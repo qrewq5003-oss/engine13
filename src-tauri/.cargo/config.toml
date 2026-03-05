@@ -1,0 +1,10 @@
+# Cargo configuration for ENGINE13
+# Uses Rust 1.93.1 from ~/.cargo/bin instead of system 1.76.0
+
+[build]
+rustc = "/home/deck/.cargo/bin/rustc"
+cargo = "/home/deck/.cargo/bin/cargo"
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# Linux-specific settings

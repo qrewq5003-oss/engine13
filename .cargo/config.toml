@@ -1,0 +1,9 @@
+# Cargo configuration for ENGINE13
+# Ensures cargo bin path is available for builds
+
+[build]
+# Use incremental compilation for faster builds
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# Linux-specific linker settings if needed

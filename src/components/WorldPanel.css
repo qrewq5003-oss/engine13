@@ -1,0 +1,143 @@
+.world-panel {
+  background: #1e1e2e;
+  border-radius: 8px;
+  padding: 16px;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cdd6f4;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.actor-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actor-card {
+  background: #313244;
+  border-radius: 6px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.actor-card:hover {
+  background: #45475a;
+}
+
+.actor-card.selected {
+  border-color: #89b4fa;
+  background: #45475a;
+}
+
+.actor-card.foreground {
+  border-left: 3px solid #f38ba8;
+}
+
+.actor-card.background {
+  border-left: 3px solid #6c7086;
+}
+
+.actor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.actor-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cdd6f4;
+}
+
+.actor-status {
+  font-size: 10px;
+}
+
+.actor-status.foreground {
+  color: #f38ba8;
+}
+
+.actor-status.background {
+  color: #6c7086;
+}
+
+.actor-region {
+  font-size: 11px;
+  color: #a6adc8;
+  margin-bottom: 8px;
+  text-transform: capitalize;
+}
+
+.actor-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.metric-label {
+  width: 60px;
+  color: #bac2de;
+  flex-shrink: 0;
+}
+
+.metric-fill-container {
+  flex: 1;
+  height: 6px;
+  background: #181825;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.metric-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.metric-value {
+  width: 30px;
+  text-align: right;
+  color: #cdd6f4;
+  flex-shrink: 0;
+}
+
+/* Scrollbar styling */
+.actor-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.actor-list::-webkit-scrollbar-track {
+  background: #1e1e2e;
+  border-radius: 3px;
+}
+
+.actor-list::-webkit-scrollbar-thumb {
+  background: #45475a;
+  border-radius: 3px;
+}
+
+.actor-list::-webkit-scrollbar-thumb:hover {
+  background: #585b70;
+}
