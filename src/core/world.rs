@@ -50,10 +50,27 @@ pub struct WorldState {
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     pub family_metrics: HashMap<String, f64>,
+    /// RNG seed - generated once at scenario start, preserved for reproducibility
+    pub rng_seed: u64,
+    /// RNG state - serialized/deserialized with WorldState for save/load
+    pub rng_state: [u8; 32],
 }
 
 impl WorldState {
     pub fn new(scenario_id: String, start_year: i32) -> Self {
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        // Generate random seed for new game
+        let rng_seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        // Initialize RNG and capture its state
+        let rng = ChaCha8Rng::seed_from_u64(rng_seed);
+        let rng_state = rng.get_seed();
+
         Self {
             tick: 0,
             year: start_year,
@@ -65,6 +82,26 @@ impl WorldState {
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
+            rng_seed,
+            rng_state,
+        }
+    }
+
+    /// Create WorldState with explicit seed (for save/load)
+    pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64, rng_state: [u8; 32]) -> Self {
+        Self {
+            tick: 0,
+            year: start_year,
+            scenario_id,
+            game_mode: GameMode::Scenario,
+            actors: HashMap::new(),
+            dead_actors: Vec::new(),
+            alliances: Vec::new(),
+            milestone_events_fired: Vec::new(),
+            milestone_condition_ticks: HashMap::new(),
+            family_metrics: HashMap::new(),
+            rng_seed,
+            rng_state,
         }
     }
 

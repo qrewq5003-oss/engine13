@@ -5,6 +5,93 @@ use crate::core::{
     EventType, Scenario, WorldState,
 };
 
+/// Coefficients for dependency graph relationships
+#[derive(Debug, Clone, Copy)]
+pub struct DependencyCoefficients {
+    // legitimacy ↓10 → cohesion ↓3
+    pub legitimacy_to_cohesion: f64,
+    // cohesion ↓10 → legitimacy ↓2
+    pub cohesion_to_legitimacy: f64,
+    // legitimacy ↓10 → military_quality ↓2
+    pub legitimacy_to_military_quality: f64,
+    // cohesion ↓10 → economic_output ↓3
+    pub cohesion_to_economic_output: f64,
+    // external_pressure ↑10 → cohesion ↓2
+    pub external_pressure_to_cohesion: f64,
+    // external_pressure ↑10 → legitimacy ↓1
+    pub external_pressure_to_legitimacy: f64,
+    // external_pressure ↑10 → military_quality ↓2
+    pub external_pressure_to_military_quality: f64,
+    // external_pressure ↑10 → military_size ↓1
+    pub external_pressure_to_military_size: f64,
+    // economic_output ↓10 → treasury ↓15
+    pub economic_output_to_treasury: f64,
+    // military_size ↓10 → economic_output ↓1
+    pub military_size_to_economic_output: f64,
+    // population ↑5000 → economic_output ↑0.5
+    pub population_to_economic_output: f64,
+    // economic_output ↓10 → population ↓200
+    pub economic_output_to_population: f64,
+    // cohesion bonus when external_pressure > 65 AND legitimacy > 60
+    pub cohesion_bonus_value: f64,
+    // legitimacy < 20 → military_quality falls -0.5/tick
+    pub low_legitimacy_military_quality_decay: f64,
+    // economic_output < 15 → population falls -100/tick
+    pub low_economic_output_population_decay: f64,
+}
+
+impl Default for DependencyCoefficients {
+    fn default() -> Self {
+        Self {
+            legitimacy_to_cohesion: 0.03,
+            cohesion_to_legitimacy: 0.02,
+            legitimacy_to_military_quality: 0.02,
+            cohesion_to_economic_output: 0.03,
+            external_pressure_to_cohesion: 0.02,
+            external_pressure_to_legitimacy: 0.01,
+            external_pressure_to_military_quality: 0.02,
+            external_pressure_to_military_size: 0.01,
+            economic_output_to_treasury: 0.15,
+            military_size_to_economic_output: 0.01,
+            population_to_economic_output: 0.00005,
+            economic_output_to_population: 20.0,
+            cohesion_bonus_value: 5.0,
+            low_legitimacy_military_quality_decay: 0.5,
+            low_economic_output_population_decay: 100.0,
+        }
+    }
+}
+
+/// Thresholds for dependency graph effects
+#[derive(Debug, Clone, Copy)]
+pub struct DependencyThresholds {
+    pub legitimacy_low: f64,           // 50.0
+    pub cohesion_low: f64,             // 50.0
+    pub external_pressure_high: f64,   // 50.0
+    pub external_pressure_critical: f64, // 65.0
+    pub economic_output_low: f64,      // 50.0
+    pub military_size_low: f64,        // 50.0
+    pub population_high: f64,          // 3000.0
+    pub legitimacy_critical: f64,      // 20.0
+    pub economic_output_critical: f64, // 15.0
+}
+
+impl Default for DependencyThresholds {
+    fn default() -> Self {
+        Self {
+            legitimacy_low: 50.0,
+            cohesion_low: 50.0,
+            external_pressure_high: 50.0,
+            external_pressure_critical: 65.0,
+            economic_output_low: 50.0,
+            military_size_low: 50.0,
+            population_high: 3000.0,
+            legitimacy_critical: 20.0,
+            economic_output_critical: 15.0,
+        }
+    }
+}
+
 /// Event log for recording simulation events
 #[derive(Debug, Clone, Default)]
 pub struct EventLog {
@@ -38,8 +125,14 @@ impl EventLog {
 /// 8. Record events to EventLog
 /// 9. Update tick and year in WorldState
 pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
     let current_tick = world.tick;
     let current_year = world.year;
+
+    // Initialize RNG once at the start of the tick
+    let mut rng = ChaCha8Rng::from_seed(world.rng_state);
 
     // Store initial state for event comparison
     let initial_states: HashMap<String, ActorMetrics> = world
@@ -49,7 +142,7 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
         .collect();
 
     // Step 1: Apply auto_deltas
-    apply_auto_deltas(world, scenario);
+    apply_auto_deltas(world, scenario, &mut rng);
 
     // Step 1b: Apply treasury calculation (incomes - expenses)
     apply_treasury(world);
@@ -83,6 +176,9 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     // Step 8c: Apply family auto deltas (passive changes per tick)
     apply_family_auto_deltas(world);
 
+    // Save RNG state once at the end of the tick
+    world.rng_state = rng.get_seed();
+
     // Step 9: Update tick and year
     world.tick += 1;
     world.year += scenario.tick_span as i32;
@@ -92,7 +188,7 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
 // Step 1: Auto Deltas
 // ============================================================================
 
-fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario) {
+fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
     for actor_id in actor_ids {
@@ -104,7 +200,7 @@ fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario) {
                         continue;
                     }
                 }
-                apply_single_auto_delta(actor, auto_delta);
+                apply_single_auto_delta(actor, auto_delta, rng);
             }
         }
     }
@@ -126,80 +222,24 @@ fn apply_treasury(world: &mut WorldState) {
     }
 }
 
-fn apply_single_auto_delta(actor: &mut Actor, auto_delta: &crate::core::AutoDelta) {
-    let delta = match auto_delta.metric.as_str() {
-        "population" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "military_size" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "military_quality" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "economic_output" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "cohesion" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "legitimacy" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "external_pressure" => {
-            let mut d = auto_delta.base;
-            for cond in &auto_delta.conditions {
-                if check_condition(&actor.metrics, cond) {
-                    d += cond.delta;
-                }
-            }
-            d
-        }
-        "treasury" => {
-            // Treasury is calculated separately via income/expenses formula
-            return;
-        }
-        _ => return,
-    };
+fn apply_single_auto_delta(actor: &mut Actor, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
+    use rand::Rng;
 
-    // Apply noise
-    let noise = (rand_f64() - 0.5) * 2.0 * auto_delta.noise;
+    // Treasury is calculated separately via income/expenses formula
+    if auto_delta.metric == "treasury" {
+        return;
+    }
+
+    // Calculate delta: base + sum of matching conditions
+    let mut delta = auto_delta.base;
+    for cond in &auto_delta.conditions {
+        if check_condition(&actor.metrics, cond) {
+            delta += cond.delta;
+        }
+    }
+
+    // Apply noise using deterministic RNG
+    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
     let final_delta = delta + noise;
 
     apply_metric_delta(&mut actor.metrics, &auto_delta.metric, final_delta);
@@ -248,6 +288,36 @@ fn apply_metric_delta(metrics: &mut ActorMetrics, metric: &str, delta: f64) {
 // Step 2: Dependency Graph
 // ============================================================================
 
+const COEF: DependencyCoefficients = DependencyCoefficients {
+    legitimacy_to_cohesion: 0.03,
+    cohesion_to_legitimacy: 0.02,
+    legitimacy_to_military_quality: 0.02,
+    cohesion_to_economic_output: 0.03,
+    external_pressure_to_cohesion: 0.02,
+    external_pressure_to_legitimacy: 0.01,
+    external_pressure_to_military_quality: 0.02,
+    external_pressure_to_military_size: 0.01,
+    economic_output_to_treasury: 0.15,
+    military_size_to_economic_output: 0.01,
+    population_to_economic_output: 0.00005,
+    economic_output_to_population: 20.0,
+    cohesion_bonus_value: 5.0,
+    low_legitimacy_military_quality_decay: 0.5,
+    low_economic_output_population_decay: 100.0,
+};
+
+const THRESH: DependencyThresholds = DependencyThresholds {
+    legitimacy_low: 50.0,
+    cohesion_low: 50.0,
+    external_pressure_high: 50.0,
+    external_pressure_critical: 65.0,
+    economic_output_low: 50.0,
+    military_size_low: 50.0,
+    population_high: 3000.0,
+    legitimacy_critical: 20.0,
+    economic_output_critical: 15.0,
+};
+
 fn apply_dependency_graph(world: &mut WorldState) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
@@ -261,95 +331,94 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
             let metrics = actor.metrics.clone();
 
-            // legitimacy ↓10 → cohesion ↓3 (coef 0.3)
-            if metrics.legitimacy < 50.0 {
-                let deficit = 50.0 - metrics.legitimacy;
-                actor.metrics.cohesion -= deficit * 0.03;
+            // legitimacy ↓10 → cohesion ↓3
+            if metrics.legitimacy < THRESH.legitimacy_low {
+                let deficit = THRESH.legitimacy_low - metrics.legitimacy;
+                actor.metrics.cohesion -= deficit * COEF.legitimacy_to_cohesion;
             }
 
-            // cohesion ↓10 → legitimacy ↓2 (coef 0.2)
-            if metrics.cohesion < 50.0 {
-                let deficit = 50.0 - metrics.cohesion;
-                actor.metrics.legitimacy -= deficit * 0.02;
+            // cohesion ↓10 → legitimacy ↓2
+            if metrics.cohesion < THRESH.cohesion_low {
+                let deficit = THRESH.cohesion_low - metrics.cohesion;
+                actor.metrics.legitimacy -= deficit * COEF.cohesion_to_legitimacy;
             }
 
-            // legitimacy ↓10 → military_quality ↓2 (coef 0.2)
-            if metrics.legitimacy < 50.0 {
-                let deficit = 50.0 - metrics.legitimacy;
-                actor.metrics.military_quality -= deficit * 0.02;
+            // legitimacy ↓10 → military_quality ↓2
+            if metrics.legitimacy < THRESH.legitimacy_low {
+                let deficit = THRESH.legitimacy_low - metrics.legitimacy;
+                actor.metrics.military_quality -= deficit * COEF.legitimacy_to_military_quality;
             }
 
-            // cohesion ↓10 → economic_output ↓3 (coef 0.3)
-            if metrics.cohesion < 50.0 {
-                let deficit = 50.0 - metrics.cohesion;
-                actor.metrics.economic_output -= deficit * 0.03;
+            // cohesion ↓10 → economic_output ↓3
+            if metrics.cohesion < THRESH.cohesion_low {
+                let deficit = THRESH.cohesion_low - metrics.cohesion;
+                actor.metrics.economic_output -= deficit * COEF.cohesion_to_economic_output;
             }
 
-            // external_pressure ↑10 → cohesion ↓2 (coef 0.2)
-            if metrics.external_pressure > 50.0 {
-                let excess = metrics.external_pressure - 50.0;
-                actor.metrics.cohesion -= excess * 0.02;
+            // external_pressure ↑10 → cohesion ↓2
+            if metrics.external_pressure > THRESH.external_pressure_high {
+                let excess = metrics.external_pressure - THRESH.external_pressure_high;
+                actor.metrics.cohesion -= excess * COEF.external_pressure_to_cohesion;
             }
 
-            // external_pressure ↑10 → legitimacy ↓1 (coef 0.1)
-            if metrics.external_pressure > 50.0 {
-                let excess = metrics.external_pressure - 50.0;
-                actor.metrics.legitimacy -= excess * 0.01;
+            // external_pressure ↑10 → legitimacy ↓1
+            if metrics.external_pressure > THRESH.external_pressure_high {
+                let excess = metrics.external_pressure - THRESH.external_pressure_high;
+                actor.metrics.legitimacy -= excess * COEF.external_pressure_to_legitimacy;
             }
 
-            // external_pressure ↑10 → military_quality ↓2 (coef 0.2)
-            if metrics.external_pressure > 50.0 {
-                let excess = metrics.external_pressure - 50.0;
-                actor.metrics.military_quality -= excess * 0.02;
+            // external_pressure ↑10 → military_quality ↓2
+            if metrics.external_pressure > THRESH.external_pressure_high {
+                let excess = metrics.external_pressure - THRESH.external_pressure_high;
+                actor.metrics.military_quality -= excess * COEF.external_pressure_to_military_quality;
             }
 
-            // external_pressure ↑10 → military_size ↓1 (coef 0.1)
-            if metrics.external_pressure > 50.0 {
-                let excess = metrics.external_pressure - 50.0;
-                actor.metrics.military_size -= excess * 0.01;
+            // external_pressure ↑10 → military_size ↓1
+            if metrics.external_pressure > THRESH.external_pressure_high {
+                let excess = metrics.external_pressure - THRESH.external_pressure_high;
+                actor.metrics.military_size -= excess * COEF.external_pressure_to_military_size;
             }
 
-            // economic_output ↓10 → treasury ↓15 (coef 1.5)
-            if metrics.economic_output < 50.0 {
-                let deficit = 50.0 - metrics.economic_output;
-                actor.metrics.treasury -= deficit * 0.15;
+            // economic_output ↓10 → treasury ↓15
+            if metrics.economic_output < THRESH.economic_output_low {
+                let deficit = THRESH.economic_output_low - metrics.economic_output;
+                actor.metrics.treasury -= deficit * COEF.economic_output_to_treasury;
             }
 
-            // military_size ↓10 → economic_output ↓1 (coef 0.1)
-            if metrics.military_size < 50.0 {
-                let deficit = 50.0 - metrics.military_size;
-                actor.metrics.economic_output -= deficit * 0.01;
+            // military_size ↓10 → economic_output ↓1
+            if metrics.military_size < THRESH.military_size_low {
+                let deficit = THRESH.military_size_low - metrics.military_size;
+                actor.metrics.economic_output -= deficit * COEF.military_size_to_economic_output;
             }
 
-            // population ↑5000 → economic_output ↑0.5 (coef 0.00005)
-            // For Rome-scale populations (5000-8000+)
-            if metrics.population > 3000.0 {
-                actor.metrics.economic_output += (metrics.population - 3000.0) * 0.00005;
+            // population ↑5000 → economic_output ↑0.5 (Rome-scale populations)
+            if metrics.population > THRESH.population_high {
+                actor.metrics.economic_output +=
+                    (metrics.population - THRESH.population_high) * COEF.population_to_economic_output;
             }
 
-            // economic_output ↓10 → population ↓200 (coef 20)
-            if metrics.economic_output < 50.0 {
-                let deficit = 50.0 - metrics.economic_output;
-                actor.metrics.population -= deficit * 20.0;
+            // economic_output ↓10 → population ↓200
+            if metrics.economic_output < THRESH.economic_output_low {
+                let deficit = THRESH.economic_output_low - metrics.economic_output;
+                actor.metrics.population -= deficit * COEF.economic_output_to_population;
             }
 
-            // Cohesion bonus effect (exception)
-            // if external_pressure grew >15 in 1 tick AND legitimacy > 60: cohesion += 5
-            // (simplified - we check current state, not growth)
-            if metrics.external_pressure > 65.0 && metrics.legitimacy > 60.0 {
-                actor.metrics.cohesion += 5.0;
+            // Cohesion bonus effect (external_pressure > 65 AND legitimacy > 60)
+            if metrics.external_pressure > THRESH.external_pressure_critical
+                && metrics.legitimacy > 60.0
+            {
+                actor.metrics.cohesion += COEF.cohesion_bonus_value;
             }
 
             // Threshold effects
-            // cohesion < 25 → any legitimacy fall is doubled (handled in clamping)
             // legitimacy < 20 → military_quality falls -0.5/tick
-            if metrics.legitimacy < 20.0 {
-                actor.metrics.military_quality -= 0.5;
+            if metrics.legitimacy < THRESH.legitimacy_critical {
+                actor.metrics.military_quality -= COEF.low_legitimacy_military_quality_decay;
             }
 
             // economic_output < 15 → population falls -100/tick
-            if metrics.economic_output < 15.0 {
-                actor.metrics.population -= 100.0;
+            if metrics.economic_output < THRESH.economic_output_critical {
+                actor.metrics.population -= COEF.low_economic_output_population_decay;
             }
         }
     }
@@ -401,18 +470,37 @@ fn determine_all_interactions(
     world: &WorldState,
 ) -> Vec<(String, InteractionType, f64)> {
     let mut result = Vec::new();
-    
+
     let neighbor = match world.actors.get(neighbor_id) {
         Some(n) => n,
         None => return result,
+    };
+
+    // Military pressure - calculate first to determine trade suppression
+    let pressure = calculate_military_pressure(actor, neighbor);
+    if pressure > 0.1 {
+        result.push((neighbor.id.clone(), InteractionType::MilitaryPressure, pressure));
+    }
+
+    // Trade suppression logic based on military pressure
+    // > 0.4: full suppression (war suppresses trade)
+    // 0.2 - 0.4: trade with 0.5 coefficient (border tensions)
+    // < 0.2: trade works normally
+    let trade_suppressed = pressure > 0.4;
+    let trade_coefficient = if pressure > 0.4 {
+        0.0
+    } else if pressure > 0.2 {
+        0.5
+    } else {
+        1.0
     };
 
     // Check if trade is possible (adjacent OR has trade_networks tag)
     let can_trade = neighbor.neighbors.iter().any(|n| n.id == actor.id)
         || actor.tags.contains(&"trade_networks".to_string());
 
-    // Trade - both actors get a small bonus
-    if can_trade && neighbor.metrics.economic_output > 0.0 && actor.metrics.economic_output > 0.0 {
+    // Trade - both actors get a small bonus (if not suppressed by military pressure)
+    if !trade_suppressed && can_trade && neighbor.metrics.economic_output > 0.0 && actor.metrics.economic_output > 0.0 {
         let distance_mod = distance_modifier(neighbor.neighbors.iter().find(|n| n.id == actor.id));
         let trade_bonus = if actor.tags.contains(&"trade_networks".to_string())
             || neighbor.tags.contains(&"trade_networks".to_string()) {
@@ -421,16 +509,12 @@ fn determine_all_interactions(
             distance_mod
         };
 
-        // Both actors gain equally: small base bonus × distance modifier
+        // Both actors gain equally: small base bonus × distance modifier × pressure coefficient
         let base_gain = 2.0; // Small fixed base gain
-        let gain = (base_gain * trade_bonus).min(3.0); // Cap at 3.0
-        result.push((neighbor.id.clone(), InteractionType::Trade, gain));
-    }
-
-    // Military pressure
-    let pressure = calculate_military_pressure(actor, neighbor);
-    if pressure > 0.1 {
-        result.push((neighbor.id.clone(), InteractionType::MilitaryPressure, pressure));
+        let gain = ((base_gain * trade_bonus * trade_coefficient).min(3.0 * trade_coefficient)).max(0.0);
+        if gain > 0.0 {
+            result.push((neighbor.id.clone(), InteractionType::Trade, gain));
+        }
     }
 
     // Migration
@@ -1166,19 +1250,6 @@ fn calculate_metric_changes(
 // ============================================================================
 // Utility
 // ============================================================================
-
-/// Simple random number generator for noise
-/// Uses xorshift algorithm to avoid same values within a single tick
-fn rand_f64() -> f64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static STATE: AtomicU64 = AtomicU64::new(12345);
-    let mut x = STATE.load(Ordering::Relaxed);
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    STATE.store(x, Ordering::Relaxed);
-    (x as f64) / (u64::MAX as f64)
-}
 
 #[cfg(test)]
 mod tests {
