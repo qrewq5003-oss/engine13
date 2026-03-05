@@ -858,9 +858,8 @@ fn check_collapses(
         // In full implementation, this would use the formula from architecture
         for successor in &successors {
             if !world.actors.contains_key(&successor.id) {
-                // Find original actor data from scenario
-                if let Some(scenario_actor) = scenario.actors.iter().find(|a| a.id == successor.id)
-                {
+                // Find actor template in scenario (includes successor templates with is_successor_template: true)
+                if let Some(scenario_actor) = scenario.actors.iter().find(|a| a.id == successor.id) {
                     let mut new_actor = scenario_actor.clone();
                     new_actor.metrics = split_metrics_for_successor(
                         &scenario_actor.metrics,
@@ -868,6 +867,7 @@ fn check_collapses(
                         successors.len(),
                     );
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
+                    new_actor.is_successor_template = false; // Clear the template flag for the actual actor
                     world.actors.insert(successor.id.clone(), new_actor);
                 }
             }

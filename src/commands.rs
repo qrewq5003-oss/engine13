@@ -250,8 +250,11 @@ pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveRe
     };
 
     let mut world_state = WorldState::new(scenario.id.clone(), scenario.start_year);
+    // Only add actors that are not successor templates
     for actor in &scenario.actors {
-        world_state.actors.insert(actor.id.clone(), actor.clone());
+        if !actor.is_successor_template {
+            world_state.actors.insert(actor.id.clone(), actor.clone());
+        }
     }
 
     // Initialize family_metrics from Rome actor's scenario_metrics

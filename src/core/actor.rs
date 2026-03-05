@@ -117,6 +117,8 @@ pub struct Actor {
     pub on_collapse: Vec<Successor>,
     pub actor_tags: HashMap<String, ActorTag>,
     pub center: Option<GeoCoordinate>,
+    /// If true, this actor is a template for successor creation and should not be added to world.actors at start
+    pub is_successor_template: bool,
 }
 
 /// Geographic coordinate

@@ -48,6 +48,14 @@ fn create_actors() -> Vec<Actor> {
         create_kushans(),
         create_guptas(),
         create_eastern_jin(),
+        // Successor templates (not added to world.actors at start)
+        create_rome_west(),
+        create_rome_east(),
+        create_visigoth_kingdom_template(),
+        create_ostrogoth_kingdom_template(),
+        create_late_sassanids_template(),
+        create_vandal_kingdom_africa_template(),
+        create_frankish_kingdom_template(),
     ]
 }
 
@@ -106,6 +114,7 @@ fn create_rome() -> Actor {
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.9, lng: 12.5 }),
+        is_successor_template: false,
     }
 }
 
@@ -143,6 +152,7 @@ fn create_huns() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 48.0, lng: 60.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -179,6 +189,7 @@ fn create_visigoths() -> Actor {
         on_collapse: vec![Successor { id: "visigoth_kingdom".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 25.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -214,6 +225,7 @@ fn create_ostrogoths() -> Actor {
         on_collapse: vec![Successor { id: "ostrogoth_kingdom".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 47.0, lng: 32.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -252,6 +264,7 @@ fn create_sassanids() -> Actor {
         on_collapse: vec![Successor { id: "late_sassanids".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 33.0, lng: 44.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -286,6 +299,7 @@ fn create_vandals() -> Actor {
         on_collapse: vec![Successor { id: "vandal_kingdom_africa".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.0, lng: 25.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -320,6 +334,7 @@ fn create_burgundians() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 49.0, lng: 8.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -354,6 +369,7 @@ fn create_franks() -> Actor {
         on_collapse: vec![Successor { id: "frankish_kingdom".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 50.0, lng: 6.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -388,6 +404,7 @@ fn create_saxons() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 53.0, lng: 9.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -421,6 +438,7 @@ fn create_alamanni() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 48.5, lng: 9.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -455,6 +473,7 @@ fn create_berbers() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 10.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -491,6 +510,7 @@ fn create_armenia() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 40.0, lng: 45.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -528,6 +548,7 @@ fn create_kushans() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 36.0, lng: 68.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -564,6 +585,7 @@ fn create_guptas() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 24.0, lng: 82.0 }),
+        is_successor_template: false,
     }
 }
 
@@ -600,6 +622,277 @@ fn create_eastern_jin() -> Actor {
         on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 118.0 }),
+        is_successor_template: false,
+    }
+}
+
+fn create_rome_west() -> Actor {
+    let mut scenario_metrics = HashMap::new();
+    scenario_metrics.insert("family_influence".to_string(), 8.0);
+    scenario_metrics.insert("family_knowledge".to_string(), 12.0);
+    scenario_metrics.insert("family_wealth".to_string(), 22.0);
+    scenario_metrics.insert("family_connections".to_string(), 15.0);
+
+    Actor {
+        id: "rome_west".to_string(),
+        name: "Западная Римская Империя".to_string(),
+        name_short: "Зап. Рим".to_string(),
+        region: "mediterranean_west".to_string(),
+        region_rank: crate::core::RegionRank::A,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "bureaucracy".to_string(),
+            "roman_law".to_string(),
+            "trade_networks".to_string(),
+            "coinage".to_string(),
+            "christianity".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 3600.0,  // 45% of 8000
+            military_size: 157.0,  // 45% of 350
+            military_quality: 50.0,  // degraded from parent
+            economic_output: 40.0,
+            cohesion: 20.0,  // trauma from collapse
+            legitimacy: 30.0,  // new power not established
+            external_pressure: 50.0,  // enemies sense weakness
+            treasury: 810.0,  // 45% of 1800
+        },
+        scenario_metrics,
+        neighbors: vec![
+            Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "ostrogoths".to_string(), distance: 3, border_type: BorderType::Land },
+            Neighbor { id: "vandals".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "burgundians".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "franks".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "alamanni".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "saxons".to_string(), distance: 3, border_type: BorderType::Sea },
+            Neighbor { id: "berbers".to_string(), distance: 2, border_type: BorderType::Sea },
+        ],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 45.0, lng: 9.0 }),  // Mediolanum
+        is_successor_template: true,
+    }
+}
+
+fn create_rome_east() -> Actor {
+    let mut scenario_metrics = HashMap::new();
+    scenario_metrics.insert("family_influence".to_string(), 8.0);
+    scenario_metrics.insert("family_knowledge".to_string(), 12.0);
+    scenario_metrics.insert("family_wealth".to_string(), 22.0);
+    scenario_metrics.insert("family_connections".to_string(), 15.0);
+
+    Actor {
+        id: "rome_east".to_string(),
+        name: "Восточная Римская Империя".to_string(),
+        name_short: "Вост. Рим".to_string(),
+        region: "mediterranean_east".to_string(),
+        region_rank: crate::core::RegionRank::A,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "bureaucracy".to_string(),
+            "roman_law".to_string(),
+            "trade_networks".to_string(),
+            "coinage".to_string(),
+            "christianity".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 4400.0,  // 55% of 8000
+            military_size: 192.0,  // 55% of 350
+            military_quality: 55.0,  // degraded from parent
+            economic_output: 45.0,
+            cohesion: 20.0,  // trauma from collapse
+            legitimacy: 30.0,  // new power not established
+            external_pressure: 45.0,  // enemies sense weakness
+            treasury: 990.0,  // 55% of 1800
+        },
+        scenario_metrics,
+        neighbors: vec![
+            Neighbor { id: "sassanids".to_string(), distance: 3, border_type: BorderType::Land },
+            Neighbor { id: "armenia".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "visigoths".to_string(), distance: 3, border_type: BorderType::Land },
+            Neighbor { id: "ostrogoths".to_string(), distance: 2, border_type: BorderType::Land },
+        ],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 28.0 }),  // Constantinople
+        is_successor_template: true,
+    }
+}
+
+// ============================================================================
+// Successor Template Functions
+// ============================================================================
+
+/// Template for Visigoth Kingdom successor creation
+pub fn create_visigoth_kingdom_template() -> Actor {
+    Actor {
+        id: "visigoth_kingdom".to_string(),
+        name: "Королевство вестготов".to_string(),
+        name_short: "Вестготы".to_string(),
+        region: "balkans".to_string(),
+        region_rank: crate::core::RegionRank::B,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "tribal_confederation".to_string(),
+            "christianity_arian".to_string(),
+            "successor_state".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 1200.0,
+            military_size: 45.0,
+            military_quality: 65.0,
+            economic_output: 25.0,
+            cohesion: 55.0,
+            legitimacy: 40.0,
+            external_pressure: 30.0,
+            treasury: 60.0,
+        },
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 25.0 }),
+        is_successor_template: true,
+    }
+}
+
+/// Template for Ostrogoth Kingdom successor creation
+pub fn create_ostrogoth_kingdom_template() -> Actor {
+    Actor {
+        id: "ostrogoth_kingdom".to_string(),
+        name: "Королевство остготов".to_string(),
+        name_short: "Остготы".to_string(),
+        region: "pontic_steppe".to_string(),
+        region_rank: crate::core::RegionRank::B,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "tribal_confederation".to_string(),
+            "steppe_adjacent".to_string(),
+            "successor_state".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 1000.0,
+            military_size: 50.0,
+            military_quality: 62.0,
+            economic_output: 20.0,
+            cohesion: 50.0,
+            legitimacy: 35.0,
+            external_pressure: 35.0,
+            treasury: 40.0,
+        },
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 47.0, lng: 32.0 }),
+        is_successor_template: true,
+    }
+}
+
+/// Template for Late Sassanids successor creation
+pub fn create_late_sassanids_template() -> Actor {
+    Actor {
+        id: "late_sassanids".to_string(),
+        name: "Поздние Сасаниды".to_string(),
+        name_short: "Персия".to_string(),
+        region: "persia".to_string(),
+        region_rank: crate::core::RegionRank::B,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "bureaucracy".to_string(),
+            "zoroastrianism".to_string(),
+            "successor_state".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 1800.0,
+            military_size: 80.0,
+            military_quality: 55.0,
+            economic_output: 30.0,
+            cohesion: 35.0,
+            legitimacy: 40.0,
+            external_pressure: 50.0,
+            treasury: 300.0,
+        },
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 33.0, lng: 44.0 }),
+        is_successor_template: true,
+    }
+}
+
+/// Template for Vandal Kingdom Africa successor creation
+pub fn create_vandal_kingdom_africa_template() -> Actor {
+    Actor {
+        id: "vandal_kingdom_africa".to_string(),
+        name: "Вандальское королевство в Африке".to_string(),
+        name_short: "Вандалы".to_string(),
+        region: "north_africa".to_string(),
+        region_rank: crate::core::RegionRank::B,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "tribal_confederation".to_string(),
+            "christianity_arian".to_string(),
+            "successor_state".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 800.0,
+            military_size: 30.0,
+            military_quality: 60.0,
+            economic_output: 28.0,
+            cohesion: 45.0,
+            legitimacy: 35.0,
+            external_pressure: 25.0,
+            treasury: 150.0,
+        },
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 10.0 }),
+        is_successor_template: true,
+    }
+}
+
+/// Template for Frankish Kingdom successor creation
+pub fn create_frankish_kingdom_template() -> Actor {
+    Actor {
+        id: "frankish_kingdom".to_string(),
+        name: "Франкское королевство".to_string(),
+        name_short: "Франки".to_string(),
+        region: "rhine_upper".to_string(),
+        region_rank: crate::core::RegionRank::B,
+        era: crate::core::Era::Ancient,
+        narrative_status: crate::core::NarrativeStatus::Background,
+        tags: vec![
+            "tribal_confederation".to_string(),
+            "rhine_border".to_string(),
+            "successor_state".to_string(),
+        ],
+        metrics: ActorMetrics {
+            population: 900.0,
+            military_size: 35.0,
+            military_quality: 58.0,
+            economic_output: 22.0,
+            cohesion: 60.0,
+            legitimacy: 45.0,
+            external_pressure: 20.0,
+            treasury: 80.0,
+        },
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(crate::core::GeoCoordinate { lat: 50.0, lng: 6.0 }),
+        is_successor_template: true,
     }
 }
 
@@ -993,7 +1286,23 @@ mod tests {
     #[test]
     fn test_load_rome_375_has_actors() {
         let scenario = load_rome_375();
-        assert_eq!(scenario.actors.len(), 15);
+        // 15 base actors + 7 successor templates = 22 total
+        assert_eq!(scenario.actors.len(), 22);
+    }
+
+    #[test]
+    fn test_successor_templates_not_in_world() {
+        let scenario = load_rome_375();
+        // Verify successor templates are marked correctly
+        let rome_west = scenario.actors.iter().find(|a| a.id == "rome_west").unwrap();
+        assert!(rome_west.is_successor_template);
+        
+        let visigoth_kingdom = scenario.actors.iter().find(|a| a.id == "visigoth_kingdom").unwrap();
+        assert!(visigoth_kingdom.is_successor_template);
+        
+        // Base actors should not be templates
+        let rome = scenario.actors.iter().find(|a| a.id == "rome").unwrap();
+        assert!(!rome.is_successor_template);
     }
 
     #[test]
