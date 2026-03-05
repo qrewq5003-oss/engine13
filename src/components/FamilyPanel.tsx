@@ -1,32 +1,23 @@
 import React from 'react';
-import type { Actor } from '../types';
+import type { WorldState } from '../types';
 import './FamilyPanel.css';
 
 interface FamilyPanelProps {
-  romeActor: Actor | null;
+  worldState: WorldState;
   currentYear: number;
   currentTick: number;
 }
 
 export const FamilyPanel: React.FC<FamilyPanelProps> = ({
-  romeActor,
+  worldState,
   currentYear,
-  currentTick,
+  currentTick: _currentTick,
 }) => {
-  if (!romeActor) {
-    return (
-      <div className="family-panel">
-        <h2 className="panel-title">Family Di Milano</h2>
-        <div className="no-data">No data available</div>
-      </div>
-    );
-  }
-
   const familyMetrics = {
-    family_influence: romeActor.scenario_metrics.family_influence || 0,
-    family_knowledge: romeActor.scenario_metrics.family_knowledge || 0,
-    family_wealth: romeActor.scenario_metrics.family_wealth || 0,
-    family_connections: romeActor.scenario_metrics.family_connections || 0,
+    family_influence: worldState.family_metrics.family_influence || 0,
+    family_knowledge: worldState.family_metrics.family_knowledge || 0,
+    family_wealth: worldState.family_metrics.family_wealth || 0,
+    family_connections: worldState.family_metrics.family_connections || 0,
   };
 
   // Calculate generation info (tick_span = 5 years, patriarch starts at 42, ends at 75)

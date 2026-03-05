@@ -31,6 +31,7 @@ pub struct AutoDelta {
     pub base: f64,
     pub conditions: Vec<DeltaCondition>,
     pub noise: f64,
+    pub actor_id: Option<String>,
 }
 
 /// Condition for auto delta modification

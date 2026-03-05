@@ -66,10 +66,11 @@ const App: React.FC = () => {
       if (world) {
         setWorldState(world);
         // Get recent events for narrative actors
-        const narrativeActorIds = Object.values(world.actors)
+        const actors = Object.values(world.actors) as Actor[];
+        const narrativeActorIds = actors
           .filter(a => a.narrative_status === 'foreground')
           .map(a => a.id);
-        const events = await getRelevantEvents(narrativeActorIds, world.tick);
+        const events = await getRelevantEvents(narrativeActorIds);
         setRecentEvents(events);
       }
 
@@ -100,23 +101,27 @@ const App: React.FC = () => {
 
   // Handle action submit
   const handleActionSubmit = useCallback(async (actionId: string) => {
-    if (isLoading) return;
+    console.log('[App] handleActionSubmit called with actionId:', actionId);
+    if (isLoading) {
+      console.log('[App] Skipping - already loading');
+      return;
+    }
 
     try {
       setIsLoading(true);
       setError(null);
+      console.log('[App] Calling submitAction API with:', actionId);
       const response = await submitAction(actionId);
+      console.log('[App] submitAction response:', response);
       setWorldState(response.new_state);
       await refreshState();
     } catch (err) {
+      console.error('[App] submitAction error:', err);
       setError(`Failed to execute action: ${err}`);
     } finally {
       setIsLoading(false);
     }
   }, [isLoading, refreshState]);
-
-  // Get Rome actor for family panel
-  const romeActor = worldState?.actors['rome'] || null;
 
   if (!scenarioLoaded) {
     return (
@@ -166,7 +171,7 @@ const App: React.FC = () => {
 
         <div className="panel-column middle-column">
           <FamilyPanel
-            romeActor={romeActor}
+            worldState={worldState}
             currentYear={worldState.year}
             currentTick={worldState.tick}
           />

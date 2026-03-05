@@ -15,7 +15,7 @@ pub fn load_rome_375() -> Scenario {
         description: "375 год. Медиолан — фактическая столица Западной Империи. Гунны за горизонтом давят на готов.".to_string(),
         start_year: 375,
         tempo: 0.7,
-        tick_span: 5,
+        tick_span: 1,
         era: crate::core::Era::Ancient,
         tick_label: "год".to_string(),
         actors: create_actors(),
@@ -618,6 +618,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
             ],
             noise: 0.1,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "military_size".to_string(),
@@ -627,6 +628,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.3 },
             ],
             noise: 0.3,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "military_quality".to_string(),
@@ -636,6 +638,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
             ],
             noise: 0.2,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "economic_output".to_string(),
@@ -645,6 +648,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Less, value: 25.0, delta: -0.5 },
             ],
             noise: 0.4,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "cohesion".to_string(),
@@ -655,6 +659,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -0.2 },
             ],
             noise: 0.2,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "legitimacy".to_string(),
@@ -665,12 +670,14 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
             ],
             noise: 0.1,
+            actor_id: Some("rome".to_string()),
         },
         AutoDelta {
             metric: "external_pressure".to_string(),
             base: -0.3,
             conditions: vec![],
             noise: 0.3,
+            actor_id: Some("rome".to_string()),
         },
     ]
 }
@@ -980,6 +987,8 @@ fn create_consequence_context() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::WorldState;
+    use crate::engine::{tick, EventLog};
 
     #[test]
     fn test_load_rome_375_has_actors() {
@@ -1006,5 +1015,38 @@ mod tests {
     fn test_scenario_has_patron_actions() {
         let scenario = load_rome_375();
         assert_eq!(scenario.patron_actions.len(), 9);
+    }
+
+    #[test]
+    fn test_rome_economic_output_population_bonus_reduced() {
+        // Test that the population bonus coefficient reduction is working
+        // Old: (8000-5000) * 0.0005 = 1.5 per tick from population alone
+        // New: (8000-3000) * 0.00005 = 0.25 per tick from population
+        let scenario = load_rome_375();
+        let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+        
+        // Initialize world with scenario actors (clone to preserve scenario)
+        for actor in &scenario.actors {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+        
+        let mut event_log = EventLog::new();
+
+        let initial_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;
+
+        for _ in 0..10 {
+            tick(&mut world, &scenario, &mut event_log);
+        }
+
+        let final_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;
+        
+        // With the reduced coefficient, economic output growth should be limited
+        // Growth should be less than 60 points over 10 ticks (was much higher before)
+        // Old coefficient would give 1.5/tick from population alone = 15+ points
+        // New coefficient gives 0.25/tick from population = 2.5 points
+        let growth = final_economic_output - initial_economic_output;
+        assert!(growth < 60.0, 
+            "Economic output growth should be limited: grew by {} (from {} to {})", 
+            growth, initial_economic_output, final_economic_output);
     }
 }

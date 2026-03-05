@@ -48,6 +48,7 @@ pub struct WorldState {
     pub dead_actors: Vec<DeadActor>,
     pub alliances: Vec<Alliance>,
     pub milestone_events_fired: Vec<String>,
+    pub family_metrics: HashMap<String, f64>,
 }
 
 impl WorldState {
@@ -61,6 +62,7 @@ impl WorldState {
             dead_actors: Vec::new(),
             alliances: Vec::new(),
             milestone_events_fired: Vec::new(),
+            family_metrics: HashMap::new(),
         }
     }
 

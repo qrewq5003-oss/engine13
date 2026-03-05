@@ -31,11 +31,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
-  const handleActionSubmit = (e: React.MouseEvent, actionId: string) => {
-    e.stopPropagation();
-    onActionSubmit(actionId);
-  };
-
   // Get last 3 events
   const lastThreeEvents = recentEvents.slice(-3).reverse();
 
@@ -92,7 +87,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </div>
                     <button
                       className="action-submit-button"
-                      onClick={(e) => handleActionSubmit(e, action.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onActionSubmit(action.id);
+                      }}
                       disabled={isLoading}
                     >
                       Execute

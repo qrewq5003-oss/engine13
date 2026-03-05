@@ -10,7 +10,7 @@ import type {
   AdvanceTickResponse,
   SubmitActionResponse,
   SaveResponse,
-} from '../types';
+} from './types/index';
 
 // ============================================================================
 // Simulation Commands
@@ -41,7 +41,10 @@ export async function getAvailableActions(): Promise<PatronAction[]> {
 }
 
 export async function submitAction(actionId: string): Promise<SubmitActionResponse> {
-  return invoke<SubmitActionResponse>('cmd_submit_action', { actionId });
+  console.log('[API] Calling cmd_submit_action with actionId:', actionId);
+  const result = invoke<SubmitActionResponse>('cmd_submit_action', { actionId });
+  console.log('[API] cmd_submit_action called, waiting for response...');
+  return result;
 }
 
 // ============================================================================

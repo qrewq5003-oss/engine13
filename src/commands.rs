@@ -71,6 +71,7 @@ pub struct AdvanceTickResponse {
 pub struct SubmitActionResponse {
     pub success: bool,
     pub effects: HashMap<String, f64>,
+    pub costs: HashMap<String, f64>,
     pub new_state: WorldState,
     pub llm_trigger: Option<LlmTrigger>,
     pub error: Option<String>,
@@ -161,7 +162,7 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
 /// Submit a player action
 pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitActionResponse, String> {
     let action_input = PlayerActionInput { action_id, target_actor_id: None };
-    let effects = apply_player_action(state, &action_input)?;
+    let (effects, costs) = apply_player_action(state, &action_input)?;
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
@@ -177,6 +178,7 @@ pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitAc
     Ok(SubmitActionResponse {
         success: true,
         effects,
+        costs,
         new_state: world_state.clone(),
         llm_trigger,
         error: None,
@@ -252,6 +254,15 @@ pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveRe
         world_state.actors.insert(actor.id.clone(), actor.clone());
     }
 
+    // Initialize family_metrics from Rome actor's scenario_metrics
+    if let Some(rome_actor) = world_state.actors.get("rome") {
+        for (key, value) in &rome_actor.scenario_metrics {
+            if key.starts_with("family_") {
+                world_state.family_metrics.insert(key.clone(), *value);
+            }
+        }
+    }
+
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
     state.event_log = EventLog::new();
@@ -275,7 +286,7 @@ pub fn get_scenario_list() -> Vec<ScenarioMeta> {
 // Helper Functions
 // ============================================================================
 
-fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -> Result<HashMap<String, f64>, String> {
+fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
@@ -290,29 +301,40 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     }
 
     // Apply cost
+    let mut applied_costs = HashMap::new();
     for (metric, cost) in &action.cost {
-        if metric.starts_with("family_") {
-            let current = player_actor.scenario_metrics.get(metric).copied().unwrap_or(0.0);
-            player_actor.scenario_metrics.insert(metric.clone(), current + cost);
-        } else if metric.starts_with("rome.") {
+        if metric.starts_with("rome.") {
             let rome_metric = metric.strip_prefix("rome.").unwrap();
             apply_metric_delta(&mut player_actor.metrics, rome_metric, *cost);
+            applied_costs.insert(metric.clone(), *cost);
+        } else if metric.starts_with("family_") {
+            // Family metrics cost - applied directly to world_state.family_metrics
+            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.family_metrics.insert(metric.clone(), current + *cost);
+            applied_costs.insert(metric.clone(), *cost);
         }
     }
+
+    eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
+    eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.family_metrics);
 
     // Apply effects
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
-        if metric.starts_with("family_") {
-            let current = player_actor.scenario_metrics.get(metric).copied().unwrap_or(0.0);
-            player_actor.scenario_metrics.insert(metric.clone(), current + effect);
-            applied_effects.insert(metric.clone(), *effect);
-        } else if metric.starts_with("rome.") {
+        if metric.starts_with("rome.") {
             let rome_metric = metric.strip_prefix("rome.").unwrap();
             apply_metric_delta(&mut player_actor.metrics, rome_metric, *effect);
             applied_effects.insert(metric.clone(), *effect);
+        } else if metric.starts_with("family_") {
+            // Family metrics effects - applied directly to world_state.family_metrics
+            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.family_metrics.insert(metric.clone(), current + *effect);
+            applied_effects.insert(metric.clone(), *effect);
         }
     }
+
+    eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
+    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.family_metrics);
 
     // Record event
     let event = Event::new(
@@ -326,7 +348,7 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     );
     state.event_log.add(event);
 
-    Ok(applied_effects)
+    Ok((applied_effects, applied_costs))
 }
 
 fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor) -> bool {

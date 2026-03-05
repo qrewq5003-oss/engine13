@@ -85,10 +85,16 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
 
 fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-    
+
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
             for auto_delta in &scenario.auto_deltas {
+                // Filter by actor_id if specified
+                if let Some(ref delta_actor_id) = auto_delta.actor_id {
+                    if delta_actor_id != &actor.id {
+                        continue;
+                    }
+                }
                 apply_single_auto_delta(actor, auto_delta);
             }
         }
@@ -284,9 +290,10 @@ fn apply_dependency_graph(world: &mut WorldState) {
                 actor.metrics.economic_output -= deficit * 0.01;
             }
 
-            // population ↑1000 → economic_output ↑0.5 (coef 0.0005)
-            if metrics.population > 1000.0 {
-                actor.metrics.economic_output += (metrics.population - 1000.0) * 0.0005;
+            // population ↑5000 → economic_output ↑0.5 (coef 0.00005)
+            // For Rome-scale populations (5000-8000+)
+            if metrics.population > 3000.0 {
+                actor.metrics.economic_output += (metrics.population - 3000.0) * 0.00005;
             }
 
             // economic_output ↓10 → population ↓200 (coef 20)
@@ -365,24 +372,20 @@ fn determine_interaction(
     let can_trade = neighbor.neighbors.iter().any(|n| n.id == actor.id)
         || actor.tags.contains(&"trade_networks".to_string());
 
-    // Trade
-    if can_trade && neighbor.metrics.economic_output > 0.0 {
+    // Trade - both actors get a small bonus
+    if can_trade && neighbor.metrics.economic_output > 0.0 && actor.metrics.economic_output > 0.0 {
         let distance_mod = distance_modifier(neighbor.neighbors.iter().find(|n| n.id == actor.id));
-        let trade_bonus = if actor.tags.contains(&"trade_networks".to_string()) {
+        let trade_bonus = if actor.tags.contains(&"trade_networks".to_string()) 
+            || neighbor.tags.contains(&"trade_networks".to_string()) {
             1.0
         } else {
             distance_mod
         };
 
-        if actor.metrics.economic_output > neighbor.metrics.economic_output {
-            // Richer actor gains more
-            let gain = (actor.metrics.economic_output * 0.05 * trade_bonus).min(5.0);
-            return Some((neighbor.id.clone(), InteractionType::Trade, gain));
-        } else {
-            // Poorer actor gains less
-            let gain = (neighbor.metrics.economic_output * 0.02 * trade_bonus).min(2.0);
-            return Some((neighbor.id.clone(), InteractionType::Trade, gain));
-        }
+        // Both actors gain equally: small base bonus × distance modifier
+        let base_gain = 2.0; // Small fixed base gain
+        let gain = (base_gain * trade_bonus).min(3.0); // Cap at 3.0
+        return Some((neighbor.id.clone(), InteractionType::Trade, gain));
     }
 
     // Military pressure
@@ -498,8 +501,13 @@ fn apply_interaction(
 ) {
     match itype {
         InteractionType::Trade => {
+            // Both actors get the trade bonus equally
+            if let Some(source) = world.actors.get_mut(source_id) {
+                source.metrics.economic_output += magnitude * 0.5;
+                source.metrics.economic_output = source.metrics.economic_output.min(100.0);
+            }
             if let Some(target) = world.actors.get_mut(target_id) {
-                target.metrics.economic_output += magnitude;
+                target.metrics.economic_output += magnitude * 0.5;
                 target.metrics.economic_output = target.metrics.economic_output.min(100.0);
             }
         }
@@ -558,15 +566,7 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
                     apply_metric_delta(&mut actor.metrics, metric, *modifier as f64);
                 }
             }
-
-            // Ensure no negative changes from tags pushed metrics below zero
-            actor.metrics.population = actor.metrics.population.max(0.0);
-            actor.metrics.military_size = actor.metrics.military_size.max(0.0);
-            actor.metrics.military_quality = actor.metrics.military_quality.max(0.0).min(100.0);
-            actor.metrics.economic_output = actor.metrics.economic_output.max(0.0).min(100.0);
-            actor.metrics.cohesion = actor.metrics.cohesion.max(0.0).min(100.0);
-            actor.metrics.legitimacy = actor.metrics.legitimacy.max(0.0).min(100.0);
-            actor.metrics.external_pressure = actor.metrics.external_pressure.max(0.0).min(100.0);
+            // Note: No clamping here - clamp_metrics is called on step 5
         }
     }
 }
@@ -804,9 +804,9 @@ fn check_collapses(
     for (actor_id, actor) in &world.actors {
         // cohesion < 10 OR legitimacy < 5
         if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
-            if !actor.on_collapse.is_empty() {
-                to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
-            }
+            // Collapse regardless of whether on_collapse is empty
+            // Empty on_collapse just means no successors, but actor still dies
+            to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
         }
     }
 
