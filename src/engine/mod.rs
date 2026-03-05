@@ -228,8 +228,14 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
+            // Early exit: skip actors already marked for removal
+            // (cohesion < 10 OR legitimacy < 5 per check_collapses)
+            if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
+                continue;
+            }
+
             let metrics = actor.metrics.clone();
-            
+
             // legitimacy ↓10 → cohesion ↓3 (coef 0.3)
             if metrics.legitimacy < 50.0 {
                 let deficit = 50.0 - metrics.legitimacy;
@@ -861,7 +867,7 @@ fn check_collapses(
                         successor.weight,
                         successors.len(),
                     );
-                    new_actor.narrative_status = crate::core::NarrativeStatus::Background;
+                    new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     world.actors.insert(successor.id.clone(), new_actor);
                 }
             }
