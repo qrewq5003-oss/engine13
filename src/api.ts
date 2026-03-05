@@ -32,6 +32,23 @@ export async function getNarrativeActors(): Promise<Actor[]> {
   return invoke<Actor[]>('cmd_get_narrative_actors');
 }
 
+export async function getNarrative(): Promise<string> {
+  return invoke<string>('cmd_get_narrative');
+}
+
+export async function getAvailableModels(): Promise<string[]> {
+  return invoke<string[]>('cmd_get_available_models');
+}
+
+export async function saveLlmConfig(
+  provider: string,
+  base_url: string,
+  api_key: string | null,
+  model: string
+): Promise<void> {
+  return invoke('cmd_save_llm_config', { provider, baseUrl: base_url, apiKey: api_key, model });
+}
+
 // ============================================================================
 // Player Action Commands
 // ============================================================================

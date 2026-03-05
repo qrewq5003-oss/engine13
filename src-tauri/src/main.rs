@@ -115,6 +115,31 @@ fn cmd_get_scenario_list() -> Vec<commands::ScenarioMeta> {
     commands::get_scenario_list()
 }
 
+#[tauri::command]
+fn cmd_get_narrative(state: State<Mutex<AppState>>) -> Result<String, String> {
+    eprintln!("[RUST] cmd_get_narrative - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let result = commands::cmd_get_narrative(&*s);
+    eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
+    result
+}
+
+#[tauri::command]
+fn cmd_get_available_models() -> Result<Vec<String>, String> {
+    eprintln!("[RUST] cmd_get_available_models - calling commands::cmd_get_available_models");
+    let result = commands::cmd_get_available_models();
+    eprintln!("[RUST] cmd_get_available_models - result: {:?}", result.as_ref().map(|m| m.len()));
+    result
+}
+
+#[tauri::command]
+fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<String>, model: String) -> Result<(), String> {
+    eprintln!("[RUST] cmd_save_llm_config - provider: {}, model: {}", provider, model);
+    let result = commands::cmd_save_llm_config(provider, base_url, api_key, model);
+    eprintln!("[RUST] cmd_save_llm_config - result: {:?}", result.is_ok());
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     eprintln!("[RUST] Starting ENGINE13 Tauri v2 app");
@@ -134,6 +159,9 @@ fn main() {
             cmd_get_relevant_events,
             cmd_load_scenario,
             cmd_get_scenario_list,
+            cmd_get_narrative,
+            cmd_get_available_models,
+            cmd_save_llm_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

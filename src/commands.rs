@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 
 use crate::core::{Actor, Event, Scenario, WorldState};
 use crate::engine::{tick, EventLog};
@@ -39,6 +40,40 @@ pub struct SaveData {
     pub created_at: u64,
     pub world_state: WorldState,
     pub event_log: Vec<Event>,
+}
+
+/// LLM configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub base_url: String,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: "lmstudio".to_string(),
+            api_key: None,
+            model: "local-model".to_string(),
+            base_url: "http://localhost:1234".to_string(),
+        }
+    }
+}
+
+impl LlmConfig {
+    pub fn default_base_url(provider: &str) -> String {
+        match provider {
+            "lmstudio" => "http://localhost:1234".to_string(),
+            "ollama" => "http://localhost:11434".to_string(),
+            "openai" => "https://api.openai.com".to_string(),
+            "anthropic" => "https://api.anthropic.com".to_string(),
+            "deepseek" => "https://api.deepseek.com".to_string(),
+            "nanogpt" => "https://nano-gpt.com/api/v1".to_string(),
+            _ => "http://localhost:1234".to_string(),
+        }
+    }
 }
 
 /// LLM trigger response
@@ -283,6 +318,260 @@ pub fn get_scenario_list() -> Vec<ScenarioMeta> {
             start_year: 375,
         },
     ]
+}
+
+/// Get LLM config from ~/.config/engine13/config.json
+pub fn get_llm_config() -> LlmConfig {
+    let config_path: Option<std::path::PathBuf> = dirs::home_dir()
+        .map(|mut p: std::path::PathBuf| {
+            p.push(".config");
+            p.push("engine13");
+            p.push("config.json");
+            p
+        });
+
+    if let Some(path) = config_path {
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(config) = serde_json::from_str::<LlmConfig>(&content) {
+                    return config;
+                }
+            }
+        }
+    }
+
+    LlmConfig::default()
+}
+
+/// Generate narrative prompt from world state
+pub fn generate_narrative_prompt(world_state: &WorldState) -> String {
+    // Get top 5 actors by military_size
+    let mut actors: Vec<_> = world_state.actors.values().collect();
+    actors.sort_by(|a, b| {
+        b.metrics.military_size.partial_cmp(&a.metrics.military_size).unwrap()
+    });
+    actors.truncate(5);
+
+    let top_actors: Vec<String> = actors
+        .iter()
+        .map(|a| {
+            format!(
+                "{} (army: {:.0}k, economy: {:.0}, cohesion: {:.0})",
+                a.name,
+                a.metrics.military_size / 1000.0,
+                a.metrics.economic_output,
+                a.metrics.cohesion
+            )
+        })
+        .collect();
+
+    let family_influence = world_state.family_metrics.get("family_influence").copied().unwrap_or(0.0);
+    let family_knowledge = world_state.family_metrics.get("family_knowledge").copied().unwrap_or(0.0);
+    let family_wealth = world_state.family_metrics.get("family_wealth").copied().unwrap_or(0.0);
+    let family_connections = world_state.family_metrics.get("family_connections").copied().unwrap_or(0.0);
+
+    format!(
+        "Year: {} AD.
+
+Active powers: {}.
+
+Family Di Milano: influence={}, knowledge={}, wealth={}, connections={}.
+
+Write 3 sentences of atmospheric narrative in second person. Historical fiction style.",
+        world_state.year,
+        top_actors.join("; "),
+        family_influence,
+        family_knowledge,
+        family_wealth,
+        family_connections
+    )
+}
+
+/// Get narrative from LLM
+pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
+    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
+    let config = get_llm_config();
+    let prompt = generate_narrative_prompt(world_state);
+
+    let response = if config.provider == "anthropic" {
+        // Anthropic format
+        let client = reqwest::blocking::Client::new();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-api-key",
+            config.api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
+        );
+        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+
+        let body = serde_json::json!({
+            "model": config.model,
+            "max_tokens": 256,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        });
+
+        let url = format!("{}/v1/messages", config.base_url);
+        let res = client
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !res.status().is_success() {
+            return Err(format!("API error: {}", res.status()));
+        }
+
+        let json: serde_json::Value = res
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        json["content"][0]["text"]
+            .as_str()
+            .map(|s: &str| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())?
+    } else {
+        // OpenAI-compatible format (LM Studio, nano-gpt, etc.)
+        let client = reqwest::blocking::Client::new();
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(api_key) = &config.api_key {
+            headers.insert(
+                "Authorization",
+                format!("Bearer {}", api_key).parse().map_err(|e| format!("Invalid API key: {}", e))?,
+            );
+        }
+
+        let body = serde_json::json!({
+            "model": config.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 256
+        });
+
+        let url = format!("{}/v1/chat/completions", config.base_url);
+        let res = client
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !res.status().is_success() {
+            return Err(format!("API error: {}", res.status()));
+        }
+
+        let json: serde_json::Value = res
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        json["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s: &str| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())?
+    };
+
+    Ok(response)
+}
+
+/// Get available models from LLM provider
+pub fn cmd_get_available_models() -> Result<Vec<String>, String> {
+    let config = get_llm_config();
+
+    let client = reqwest::blocking::Client::new();
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    if config.provider == "anthropic" {
+        headers.insert(
+            "x-api-key",
+            config.api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
+        );
+        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+    } else if let Some(api_key) = &config.api_key {
+        headers.insert(
+            "Authorization",
+            format!("Bearer {}", api_key).parse().map_err(|e| format!("Invalid API key: {}", e))?,
+        );
+    }
+
+    let url = if config.provider == "anthropic" {
+        format!("{}/v1/models", config.base_url)
+    } else {
+        format!("{}/v1/models", config.base_url)
+    };
+
+    let res = client
+        .get(&url)
+        .headers(headers)
+        .send()
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("API error: {}", res.status()));
+    }
+
+    let json: serde_json::Value = res
+        .json()
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    // Parse models list - handle both OpenAI and Anthropic formats
+    let models: Vec<String> = if let Some(data) = json["data"].as_array() {
+        // OpenAI format: { "data": [{ "id": "model-name", ... }, ...] }
+        data.iter()
+            .filter_map(|item| item["id"].as_str().map(|s| s.to_string()))
+            .collect()
+    } else if let Some(models_array) = json["models"].as_array() {
+        // Alternative format: { "models": [{ "name": "model-name", ... }, ...] }
+        models_array.iter()
+            .filter_map(|item| item["name"].as_str().map(|s| s.to_string()))
+            .collect()
+    } else {
+        vec![]
+    };
+
+    Ok(models)
+}
+
+/// Save LLM config to ~/.config/engine13/config.json
+pub fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<String>, model: String) -> Result<(), String> {
+    let config_dir = dirs::home_dir()
+        .map(|mut p: std::path::PathBuf| {
+            p.push(".config");
+            p.push("engine13");
+            p
+        })
+        .ok_or("Could not determine home directory")?;
+
+    // Create directory if it doesn't exist
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+
+    let config_path = config_dir.join("config.json");
+
+    let config = LlmConfig {
+        provider,
+        api_key,
+        model,
+        base_url,
+    };
+
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&config_path, json)
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    eprintln!("[DEBUG] Config saved to {:?}", config_path);
+    Ok(())
 }
 
 // ============================================================================

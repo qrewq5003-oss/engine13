@@ -1,0 +1,43 @@
+.narrative-panel {
+  background: linear-gradient(135deg, #2d1b4e 0%, #1a1a2e 100%);
+  border: 1px solid #4a3b6e;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.narrative-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #d4a574;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid #4a3b6e;
+  padding-bottom: 8px;
+}
+
+.narrative-content {
+  min-height: 80px;
+}
+
+.narrative-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #e8e8e8;
+  margin: 0;
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.narrative-loading,
+.narrative-error,
+.narrative-placeholder {
+  font-size: 13px;
+  color: #888;
+  font-style: italic;
+}
+
+.narrative-error {
+  color: #ff6b6b;
+}

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { WorldPanel } from './components/WorldPanel';
 import { FamilyPanel } from './components/FamilyPanel';
 import { ControlPanel } from './components/ControlPanel';
+import { NarrativePanel } from './components/NarrativePanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import {
   loadScenario,
   getWorldState,
@@ -9,6 +11,7 @@ import {
   advanceTick,
   submitAction,
   getRelevantEvents,
+  getNarrative,
 } from './api';
 import type { WorldState, Actor, PatronAction, Event } from './types';
 import './App.css';
@@ -22,6 +25,15 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [scenarioLoaded, setScenarioLoaded] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string>('Initializing...');
+  
+  // Narrative state
+  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [narrativeError, setNarrativeError] = useState<string | null>(null);
+  const [lastNarrativeTick, setLastNarrativeTick] = useState<number>(-5);
+  
+  // Settings state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Load scenario on mount
   useEffect(() => {
@@ -79,6 +91,31 @@ const App: React.FC = () => {
       setError(`Failed to refresh state: ${err}`);
     }
   }, []);
+
+  // Refresh narrative
+  const refreshNarrative = useCallback(async () => {
+    try {
+      setNarrativeLoading(true);
+      setNarrativeError(null);
+      const result = await getNarrative();
+      setNarrative(result);
+    } catch (err) {
+      setNarrativeError(`Failed to load narrative: ${err}`);
+    } finally {
+      setNarrativeLoading(false);
+    }
+  }, []);
+
+  // Auto-refresh narrative every 5 ticks
+  useEffect(() => {
+    if (worldState && scenarioLoaded) {
+      const ticksSinceLastNarrative = worldState.tick - lastNarrativeTick;
+      if (ticksSinceLastNarrative >= 5) {
+        refreshNarrative();
+        setLastNarrativeTick(worldState.tick);
+      }
+    }
+  }, [worldState?.tick, scenarioLoaded, refreshNarrative, lastNarrativeTick]);
 
   // Handle advance tick
   const handleAdvanceTick = useCallback(async () => {
@@ -149,8 +186,17 @@ const App: React.FC = () => {
   return (
     <div className="app">
       <header className="app-header">
-        <h1 className="app-title">ENGINE13</h1>
-        <span className="app-subtitle">Rome 375 — Family Di Milano</span>
+        <div className="header-left">
+          <h1 className="app-title">ENGINE13</h1>
+          <span className="app-subtitle">Rome 375 — Family Di Milano</span>
+        </div>
+        <button
+          className="settings-button"
+          onClick={() => setIsSettingsOpen(true)}
+          title="LLM Settings"
+        >
+          ⚙
+        </button>
       </header>
 
       {error && (
@@ -170,6 +216,11 @@ const App: React.FC = () => {
         </div>
 
         <div className="panel-column middle-column">
+          <NarrativePanel
+            narrative={narrative}
+            isLoading={narrativeLoading}
+            error={narrativeError}
+          />
           <FamilyPanel
             worldState={worldState}
             currentYear={worldState.year}
@@ -189,6 +240,11 @@ const App: React.FC = () => {
           />
         </div>
       </main>
+
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </div>
   );
 };

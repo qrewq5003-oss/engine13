@@ -69,8 +69,30 @@ body {
   padding: 12px 24px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.settings-button:hover {
+  background: var(--bg-hover);
+  color: var(--accent-blue);
 }
 
 .app-title {
