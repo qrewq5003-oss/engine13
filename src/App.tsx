@@ -29,7 +29,6 @@ const App: React.FC = () => {
   // Narrative state
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
-  const [narrativeError, setNarrativeError] = useState<string | null>(null);
   const [lastNarrativeTick, setLastNarrativeTick] = useState<number>(-5);
   
   // Settings state
@@ -42,18 +41,19 @@ const App: React.FC = () => {
         console.log('[App] Starting scenario initialization');
         setIsLoading(true);
         setLoadingStep('Loading scenario...');
-        
+
         console.log('[App] Calling loadScenario');
         const loadResult = await loadScenario('rome_375');
         console.log('[App] loadScenario result:', loadResult);
-        
+
         if (!loadResult.success) {
           throw new Error(loadResult.error || 'Failed to load scenario');
         }
-        
+
         setLoadingStep('Fetching world state...');
         await refreshState();
-        
+        await refreshNarrative();
+
         setLoadingStep('Complete');
         setScenarioLoaded(true);
       } catch (err) {
@@ -96,26 +96,67 @@ const App: React.FC = () => {
   const refreshNarrative = useCallback(async () => {
     try {
       setNarrativeLoading(true);
-      setNarrativeError(null);
       const result = await getNarrative();
-      setNarrative(result);
+      console.log('[Narrative] Got text:', result?.slice(0, 50));
+      console.log('[Narrative] Full result type:', typeof result, 'length:', result?.length);
+      console.log('[Narrative] Result is empty:', !result);
+      console.log('[Narrative] Result value:', JSON.stringify(result));
+      
+      // Handle empty string case - use placeholder
+      if (!result || result.trim() === '') {
+        const placeholder = worldState
+          ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
+          : 'Медиолан. Семья наблюдает за судьбой Империи.';
+        console.log('[Narrative] Using placeholder because result was empty');
+        setNarrative(placeholder);
+      } else {
+        setNarrative(result);
+      }
     } catch (err) {
-      setNarrativeError(`Failed to load narrative: ${err}`);
+      console.error('[Narrative] Error:', err);
+      // Don't show error - LLM may be unavailable, use placeholder
+      const placeholder = worldState
+        ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
+        : 'Медиолан. Семья наблюдает за судьбой Империи.';
+      setNarrative(placeholder);
     } finally {
       setNarrativeLoading(false);
     }
-  }, []);
+  }, [worldState]);
 
   // Auto-refresh narrative every 5 ticks
   useEffect(() => {
     if (worldState && scenarioLoaded) {
       const ticksSinceLastNarrative = worldState.tick - lastNarrativeTick;
       if (ticksSinceLastNarrative >= 5) {
-        refreshNarrative();
+        const fetchNarrative = async () => {
+          try {
+            setNarrativeLoading(true);
+            const result = await getNarrative();
+            console.log('[Narrative] Auto-refresh Got text:', result?.slice(0, 50));
+            console.log('[Narrative] Auto-refresh Result value:', JSON.stringify(result));
+            
+            // Handle empty string case
+            if (!result || result.trim() === '') {
+              const placeholder = `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`;
+              console.log('[Narrative] Auto-refresh Using placeholder');
+              setNarrative(placeholder);
+            } else {
+              setNarrative(result);
+            }
+          } catch (err) {
+            console.error('[Narrative] Auto-refresh Error:', err);
+            const placeholder = `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`;
+            setNarrative(placeholder);
+          } finally {
+            setNarrativeLoading(false);
+          }
+        };
+        fetchNarrative();
         setLastNarrativeTick(worldState.tick);
       }
     }
-  }, [worldState?.tick, scenarioLoaded, refreshNarrative, lastNarrativeTick]);
+  }, [worldState?.tick, worldState?.year, scenarioLoaded, lastNarrativeTick]);
 
   // Handle advance tick
   const handleAdvanceTick = useCallback(async () => {
@@ -129,12 +170,14 @@ const App: React.FC = () => {
       if (response.events.length > 0) {
         setRecentEvents(response.events);
       }
+      // Refresh available actions and events to reflect new state
+      await refreshState();
     } catch (err) {
       setError(`Failed to advance tick: ${err}`);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading]);
+  }, [isLoading, refreshState]);
 
   // Handle action submit
   const handleActionSubmit = useCallback(async (actionId: string) => {
@@ -219,7 +262,6 @@ const App: React.FC = () => {
           <NarrativePanel
             narrative={narrative}
             isLoading={narrativeLoading}
-            error={narrativeError}
           />
           <FamilyPanel
             worldState={worldState}

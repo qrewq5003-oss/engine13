@@ -31,13 +31,8 @@
 }
 
 .narrative-loading,
-.narrative-error,
 .narrative-placeholder {
   font-size: 13px;
   color: #888;
   font-style: italic;
-}
-
-.narrative-error {
-  color: #ff6b6b;
 }

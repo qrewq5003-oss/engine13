@@ -36,8 +36,12 @@ export async function getNarrative(): Promise<string> {
   return invoke<string>('cmd_get_narrative');
 }
 
-export async function getAvailableModels(): Promise<string[]> {
-  return invoke<string[]>('cmd_get_available_models');
+export async function getAvailableModels(
+  provider: string,
+  base_url: string,
+  api_key: string | null
+): Promise<string[]> {
+  return invoke<string[]>('cmd_get_available_models', { provider, baseUrl: base_url, apiKey: api_key });
 }
 
 export async function saveLlmConfig(

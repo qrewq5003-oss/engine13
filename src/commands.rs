@@ -70,7 +70,7 @@ impl LlmConfig {
             "openai" => "https://api.openai.com".to_string(),
             "anthropic" => "https://api.anthropic.com".to_string(),
             "deepseek" => "https://api.deepseek.com".to_string(),
-            "nanogpt" => "https://nano-gpt.com/api/v1".to_string(),
+            "nanogpt" => "https://nano-gpt.com/api".to_string(),
             _ => "http://localhost:1234".to_string(),
         }
     }
@@ -187,7 +187,7 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
     let available_actions = scenario
         .patron_actions
         .iter()
-        .filter(|action| is_action_available(action, player_actor))
+        .filter(|action| is_action_available(action, player_actor, &world_state.family_metrics))
         .cloned()
         .collect();
 
@@ -301,6 +301,14 @@ pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveRe
         }
     }
 
+    // Initialize patriarch_age from generation_mechanics if available
+    if let Some(gen_mechanics) = &scenario.generation_mechanics {
+        world_state.family_metrics.insert(
+            "patriarch_age".to_string(),
+            gen_mechanics.patriarch_start_age as f64,
+        );
+    }
+
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
     state.event_log = EventLog::new();
@@ -393,9 +401,18 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
     let config = get_llm_config();
     let prompt = generate_narrative_prompt(world_state);
 
+    // Generate placeholder narrative for when LLM is unavailable
+    let placeholder = format!("Медиолан, {} год. Семья наблюдает за судьбой Империи.", world_state.year);
+
+    eprintln!("[NARRATIVE] Getting narrative for year {}", world_state.year);
+    eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
+
     let response = if config.provider == "anthropic" {
         // Anthropic format
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "x-api-key",
@@ -419,11 +436,18 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
             .post(&url)
             .headers(headers)
             .json(&body)
-            .send()
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .send();
+
+        // Handle connection errors gracefully - return placeholder
+        let res = match res {
+            Ok(r) => r,
+            Err(_) => return Ok(placeholder),
+        };
 
         if !res.status().is_success() {
-            return Err(format!("API error: {}", res.status()));
+            let status = res.status();
+            let error_body = res.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, error_body));
         }
 
         let json: serde_json::Value = res
@@ -433,10 +457,13 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
         json["content"][0]["text"]
             .as_str()
             .map(|s: &str| s.to_string())
-            .ok_or_else(|| "No content in response".to_string())?
+            .unwrap_or(placeholder)
     } else {
         // OpenAI-compatible format (LM Studio, nano-gpt, etc.)
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?;
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(api_key) = &config.api_key {
             headers.insert(
@@ -461,11 +488,37 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
             .post(&url)
             .headers(headers)
             .json(&body)
-            .send()
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .send();
+
+        // Handle connection errors gracefully - return placeholder
+        let res = match res {
+            Ok(r) => r,
+            Err(_) => return Ok(placeholder),
+        };
 
         if !res.status().is_success() {
-            return Err(format!("API error: {}", res.status()));
+            // Handle 400 error with response body
+            let status = res.status();
+            let error_body = res.text().unwrap_or_default();
+
+            // Try to parse error message from JSON response
+            let error_message = if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_body) {
+                if let Some(error) = error_json.get("error") {
+                    if let Some(msg) = error.get("message").and_then(|m| m.as_str()) {
+                        msg.to_string()
+                    } else if let Some(msg) = error.as_str() {
+                        msg.to_string()
+                    } else {
+                        error_body
+                    }
+                } else {
+                    error_body
+                }
+            } else {
+                error_body
+            };
+
+            return Err(format!("API error ({}): {}", status, error_message));
         }
 
         let json: serde_json::Value = res
@@ -475,37 +528,35 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
         json["choices"][0]["message"]["content"]
             .as_str()
             .map(|s: &str| s.to_string())
-            .ok_or_else(|| "No content in response".to_string())?
+            .unwrap_or(placeholder)
     };
 
+    eprintln!("[NARRATIVE] Response length: {}, first 50 chars: {:?}", response.len(), response.chars().take(50).collect::<String>());
     Ok(response)
 }
 
 /// Get available models from LLM provider
-pub fn cmd_get_available_models() -> Result<Vec<String>, String> {
-    let config = get_llm_config();
-
-    let client = reqwest::blocking::Client::new();
+pub fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
     let mut headers = reqwest::header::HeaderMap::new();
 
-    if config.provider == "anthropic" {
+    if provider == "anthropic" {
         headers.insert(
             "x-api-key",
-            config.api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
+            api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
         );
         headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
-    } else if let Some(api_key) = &config.api_key {
+    } else if let Some(api_key) = &api_key {
         headers.insert(
             "Authorization",
             format!("Bearer {}", api_key).parse().map_err(|e| format!("Invalid API key: {}", e))?,
         );
     }
 
-    let url = if config.provider == "anthropic" {
-        format!("{}/v1/models", config.base_url)
-    } else {
-        format!("{}/v1/models", config.base_url)
-    };
+    let url = format!("{}/v1/models", base_url);
 
     let res = client
         .get(&url)
@@ -514,7 +565,9 @@ pub fn cmd_get_available_models() -> Result<Vec<String>, String> {
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
     if !res.status().is_success() {
-        return Err(format!("API error: {}", res.status()));
+        let status = res.status();
+        let error_body = res.text().unwrap_or_default();
+        return Err(format!("API error ({}): {}", status, error_body));
     }
 
     let json: serde_json::Value = res
@@ -588,7 +641,7 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
 
     let player_actor = world_state.actors.get_mut("rome").ok_or("Player actor not found")?;
 
-    if !is_action_available(action, player_actor) {
+    if !is_action_available(action, player_actor, &world_state.family_metrics) {
         return Err("Action is not available".to_string());
     }
 
@@ -643,12 +696,12 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     Ok((applied_effects, applied_costs))
 }
 
-fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor) -> bool {
+fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor, family_metrics: &HashMap<String, f64>) -> bool {
     match &action.available_if {
         crate::core::ActionCondition::Always => true,
         crate::core::ActionCondition::Metric { metric, operator, value } => {
             let current = if metric.starts_with("family_") {
-                player_actor.scenario_metrics.get(metric).copied().unwrap_or(0.0)
+                family_metrics.get(metric).copied().unwrap_or(0.0)
             } else {
                 get_metric_value(&player_actor.metrics, metric)
             };

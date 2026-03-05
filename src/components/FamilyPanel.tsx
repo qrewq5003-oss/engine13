@@ -18,13 +18,16 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
     family_knowledge: worldState.family_metrics.family_knowledge || 0,
     family_wealth: worldState.family_metrics.family_wealth || 0,
     family_connections: worldState.family_metrics.family_connections || 0,
+    patriarch_age: worldState.family_metrics.patriarch_age || 42, // Default to 42 if not set
   };
 
-  // Calculate generation info (tick_span = 5 years, patriarch starts at 42, ends at 75)
-  const yearsElapsed = (currentYear - 375);
-  const generationNumber = Math.floor(yearsElapsed / 33) + 1; // ~33 years per generation
-  const patriarchAge = 42 + (yearsElapsed % 33);
-  const generationStartYear = 375 + (generationNumber - 1) * 33;
+  // Calculate generation info from patriarch_age
+  // patriarch_start_age = 42, patriarch_end_age = 75, so generation length ~33 years
+  const patriarchAge = Math.floor(familyMetrics.patriarch_age);
+  const yearsSinceStart = currentYear - 375;
+  const generationLength = 33;
+  const generationNumber = Math.floor(yearsSinceStart / generationLength) + 1;
+  const generationStartYear = 375 + (generationNumber - 1) * generationLength;
 
   return (
     <div className="family-panel">
@@ -70,15 +73,22 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
       <div className="family-context">
         <p className="context-text">
-          Mediolanum, {currentYear} AD. You are the head of an unnoticed family.
-          The Huns press on the Goths beyond the horizon. The Goths seek refuge
-          across the Danube. Three years until Adrianople — but that has not
-          happened yet.
+          {getContextText(currentYear)}
         </p>
       </div>
     </div>
   );
 };
+
+function getContextText(year: number): string {
+  if (year < 378) {
+    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Huns press on the Goths beyond the horizon. The Goths seek refuge across the Danube. Three years until Adrianople — but that has not happened yet.`;
+  } else if (year <= 410) {
+    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Empire reels from Adrianople's disaster. Barbarian kings carve their kingdoms from Roman soil. The old order crumbles.`;
+  } else {
+    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Western Empire has fallen. Rome itself was sacked. In the chaos, new powers rise from the ashes of civilization.`;
+  }
+}
 
 interface FamilyMetricBarProps {
   label: string;

@@ -51,6 +51,9 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     // Step 1: Apply auto_deltas
     apply_auto_deltas(world, scenario);
 
+    // Step 1b: Apply treasury calculation (incomes - expenses)
+    apply_treasury(world);
+
     // Step 2: Apply dependency graph coefficients
     apply_dependency_graph(world);
 
@@ -73,6 +76,12 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
 
     // Step 8: Record metric change events if significant
     record_metric_changes(world, &initial_states, current_tick, current_year, event_log);
+
+    // Step 8b: Check generation transfer (patriarch aging)
+    check_generation_transfer(world, scenario, event_log);
+
+    // Step 8c: Apply family auto deltas (passive changes per tick)
+    apply_family_auto_deltas(world);
 
     // Step 9: Update tick and year
     world.tick += 1;
@@ -97,6 +106,22 @@ fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario) {
                 }
                 apply_single_auto_delta(actor, auto_delta);
             }
+        }
+    }
+}
+
+/// Apply treasury calculation: treasury += incomes - expenses
+/// Formula:
+///   incomes = economic_output × population × 0.001
+///   expenses = military_size × 0.8
+fn apply_treasury(world: &mut WorldState) {
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+
+    for actor_id in actor_ids {
+        if let Some(actor) = world.actors.get_mut(&actor_id) {
+            let incomes = actor.metrics.economic_output * actor.metrics.population * 0.001;
+            let expenses = actor.metrics.military_size * 0.8;
+            actor.metrics.treasury += incomes - expenses;
         }
     }
 }
@@ -336,7 +361,7 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
 fn calculate_interactions(world: &mut WorldState) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-    
+
     // Collect all interactions first to avoid borrow issues
     let mut interactions: Vec<(String, String, InteractionType, f64)> = Vec::new();
 
@@ -344,9 +369,11 @@ fn calculate_interactions(world: &mut WorldState) {
         if let Some(actor) = world.actors.get(actor_id) {
             for neighbor in &actor.neighbors {
                 if world.actors.contains_key(&neighbor.id) {
-                    let interaction = determine_interaction(actor, &neighbor.id, world);
-                    if let Some((target, itype, magnitude)) = interaction {
-                        interactions.push((actor_id.clone(), target, itype, magnitude));
+                    // Get ALL interactions (trade, pressure, migration, cultural) not just the first one
+                    let actor_interactions = determine_all_interactions(actor, &neighbor.id, world);
+                    // Add source actor_id to each interaction
+                    for (target_id, itype, magnitude) in actor_interactions {
+                        interactions.push((actor_id.clone(), target_id, itype, magnitude));
                     }
                 }
             }
@@ -367,12 +394,18 @@ enum InteractionType {
     CulturalInfluence,
 }
 
-fn determine_interaction(
+/// Determine ALL possible interactions between two actors (not just the first one)
+fn determine_all_interactions(
     actor: &Actor,
     neighbor_id: &str,
     world: &WorldState,
-) -> Option<(String, InteractionType, f64)> {
-    let neighbor = world.actors.get(neighbor_id)?;
+) -> Vec<(String, InteractionType, f64)> {
+    let mut result = Vec::new();
+    
+    let neighbor = match world.actors.get(neighbor_id) {
+        Some(n) => n,
+        None => return result,
+    };
 
     // Check if trade is possible (adjacent OR has trade_networks tag)
     let can_trade = neighbor.neighbors.iter().any(|n| n.id == actor.id)
@@ -381,7 +414,7 @@ fn determine_interaction(
     // Trade - both actors get a small bonus
     if can_trade && neighbor.metrics.economic_output > 0.0 && actor.metrics.economic_output > 0.0 {
         let distance_mod = distance_modifier(neighbor.neighbors.iter().find(|n| n.id == actor.id));
-        let trade_bonus = if actor.tags.contains(&"trade_networks".to_string()) 
+        let trade_bonus = if actor.tags.contains(&"trade_networks".to_string())
             || neighbor.tags.contains(&"trade_networks".to_string()) {
             1.0
         } else {
@@ -391,28 +424,39 @@ fn determine_interaction(
         // Both actors gain equally: small base bonus × distance modifier
         let base_gain = 2.0; // Small fixed base gain
         let gain = (base_gain * trade_bonus).min(3.0); // Cap at 3.0
-        return Some((neighbor.id.clone(), InteractionType::Trade, gain));
+        result.push((neighbor.id.clone(), InteractionType::Trade, gain));
     }
 
     // Military pressure
     let pressure = calculate_military_pressure(actor, neighbor);
     if pressure > 0.1 {
-        return Some((neighbor.id.clone(), InteractionType::MilitaryPressure, pressure));
+        result.push((neighbor.id.clone(), InteractionType::MilitaryPressure, pressure));
     }
 
     // Migration
     let migration = calculate_migration(actor, neighbor);
     if migration > 0.01 {
-        return Some((neighbor.id.clone(), InteractionType::Migration, migration));
+        result.push((neighbor.id.clone(), InteractionType::Migration, migration));
     }
 
     // Cultural influence
     let cultural = calculate_cultural_influence(actor, neighbor);
     if cultural > 0.1 {
-        return Some((neighbor.id.clone(), InteractionType::CulturalInfluence, cultural));
+        result.push((neighbor.id.clone(), InteractionType::CulturalInfluence, cultural));
     }
 
-    None
+    result
+}
+
+/// Legacy function - kept for compatibility, returns only the first interaction
+#[allow(dead_code)]
+fn determine_interaction(
+    actor: &Actor,
+    neighbor_id: &str,
+    world: &WorldState,
+) -> Option<(String, InteractionType, f64)> {
+    let all = determine_all_interactions(actor, neighbor_id, world);
+    all.into_iter().next()
 }
 
 fn distance_modifier(neighbor: Option<&crate::core::Neighbor>) -> f64 {
@@ -539,19 +583,20 @@ fn apply_interaction(
         }
         InteractionType::CulturalInfluence => {
             if let Some(target) = world.actors.get_mut(target_id) {
-                target.metrics.cohesion -= magnitude * 0.1;
-                target.metrics.legitimacy -= magnitude * 0.05;
+                // If target cohesion > 60, reduce the effect magnitude by 70%
+                let effective_magnitude = if target.metrics.cohesion > 60.0 {
+                    magnitude * 0.3
+                } else {
+                    magnitude
+                };
+
+                target.metrics.cohesion -= effective_magnitude * 0.1;
+                target.metrics.legitimacy -= effective_magnitude * 0.05;
 
                 // Overwhelming superiority
-                if magnitude > target.metrics.cohesion * 2.0 {
-                    target.metrics.cohesion -= magnitude * 0.15;
-                    target.metrics.legitimacy -= magnitude * 0.075;
-                }
-
-                // Resistance
-                if target.metrics.cohesion > 60.0 {
-                    target.metrics.cohesion *= 0.7;
-                    target.metrics.legitimacy *= 0.7;
+                if effective_magnitude > target.metrics.cohesion * 2.0 {
+                    target.metrics.cohesion -= effective_magnitude * 0.15;
+                    target.metrics.legitimacy -= effective_magnitude * 0.075;
                 }
             }
         }
@@ -592,6 +637,52 @@ fn clamp_metrics(world: &mut WorldState) {
         actor.metrics.external_pressure = actor.metrics.external_pressure.max(0.0).min(100.0);
         // Treasury can be negative
     }
+}
+
+// ============================================================================
+// Family Auto Deltas (Passive changes per tick)
+// ============================================================================
+
+fn apply_family_auto_deltas(world: &mut WorldState) {
+    let rome_cohesion = world.actors.get("rome")
+        .map(|a| a.metrics.cohesion).unwrap_or(50.0);
+    let rome_econ = world.actors.get("rome")
+        .map(|a| a.metrics.economic_output).unwrap_or(50.0);
+    let rome_legitimacy = world.actors.get("rome")
+        .map(|a| a.metrics.legitimacy).unwrap_or(50.0);
+    let rome_pressure = world.actors.get("rome")
+        .map(|a| a.metrics.external_pressure).unwrap_or(30.0);
+
+    let influence = world.family_metrics.get("family_influence").copied().unwrap_or(0.0);
+    let knowledge = world.family_metrics.get("family_knowledge").copied().unwrap_or(0.0);
+    let wealth = world.family_metrics.get("family_wealth").copied().unwrap_or(0.0);
+    let connections = world.family_metrics.get("family_connections").copied().unwrap_or(0.0);
+
+    // family_influence
+    let mut d_influence: f64 = -0.5; // пассивный спад
+    if connections > 30.0 { d_influence += 0.3; }
+    if wealth > 40.0      { d_influence += 0.2; }
+    if rome_legitimacy > 60.0 { d_influence += 0.1; }
+    if rome_cohesion < 30.0   { d_influence -= 0.2; }
+
+    // family_knowledge
+    let mut d_knowledge: f64 = 0.2; // всегда растёт
+    if knowledge > 50.0 { d_knowledge += 0.1; } // ускоряется при накоплении
+
+    // family_wealth
+    let mut d_wealth: f64 = 0.0;
+    if connections > 20.0      { d_wealth += 0.5; }
+    else if connections < 5.0  { d_wealth -= 0.5; }
+    if rome_econ > 60.0        { d_wealth += 0.2; }
+
+    // family_connections
+    let mut d_connections: f64 = -0.3; // нужно поддерживать
+    if rome_pressure > 70.0 { d_connections -= 0.2; } // люди разбегаются
+
+    world.family_metrics.insert("family_influence".to_string(),   (influence   + d_influence).max(0.0).min(100.0));
+    world.family_metrics.insert("family_knowledge".to_string(),   (knowledge   + d_knowledge).max(0.0).min(100.0));
+    world.family_metrics.insert("family_wealth".to_string(),      (wealth      + d_wealth).max(0.0).min(100.0));
+    world.family_metrics.insert("family_connections".to_string(), (connections + d_connections).max(0.0).min(100.0));
 }
 
 // ============================================================================
@@ -730,7 +821,24 @@ fn check_milestone_events(
             continue;
         }
 
-        let should_trigger = check_event_condition(world, &milestone.condition);
+        let condition_met = check_event_condition(world, &milestone.condition);
+        
+        // Handle duration: condition must be met for `duration` consecutive ticks
+        let should_trigger = if let Some(duration) = milestone.condition.duration {
+            let counter = world.milestone_condition_ticks.entry(milestone.id.clone()).or_insert(0);
+            
+            if condition_met {
+                *counter += 1;
+                *counter >= duration
+            } else {
+                // Reset counter if condition is not met
+                *counter = 0;
+                false
+            }
+        } else {
+            // No duration specified - trigger immediately when condition is met
+            condition_met
+        };
 
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
@@ -789,6 +897,66 @@ fn check_event_condition(world: &WorldState, condition: &EventCondition) -> bool
                 .unwrap_or(false),
         },
         EventConditionType::Tick { tick } => world.tick >= *tick,
+    }
+}
+
+// ============================================================================
+// Generation Transfer (Patriarch Aging)
+// ============================================================================
+
+/// Check and handle generation transfer for the family patriarch
+fn check_generation_transfer(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    event_log: &mut EventLog,
+) {
+    let Some(gen_mechanics) = &scenario.generation_mechanics else {
+        return; // No generation mechanics defined for this scenario
+    };
+
+    let current_tick = world.tick;
+    let current_year = world.year;
+
+    // Get current patriarch age (default to start age if not set)
+    let patriarch_age_key = "patriarch_age".to_string();
+    let current_age = world.family_metrics
+        .get(&patriarch_age_key)
+        .copied()
+        .unwrap_or(gen_mechanics.patriarch_start_age as f64);
+
+    // Age the patriarch by tick_span years
+    let new_age = current_age + scenario.tick_span as f64;
+    world.family_metrics.insert(patriarch_age_key.clone(), new_age);
+
+    // Check if patriarch has reached end age - trigger generation transfer
+    if new_age >= gen_mechanics.patriarch_end_age as f64 {
+        // Apply inheritance coefficients to family metrics
+        // Per architecture: new generation starts with reduced metrics
+        let inheritance_coefficient = 0.7; // New generation inherits 70% of family strength
+
+        let metrics_to_scale = ["family_influence", "family_knowledge", "family_wealth", "family_connections"];
+        
+        for metric in &metrics_to_scale {
+            if let Some(value) = world.family_metrics.get(*metric) {
+                let new_value = value * inheritance_coefficient;
+                world.family_metrics.insert(metric.to_string(), new_value);
+            }
+        }
+
+        // Reset patriarch age to start age for new generation
+        world.family_metrics.insert(patriarch_age_key, gen_mechanics.patriarch_start_age as f64);
+
+        // Record generation transfer event
+        let event = Event::new(
+            "generation_transfer".to_string(),
+            current_tick,
+            current_year,
+            "scenario".to_string(),
+            EventType::Milestone,
+            true, // is_key event
+            "Новое поколение семьи Ди Милано вступает во власть".to_string(),
+        );
+        event_log.add(event);
     }
 }
 
@@ -891,9 +1059,9 @@ fn metrics_to_snapshot(metrics: &ActorMetrics) -> HashMap<String, f64> {
 fn split_metrics_for_successor(
     parent: &ActorMetrics,
     weight: f64,
-    total_successors: usize,
+    _total_successors: usize,
 ) -> ActorMetrics {
-    let share = weight / (total_successors as f64);
+    let share = weight;
 
     ActorMetrics {
         population: parent.population * share,
@@ -1000,14 +1168,16 @@ fn calculate_metric_changes(
 // ============================================================================
 
 /// Simple random number generator for noise
-/// In production, use a proper RNG with seed
+/// Uses xorshift algorithm to avoid same values within a single tick
 fn rand_f64() -> f64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos() as f64;
-    (nanos / 1_000_000_000.0) % 1.0
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static STATE: AtomicU64 = AtomicU64::new(12345);
+    let mut x = STATE.load(Ordering::Relaxed);
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    STATE.store(x, Ordering::Relaxed);
+    (x as f64) / (u64::MAX as f64)
 }
 
 #[cfg(test)]

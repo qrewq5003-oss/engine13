@@ -48,6 +48,7 @@ pub struct WorldState {
     pub dead_actors: Vec<DeadActor>,
     pub alliances: Vec<Alliance>,
     pub milestone_events_fired: Vec<String>,
+    pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     pub family_metrics: HashMap<String, f64>,
 }
 
@@ -62,6 +63,7 @@ impl WorldState {
             dead_actors: Vec::new(),
             alliances: Vec::new(),
             milestone_events_fired: Vec::new(),
+            milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
         }
     }

@@ -11,10 +11,21 @@ use tauri::State;
 #[tauri::command]
 fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13::WorldState>, String> {
     eprintln!("[RUST] cmd_get_world_state - acquiring lock");
-    let s = state.lock().map_err(|e| {
+    let mut s = state.lock().map_err(|e| {
         eprintln!("[RUST] cmd_get_world_state - lock error: {}", e);
         e.to_string()
     })?;
+    
+    // If family_metrics is empty, initialize with default values
+    if let Some(ref mut world_state) = s.world_state {
+        if world_state.family_metrics.is_empty() {
+            world_state.family_metrics.insert("family_influence".to_string(), 0.0);
+            world_state.family_metrics.insert("family_knowledge".to_string(), 0.0);
+            world_state.family_metrics.insert("family_wealth".to_string(), 0.0);
+            world_state.family_metrics.insert("family_connections".to_string(), 0.0);
+        }
+    }
+    
     eprintln!("[RUST] cmd_get_world_state - returning state: {:?}", s.world_state.is_some());
     Ok(s.world_state.clone())
 }
@@ -125,9 +136,9 @@ fn cmd_get_narrative(state: State<Mutex<AppState>>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn cmd_get_available_models() -> Result<Vec<String>, String> {
-    eprintln!("[RUST] cmd_get_available_models - calling commands::cmd_get_available_models");
-    let result = commands::cmd_get_available_models();
+fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
+    eprintln!("[RUST] cmd_get_available_models - provider: {}", provider);
+    let result = commands::cmd_get_available_models(provider, base_url, api_key);
     eprintln!("[RUST] cmd_get_available_models - result: {:?}", result.as_ref().map(|m| m.len()));
     result
 }

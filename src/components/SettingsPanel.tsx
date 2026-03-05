@@ -19,7 +19,7 @@ const PROVIDERS: ProviderOption[] = [
   { value: 'openai', label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com' },
   { value: 'anthropic', label: 'Anthropic', defaultBaseUrl: 'https://api.anthropic.com' },
   { value: 'deepseek', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com' },
-  { value: 'nanogpt', label: 'NanoGPT', defaultBaseUrl: 'https://nano-gpt.com/api/v1' },
+  { value: 'nanogpt', label: 'NanoGPT', defaultBaseUrl: 'https://nano-gpt.com/api' },
 ];
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
@@ -63,7 +63,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     setIsLoadingModels(true);
     setMessage(null);
     try {
-      const models = await getAvailableModels();
+      const models = await getAvailableModels(provider, baseUrl, apiKey || null);
       setAvailableModels(models);
       setMessage({ type: 'success', text: `Loaded ${models.length} models` });
     } catch (err) {
