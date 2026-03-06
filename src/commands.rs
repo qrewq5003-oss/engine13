@@ -4,6 +4,7 @@ use std::fs;
 use tauri::Emitter;
 
 use crate::core::{Actor, Event, Scenario, WorldState};
+use crate::db::Db;
 use crate::engine::{tick, EventLog};
 use crate::scenarios::load_rome_375;
 
@@ -16,7 +17,6 @@ pub struct AppState {
     pub world_state: Option<WorldState>,
     pub event_log: EventLog,
     pub current_scenario: Option<Scenario>,
-    pub saves: HashMap<String, SaveData>,
 }
 
 impl Default for AppState {
@@ -25,7 +25,6 @@ impl Default for AppState {
             world_state: None,
             event_log: EventLog::new(),
             current_scenario: None,
-            saves: HashMap::new(),
         }
     }
 }
@@ -222,60 +221,110 @@ pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitAc
 }
 
 /// Save current game state
-pub fn save_game(state: &mut AppState, slot: Option<String>, name: Option<String>) -> Result<SaveResponse, String> {
+pub fn save_game(
+    state: &mut AppState,
+    db: &Db,
+    slot: Option<String>,
+    name: Option<String>,
+) -> Result<SaveResponse, String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state to save")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
     let save_id = slot.unwrap_or_else(|| format!("autosave_{}", world_state.tick));
     let save_name = name.unwrap_or_else(|| format!("Tick {} - Year {}", world_state.tick, world_state.year));
 
-    let save_data = SaveData {
+    // Serialize world_state to JSON
+    let world_state_json = serde_json::to_string(&world_state)
+        .map_err(|e| format!("Failed to serialize world state: {}", e))?;
+
+    // Create player_state (for now just family_metrics, can be extended)
+    let player_state_json = serde_json::to_string(&world_state.family_metrics)
+        .map_err(|e| format!("Failed to serialize player state: {}", e))?;
+
+    let db_save = crate::db::DbSave {
         id: save_id.clone(),
         name: save_name,
         scenario_id: scenario.id.clone(),
         tick: world_state.tick,
         year: world_state.year,
-        created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-        world_state: world_state.clone(),
-        event_log: state.event_log.events.clone(),
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        world_state_json,
+        player_state_json,
     };
 
-    state.saves.insert(save_id.clone(), save_data);
+    db.insert_save(&db_save)
+        .map_err(|e| format!("Failed to insert save: {}", e))?;
 
     Ok(SaveResponse { success: true, save_id: Some(save_id), error: None })
 }
 
 /// Load game from save
-pub fn load_game(state: &mut AppState, save_id: String) -> Result<LoadResponse, String> {
-    let save_data = state.saves.get(&save_id).cloned().ok_or_else(|| format!("Save '{}' not found", save_id))?;
+pub fn load_game(
+    state: &mut AppState,
+    db: &Db,
+    save_id: String,
+) -> Result<LoadResponse, String> {
+    let db_save = db.get_save_by_id(&save_id)
+        .map_err(|e| format!("Failed to get save: {}", e))?
+        .ok_or_else(|| format!("Save '{}' not found", save_id))?;
 
-    state.world_state = Some(save_data.world_state.clone());
-    state.event_log = EventLog { events: save_data.event_log };
+    // Deserialize world_state from JSON
+    let world_state: WorldState = serde_json::from_str(&db_save.world_state_json)
+        .map_err(|e| format!("Failed to deserialize world state: {}", e))?;
 
-    if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(save_data.scenario_id.clone()) {
-        match save_data.scenario_id.as_str() {
+    // Deserialize player_state (family_metrics)
+    let family_metrics: HashMap<String, f64> = serde_json::from_str(&db_save.player_state_json)
+        .unwrap_or_else(|_| HashMap::new());
+
+    state.world_state = Some(world_state.clone());
+    state.event_log = EventLog::new();
+
+    // Update family_metrics in world_state
+    if let Some(ref mut ws) = state.world_state {
+        ws.family_metrics = family_metrics;
+    }
+
+    if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
+        match db_save.scenario_id.as_str() {
             "rome_375" => { state.current_scenario = Some(load_rome_375()); }
-            _ => return Err(format!("Unknown scenario: {}", save_data.scenario_id)),
+            _ => return Err(format!("Unknown scenario: {}", db_save.scenario_id)),
         }
     }
 
-    Ok(LoadResponse { success: true, world_state: Some(save_data.world_state), error: None })
+    Ok(LoadResponse { success: true, world_state: Some(world_state), error: None })
+}
+
+/// List all saves
+pub fn list_saves(db: &Db) -> Vec<SaveData> {
+    match db.list_saves() {
+        Ok(db_saves) => {
+            db_saves.iter().map(|db_save| SaveData {
+                id: db_save.id.clone(),
+                name: db_save.name.clone(),
+                scenario_id: db_save.scenario_id.clone(),
+                tick: db_save.tick,
+                year: db_save.year,
+                created_at: db_save.created_at,
+                world_state: serde_json::from_str(&db_save.world_state_json).unwrap_or_else(|_| {
+                    WorldState::new(db_save.scenario_id.clone(), db_save.year)
+                }),
+                event_log: vec![],
+            }).collect()
+        }
+        Err(e) => {
+            eprintln!("Failed to list saves: {}", e);
+            vec![]
+        }
+    }
 }
 
 /// Get relevant events
-pub fn get_relevant_events(state: &AppState, actor_ids: Vec<String>) -> Result<Vec<Event>, String> {
-    let mut relevant_events: Vec<Event> = state
-        .event_log
-        .events
-        .iter()
-        .filter(|e| e.actor_id == "scenario" || actor_ids.contains(&e.actor_id) || e.involved_actors.iter().any(|a| actor_ids.contains(a)))
-        .cloned()
-        .collect();
-
-    relevant_events.sort_by(|a, b| b.tick.cmp(&a.tick));
-    relevant_events.truncate(20);
-
-    Ok(relevant_events)
+pub fn get_relevant_events(db: &Db, actor_id: String) -> Result<Vec<Event>, String> {
+    // For now, just get events for the actor (relevance scoring is next step)
+    db.get_events_by_actor(&actor_id)
 }
 
 /// Load a scenario

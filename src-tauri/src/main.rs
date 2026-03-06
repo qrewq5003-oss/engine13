@@ -4,6 +4,7 @@
 )]
 
 use engine13::commands::{self, AppState};
+use engine13::db::Db;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -31,12 +32,46 @@ fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13:
 }
 
 #[tauri::command]
-fn cmd_advance_tick(state: State<Mutex<AppState>>, action: Option<commands::PlayerActionInput>) -> Result<commands::AdvanceTickResponse, String> {
-    eprintln!("[RUST] cmd_advance_tick - acquiring lock");
+fn cmd_advance_tick(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+    action: Option<commands::PlayerActionInput>,
+) -> Result<commands::AdvanceTickResponse, String> {
+    eprintln!("[RUST] cmd_advance_tick - acquiring locks");
+    
+    // First, advance the tick and get events
     let mut s = state.lock().map_err(|e| e.to_string())?;
     eprintln!("[RUST] cmd_advance_tick - calling advance_tick");
     let result = commands::advance_tick(&mut *s, action);
     eprintln!("[RUST] cmd_advance_tick - result: {:?}", result.is_ok());
+    
+    // If successful, write events and dead actors to database
+    if let Ok(ref response) = result {
+        let db_guard = db.lock().map_err(|e| e.to_string())?;
+        
+        // Write events to database
+        if !response.events.is_empty() {
+            if let Err(e) = (&mut *db_guard).insert_events_batch(&response.events) {
+                eprintln!("[RUST] cmd_advance_tick - failed to write events to DB: {}", e);
+            } else {
+                eprintln!("[RUST] cmd_advance_tick - wrote {} events to DB", response.events.len());
+            }
+        }
+        
+        // Write dead actors to database
+        if let Some(ref world_state) = s.world_state {
+            if !world_state.dead_actors.is_empty() {
+                for dead_actor in &world_state.dead_actors {
+                    if let Err(e) = db_guard.insert_dead_actor_from_core(dead_actor) {
+                        eprintln!("[RUST] cmd_advance_tick - failed to write dead actor to DB: {}", e);
+                    } else {
+                        eprintln!("[RUST] cmd_advance_tick - wrote dead actor {} to DB", dead_actor.id);
+                    }
+                }
+            }
+        }
+    }
+    
     result
 }
 
@@ -63,46 +98,86 @@ fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine
 }
 
 #[tauri::command]
-fn cmd_submit_action(state: State<Mutex<AppState>>, action_id: String) -> Result<commands::SubmitActionResponse, String> {
-    eprintln!("[RUST] cmd_submit_action - acquiring lock, action_id: {}", action_id);
+fn cmd_submit_action(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+    action_id: String,
+) -> Result<commands::SubmitActionResponse, String> {
+    eprintln!("[RUST] cmd_submit_action - acquiring locks, action_id: {}", action_id);
+    
+    // First, submit the action and get response
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let result = commands::submit_action(&mut *s, action_id);
     eprintln!("[RUST] cmd_submit_action - result: {:?}", result.is_ok());
+    
+    // If successful, write events to database
+    if let Ok(ref response) = result {
+        let db_guard = db.lock().map_err(|e| e.to_string())?;
+        // Get events from the event_log (submit_action doesn't return events directly)
+        let events = s.event_log.events.clone();
+        if !events.is_empty() {
+            if let Err(e) = db_guard.insert_events_batch(&events) {
+                eprintln!("[RUST] cmd_submit_action - failed to write events to DB: {}", e);
+            } else {
+                eprintln!("[RUST] cmd_submit_action - wrote {} events to DB", events.len());
+            }
+        }
+    }
+    
     result
 }
 
 #[tauri::command]
-fn cmd_save_game(state: State<Mutex<AppState>>, slot: Option<String>, name: Option<String>) -> Result<commands::SaveResponse, String> {
-    eprintln!("[RUST] cmd_save_game - acquiring lock");
+fn cmd_save_game(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+    slot: Option<String>,
+    name: Option<String>,
+) -> Result<commands::SaveResponse, String> {
+    eprintln!("[RUST] cmd_save_game - acquiring locks");
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::save_game(&mut *s, slot, name);
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let result = commands::save_game(&mut *s, &*db_guard, slot, name);
     eprintln!("[RUST] cmd_save_game - result: {:?}", result);
     result
 }
 
 #[tauri::command]
-fn cmd_load_game(state: State<Mutex<AppState>>, save_id: String) -> Result<commands::LoadResponse, String> {
-    eprintln!("[RUST] cmd_load_game - acquiring lock, save_id: {}", save_id);
+fn cmd_load_game(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+    save_id: String,
+) -> Result<commands::LoadResponse, String> {
+    eprintln!("[RUST] cmd_load_game - acquiring locks, save_id: {}", save_id);
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::load_game(&mut *s, save_id);
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let result = commands::load_game(&mut *s, &*db_guard, save_id);
     eprintln!("[RUST] cmd_load_game - result: {:?}", result.is_ok());
     result
 }
 
 #[tauri::command]
-fn cmd_list_saves(state: State<Mutex<AppState>>) -> Result<Vec<commands::SaveData>, String> {
+fn cmd_list_saves(db: State<Mutex<Db>>) -> Result<Vec<commands::SaveData>, String> {
     eprintln!("[RUST] cmd_list_saves - acquiring lock");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let saves: Vec<_> = s.saves.values().cloned().collect();
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let saves = commands::list_saves(&*db_guard);
     eprintln!("[RUST] cmd_list_saves - found {} saves", saves.len());
     Ok(saves)
 }
 
 #[tauri::command]
-fn cmd_get_relevant_events(state: State<Mutex<AppState>>, actor_ids: Vec<String>) -> Result<Vec<engine13::Event>, String> {
+fn cmd_get_relevant_events(
+    db: State<Mutex<Db>>,
+    actor_ids: Vec<String>,
+) -> Result<Vec<engine13::Event>, String> {
     eprintln!("[RUST] cmd_get_relevant_events - acquiring lock");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_relevant_events(&*s, actor_ids);
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    // For now, just get events for the first actor (relevance scoring is next step)
+    let result = if let Some(actor_id) = actor_ids.first() {
+        commands::get_relevant_events(&*db_guard, actor_id.clone())
+    } else {
+        Ok(vec![])
+    };
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }
@@ -154,10 +229,23 @@ fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<Strin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     eprintln!("[RUST] Starting ENGINE13 Tauri v2 app");
-    
+
+    // Initialize database
+    let db_path = Db::default_path().unwrap_or_else(|e| {
+        eprintln!("[RUST] Failed to get default db path: {}, using fallback", e);
+        std::path::PathBuf::from("engine13.db")
+    });
+    eprintln!("[RUST] Database path: {:?}", db_path);
+
+    let db = Db::open(&db_path).unwrap_or_else(|e| {
+        panic!("[RUST] Failed to open database at {:?}: {}", db_path, e);
+    });
+    eprintln!("[RUST] Database initialized successfully");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .manage(Mutex::new(AppState::default()))
+        .manage(Mutex::new(db))
         .invoke_handler(tauri::generate_handler![
             cmd_get_world_state,
             cmd_advance_tick,
