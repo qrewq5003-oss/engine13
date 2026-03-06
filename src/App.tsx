@@ -30,7 +30,6 @@ const App: React.FC = () => {
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
-  const [lastNarrativeTick, setLastNarrativeTick] = useState<number>(-5);
   
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -93,27 +92,35 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Refresh narrative
+  // Refresh narrative (streaming - uses current world state from API)
   const refreshNarrative = useCallback(async () => {
     try {
       setNarrativeLoading(true);
       setIsGeneratingNarrative(true);
-      const result = await getNarrative();
-      console.log('[Narrative] Got text:', result?.slice(0, 50));
-      console.log('[Narrative] Full result type:', typeof result, 'length:', result?.length);
-      console.log('[Narrative] Result is empty:', !result);
-      console.log('[Narrative] Result value:', JSON.stringify(result));
-
-      // Handle empty string case - use placeholder
-      if (!result || result.trim() === '') {
-        const placeholder = worldState
-          ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
-          : 'Медиолан. Семья наблюдает за судьбой Империи.';
-        console.log('[Narrative] Using placeholder because result was empty');
-        setNarrative(placeholder);
-      } else {
-        setNarrative(result);
-      }
+      setNarrative(''); // Reset narrative before streaming
+      
+      await getNarrative(
+        (chunk) => {
+          // Append each chunk to narrative
+          setNarrative((prev) => (prev || '') + chunk);
+        },
+        () => {
+          // Done streaming
+          console.log('[Narrative] Streaming complete');
+          setNarrativeLoading(false);
+          setIsGeneratingNarrative(false);
+        },
+        (error) => {
+          // Error handling - use placeholder
+          console.error('[Narrative] Error:', error);
+          const placeholder = worldState
+            ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
+            : 'Медиолан. Семья наблюдает за судьбой Империи.';
+          setNarrative(placeholder);
+          setNarrativeLoading(false);
+          setIsGeneratingNarrative(false);
+        }
+      );
     } catch (err) {
       console.error('[Narrative] Error:', err);
       // Don't show error - LLM may be unavailable, use placeholder
@@ -121,68 +128,37 @@ const App: React.FC = () => {
         ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
         : 'Медиолан. Семья наблюдает за судьбой Империи.';
       setNarrative(placeholder);
-    } finally {
       setNarrativeLoading(false);
       setIsGeneratingNarrative(false);
     }
   }, [worldState]);
 
-  // Auto-refresh narrative every 5 ticks
-  useEffect(() => {
-    if (worldState && scenarioLoaded) {
-      const ticksSinceLastNarrative = worldState.tick - lastNarrativeTick;
-      if (ticksSinceLastNarrative >= 5) {
-        const fetchNarrative = async () => {
-          try {
-            setNarrativeLoading(true);
-            setIsGeneratingNarrative(true);
-            const result = await getNarrative();
-            console.log('[Narrative] Auto-refresh Got text:', result?.slice(0, 50));
-            console.log('[Narrative] Auto-refresh Result value:', JSON.stringify(result));
-
-            // Handle empty string case
-            if (!result || result.trim() === '') {
-              const placeholder = `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`;
-              console.log('[Narrative] Auto-refresh Using placeholder');
-              setNarrative(placeholder);
-            } else {
-              setNarrative(result);
-            }
-          } catch (err) {
-            console.error('[Narrative] Auto-refresh Error:', err);
-            const placeholder = `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`;
-            setNarrative(placeholder);
-          } finally {
-            setNarrativeLoading(false);
-            setIsGeneratingNarrative(false);
-          }
-        };
-        fetchNarrative();
-        setLastNarrativeTick(worldState.tick);
-      }
-    }
-  }, [worldState?.tick, worldState?.year, scenarioLoaded, lastNarrativeTick]);
-
-  // Handle advance tick
+  // Handle advance tick - correct order: advanceTick first, then getNarrative every tick
   const handleAdvanceTick = useCallback(async () => {
-    if (isLoading) return;
+    if (isLoading || isGeneratingNarrative) return;
 
     try {
       setIsLoading(true);
       setError(null);
+
+      // Step 1: Advance tick - updates world_state
       const response = await advanceTick();
       setWorldState(response.world_state);
       if (response.events.length > 0) {
         setRecentEvents(response.events);
       }
-      // Refresh available actions and events to reflect new state
+
+      // Step 2: Refresh available actions and events to reflect new state
       await refreshState();
+
+      // Step 3: Generate narrative every tick (using new world state)
+      await refreshNarrative();
     } catch (err) {
       setError(`Failed to advance tick: ${err}`);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, refreshState]);
+  }, [isLoading, isGeneratingNarrative, refreshState, refreshNarrative]);
 
   // Handle action submit
   const handleActionSubmit = useCallback(async (actionId: string) => {

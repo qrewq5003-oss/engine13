@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use tauri::Emitter;
 
 use crate::core::{Actor, Event, Scenario, WorldState};
 use crate::engine::{tick, EventLog};
@@ -397,8 +398,8 @@ Write 15-20 sentences of atmospheric narrative in second person. Historical fict
     )
 }
 
-/// Get narrative from LLM
-pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
+/// Get narrative from LLM with streaming
+pub async fn cmd_get_narrative(state: &AppState, app: tauri::AppHandle) -> Result<(), String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let config = get_llm_config();
     let prompt = generate_narrative_prompt(world_state);
@@ -409,9 +410,9 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
     eprintln!("[NARRATIVE] Getting narrative for year {}", world_state.year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
-    let response = if config.provider == "anthropic" {
-        // Anthropic format
-        let client = reqwest::blocking::Client::builder()
+    if config.provider == "anthropic" {
+        // Anthropic format - streaming
+        let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| format!("Client build failed: {}", e))?;
@@ -430,7 +431,8 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
                     "role": "user",
                     "content": prompt
                 }
-            ]
+            ],
+            "stream": true
         });
 
         let url = format!("{}/v1/messages", config.base_url);
@@ -438,31 +440,59 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
             .post(&url)
             .headers(headers)
             .json(&body)
-            .send();
+            .send()
+            .await;
 
-        // Handle connection errors gracefully - return placeholder
+        // Handle connection errors gracefully - emit placeholder
         let res = match res {
             Ok(r) => r,
-            Err(_) => return Ok(placeholder),
+            Err(_) => {
+                eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
+                let _ = app.emit("narrative_chunk", placeholder.clone());
+                let _ = app.emit("narrative_done", "");
+                return Ok(());
+            }
         };
 
         if !res.status().is_success() {
             let status = res.status();
-            let error_body = res.text().unwrap_or_default();
+            let error_body = res.text().await.unwrap_or_default();
             return Err(format!("API error ({}): {}", status, error_body));
         }
 
-        let json: serde_json::Value = res
-            .json()
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        // Stream SSE response
+        let mut stream = res.bytes_stream();
+        use futures_util::StreamExt;
 
-        json["content"][0]["text"]
-            .as_str()
-            .map(|s: &str| s.to_string())
-            .unwrap_or(placeholder)
+        while let Some(chunk_result) = stream.next().await {
+            let chunk: bytes::Bytes = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[NARRATIVE] Stream error: {}", e);
+                    break;
+                }
+            };
+
+            if let Ok(text) = std::str::from_utf8(&chunk) {
+                // Parse SSE data lines
+                for line in text.lines() {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if data == "[DONE]" {
+                            break;
+                        }
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(content) = json["content"][0]["text"].as_str() {
+                                let _ = app.emit("narrative_chunk", content.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     } else {
-        // OpenAI-compatible format (LM Studio, nano-gpt, etc.)
-        let client = reqwest::blocking::Client::builder()
+        // OpenAI-compatible format - streaming
+        let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| format!("Client build failed: {}", e))?;
@@ -482,7 +512,8 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
                     "content": prompt
                 }
             ],
-            "max_tokens": 3000
+            "max_tokens": 3000,
+            "stream": true
         });
 
         let url = format!("{}/v1/chat/completions", config.base_url);
@@ -490,51 +521,61 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
             .post(&url)
             .headers(headers)
             .json(&body)
-            .send();
+            .send()
+            .await;
 
-        // Handle connection errors gracefully - return placeholder
+        // Handle connection errors gracefully - emit placeholder
         let res = match res {
             Ok(r) => r,
-            Err(_) => return Ok(placeholder),
+            Err(_) => {
+                eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
+                let _ = app.emit("narrative_chunk", placeholder.clone());
+                let _ = app.emit("narrative_done", "");
+                return Ok(());
+            }
         };
 
         if !res.status().is_success() {
-            // Handle 400 error with response body
             let status = res.status();
-            let error_body = res.text().unwrap_or_default();
-
-            // Try to parse error message from JSON response
-            let error_message = if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_body) {
-                if let Some(error) = error_json.get("error") {
-                    if let Some(msg) = error.get("message").and_then(|m| m.as_str()) {
-                        msg.to_string()
-                    } else if let Some(msg) = error.as_str() {
-                        msg.to_string()
-                    } else {
-                        error_body
-                    }
-                } else {
-                    error_body
-                }
-            } else {
-                error_body
-            };
-
-            return Err(format!("API error ({}): {}", status, error_message));
+            let error_body = res.text().await.unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, error_body));
         }
 
-        let json: serde_json::Value = res
-            .json()
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        // Stream SSE response
+        let mut stream = res.bytes_stream();
+        use futures_util::StreamExt;
 
-        json["choices"][0]["message"]["content"]
-            .as_str()
-            .map(|s: &str| s.to_string())
-            .unwrap_or(placeholder)
-    };
+        while let Some(chunk_result) = stream.next().await {
+            let chunk: bytes::Bytes = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[NARRATIVE] Stream error: {}", e);
+                    break;
+                }
+            };
 
-    eprintln!("[NARRATIVE] Response length: {}, first 50 chars: {:?}", response.len(), response.chars().take(50).collect::<String>());
-    Ok(response)
+            if let Ok(text) = std::str::from_utf8(&chunk) {
+                // Parse SSE data lines
+                for line in text.lines() {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if data == "[DONE]" {
+                            break;
+                        }
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                                let _ = app.emit("narrative_chunk", content.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("[NARRATIVE] Streaming complete");
+    let _ = app.emit("narrative_done", "");
+    Ok(())
 }
 
 /// Get available models from LLM provider
@@ -577,15 +618,17 @@ pub fn cmd_get_available_models(provider: String, base_url: String, api_key: Opt
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     // Parse models list - handle both OpenAI and Anthropic formats
-    let models: Vec<String> = if let Some(data) = json["data"].as_array() {
+    let models: Vec<String> = if let Some(data_arr) = json.get("data").and_then(|v: &serde_json::Value| v.as_array()) {
         // OpenAI format: { "data": [{ "id": "model-name", ... }, ...] }
+        let data: &Vec<serde_json::Value> = data_arr;
         data.iter()
-            .filter_map(|item| item["id"].as_str().map(|s| s.to_string()))
+            .filter_map(|item: &serde_json::Value| item.get("id").and_then(|v: &serde_json::Value| v.as_str()).map(|s: &str| s.to_string()))
             .collect()
-    } else if let Some(models_array) = json["models"].as_array() {
+    } else if let Some(models_arr) = json.get("models").and_then(|v: &serde_json::Value| v.as_array()) {
         // Alternative format: { "models": [{ "name": "model-name", ... }, ...] }
+        let models_array: &Vec<serde_json::Value> = models_arr;
         models_array.iter()
-            .filter_map(|item| item["name"].as_str().map(|s| s.to_string()))
+            .filter_map(|item: &serde_json::Value| item.get("name").and_then(|v: &serde_json::Value| v.as_str()).map(|s: &str| s.to_string()))
             .collect()
     } else {
         vec![]

@@ -98,12 +98,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     setTestResult(null);
     setMessage(null);
     try {
-      const result = await getNarrative();
-      setTestResult(result);
-      setMessage({ type: 'success', text: 'Test successful' });
+      let narrativeText = '';
+      await getNarrative(
+        (chunk) => {
+          narrativeText += chunk;
+        },
+        () => {
+          setTestResult(narrativeText);
+          setMessage({ type: 'success', text: 'Test successful' });
+          setIsTesting(false);
+        },
+        (err) => {
+          setMessage({ type: 'error', text: `Test failed: ${err}` });
+          setIsTesting(false);
+        }
+      );
     } catch (err) {
       setMessage({ type: 'error', text: `Test failed: ${err}` });
-    } finally {
       setIsTesting(false);
     }
   };

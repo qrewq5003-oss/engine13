@@ -1,5 +1,6 @@
 // Tauri command invocations (Tauri v2)
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type {
   WorldState,
   Actor,
@@ -32,8 +33,45 @@ export async function getNarrativeActors(): Promise<Actor[]> {
   return invoke<Actor[]>('cmd_get_narrative_actors');
 }
 
-export async function getNarrative(): Promise<string> {
-  return invoke<string>('cmd_get_narrative');
+// Streaming narrative - returns unsubscribe function
+export async function getNarrative(
+  onChunk: (text: string) => void,
+  onDone: () => void,
+  onError?: (error: string) => void
+): Promise<() => void> {
+  console.log('[API] Starting streaming narrative');
+  
+  // Listen for chunks
+  const unlistenChunk = await listen<string>('narrative_chunk', (event) => {
+    console.log('[API] narrative_chunk:', event.payload);
+    onChunk(event.payload);
+  });
+  
+  // Listen for done
+  const unlistenDone = await listen('narrative_done', () => {
+    console.log('[API] narrative_done');
+    unlistenChunk();
+    unlistenDone();
+    onDone();
+  });
+  
+  // Invoke the command
+  try {
+    await invoke('cmd_get_narrative');
+  } catch (err) {
+    console.error('[API] cmd_get_narrative error:', err);
+    unlistenChunk();
+    unlistenDone();
+    if (onError) {
+      onError(String(err));
+    }
+  }
+  
+  // Return unsubscribe function
+  return () => {
+    unlistenChunk();
+    unlistenDone();
+  };
 }
 
 export async function getAvailableModels(
