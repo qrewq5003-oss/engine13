@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use tauri::Emitter;
 
@@ -406,6 +406,7 @@ pub fn generate_narrative_prompt(
     world_state: &WorldState,
     scenario: &Scenario,
     event_log: &EventLog,
+    db: &Db,
 ) -> String {
     // Determine which context to use based on game mode
     let scenario_context = match world_state.game_mode {
@@ -454,29 +455,71 @@ pub fn generate_narrative_prompt(
         prompt.push('\n');
     }
 
-    // Section 3: Recent events (last 10 key events or events involving narrative actors)
+    // Section 3: Recent events with relevance scoring
     prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
-    let narrative_actor_ids: Vec<_> = foreground_actors.iter().map(|a| a.id.as_str()).collect();
-
-    let mut recent_events: Vec<_> = event_log
-        .events
-        .iter()
-        .filter(|e| {
-            e.is_key || narrative_actor_ids.contains(&e.actor_id.as_str())
+    
+    // Build query tags from current context
+    let mut query_tags: Vec<String> = Vec::new();
+    
+    // Add narrative actor names (short) and regions
+    for actor in &foreground_actors {
+        query_tags.push(actor.name_short.clone());
+        query_tags.push(actor.region.clone());
+    }
+    
+    // Add interaction types from recent events
+    let recent_event_types: HashSet<String> = event_log.events.iter()
+        .filter(|e| e.is_key || foreground_actors.iter().any(|a| a.id == e.actor_id))
+        .flat_map(|e| {
+            match e.event_type {
+                crate::core::EventType::War => Some("war".to_string()),
+                crate::core::EventType::Migration => Some("migration".to_string()),
+                crate::core::EventType::Trade => Some("trade".to_string()),
+                _ => None,
+            }
         })
         .collect();
+    query_tags.extend(recent_event_types);
+    
+    // Get scored relevant events from database
+    let narrative_actor_ids: Vec<String> = foreground_actors.iter().map(|a| a.id.clone()).collect();
+    
+    let relevant_events = db.get_relevant_events_scored(
+        world_state.tick,
+        &query_tags,
+        &narrative_actor_ids,
+    );
+    
+    let events_to_show = match relevant_events {
+        Ok(events) => {
+            eprintln!("[NARRATIVE] Got {} relevant events from DB", events.len());
+            events
+        }
+        Err(e) => {
+            eprintln!("[NARRATIVE] Failed to get relevant events from DB: {}", e);
+            // Fallback to simple event_log query
+            event_log.events.iter()
+                .filter(|e| {
+                    e.is_key || narrative_actor_ids.contains(&e.actor_id)
+                })
+                .cloned()
+                .collect()
+        }
+    };
 
-    // Sort by tick descending (most recent first)
-    recent_events.sort_by(|a, b| b.tick.cmp(&a.tick));
-    recent_events.truncate(10);
-
-    if recent_events.is_empty() {
+    if events_to_show.is_empty() {
         prompt.push_str("Нет недавних событий.\n");
     } else {
-        for event in &recent_events {
+        for event in &events_to_show {
+            // Calculate score for logging
+            let ticks_ago = world_state.tick.saturating_sub(event.tick);
+            let temporal_coeff = Db::temporal_coefficient(ticks_ago, event.is_key);
+            let thematic_sim = Db::thematic_similarity(&event.tags, &query_tags);
+            let score = temporal_coeff * thematic_sim;
+            
             prompt.push_str(&format!(
-                "{} (тик {}): {}\n",
-                event.year, event.tick, event.description
+                "{} (тик {}): {} [score: {:.2}]\n",
+                event.year, event.tick, event.description, score
             ));
         }
     }
@@ -485,11 +528,15 @@ pub fn generate_narrative_prompt(
 }
 
 /// Get narrative from LLM with streaming
-pub async fn cmd_get_narrative(state: &AppState, app: tauri::AppHandle) -> Result<(), String> {
+pub async fn cmd_get_narrative(
+    state: &AppState,
+    db: &Db,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let config = get_llm_config();
-    let prompt = generate_narrative_prompt(world_state, scenario, &state.event_log);
+    let prompt = generate_narrative_prompt(world_state, scenario, &state.event_log, db);
 
     // Generate placeholder narrative for when LLM is unavailable
     let placeholder = format!("Медиолан, {} год. Семья наблюдает за судьбой Империи.", world_state.year);

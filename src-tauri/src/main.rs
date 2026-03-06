@@ -202,10 +202,15 @@ fn cmd_get_scenario_list() -> Vec<commands::ScenarioMeta> {
 }
 
 #[tauri::command]
-async fn cmd_get_narrative(state: State<'_, Mutex<AppState>>, app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[RUST] cmd_get_narrative - acquiring lock");
+async fn cmd_get_narrative(
+    state: State<'_, Mutex<AppState>>,
+    db: State<'_, Mutex<Db>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    eprintln!("[RUST] cmd_get_narrative - acquiring locks");
     let s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::cmd_get_narrative(&*s, app).await;
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let result = commands::cmd_get_narrative(&*s, &*db_guard, app).await;
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
     result
 }

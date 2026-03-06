@@ -1,6 +1,6 @@
 use rusqlite::{Connection, OpenFlags, params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use crate::core::Event;
 
@@ -372,6 +372,192 @@ impl Db {
         }
 
         Ok(result)
+    }
+
+    /// Get relevant events with temporal decay and thematic scoring
+    /// Returns events sorted by relevance (thematic_similarity × temporal_coefficient)
+    pub fn get_relevant_events_scored(
+        &self,
+        current_tick: u32,
+        query_tags: &[String],
+        narrative_actor_ids: &[String],
+    ) -> Result<Vec<Event>, String> {
+        // Get all events for narrative actors plus key events
+        let mut all_events: Vec<Event> = Vec::new();
+
+        // Get events for each narrative actor
+        for actor_id in narrative_actor_ids {
+            let mut events = self.get_events_by_actor(actor_id)?;
+            all_events.append(&mut events);
+        }
+
+        // Get all key events
+        let key_events = self.get_all_key_events()?;
+        for event in key_events {
+            if !all_events.iter().any(|e| e.id == event.id) {
+                all_events.push(event);
+            }
+        }
+
+        // Calculate relevance score for each event
+        let mut scored_events: Vec<(Event, f64)> = all_events
+            .into_iter()
+            .map(|event| {
+                let ticks_ago = current_tick.saturating_sub(event.tick);
+                let temporal_coeff = Self::temporal_coefficient(ticks_ago, event.is_key);
+                let thematic_sim = Self::thematic_similarity(&event.tags, query_tags);
+                let relevance = thematic_sim * temporal_coeff;
+                (event, relevance)
+            })
+            .collect();
+
+        // Sort by relevance descending
+        scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Apply selection rules:
+        // 1. Top 15 by relevance
+        // 2. Last 5 events always (regardless of relevance)
+        // 3. All is_key events from narrative actors always
+
+        // Get last 5 events (most recent by tick)
+        let mut by_tick = scored_events.clone();
+        by_tick.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
+        let _last_5: HashSet<String> = by_tick.iter().take(5).map(|(e, _)| e.id.clone()).collect();
+
+        // Get all is_key events from narrative actors
+        let key_from_narrative: HashSet<String> = scored_events
+            .iter()
+            .filter(|(e, _)| e.is_key && narrative_actor_ids.contains(&e.actor_id))
+            .map(|(e, _)| e.id.clone())
+            .collect();
+
+        // Build final list with deduplication
+        let mut final_events: Vec<(Event, f64)> = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
+
+        // Add top 15 by relevance
+        for (event, score) in scored_events.iter() {
+            if final_events.len() >= 15 {
+                break;
+            }
+            if !seen_ids.contains(&event.id) {
+                seen_ids.insert(event.id.clone());
+                final_events.push((event.clone(), *score));
+            }
+        }
+
+        // Add last 5 (if not already included)
+        for (event, score) in by_tick.iter().take(5) {
+            if !seen_ids.contains(&event.id) {
+                seen_ids.insert(event.id.clone());
+                final_events.push((event.clone(), *score));
+            }
+        }
+
+        // Add is_key events from narrative actors (if not already included)
+        for (event, score) in scored_events.iter() {
+            if key_from_narrative.contains(&event.id) && !seen_ids.contains(&event.id) {
+                seen_ids.insert(event.id.clone());
+                final_events.push((event.clone(), *score));
+            }
+        }
+
+        // Sort final list by tick descending (most recent first) for presentation
+        final_events.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
+
+        // Return just the events (scores are logged for debugging)
+        Ok(final_events.into_iter().map(|(e, _)| e).collect())
+    }
+
+    /// Get all key events from database
+    fn get_all_key_events(&self) -> Result<Vec<Event>, String> {
+        let mut stmt = self.conn
+            .prepare("SELECT * FROM events WHERE is_key = 1 ORDER BY tick DESC")
+            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let events = stmt
+            .query_map([], |row: &rusqlite::Row| {
+                let event_id: String = row.get(1)?;
+                let tick: u32 = row.get(2)?;
+                let year: i32 = row.get(3)?;
+                let actor_id: String = row.get(4)?;
+                let event_type_str: String = row.get(5)?;
+                let description: String = row.get(6)?;
+                let metrics_snapshot_str: String = row.get(7)?;
+                let involved_actors_str: String = row.get(8)?;
+                let tags_str: String = row.get(9)?;
+                let is_key: i32 = row.get(10)?;
+
+                let event_type = Self::string_to_event_type(&event_type_str);
+                let metrics_snapshot: HashMap<String, f64> =
+                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
+                let involved_actors: Vec<String> =
+                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
+                let tags: Vec<String> =
+                    serde_json::from_str(&tags_str).unwrap_or_default();
+
+                Ok(Event {
+                    id: event_id,
+                    tick,
+                    year,
+                    actor_id,
+                    event_type,
+                    description,
+                    metrics_snapshot,
+                    involved_actors,
+                    tags,
+                    is_key: is_key != 0,
+                })
+            })
+            .map_err(|e| format!("Failed to query key events: {}", e))?;
+
+        let mut result = Vec::new();
+        for event in events {
+            if let Ok(e) = event {
+                result.push(e);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Calculate temporal coefficient based on ticks ago
+    /// is_key events have minimum coefficient of 0.3
+    pub fn temporal_coefficient(ticks_ago: u32, is_key: bool) -> f64 {
+        let coeff: f64 = match ticks_ago {
+            0..=10 => 1.0,
+            11..=30 => 0.7,
+            31..=60 => 0.4,
+            61..=100 => 0.2,
+            _ => 0.05,
+        };
+
+        // is_key events never drop below 0.3
+        if is_key {
+            coeff.max(0.3)
+        } else {
+            coeff
+        }
+    }
+
+    /// Calculate thematic similarity between event tags and query tags
+    /// similarity = matching_tags / max(event_tags.len(), query_tags.len())
+    pub fn thematic_similarity(event_tags: &[String], query_tags: &[String]) -> f64 {
+        if event_tags.is_empty() && query_tags.is_empty() {
+            return 1.0;
+        }
+
+        let event_set: HashSet<&String> = event_tags.iter().collect();
+        let query_set: HashSet<&String> = query_tags.iter().collect();
+
+        let matching = event_set.intersection(&query_set).count() as f64;
+        let max_len = event_tags.len().max(query_tags.len()) as f64;
+
+        if max_len == 0.0 {
+            1.0
+        } else {
+            matching / max_len
+        }
     }
 
     // ========================================================================
