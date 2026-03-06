@@ -408,10 +408,9 @@ pub fn generate_narrative_prompt(
     event_log: &EventLog,
 ) -> String {
     // Determine which context to use based on game mode
-    let scenario_context = if world_state.game_mode == crate::core::GameMode::Scenario {
-        &scenario.llm_context
-    } else {
-        &scenario.consequence_context
+    let scenario_context = match world_state.game_mode {
+        crate::core::GameMode::Consequences => &scenario.consequence_context,
+        _ => &scenario.llm_context,
     };
 
     // Section 1: Scenario context (most important)
@@ -433,9 +432,9 @@ pub fn generate_narrative_prompt(
             actor.name, actor.name_short
         ));
         prompt.push_str(&format!(
-            "  population: {:.0}, military: {:.0}k, quality: {:.0}\n",
+            "  population: {:.0}, military: {:.0}, quality: {:.0}\n",
             actor.metrics.population,
-            actor.metrics.military_size / 1000.0,
+            actor.metrics.military_size,
             actor.metrics.military_quality
         ));
         prompt.push_str(&format!(

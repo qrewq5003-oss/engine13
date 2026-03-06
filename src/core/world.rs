@@ -35,6 +35,7 @@ pub struct Alliance {
 pub enum GameMode {
     Sandbox,
     Scenario,
+    Consequences,
 }
 
 /// Current state of the world simulation
