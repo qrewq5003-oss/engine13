@@ -29,6 +29,7 @@ const App: React.FC = () => {
   // Narrative state
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
   const [lastNarrativeTick, setLastNarrativeTick] = useState<number>(-5);
   
   // Settings state
@@ -96,12 +97,13 @@ const App: React.FC = () => {
   const refreshNarrative = useCallback(async () => {
     try {
       setNarrativeLoading(true);
+      setIsGeneratingNarrative(true);
       const result = await getNarrative();
       console.log('[Narrative] Got text:', result?.slice(0, 50));
       console.log('[Narrative] Full result type:', typeof result, 'length:', result?.length);
       console.log('[Narrative] Result is empty:', !result);
       console.log('[Narrative] Result value:', JSON.stringify(result));
-      
+
       // Handle empty string case - use placeholder
       if (!result || result.trim() === '') {
         const placeholder = worldState
@@ -121,6 +123,7 @@ const App: React.FC = () => {
       setNarrative(placeholder);
     } finally {
       setNarrativeLoading(false);
+      setIsGeneratingNarrative(false);
     }
   }, [worldState]);
 
@@ -132,10 +135,11 @@ const App: React.FC = () => {
         const fetchNarrative = async () => {
           try {
             setNarrativeLoading(true);
+            setIsGeneratingNarrative(true);
             const result = await getNarrative();
             console.log('[Narrative] Auto-refresh Got text:', result?.slice(0, 50));
             console.log('[Narrative] Auto-refresh Result value:', JSON.stringify(result));
-            
+
             // Handle empty string case
             if (!result || result.trim() === '') {
               const placeholder = `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`;
@@ -150,6 +154,7 @@ const App: React.FC = () => {
             setNarrative(placeholder);
           } finally {
             setNarrativeLoading(false);
+            setIsGeneratingNarrative(false);
           }
         };
         fetchNarrative();
@@ -278,7 +283,7 @@ const App: React.FC = () => {
             recentEvents={recentEvents}
             onAdvanceTick={handleAdvanceTick}
             onActionSubmit={handleActionSubmit}
-            isLoading={isLoading}
+            isLoading={isLoading || isGeneratingNarrative}
           />
         </div>
       </main>

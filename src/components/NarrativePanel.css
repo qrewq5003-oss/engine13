@@ -4,6 +4,8 @@
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
+  overflow-y: auto;
+  max-height: 300px;
 }
 
 .narrative-title {
@@ -28,6 +30,9 @@
   margin: 0;
   font-style: italic;
   font-family: Georgia, 'Times New Roman', serif;
+  overflow-y: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .narrative-loading,
@@ -35,4 +40,47 @@
   font-size: 13px;
   color: #888;
   font-style: italic;
+}
+
+.narrative-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #4a3b6e;
+  border-top-color: #d4a574;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  color: #d4a574;
+  font-style: italic;
+}
+
+.dots {
+  display: inline-block;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 20% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  80%, 100% {
+    opacity: 1;
+  }
 }

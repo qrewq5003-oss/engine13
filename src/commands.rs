@@ -379,13 +379,15 @@ pub fn generate_narrative_prompt(world_state: &WorldState) -> String {
     let family_connections = world_state.family_metrics.get("family_connections").copied().unwrap_or(0.0);
 
     format!(
-        "Year: {} AD.
+        "Respond in Russian language only.
+
+Year: {} AD.
 
 Active powers: {}.
 
 Family Di Milano: influence={}, knowledge={}, wealth={}, connections={}.
 
-Write 3 sentences of atmospheric narrative in second person. Historical fiction style.",
+Write 15-20 sentences of atmospheric narrative in second person. Historical fiction style.",
         world_state.year,
         top_actors.join("; "),
         family_influence,
@@ -422,7 +424,7 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
 
         let body = serde_json::json!({
             "model": config.model,
-            "max_tokens": 256,
+            "max_tokens": 3000,
             "messages": [
                 {
                     "role": "user",
@@ -480,7 +482,7 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
                     "content": prompt
                 }
             ],
-            "max_tokens": 256
+            "max_tokens": 3000
         });
 
         let url = format!("{}/v1/chat/completions", config.base_url);
