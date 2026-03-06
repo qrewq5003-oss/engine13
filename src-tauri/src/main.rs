@@ -217,7 +217,6 @@ fn cmd_set_game_mode(
         "free" => crate::core::GameMode::Free,
         "scenario" => crate::core::GameMode::Scenario,
         "consequences" => crate::core::GameMode::Consequences,
-        "sandbox" => crate::core::GameMode::Sandbox,
         _ => return Err(format!("Unknown game mode: {}", mode)),
     };
     
