@@ -37,8 +37,8 @@ fn cmd_advance_tick(
     
     // If successful, write events and dead actors to database
     if let Ok(ref response) = result {
-        let db_guard = db.lock().map_err(|e| e.to_string())?;
-        
+        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
+
         // Write events to database
         if !response.events.is_empty() {
             if let Err(e) = (&mut *db_guard).insert_events_batch(&response.events) {
@@ -47,7 +47,7 @@ fn cmd_advance_tick(
                 eprintln!("[RUST] cmd_advance_tick - wrote {} events to DB", response.events.len());
             }
         }
-        
+
         // Write dead actors to database
         if let Some(ref world_state) = s.world_state {
             if !world_state.dead_actors.is_empty() {
@@ -102,7 +102,7 @@ fn cmd_submit_action(
     
     // If successful, write events to database
     if let Ok(ref response) = result {
-        let db_guard = db.lock().map_err(|e| e.to_string())?;
+        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
         // Get events from the event_log (submit_action doesn't return events directly)
         let events = s.event_log.events.clone();
         if !events.is_empty() {
@@ -198,9 +198,30 @@ async fn cmd_get_narrative(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::cmd_get_narrative(&*s, &*db_guard, app).await;
+    
+    // Clone AppState and generate prompt before await (releases locks)
+    let (prompt, placeholder, config, year) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let db_guard = db.lock().map_err(|e| e.to_string())?;
+        let world_state = s.world_state.as_ref().ok_or("No active world state")?;
+        let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
+        let prompt = commands::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard);
+        let placeholder = format!("Медиолан, {} год. Семья наблюдает за судьбой Империи.", world_state.year);
+        let config = commands::get_llm_config();
+        let year = world_state.year;
+        (prompt, placeholder, config, year)
+    }; // All locks released here
+    
+    // Now do the async HTTP requests without holding any locks
+    eprintln!("[NARRATIVE] Getting narrative for year {}", year);
+    eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
+    
+    let result = if config.provider == "anthropic" {
+        commands::stream_narrative_anthropic(prompt, placeholder, config, app).await
+    } else {
+        commands::stream_narrative_openai(prompt, placeholder, config, app).await
+    };
+    
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
     result
 }
@@ -214,9 +235,9 @@ fn cmd_set_game_mode(
     let mut s = state.lock().map_err(|e| e.to_string())?;
     
     let new_mode = match mode.as_str() {
-        "free" => crate::core::GameMode::Free,
-        "scenario" => crate::core::GameMode::Scenario,
-        "consequences" => crate::core::GameMode::Consequences,
+        "free" => engine13::GameMode::Free,
+        "scenario" => engine13::GameMode::Scenario,
+        "consequences" => engine13::GameMode::Consequences,
         _ => return Err(format!("Unknown game mode: {}", mode)),
     };
     

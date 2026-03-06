@@ -894,6 +894,183 @@ pub async fn cmd_get_narrative(
     Ok(())
 }
 
+/// Stream narrative from Anthropic API
+pub async fn stream_narrative_anthropic(
+    prompt: String,
+    placeholder: String,
+    config: LlmConfig,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "x-api-key",
+        config.api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
+    );
+    headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+
+    let body = serde_json::json!({
+        "model": config.model,
+        "max_tokens": 3000,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "stream": true
+    });
+
+    let url = format!("{}/v1/messages", config.base_url);
+    let res = client
+        .post(&url)
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
+            let _ = app.emit("narrative_chunk", placeholder.clone());
+            let _ = app.emit("narrative_done", "");
+            return Ok(());
+        }
+    };
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let error_body = res.text().await.unwrap_or_default();
+        return Err(format!("API error ({}): {}", status, error_body));
+    }
+
+    let mut stream = res.bytes_stream();
+    use futures_util::StreamExt;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk: bytes::Bytes = match chunk_result {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[NARRATIVE] Stream error: {}", e);
+                break;
+            }
+        };
+
+        if let Ok(text) = std::str::from_utf8(&chunk) {
+            for line in text.lines() {
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    if data == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = json["content"][0]["text"].as_str() {
+                            let _ = app.emit("narrative_chunk", content.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("[NARRATIVE] Streaming complete");
+    let _ = app.emit("narrative_done", "");
+    Ok(())
+}
+
+/// Stream narrative from OpenAI-compatible API
+pub async fn stream_narrative_openai(
+    prompt: String,
+    placeholder: String,
+    config: LlmConfig,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(api_key) = &config.api_key {
+        headers.insert(
+            "Authorization",
+            format!("Bearer {}", api_key).parse().map_err(|e| format!("Invalid API key: {}", e))?,
+        );
+    }
+
+    let body = serde_json::json!({
+        "model": config.model,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": 3000,
+        "stream": true
+    });
+
+    let url = format!("{}/v1/chat/completions", config.base_url);
+    let res = client
+        .post(&url)
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
+            let _ = app.emit("narrative_chunk", placeholder.clone());
+            let _ = app.emit("narrative_done", "");
+            return Ok(());
+        }
+    };
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let error_body = res.text().await.unwrap_or_default();
+        return Err(format!("API error ({}): {}", status, error_body));
+    }
+
+    let mut stream = res.bytes_stream();
+    use futures_util::StreamExt;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk: bytes::Bytes = match chunk_result {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[NARRATIVE] Stream error: {}", e);
+                break;
+            }
+        };
+
+        if let Ok(text) = std::str::from_utf8(&chunk) {
+            for line in text.lines() {
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    if data == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                            let _ = app.emit("narrative_chunk", content.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("[NARRATIVE] Streaming complete");
+    let _ = app.emit("narrative_done", "");
+    Ok(())
+}
+
 /// Get available models from LLM provider
 pub fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     let client = reqwest::blocking::Client::builder()
