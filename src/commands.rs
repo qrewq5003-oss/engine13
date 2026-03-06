@@ -223,15 +223,29 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
 
     // In Consequences and Free modes, return universal actions only
-    if world_state.game_mode == crate::core::GameMode::Consequences 
-        || world_state.game_mode == crate::core::GameMode::Free 
+    if world_state.game_mode == crate::core::GameMode::Consequences
+        || world_state.game_mode == crate::core::GameMode::Free
     {
         return Ok(get_universal_actions(world_state));
     }
-    
+
     // In Scenario mode, use scenario-specific actions
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-    let player_actor = world_state.actors.get("rome").ok_or("Player actor not found")?;
+
+    // Handle scenarios without player_actor (e.g., Constantinople 1430)
+    if scenario.player_actor_id.is_none() {
+        let available_actions = scenario
+            .patron_actions
+            .iter()
+            .filter(|action| is_action_available_no_player(action, world_state))
+            .cloned()
+            .collect();
+        return Ok(available_actions);
+    }
+
+    // Scenarios with player_actor (e.g., Rome 375)
+    let player_actor_id = scenario.player_actor_id.as_ref().ok_or("Player actor not found")?;
+    let player_actor = world_state.actors.get(player_actor_id).ok_or("Player actor not found")?;
 
     let available_actions = scenario
         .patron_actions
@@ -1245,6 +1259,44 @@ fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor,
             };
             compare_value(current, operator, value)
         }
+    }
+}
+
+/// Check if action is available for scenarios without player_actor (e.g., Constantinople 1430)
+/// Metric format:
+/// - "family_*" - from world_state.family_metrics
+/// - "actor_id.metric" (e.g., "venice.treasury") - from world_state.actors.get(actor_id).metrics
+/// - Other (e.g., "federation_progress") - from world_state.global_metrics
+fn is_action_available_no_player(action: &crate::core::PatronAction, world_state: &WorldState) -> bool {
+    match &action.available_if {
+        crate::core::ActionCondition::Always => true,
+        crate::core::ActionCondition::Metric { metric, operator, value } => {
+            let current = get_metric_value_no_player(metric, world_state);
+            compare_value(current, operator, value)
+        }
+    }
+}
+
+/// Get metric value for scenarios without player_actor
+fn get_metric_value_no_player(metric: &str, world_state: &WorldState) -> f64 {
+    if metric.starts_with("family_") {
+        // Family metrics
+        world_state.family_metrics.get(metric).copied().unwrap_or(0.0)
+    } else if metric.contains('.') {
+        // Actor-specific metric: "actor_id.metric" (e.g., "venice.treasury")
+        let parts: Vec<&str> = metric.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            let actor_id = parts[0];
+            let metric_name = parts[1];
+            world_state.actors.get(actor_id)
+                .map(|actor| get_metric_value(&actor.metrics, metric_name))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    } else {
+        // Global metric (e.g., "federation_progress")
+        world_state.global_metrics.get(metric).copied().unwrap_or(0.0)
     }
 }
 
