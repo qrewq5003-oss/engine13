@@ -1422,7 +1422,7 @@ fn check_generation_transfer(
     if new_age >= gen_mechanics.patriarch_end_age as f64 {
         // Apply inheritance coefficients to all family metrics
         // Per architecture: new generation starts with reduced metrics
-        let inheritance_coefficient = 0.7; // New generation inherits 70% of family strength
+        // Use scenario-specific coefficients if available, default to 0.7
 
         // Scale all family_ metrics (metrics starting with "family_")
         let family_metric_keys: Vec<String> = world.family_metrics
@@ -1433,7 +1433,12 @@ fn check_generation_transfer(
 
         for metric in &family_metric_keys {
             if let Some(value) = world.family_metrics.get(metric) {
-                let new_value = value * inheritance_coefficient;
+                // Get coefficient from scenario, default to 0.7
+                let coefficient = gen_mechanics.inheritance_coefficients
+                    .get(metric)
+                    .copied()
+                    .unwrap_or(0.7);
+                let new_value = value * coefficient;
                 world.family_metrics.insert(metric.clone(), new_value);
             }
         }

@@ -1016,6 +1016,63 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             noise: 0.1,
             actor_id: None,
         },
+        // Rome → Family: when Rome struggles, family suffers
+        AutoDelta {
+            metric: "family_connections".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
+            ],
+            noise: 0.0,
+            actor_id: None,
+        },
+        AutoDelta {
+            metric: "family_wealth".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
+                DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
+            ],
+            noise: 0.0,
+            actor_id: None,
+        },
+        AutoDelta {
+            metric: "family_influence".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
+            ],
+            noise: 0.0,
+            actor_id: None,
+        },
+        // Family → Rome: when family thrives, Rome benefits
+        AutoDelta {
+            metric: "legitimacy".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "family_influence".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+            ],
+            noise: 0.0,
+            actor_id: Some("rome".to_string()),
+        },
+        AutoDelta {
+            metric: "cohesion".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+            ],
+            noise: 0.0,
+            actor_id: Some("rome".to_string()),
+        },
+        AutoDelta {
+            metric: "economic_output".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
+            ],
+            noise: 0.0,
+            actor_id: Some("rome".to_string()),
+        },
     ]
 }
 
@@ -1260,10 +1317,17 @@ fn create_rank_conditions() -> Vec<RankCondition> {
 // ============================================================================
 
 fn create_generation_mechanics() -> GenerationMechanics {
+    let mut inheritance_coefficients = HashMap::new();
+    inheritance_coefficients.insert("family_influence".to_string(), 0.85);
+    inheritance_coefficients.insert("family_knowledge".to_string(), 1.0);
+    inheritance_coefficients.insert("family_wealth".to_string(), 1.0);
+    inheritance_coefficients.insert("family_connections".to_string(), 0.8);
+
     GenerationMechanics {
         tick_span: 5,
         patriarch_start_age: 42,
         patriarch_end_age: 75,
+        inheritance_coefficients,
     }
 }
 

@@ -141,6 +141,8 @@ pub struct GenerationMechanics {
     pub tick_span: u32,
     pub patriarch_start_age: u32,
     pub patriarch_end_age: u32,
+    /// Inheritance coefficients per family metric (default 0.7 if not specified)
+    pub inheritance_coefficients: HashMap<String, f64>,
 }
 
 /// Player context for scenario
