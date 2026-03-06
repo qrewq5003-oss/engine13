@@ -26,6 +26,7 @@ pub fn load_rome_375() -> Scenario {
         generation_mechanics: Some(create_generation_mechanics()),
         llm_context: create_llm_context(),
         consequence_context: create_consequence_context(),
+        player_actor_id: "rome".to_string(),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -902,6 +903,7 @@ pub fn create_frankish_kingdom_template() -> Actor {
 
 fn create_auto_deltas() -> Vec<AutoDelta> {
     vec![
+        // Actor auto-deltas for Rome
         AutoDelta {
             metric: "population".to_string(),
             base: 0.3,
@@ -971,6 +973,48 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![],
             noise: 0.3,
             actor_id: Some("rome".to_string()),
+        },
+        // Family auto-deltas (passive changes per tick)
+        AutoDelta {
+            metric: "family_influence".to_string(),
+            base: -0.5, // passive decay
+            conditions: vec![
+                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 30.0, delta: 0.3 },
+                DeltaCondition { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.2 },
+                DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
+                DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
+            ],
+            noise: 0.1,
+            actor_id: None,
+        },
+        AutoDelta {
+            metric: "family_knowledge".to_string(),
+            base: 0.2, // always grows
+            conditions: vec![
+                DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
+            ],
+            noise: 0.05,
+            actor_id: None,
+        },
+        AutoDelta {
+            metric: "family_wealth".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 20.0, delta: 0.5 },
+                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
+                DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
+            ],
+            noise: 0.1,
+            actor_id: None,
+        },
+        AutoDelta {
+            metric: "family_connections".to_string(),
+            base: -0.3, // need to maintain
+            conditions: vec![
+                DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
+            ],
+            noise: 0.1,
+            actor_id: None,
         },
     ]
 }

@@ -16,17 +16,7 @@ fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13:
         eprintln!("[RUST] cmd_get_world_state - lock error: {}", e);
         e.to_string()
     })?;
-    
-    // If family_metrics is empty, initialize with default values
-    if let Some(ref mut world_state) = s.world_state {
-        if world_state.family_metrics.is_empty() {
-            world_state.family_metrics.insert("family_influence".to_string(), 0.0);
-            world_state.family_metrics.insert("family_knowledge".to_string(), 0.0);
-            world_state.family_metrics.insert("family_wealth".to_string(), 0.0);
-            world_state.family_metrics.insert("family_connections".to_string(), 0.0);
-        }
-    }
-    
+
     eprintln!("[RUST] cmd_get_world_state - returning state: {:?}", s.world_state.is_some());
     Ok(s.world_state.clone())
 }

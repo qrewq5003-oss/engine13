@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::core::{
-    Actor, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
+    Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, Scenario, WorldState,
 };
 
@@ -163,9 +163,12 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     check_threshold_effects(world, scenario, event_log);
     check_rank_conditions(world, scenario, event_log);
     check_milestone_events(world, scenario, event_log);
-    
+
     // Step 6b: Check game mode transitions (after milestone events)
     check_game_mode_transitions(world, scenario, event_log);
+
+    // Step 6c: Check relevance thresholds for actor promotion/demotion
+    check_relevance_thresholds(world, scenario, event_log);
 
     // Step 7: Check on_collapse conditions
     check_collapses(world, scenario, event_log);
@@ -176,8 +179,14 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     // Step 8b: Check generation transfer (patriarch aging)
     check_generation_transfer(world, scenario, event_log);
 
-    // Step 8c: Apply family auto deltas (passive changes per tick)
-    apply_family_auto_deltas(world);
+    // Step 8d: Update metric history for relevance tracking
+    update_metric_history(world);
+
+    // Step 8e: Update prev_metrics for delta calculation
+    update_prev_metrics(world);
+
+    // Step 8f: Increment ticks_since_last_narrative counter
+    world.ticks_since_last_narrative += 1;
 
     // Save RNG state once at the end of the tick
     world.rng_state = rng.get_seed();
@@ -205,6 +214,13 @@ fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
                 }
                 apply_single_auto_delta(actor, auto_delta, rng);
             }
+        }
+    }
+
+    // Apply family auto_deltas (metrics starting with "family_")
+    for auto_delta in &scenario.auto_deltas {
+        if auto_delta.metric.starts_with("family_") {
+            apply_family_auto_delta(world, auto_delta, rng);
         }
     }
 }
@@ -246,6 +262,53 @@ fn apply_single_auto_delta(actor: &mut Actor, auto_delta: &crate::core::AutoDelt
     let final_delta = delta + noise;
 
     apply_metric_delta(&mut actor.metrics, &auto_delta.metric, final_delta);
+}
+
+/// Apply auto_delta to family metrics
+fn apply_family_auto_delta(world: &mut WorldState, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
+    use rand::Rng;
+
+    // Calculate delta: base + sum of matching conditions
+    let mut delta = auto_delta.base;
+    for cond in &auto_delta.conditions {
+        if check_family_condition(world, cond) {
+            delta += cond.delta;
+        }
+    }
+
+    // Apply noise using deterministic RNG
+    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
+    let final_delta = delta + noise;
+
+    // Apply delta to family metric
+    let current = world.family_metrics.get(&auto_delta.metric).copied().unwrap_or(0.0);
+    let new_value = (current + final_delta).max(0.0).min(100.0);
+    world.family_metrics.insert(auto_delta.metric.clone(), new_value);
+}
+
+/// Check condition against family metrics and actor metrics
+fn check_family_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
+    let value = if cond.metric.starts_with("family_") {
+        world.family_metrics.get(&cond.metric).copied().unwrap_or(0.0)
+    } else if cond.metric.starts_with("rome.") {
+        let rome_metric = cond.metric.strip_prefix("rome.").unwrap();
+        world.actors.get("rome")
+            .map(|a| get_metric_value(&a.metrics, rome_metric))
+            .unwrap_or(50.0)
+    } else {
+        // Assume it's an actor metric for "rome" by default
+        world.actors.get("rome")
+            .map(|a| get_metric_value(&a.metrics, &cond.metric))
+            .unwrap_or(50.0)
+    };
+
+    match cond.operator {
+        ComparisonOperator::Less => value < cond.value,
+        ComparisonOperator::LessOrEqual => value <= cond.value,
+        ComparisonOperator::Greater => value > cond.value,
+        ComparisonOperator::GreaterOrEqual => value >= cond.value,
+        ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
+    }
 }
 
 fn check_condition(metrics: &ActorMetrics, cond: &crate::core::DeltaCondition) -> bool {
@@ -727,52 +790,6 @@ fn clamp_metrics(world: &mut WorldState) {
 }
 
 // ============================================================================
-// Family Auto Deltas (Passive changes per tick)
-// ============================================================================
-
-fn apply_family_auto_deltas(world: &mut WorldState) {
-    let rome_cohesion = world.actors.get("rome")
-        .map(|a| a.metrics.cohesion).unwrap_or(50.0);
-    let rome_econ = world.actors.get("rome")
-        .map(|a| a.metrics.economic_output).unwrap_or(50.0);
-    let rome_legitimacy = world.actors.get("rome")
-        .map(|a| a.metrics.legitimacy).unwrap_or(50.0);
-    let rome_pressure = world.actors.get("rome")
-        .map(|a| a.metrics.external_pressure).unwrap_or(30.0);
-
-    let influence = world.family_metrics.get("family_influence").copied().unwrap_or(0.0);
-    let knowledge = world.family_metrics.get("family_knowledge").copied().unwrap_or(0.0);
-    let wealth = world.family_metrics.get("family_wealth").copied().unwrap_or(0.0);
-    let connections = world.family_metrics.get("family_connections").copied().unwrap_or(0.0);
-
-    // family_influence
-    let mut d_influence: f64 = -0.5; // пассивный спад
-    if connections > 30.0 { d_influence += 0.3; }
-    if wealth > 40.0      { d_influence += 0.2; }
-    if rome_legitimacy > 60.0 { d_influence += 0.1; }
-    if rome_cohesion < 30.0   { d_influence -= 0.2; }
-
-    // family_knowledge
-    let mut d_knowledge: f64 = 0.2; // всегда растёт
-    if knowledge > 50.0 { d_knowledge += 0.1; } // ускоряется при накоплении
-
-    // family_wealth
-    let mut d_wealth: f64 = 0.0;
-    if connections > 20.0      { d_wealth += 0.5; }
-    else if connections < 5.0  { d_wealth -= 0.5; }
-    if rome_econ > 60.0        { d_wealth += 0.2; }
-
-    // family_connections
-    let mut d_connections: f64 = -0.3; // нужно поддерживать
-    if rome_pressure > 70.0 { d_connections -= 0.2; } // люди разбегаются
-
-    world.family_metrics.insert("family_influence".to_string(),   (influence   + d_influence).max(0.0).min(100.0));
-    world.family_metrics.insert("family_knowledge".to_string(),   (knowledge   + d_knowledge).max(0.0).min(100.0));
-    world.family_metrics.insert("family_wealth".to_string(),      (wealth      + d_wealth).max(0.0).min(100.0));
-    world.family_metrics.insert("family_connections".to_string(), (connections + d_connections).max(0.0).min(100.0));
-}
-
-// ============================================================================
 // Step 6: Threshold Effects, Rank Conditions, Milestone Events
 // ============================================================================
 
@@ -988,6 +1005,295 @@ fn check_game_mode_transitions(
     }
 }
 
+/// Check relevance thresholds for actors to move between foreground and background
+/// Implements architecture rules for actor relevance
+fn check_relevance_thresholds(
+    world: &mut WorldState,
+    _scenario: &Scenario,
+    event_log: &mut EventLog,
+) {
+    let current_tick = world.tick;
+    let current_year = world.year;
+
+    // Calculate average power projection for all active actors
+    let avg_power_projection: f64 = world.actors.values()
+        .map(|a| a.power_projection(1.0))
+        .sum::<f64>() / world.actors.len().max(1) as f64;
+
+    // Get list of narrative actor IDs for contact check (collect as owned Strings to avoid borrow issues)
+    let narrative_actor_ids: Vec<String> = world.actors.iter()
+        .filter(|(_, a)| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    // Check each background actor for potential promotion to foreground
+    let mut to_promote: Vec<String> = Vec::new();
+
+    for (actor_id, actor) in &world.actors {
+        if actor.narrative_status != crate::core::NarrativeStatus::Background {
+            continue; // Already foreground
+        }
+
+        let power_proj = actor.power_projection(1.0);
+
+        // Condition 1: Power projection > 70% of average
+        let condition_power = power_proj > avg_power_projection * 0.7;
+
+        // Condition 2: Contact with narrative actor (simplified - military pressure only)
+        // TODO: Full implementation should check trade, culture, migration interactions
+        // For now, use external_pressure as proxy for military pressure from narrative actors
+        let condition_contact = narrative_actor_ids.iter()
+            .filter(|narr_id| narr_id.as_str() != actor_id.as_str())
+            .any(|narr_id| {
+                if let Some(_narr_actor) = world.actors.get(narr_id) {
+                    // Check if this actor has high external_pressure (proxy for military pressure)
+                    // and the narrative actor is the source
+                    // Simplified: just check if actor's external_pressure is high
+                    actor.metrics.external_pressure > 40.0 && power_proj > 50.0
+                } else {
+                    false
+                }
+            });
+
+        // Condition 3: Internal upheaval
+        // Check if any metric changed by >30 in last 5 ticks
+        let condition_upheaval = check_actor_upheaval(world, actor_id)
+            || actor.metrics.cohesion < 25.0
+            || actor.metrics.legitimacy < 20.0;
+
+        if condition_power || condition_contact || condition_upheaval {
+            let mut reasons = Vec::new();
+            if condition_power {
+                reasons.push(format!("power_projection {:.0} > 70% avg {:.0}", power_proj, avg_power_projection * 0.7));
+            }
+            if condition_contact {
+                reasons.push("military contact with narrative actor".to_string());
+            }
+            if condition_upheaval {
+                reasons.push("internal upheaval".to_string());
+            }
+
+            to_promote.push(actor_id.clone());
+
+            // Record event
+            let event = Event::new(
+                format!("foreground_{}", actor_id),
+                current_tick,
+                current_year,
+                actor_id.clone(),
+                EventType::Threshold,
+                true,
+                format!("{} вышел на передний план: {}", actor.name, reasons.join(", ")),
+            );
+            event_log.add(event);
+
+            eprintln!("[THRESHOLD] Actor {} gained foreground status: {}", actor_id, reasons.join(", "));
+        }
+    }
+
+    // Apply promotions
+    for actor_id in &to_promote {
+        if let Some(actor) = world.actors.get_mut(actor_id) {
+            actor.narrative_status = crate::core::NarrativeStatus::Foreground;
+        }
+        // Reset upheaval counter
+        world.actor_upheaval_ticks.insert(actor_id.clone(), 0);
+    }
+
+    // Check foreground actors for potential demotion to background
+    let mut to_demote: Vec<String> = Vec::new();
+
+    for (actor_id, actor) in &world.actors {
+        if actor.narrative_status != crate::core::NarrativeStatus::Foreground {
+            continue; // Already background
+        }
+
+        let power_proj = actor.power_projection(1.0);
+
+        // Condition for return to background:
+        // power_projection < 40% of average
+        // AND no active interactions with narrative actors
+        // AND no internal upheaval for 10+ ticks
+        let low_power = power_proj < avg_power_projection * 0.4;
+
+        // Check for recent upheaval
+        let recent_upheaval = world.actor_upheaval_ticks.get(actor_id).copied().unwrap_or(0) < 10;
+
+        // Check for interactions with narrative actors (simplified)
+        let has_narrative_contact = narrative_actor_ids.iter()
+            .filter(|&narr_id| narr_id != actor_id)
+            .any(|narr_id| {
+                if let Some(narr_actor) = world.actors.get(narr_id) {
+                    // Simplified: check if either actor has high external_pressure
+                    actor.metrics.external_pressure > 30.0 || narr_actor.metrics.external_pressure > 30.0
+                } else {
+                    false
+                }
+            });
+
+        if low_power && !has_narrative_contact && !recent_upheaval {
+            to_demote.push(actor_id.clone());
+
+            let event = Event::new(
+                format!("background_{}", actor_id),
+                current_tick,
+                current_year,
+                actor_id.clone(),
+                EventType::Threshold,
+                false,
+                format!("{} вернулся в фон: низкая релевантность", actor.name),
+            );
+            event_log.add(event);
+
+            eprintln!("[THRESHOLD] Actor {} lost foreground status: low relevance", actor_id);
+        }
+    }
+
+    // Apply demotions
+    for actor_id in &to_demote {
+        if let Some(actor) = world.actors.get_mut(actor_id) {
+            actor.narrative_status = crate::core::NarrativeStatus::Background;
+        }
+    }
+}
+
+/// Check if an actor has had a metric change of >30 in the last 5 ticks
+fn check_actor_upheaval(world: &WorldState, actor_id: &str) -> bool {
+    // Check all metrics for this actor
+    let metrics_to_check = [
+        "population", "military_size", "military_quality", "economic_output",
+        "cohesion", "legitimacy", "external_pressure", "treasury",
+    ];
+
+    for metric in &metrics_to_check {
+        let key = format!("{}:{}", actor_id, metric);
+        if let Some(history) = world.metric_history.get(&key) {
+            if history.len() >= 2 {
+                let oldest = history.front().copied().unwrap_or(0.0);
+                let newest = history.back().copied().unwrap_or(0.0);
+                if (newest - oldest).abs() > 30.0 {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Update metric history for all actors (called at end of tick)
+fn update_metric_history(world: &mut WorldState) {
+    let max_history_len = 5;
+
+    for (actor_id, actor) in &world.actors {
+        // Update history for each metric
+        let metrics = [
+            ("population", actor.metrics.population),
+            ("military_size", actor.metrics.military_size),
+            ("military_quality", actor.metrics.military_quality),
+            ("economic_output", actor.metrics.economic_output),
+            ("cohesion", actor.metrics.cohesion),
+            ("legitimacy", actor.metrics.legitimacy),
+            ("external_pressure", actor.metrics.external_pressure),
+            ("treasury", actor.metrics.treasury),
+        ];
+
+        for (metric_name, value) in &metrics {
+            let key = format!("{}:{}", actor_id, metric_name);
+            let history = world.metric_history.entry(key).or_insert_with(VecDeque::new);
+            history.push_back(*value);
+
+            // Keep only last 5 ticks
+            while history.len() > max_history_len {
+                history.pop_front();
+            }
+        }
+    }
+
+    // Update upheaval counters for all actors
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+    for actor_id in actor_ids {
+        let has_upheaval = check_actor_upheaval(world, &actor_id);
+        let counter = world.actor_upheaval_ticks.entry(actor_id).or_insert(0);
+        if has_upheaval {
+            *counter = 0; // Reset on upheaval
+        } else {
+            *counter += 1; // Increment otherwise
+        }
+    }
+}
+
+/// Update prev_metrics for all actors (called at end of tick, after all changes applied)
+fn update_prev_metrics(world: &mut WorldState) {
+    for (actor_id, actor) in &world.actors {
+        world.prev_metrics.insert(actor_id.clone(), actor.metrics.clone());
+    }
+}
+
+/// Calculate actor deltas by comparing current metrics with prev_metrics
+pub fn calculate_actor_deltas(world: &WorldState) -> Vec<ActorDelta> {
+    use std::collections::HashMap;
+
+    let mut deltas = Vec::new();
+
+    for (actor_id, actor) in &world.actors {
+        if let Some(prev) = world.prev_metrics.get(actor_id) {
+            let mut metric_changes = HashMap::new();
+
+            // Calculate delta for each metric
+            let pop_delta = actor.metrics.population - prev.population;
+            if pop_delta.abs() > 0.01 {
+                metric_changes.insert("population".to_string(), pop_delta);
+            }
+
+            let mil_delta = actor.metrics.military_size - prev.military_size;
+            if mil_delta.abs() > 0.01 {
+                metric_changes.insert("military_size".to_string(), mil_delta);
+            }
+
+            let qual_delta = actor.metrics.military_quality - prev.military_quality;
+            if qual_delta.abs() > 0.01 {
+                metric_changes.insert("military_quality".to_string(), qual_delta);
+            }
+
+            let econ_delta = actor.metrics.economic_output - prev.economic_output;
+            if econ_delta.abs() > 0.01 {
+                metric_changes.insert("economic_output".to_string(), econ_delta);
+            }
+
+            let coh_delta = actor.metrics.cohesion - prev.cohesion;
+            if coh_delta.abs() > 0.01 {
+                metric_changes.insert("cohesion".to_string(), coh_delta);
+            }
+
+            let leg_delta = actor.metrics.legitimacy - prev.legitimacy;
+            if leg_delta.abs() > 0.01 {
+                metric_changes.insert("legitimacy".to_string(), leg_delta);
+            }
+
+            let pres_delta = actor.metrics.external_pressure - prev.external_pressure;
+            if pres_delta.abs() > 0.01 {
+                metric_changes.insert("external_pressure".to_string(), pres_delta);
+            }
+
+            let treas_delta = actor.metrics.treasury - prev.treasury;
+            if treas_delta.abs() > 0.01 {
+                metric_changes.insert("treasury".to_string(), treas_delta);
+            }
+
+            if !metric_changes.is_empty() {
+                deltas.push(ActorDelta {
+                    actor_id: actor_id.clone(),
+                    actor_name: actor.name.clone(),
+                    metric_changes,
+                });
+            }
+        }
+    }
+
+    deltas
+}
+
 fn check_event_condition(world: &WorldState, condition: &EventCondition) -> bool {
     match &condition.condition_type {
         EventConditionType::Metric {
@@ -1055,16 +1361,21 @@ fn check_generation_transfer(
 
     // Check if patriarch has reached end age - trigger generation transfer
     if new_age >= gen_mechanics.patriarch_end_age as f64 {
-        // Apply inheritance coefficients to family metrics
+        // Apply inheritance coefficients to all family metrics
         // Per architecture: new generation starts with reduced metrics
         let inheritance_coefficient = 0.7; // New generation inherits 70% of family strength
 
-        let metrics_to_scale = ["family_influence", "family_knowledge", "family_wealth", "family_connections"];
-        
-        for metric in &metrics_to_scale {
-            if let Some(value) = world.family_metrics.get(*metric) {
+        // Scale all family_ metrics (metrics starting with "family_")
+        let family_metric_keys: Vec<String> = world.family_metrics
+            .keys()
+            .filter(|k| k.starts_with("family_"))
+            .cloned()
+            .collect();
+
+        for metric in &family_metric_keys {
+            if let Some(value) = world.family_metrics.get(metric) {
                 let new_value = value * inheritance_coefficient;
-                world.family_metrics.insert(metric.to_string(), new_value);
+                world.family_metrics.insert(metric.clone(), new_value);
             }
         }
 
@@ -1079,7 +1390,7 @@ fn check_generation_transfer(
             "scenario".to_string(),
             EventType::Milestone,
             true, // is_key event
-            "Новое поколение семьи Ди Милано вступает во власть".to_string(),
+            "Новое поколение семьи вступает во власть".to_string(),
         );
         event_log.add(event);
     }

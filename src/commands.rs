@@ -76,11 +76,41 @@ impl LlmConfig {
     }
 }
 
+/// LLM trigger type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerType {
+    PlayerAction,
+    ThresholdEvent,
+    Time,
+}
+
+/// Action info for player_action trigger
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionInfo {
+    pub action_name: String,
+    pub effects: HashMap<String, f64>,
+    pub costs: HashMap<String, f64>,
+}
+
+/// Threshold context for threshold_event trigger
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThresholdContext {
+    pub actor_id: String,
+    pub actor_name: String,
+    pub threshold_type: String, // "relevance_gained" | "metric_threshold" | "milestone"
+    pub description: String,
+}
+
 /// LLM trigger response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmTrigger {
+    pub trigger_type: TriggerType,
     pub prompt: String,
     pub context: LlmContext,
+    pub action_info: Option<ActionInfo>,           // for player_action
+    pub threshold_context: Option<ThresholdContext>, // for threshold_event
+    pub actor_deltas: Vec<crate::core::ActorDelta>, // for all triggers
 }
 
 /// Context for LLM generation
@@ -91,6 +121,7 @@ pub struct LlmContext {
     pub narrative_actors: Vec<String>,
     pub recent_events: Vec<String>,
     pub scenario_context: String,
+    pub ticks_since_last: u32, // for time trigger
 }
 
 /// Response from advance_tick
@@ -154,8 +185,17 @@ pub struct PlayerActionInput {
 
 /// Advance simulation by one tick
 pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> Result<AdvanceTickResponse, String> {
+    // Track action info for trigger
+    let mut action_info: Option<(crate::core::PatronAction, HashMap<String, f64>, HashMap<String, f64>)> = None;
+    
     if let Some(action_input) = action {
-        apply_player_action(state, &action_input)?;
+        let (effects, costs) = apply_player_action(state, &action_input)?;
+        
+        // Get action details for trigger
+        let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+        if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == action_input.action_id) {
+            action_info = Some((action.clone(), effects, costs));
+        }
     }
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
@@ -163,11 +203,12 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
 
     tick(world_state, scenario, &mut state.event_log);
 
-    let world_state_clone = world_state.clone();
     let scenario_clone = scenario.clone();
     let event_log_clone = state.event_log.clone();
 
-    let llm_trigger = check_llm_trigger_with_data(&world_state_clone, &scenario_clone, &event_log_clone);
+    // Pass action info to trigger check - this will reset ticks_since_last_narrative if trigger fires
+    let action_info_ref = action_info.as_ref().map(|(a, e, c)| (a, e, c));
+    let llm_trigger = check_llm_trigger_with_data(world_state, &scenario_clone, &event_log_clone, action_info_ref);
     let events = state.event_log.events.clone();
 
     Ok(AdvanceTickResponse {
@@ -281,19 +322,25 @@ fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAc
 
 /// Submit a player action
 pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitActionResponse, String> {
-    let action_input = PlayerActionInput { action_id, target_actor_id: None };
+    let action_input = PlayerActionInput { action_id: action_id.clone(), target_actor_id: None };
     let (effects, costs) = apply_player_action(state, &action_input)?;
+
+    // Get action details for trigger
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+    let action = scenario.patron_actions.iter().find(|a| a.id == action_id)
+        .ok_or_else(|| format!("Action '{}' not found", action_id))?;
+    let action_info = (action.clone(), effects.clone(), costs.clone());
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
     tick(world_state, scenario, &mut state.event_log);
 
-    let world_state_clone = world_state.clone();
     let scenario_clone = scenario.clone();
     let event_log_clone = state.event_log.clone();
 
-    let llm_trigger = check_llm_trigger_with_data(&world_state_clone, &scenario_clone, &event_log_clone);
+    // Pass action info to trigger check - this will reset ticks_since_last_narrative if trigger fires
+    let llm_trigger = check_llm_trigger_with_data(world_state, &scenario_clone, &event_log_clone, Some((&action_info.0, &action_info.1, &action_info.2)));
 
     Ok(SubmitActionResponse {
         success: true,
@@ -457,9 +504,10 @@ pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveRe
         }
     }
 
-    // Initialize family_metrics from Rome actor's scenario_metrics
-    if let Some(rome_actor) = world_state.actors.get("rome") {
-        for (key, value) in &rome_actor.scenario_metrics {
+    // Initialize family_metrics from player actor's scenario_metrics
+    let player_actor_id = &scenario.player_actor_id;
+    if let Some(player_actor) = world_state.actors.get(player_actor_id) {
+        for (key, value) in &player_actor.scenario_metrics {
             if key.starts_with("family_") {
                 world_state.family_metrics.insert(key.clone(), *value);
             }
@@ -1053,7 +1101,14 @@ fn apply_metric_delta(metrics: &mut crate::core::ActorMetrics, metric: &str, del
     }
 }
 
-fn check_llm_trigger_with_data(world_state: &WorldState, scenario: &Scenario, event_log: &EventLog) -> Option<LlmTrigger> {
+fn check_llm_trigger_with_data(
+    world_state: &mut WorldState,
+    scenario: &Scenario,
+    event_log: &EventLog,
+    action_info: Option<(&crate::core::PatronAction, &HashMap<String, f64>, &HashMap<String, f64>)>, // (action, effects, costs)
+) -> Option<LlmTrigger> {
+    use crate::engine::calculate_actor_deltas;
+
     let narrative_actor_ids: Vec<String> = world_state
         .actors
         .values()
@@ -1069,40 +1124,270 @@ fn check_llm_trigger_with_data(world_state: &WorldState, scenario: &Scenario, ev
         .map(|e| e.description.clone())
         .collect();
 
-    let should_trigger = !recent_events.is_empty()
-        || event_log.events.iter().any(|e| e.event_type == crate::core::EventType::Milestone);
+    // Calculate actor deltas
+    let actor_deltas = calculate_actor_deltas(world_state);
 
-    if should_trigger {
-        Some(LlmTrigger {
-            prompt: generate_llm_prompt(world_state, scenario, &narrative_actor_ids),
+    // Priority 1: Check for player action trigger
+    if let Some((action, effects, costs)) = action_info {
+        let ticks_since_last = world_state.ticks_since_last_narrative;
+        world_state.ticks_since_last_narrative = 0; // Reset counter
+        
+        return Some(LlmTrigger {
+            trigger_type: TriggerType::PlayerAction,
+            prompt: generate_llm_prompt_with_trigger(
+                world_state,
+                scenario,
+                &narrative_actor_ids,
+                &recent_events,
+                &actor_deltas,
+                ticks_since_last,
+                Some(&TriggerDetail::PlayerAction {
+                    action_name: action.name.clone(),
+                    effects: effects.clone(),
+                    costs: costs.clone(),
+                }),
+            ),
             context: LlmContext {
                 current_year: world_state.year,
                 current_tick: world_state.tick,
                 narrative_actors: narrative_actor_ids,
                 recent_events,
                 scenario_context: scenario.llm_context.clone(),
+                ticks_since_last: ticks_since_last,
             },
-        })
-    } else {
-        None
+            action_info: Some(ActionInfo {
+                action_name: action.name.clone(),
+                effects: effects.clone(),
+                costs: costs.clone(),
+            }),
+            threshold_context: None,
+            actor_deltas,
+        });
     }
+
+    // Priority 2: Check for threshold event trigger (relevance gain or milestone)
+    let threshold_event = event_log.events.iter().find(|e| {
+        e.event_type == crate::core::EventType::Threshold || e.event_type == crate::core::EventType::Milestone
+    });
+
+    if let Some(event) = threshold_event {
+        let ticks_since_last = world_state.ticks_since_last_narrative;
+        world_state.ticks_since_last_narrative = 0; // Reset counter
+        
+        // Determine threshold type
+        let threshold_type = if event.event_type == crate::core::EventType::Milestone {
+            "milestone".to_string()
+        } else if event.description.contains("передний план") || event.description.contains("foreground") {
+            "relevance_gained".to_string()
+        } else {
+            "metric_threshold".to_string()
+        };
+
+        // Extract actor info from event
+        let (actor_id, actor_name) = world_state.actors.get(&event.actor_id)
+            .map(|a| (a.id.clone(), a.name.clone()))
+            .unwrap_or_else(|| (event.actor_id.clone(), event.actor_id.clone()));
+
+        return Some(LlmTrigger {
+            trigger_type: TriggerType::ThresholdEvent,
+            prompt: generate_llm_prompt_with_trigger(
+                world_state,
+                scenario,
+                &narrative_actor_ids,
+                &recent_events,
+                &actor_deltas,
+                ticks_since_last,
+                Some(&TriggerDetail::ThresholdEvent {
+                    actor_id: actor_id.clone(),
+                    actor_name: actor_name.clone(),
+                    threshold_type: threshold_type.clone(),
+                    description: event.description.clone(),
+                }),
+            ),
+            context: LlmContext {
+                current_year: world_state.year,
+                current_tick: world_state.tick,
+                narrative_actors: narrative_actor_ids.clone(),
+                recent_events,
+                scenario_context: scenario.llm_context.clone(),
+                ticks_since_last: ticks_since_last,
+            },
+            action_info: None,
+            threshold_context: Some(ThresholdContext {
+                actor_id,
+                actor_name,
+                threshold_type,
+                description: event.description.clone(),
+            }),
+            actor_deltas,
+        });
+    }
+
+    // Priority 3: Check for time-based trigger (every 5 ticks)
+    if world_state.ticks_since_last_narrative >= 5 {
+        let ticks_since_last = world_state.ticks_since_last_narrative;
+        world_state.ticks_since_last_narrative = 0; // Reset counter
+        
+        return Some(LlmTrigger {
+            trigger_type: TriggerType::Time,
+            prompt: generate_llm_prompt_with_trigger(
+                world_state,
+                scenario,
+                &narrative_actor_ids,
+                &recent_events,
+                &actor_deltas,
+                ticks_since_last,
+                Some(&TriggerDetail::Time),
+            ),
+            context: LlmContext {
+                current_year: world_state.year,
+                current_tick: world_state.tick,
+                narrative_actors: narrative_actor_ids,
+                recent_events,
+                scenario_context: scenario.llm_context.clone(),
+                ticks_since_last: ticks_since_last,
+            },
+            action_info: None,
+            threshold_context: None,
+            actor_deltas,
+        });
+    }
+
+    None
 }
 
-fn generate_llm_prompt(world_state: &WorldState, scenario: &Scenario, narrative_actor_ids: &[String]) -> String {
-    let mut prompt = format!("Год: {}\nСценарий: {}\n\n", world_state.year, scenario.label);
-    prompt.push_str("Активные акторы:\n");
+/// Detail for trigger-specific prompt generation
+enum TriggerDetail {
+    PlayerAction {
+        action_name: String,
+        effects: HashMap<String, f64>,
+        costs: HashMap<String, f64>,
+    },
+    ThresholdEvent {
+        actor_id: String,
+        actor_name: String,
+        threshold_type: String,
+        description: String,
+    },
+    Time,
+}
+
+/// Generate LLM prompt with trigger-specific sections
+fn generate_llm_prompt_with_trigger(
+    world_state: &WorldState,
+    scenario: &Scenario,
+    narrative_actor_ids: &[String],
+    recent_events: &[String],
+    actor_deltas: &[crate::core::ActorDelta],
+    ticks_since_last: u32,
+    trigger_detail: Option<&TriggerDetail>,
+) -> String {
+    let mut prompt = String::new();
+
+    // Section 1: Scenario context
+    prompt.push_str(&scenario.llm_context);
+    prompt.push_str("\n\n");
+
+    // Section 2: World state
+    prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
+    prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
+
     for actor_id in narrative_actor_ids {
         if let Some(actor) = world_state.actors.get(actor_id) {
             prompt.push_str(&format!(
-                "- {}: население {:.0}k, армия {:.0}k, сплочённость {:.0}, легитимность {:.0}\n",
-                actor.name_short,
+                "{} ({}):\n",
+                actor.name, actor.name_short
+            ));
+            prompt.push_str(&format!(
+                "  population: {:.0}k, military: {:.0}k, quality: {:.0}\n",
                 actor.metrics.population / 1000.0,
                 actor.metrics.military_size / 1000.0,
-                actor.metrics.cohesion,
-                actor.metrics.legitimacy
+                actor.metrics.military_quality
             ));
+            prompt.push_str(&format!(
+                "  economy: {:.0}, cohesion: {:.0}, legitimacy: {:.0}, pressure: {:.0}\n",
+                actor.metrics.economic_output,
+                actor.metrics.cohesion,
+                actor.metrics.legitimacy,
+                actor.metrics.external_pressure
+            ));
+            prompt.push_str(&format!(
+                "  treasury: {:.0}\n",
+                actor.metrics.treasury
+            ));
+            prompt.push('\n');
         }
     }
+
+    // Section 3: Recent events
+    prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
+    if recent_events.is_empty() {
+        prompt.push_str("Нет недавних событий.\n");
+    } else {
+        for event in recent_events {
+            prompt.push_str(&format!("{}\n", event));
+        }
+    }
+    prompt.push('\n');
+
+    // Section 4: Actor deltas (changes this tick)
+    if !actor_deltas.is_empty() {
+        prompt.push_str("=== ИЗМЕНЕНИЯ ЗА ТИК ===\n");
+        for delta in actor_deltas {
+            if !delta.metric_changes.is_empty() {
+                prompt.push_str(&format!("{}:\n", delta.actor_name));
+                for (metric, change) in &delta.metric_changes {
+                    let sign = if *change > 0.0 { "+" } else { "" };
+                    prompt.push_str(&format!("  {}: {}{:.1}\n", metric, sign, change));
+                }
+            }
+        }
+        prompt.push('\n');
+    }
+
+    // Section 5: Trigger-specific section
+    prompt.push_str("=== ТРИГГЕР ===\n");
+    match trigger_detail {
+        Some(TriggerDetail::PlayerAction { action_name, effects, costs }) => {
+            prompt.push_str("ДЕЙСТВИЕ ИГРОКА:\n");
+            prompt.push_str(&format!("Название: {}\n", action_name));
+            prompt.push_str("Эффекты:\n");
+            for (metric, value) in effects {
+                let sign = if *value > 0.0 { "+" } else { "" };
+                prompt.push_str(&format!("  {}: {}{:.1}\n", metric, sign, value));
+            }
+            if !costs.is_empty() {
+                prompt.push_str("Стоимость:\n");
+                for (metric, value) in costs {
+                    prompt.push_str(&format!("  {}: {:.1}\n", metric, value));
+                }
+            }
+        }
+        Some(TriggerDetail::ThresholdEvent { actor_id, actor_name, threshold_type, description }) => {
+            prompt.push_str("ПОРОГОВОЕ СОБЫТИЕ:\n");
+            prompt.push_str(&format!("Актор: {} (ID: {})\n", actor_name, actor_id));
+            prompt.push_str(&format!("Тип: {}\n", threshold_type));
+            prompt.push_str(&format!("Описание: {}\n", description));
+        }
+        Some(TriggerDetail::Time) => {
+            prompt.push_str("ВРЕМЕННОЙ СРЕЗ:\n");
+            prompt.push_str(&format!("Тиков с последнего нарратива: {}\n", ticks_since_last));
+            prompt.push_str("Суммарные изменения за период:\n");
+            for delta in actor_deltas {
+                if !delta.metric_changes.is_empty() {
+                    prompt.push_str(&format!("  {}:\n", delta.actor_name));
+                    for (metric, change) in &delta.metric_changes {
+                        let sign = if *change > 0.0 { "+" } else { "" };
+                        prompt.push_str(&format!("    {}: {}{:.1}\n", metric, sign, change));
+                    }
+                }
+            }
+        }
+        None => {
+            prompt.push_str("Нет специфического триггера.\n");
+        }
+    }
+
     prompt
 }
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
-use super::actor::Actor;
+use super::actor::{Actor, ActorMetrics};
 
 /// Dead actor record - preserves history after collapse
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +29,14 @@ pub struct Alliance {
     pub formed_tick: u32,
 }
 
+/// Actor delta for tracking metric changes between ticks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActorDelta {
+    pub actor_id: String,
+    pub actor_name: String,
+    pub metric_changes: HashMap<String, f64>,
+}
+
 /// Game mode
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -52,10 +60,18 @@ pub struct WorldState {
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     pub family_metrics: HashMap<String, f64>,
+    /// Metric history for relevance threshold tracking - key: "actor_id:metric_name", value: last 5 ticks
+    pub metric_history: HashMap<String, VecDeque<f64>>,
+    /// Ticks since last internal upheaval for each actor - for background return check
+    pub actor_upheaval_ticks: HashMap<String, u32>,
     /// RNG seed - generated once at scenario start, preserved for reproducibility
     pub rng_seed: u64,
     /// RNG state - serialized/deserialized with WorldState for save/load
     pub rng_state: [u8; 32],
+    /// Previous tick metrics for each actor - for calculating deltas
+    pub prev_metrics: HashMap<String, ActorMetrics>,
+    /// Ticks since last narrative trigger - for time-based trigger
+    pub ticks_since_last_narrative: u32,
 }
 
 impl WorldState {
@@ -84,8 +100,12 @@ impl WorldState {
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
+            metric_history: HashMap::new(),
+            actor_upheaval_ticks: HashMap::new(),
             rng_seed,
             rng_state,
+            prev_metrics: HashMap::new(),
+            ticks_since_last_narrative: 0,
         }
     }
 
@@ -102,8 +122,12 @@ impl WorldState {
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
+            metric_history: HashMap::new(),
+            actor_upheaval_ticks: HashMap::new(),
             rng_seed,
             rng_state,
+            prev_metrics: HashMap::new(),
+            ticks_since_last_narrative: 0,
         }
     }
 

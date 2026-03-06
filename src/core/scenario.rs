@@ -22,6 +22,7 @@ pub struct Scenario {
     pub generation_mechanics: Option<GenerationMechanics>,
     pub llm_context: String,
     pub consequence_context: String,
+    pub player_actor_id: String,
 }
 
 /// Autonomous delta configuration for metrics
