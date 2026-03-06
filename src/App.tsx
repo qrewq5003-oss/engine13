@@ -4,6 +4,7 @@ import { FamilyPanel } from './components/FamilyPanel';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
 import {
   loadScenario,
   getWorldState,
@@ -12,11 +13,22 @@ import {
   submitAction,
   getRelevantEvents,
   getNarrative,
+  getScenarioList,
+  listSaves,
+  loadGame,
 } from './api';
-import type { WorldState, Actor, PatronAction, Event } from './types';
+import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveData } from './types';
 import './App.css';
 
 const App: React.FC = () => {
+  // Game state: 'menu' or 'playing'
+  const [gameState, setGameState] = useState<'menu' | 'playing'>('menu');
+  
+  // Menu state
+  const [scenarios, setScenarios] = useState<ScenarioMeta[]>([]);
+  const [hasSaves, setHasSaves] = useState(false);
+  
+  // Game state
   const [worldState, setWorldState] = useState<WorldState | null>(null);
   const [availableActions, setAvailableActions] = useState<PatronAction[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
@@ -25,47 +37,95 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [scenarioLoaded, setScenarioLoaded] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string>('Initializing...');
-  
+
   // Narrative state
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
-  
+
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Load scenario on mount
+  // Initialize menu on mount
   useEffect(() => {
-    const initScenario = async () => {
+    const initMenu = async () => {
       try {
-        console.log('[App] Starting scenario initialization');
-        setIsLoading(true);
-        setLoadingStep('Loading scenario...');
-
-        console.log('[App] Calling loadScenario');
-        const loadResult = await loadScenario('rome_375');
-        console.log('[App] loadScenario result:', loadResult);
-
-        if (!loadResult.success) {
-          throw new Error(loadResult.error || 'Failed to load scenario');
-        }
-
-        setLoadingStep('Fetching world state...');
-        await refreshState();
-        await refreshNarrative();
-
-        setLoadingStep('Complete');
-        setScenarioLoaded(true);
+        console.log('[App] Starting menu initialization');
+        const [scenarioList, saves] = await Promise.all([
+          getScenarioList(),
+          listSaves(),
+        ]);
+        setScenarios(scenarioList);
+        setHasSaves(saves.length > 0);
+        console.log('[App] Menu initialized:', scenarioList.length, 'scenarios,', saves.length, 'saves');
       } catch (err) {
-        console.error('[App] Initialization error:', err);
-        setError(`Failed to load scenario: ${err}`);
-      } finally {
-        setIsLoading(false);
+        console.error('[App] Menu initialization error:', err);
+        setError(`Failed to initialize menu: ${err}`);
       }
     };
 
-    initScenario();
+    initMenu();
   }, []);
+
+  // Handle starting a scenario
+  const handleStartScenario = async (scenarioId: string) => {
+    try {
+      setIsLoading(true);
+      setLoadingStep('Loading scenario...');
+      
+      const loadResult = await loadScenario(scenarioId);
+      if (!loadResult.success) {
+        throw new Error(loadResult.error || 'Failed to load scenario');
+      }
+
+      setLoadingStep('Fetching world state...');
+      await refreshState();
+      await refreshNarrative();
+
+      setLoadingStep('Complete');
+      setScenarioLoaded(true);
+      setGameState('playing');
+    } catch (err) {
+      console.error('[App] Start scenario error:', err);
+      setError(`Failed to load scenario: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle continuing from save
+  const handleContinue = async (saves: SaveData[]) => {
+    try {
+      setIsLoading(true);
+      setLoadingStep('Loading save...');
+      
+      // Sort by tick descending to get latest save
+      const sortedSaves = [...saves].sort((a, b) => b.tick - a.tick);
+      const latestSave = sortedSaves[0];
+      
+      if (!latestSave) {
+        throw new Error('No saves found');
+      }
+      
+      const loadResult = await loadGame(latestSave.id);
+      if (!loadResult.success) {
+        throw new Error(loadResult.error || 'Failed to load save');
+      }
+
+      setLoadingStep('Fetching world state...');
+      await refreshState();
+      await refreshNarrative();
+
+      setLoadingStep('Complete');
+      setScenarioLoaded(true);
+      setGameState('playing');
+    } catch (err) {
+      console.error('[App] Continue error:', err);
+      setError(`Failed to load save: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Refresh all state
   const refreshState = useCallback(async () => {
@@ -184,6 +244,19 @@ const App: React.FC = () => {
     }
   }, [isLoading, refreshState]);
 
+  // Render menu screen
+  if (gameState === 'menu') {
+    return (
+      <ScenarioSelectScreen
+        scenarios={scenarios}
+        hasSaves={hasSaves}
+        onStartScenario={handleStartScenario}
+        onContinue={handleContinue}
+      />
+    );
+  }
+
+  // Loading state
   if (!scenarioLoaded) {
     return (
       <div className="app loading">
@@ -207,12 +280,17 @@ const App: React.FC = () => {
     );
   }
 
+  // Render game screen
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">ENGINE13</h1>
-          <span className="app-subtitle">Rome 375 — Family Di Milano</span>
+          <span className="app-subtitle">
+            {worldState.scenario_id === 'rome_375' ? 'Rome 375 — Семья Ди Милано' :
+             worldState.scenario_id === 'constantinople_1430' ? 'Constantinople 1430 — Федерация' :
+             worldState.scenario_id}
+          </span>
         </div>
         <button
           className="settings-button"

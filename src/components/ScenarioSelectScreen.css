@@ -1,0 +1,115 @@
+.scenario-select-screen {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.scenario-select-content {
+  max-width: 800px;
+  width: 100%;
+}
+
+.scenario-title {
+  font-size: 3rem;
+  color: #e94560;
+  text-align: center;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+}
+
+.scenario-subtitle {
+  font-size: 1.2rem;
+  color: #a0a0a0;
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.scenario-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.scenario-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.scenario-card:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(233, 69, 96, 0.5);
+  transform: translateY(-2px);
+}
+
+.scenario-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.scenario-name {
+  font-size: 1.5rem;
+  color: #ffffff;
+  margin: 0;
+}
+
+.scenario-year {
+  font-size: 1.1rem;
+  color: #e94560;
+  font-weight: bold;
+}
+
+.scenario-description {
+  color: #b0b0b0;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 1.25rem 0;
+}
+
+.scenario-start-button {
+  background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.scenario-start-button:hover {
+  background: linear-gradient(135deg, #ff5a7a 0%, #e94560 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
+}
+
+.continue-section {
+  margin-top: 3rem;
+  text-align: center;
+}
+
+.continue-button {
+  background: linear-gradient(135deg, #4a9eff 0%, #2d7dd2 100%);
+  color: white;
+  border: none;
+  padding: 1rem 3rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.continue-button:hover {
+  background: linear-gradient(135deg, #6ab0ff 0%, #4a9eff 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(74, 158, 255, 0.4);
+}
