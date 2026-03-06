@@ -146,6 +146,7 @@ export interface Scenario {
   generation_mechanics: GenerationMechanics | null;
   llm_context: string;
   consequence_context: string;
+  player_actor_id: string | null;
 }
 
 export interface AutoDelta {

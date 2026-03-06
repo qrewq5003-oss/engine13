@@ -322,11 +322,13 @@ const App: React.FC = () => {
             narrative={narrative}
             isLoading={narrativeLoading}
           />
-          <FamilyPanel
-            worldState={worldState}
-            currentYear={worldState.year}
-            currentTick={worldState.tick}
-          />
+          {worldState.scenario_id === 'rome_375' && (
+            <FamilyPanel
+              worldState={worldState}
+              currentYear={worldState.year}
+              currentTick={worldState.tick}
+            />
+          )}
         </div>
 
         <div className="panel-column right-column">
