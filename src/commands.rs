@@ -401,57 +401,96 @@ pub fn get_llm_config() -> LlmConfig {
     LlmConfig::default()
 }
 
-/// Generate narrative prompt from world state
-pub fn generate_narrative_prompt(world_state: &WorldState) -> String {
-    // Get top 5 actors by military_size
-    let mut actors: Vec<_> = world_state.actors.values().collect();
-    actors.sort_by(|a, b| {
-        b.metrics.military_size.partial_cmp(&a.metrics.military_size).unwrap()
-    });
-    actors.truncate(5);
+/// Generate narrative prompt from world state and scenario
+pub fn generate_narrative_prompt(
+    world_state: &WorldState,
+    scenario: &Scenario,
+    event_log: &EventLog,
+) -> String {
+    // Determine which context to use based on game mode
+    let scenario_context = if world_state.game_mode == crate::core::GameMode::Scenario {
+        &scenario.llm_context
+    } else {
+        &scenario.consequence_context
+    };
 
-    let top_actors: Vec<String> = actors
+    // Section 1: Scenario context (most important)
+    let mut prompt = format!("{}\n\n", scenario_context);
+
+    // Section 2: World state - foreground actors only
+    prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
+    prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
+
+    let foreground_actors: Vec<_> = world_state
+        .actors
+        .values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .collect();
+
+    for actor in &foreground_actors {
+        prompt.push_str(&format!(
+            "{} ({}):\n",
+            actor.name, actor.name_short
+        ));
+        prompt.push_str(&format!(
+            "  population: {:.0}, military: {:.0}k, quality: {:.0}\n",
+            actor.metrics.population,
+            actor.metrics.military_size / 1000.0,
+            actor.metrics.military_quality
+        ));
+        prompt.push_str(&format!(
+            "  economy: {:.0}, cohesion: {:.0}, legitimacy: {:.0}, pressure: {:.0}\n",
+            actor.metrics.economic_output,
+            actor.metrics.cohesion,
+            actor.metrics.legitimacy,
+            actor.metrics.external_pressure
+        ));
+        prompt.push_str(&format!(
+            "  treasury: {:.0}\n",
+            actor.metrics.treasury
+        ));
+        if !actor.tags.is_empty() {
+            prompt.push_str(&format!("  tags: {}\n", actor.tags.join(", ")));
+        }
+        prompt.push('\n');
+    }
+
+    // Section 3: Recent events (last 10 key events or events involving narrative actors)
+    prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
+    let narrative_actor_ids: Vec<_> = foreground_actors.iter().map(|a| a.id.as_str()).collect();
+
+    let mut recent_events: Vec<_> = event_log
+        .events
         .iter()
-        .map(|a| {
-            format!(
-                "{} (army: {:.0}k, economy: {:.0}, cohesion: {:.0})",
-                a.name,
-                a.metrics.military_size / 1000.0,
-                a.metrics.economic_output,
-                a.metrics.cohesion
-            )
+        .filter(|e| {
+            e.is_key || narrative_actor_ids.contains(&e.actor_id.as_str())
         })
         .collect();
 
-    let family_influence = world_state.family_metrics.get("family_influence").copied().unwrap_or(0.0);
-    let family_knowledge = world_state.family_metrics.get("family_knowledge").copied().unwrap_or(0.0);
-    let family_wealth = world_state.family_metrics.get("family_wealth").copied().unwrap_or(0.0);
-    let family_connections = world_state.family_metrics.get("family_connections").copied().unwrap_or(0.0);
+    // Sort by tick descending (most recent first)
+    recent_events.sort_by(|a, b| b.tick.cmp(&a.tick));
+    recent_events.truncate(10);
 
-    format!(
-        "Respond in Russian language only.
+    if recent_events.is_empty() {
+        prompt.push_str("Нет недавних событий.\n");
+    } else {
+        for event in &recent_events {
+            prompt.push_str(&format!(
+                "{} (тик {}): {}\n",
+                event.year, event.tick, event.description
+            ));
+        }
+    }
 
-Year: {} AD.
-
-Active powers: {}.
-
-Family Di Milano: influence={}, knowledge={}, wealth={}, connections={}.
-
-Write 15-20 sentences of atmospheric narrative in second person. Historical fiction style.",
-        world_state.year,
-        top_actors.join("; "),
-        family_influence,
-        family_knowledge,
-        family_wealth,
-        family_connections
-    )
+    prompt
 }
 
 /// Get narrative from LLM with streaming
 pub async fn cmd_get_narrative(state: &AppState, app: tauri::AppHandle) -> Result<(), String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let config = get_llm_config();
-    let prompt = generate_narrative_prompt(world_state);
+    let prompt = generate_narrative_prompt(world_state, scenario, &state.event_log);
 
     // Generate placeholder narrative for when LLM is unavailable
     let placeholder = format!("Медиолан, {} год. Семья наблюдает за судьбой Империи.", world_state.year);
