@@ -225,28 +225,28 @@ fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAc
     support_effects.insert("family_cohesion".to_string(), 3.0);
     support_effects.insert("family_legitimacy".to_string(), 2.0);
     let mut support_cost = HashMap::new();
-    support_cost.insert("family_wealth".to_string(), -50.0);
-    
+    support_cost.insert("treasury".to_string(), -50.0);
+
     actions.push(PatronAction {
         id: "support_stability".to_string(),
         name: "Поддержать стабильность".to_string(),
         available_if: ActionCondition::Metric {
-            metric: "family_wealth".to_string(),
+            metric: "treasury".to_string(),
             operator: ComparisonOperator::Greater,
             value: 50.0,
         },
         effects: support_effects,
         cost: support_cost,
     });
-    
+
     // 3. Raise Taxes - always available
     // Effects: treasury +80
     // Side effects: legitimacy -5, cohesion -3
     let mut taxes_effects = HashMap::new();
-    taxes_effects.insert("family_wealth".to_string(), 80.0);
+    taxes_effects.insert("treasury".to_string(), 80.0);
     taxes_effects.insert("family_cohesion".to_string(), -3.0);
     taxes_effects.insert("family_legitimacy".to_string(), -5.0);
-    
+
     actions.push(PatronAction {
         id: "raise_taxes".to_string(),
         name: "Повысить налоги".to_string(),
@@ -254,7 +254,7 @@ fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAc
         effects: taxes_effects,
         cost: HashMap::new(),
     });
-    
+
     // 4. Recruit Soldiers - requires treasury > 100
     // Effects: military_size +10, military_quality -5
     // Cost: treasury -100
@@ -262,13 +262,13 @@ fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAc
     recruit_effects.insert("rome.military_size".to_string(), 10.0);
     recruit_effects.insert("rome.military_quality".to_string(), -5.0);
     let mut recruit_cost = HashMap::new();
-    recruit_cost.insert("family_wealth".to_string(), -100.0);
-    
+    recruit_cost.insert("treasury".to_string(), -100.0);
+
     actions.push(PatronAction {
         id: "recruit_soldiers".to_string(),
         name: "Нанять солдат".to_string(),
         available_if: ActionCondition::Metric {
-            metric: "family_wealth".to_string(),
+            metric: "treasury".to_string(),
             operator: ComparisonOperator::Greater,
             value: 100.0,
         },
