@@ -163,6 +163,9 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     check_threshold_effects(world, scenario, event_log);
     check_rank_conditions(world, scenario, event_log);
     check_milestone_events(world, scenario, event_log);
+    
+    // Step 6b: Check game mode transitions (after milestone events)
+    check_game_mode_transitions(world, scenario, event_log);
 
     // Step 7: Check on_collapse conditions
     check_collapses(world, scenario, event_log);
@@ -943,6 +946,44 @@ fn check_milestone_events(
                 milestone.llm_context_shift.clone(),
             );
             event_log.add(event);
+        }
+    }
+}
+
+/// Check and handle game mode transitions
+/// Scenario → Consequences: automatic when milestone with triggers_collapse fires
+fn check_game_mode_transitions(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    event_log: &mut EventLog,
+) {
+    // Only transition from Scenario to Consequences
+    if world.game_mode != crate::core::GameMode::Scenario {
+        return;
+    }
+    
+    // Check if any milestone with triggers_collapse fired this tick
+    for milestone in &scenario.milestone_events {
+        if world.milestone_events_fired.contains(&milestone.id) 
+            && milestone.triggers_collapse 
+        {
+            // Transition to Consequences mode
+            world.game_mode = crate::core::GameMode::Consequences;
+            
+            // Record the mode change event
+            let event = Event::new(
+                "game_mode_consequences".to_string(),
+                world.tick,
+                world.year,
+                "scenario".to_string(),
+                EventType::Milestone,
+                true,
+                "Сценарий завершён. Симуляция продолжается в режиме последствий.".to_string(),
+            );
+            event_log.add(event);
+            
+            eprintln!("[GAME_MODE] Transitioned to Consequences mode at tick {}", world.tick);
+            return; // Only one transition per tick
         }
     }
 }

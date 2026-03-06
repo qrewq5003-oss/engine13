@@ -179,9 +179,17 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
 
 /// Get available actions for the player
 pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::PatronAction>, String> {
-    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
 
+    // In Consequences and Free modes, return universal actions only
+    if world_state.game_mode == crate::core::GameMode::Consequences 
+        || world_state.game_mode == crate::core::GameMode::Free 
+    {
+        return Ok(get_universal_actions(world_state));
+    }
+    
+    // In Scenario mode, use scenario-specific actions
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let player_actor = world_state.actors.get("rome").ok_or("Player actor not found")?;
 
     let available_actions = scenario
@@ -192,6 +200,83 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
         .collect();
 
     Ok(available_actions)
+}
+
+/// Get universal actions available in Consequences and Free modes
+fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAction> {
+    use crate::core::{PatronAction, ActionCondition, ComparisonOperator};
+    use std::collections::HashMap;
+    
+    let mut actions = Vec::new();
+    
+    // 1. Observe - always available, no effects, no cost
+    actions.push(PatronAction {
+        id: "observe".to_string(),
+        name: "Наблюдать".to_string(),
+        available_if: ActionCondition::Always,
+        effects: HashMap::new(),
+        cost: HashMap::new(),
+    });
+    
+    // 2. Support Stability - requires treasury > 50
+    // Effects: cohesion +3, legitimacy +2
+    // Cost: treasury -50
+    let mut support_effects = HashMap::new();
+    support_effects.insert("family_cohesion".to_string(), 3.0);
+    support_effects.insert("family_legitimacy".to_string(), 2.0);
+    let mut support_cost = HashMap::new();
+    support_cost.insert("family_wealth".to_string(), -50.0);
+    
+    actions.push(PatronAction {
+        id: "support_stability".to_string(),
+        name: "Поддержать стабильность".to_string(),
+        available_if: ActionCondition::Metric {
+            metric: "family_wealth".to_string(),
+            operator: ComparisonOperator::Greater,
+            value: 50.0,
+        },
+        effects: support_effects,
+        cost: support_cost,
+    });
+    
+    // 3. Raise Taxes - always available
+    // Effects: treasury +80
+    // Side effects: legitimacy -5, cohesion -3
+    let mut taxes_effects = HashMap::new();
+    taxes_effects.insert("family_wealth".to_string(), 80.0);
+    taxes_effects.insert("family_cohesion".to_string(), -3.0);
+    taxes_effects.insert("family_legitimacy".to_string(), -5.0);
+    
+    actions.push(PatronAction {
+        id: "raise_taxes".to_string(),
+        name: "Повысить налоги".to_string(),
+        available_if: ActionCondition::Always,
+        effects: taxes_effects,
+        cost: HashMap::new(),
+    });
+    
+    // 4. Recruit Soldiers - requires treasury > 100
+    // Effects: military_size +10, military_quality -5
+    // Cost: treasury -100
+    let mut recruit_effects = HashMap::new();
+    recruit_effects.insert("rome.military_size".to_string(), 10.0);
+    recruit_effects.insert("rome.military_quality".to_string(), -5.0);
+    let mut recruit_cost = HashMap::new();
+    recruit_cost.insert("family_wealth".to_string(), -100.0);
+    
+    actions.push(PatronAction {
+        id: "recruit_soldiers".to_string(),
+        name: "Нанять солдат".to_string(),
+        available_if: ActionCondition::Metric {
+            metric: "family_wealth".to_string(),
+            operator: ComparisonOperator::Greater,
+            value: 100.0,
+        },
+        effects: recruit_effects,
+        cost: recruit_cost,
+    });
+    
+    actions
 }
 
 /// Submit a player action
@@ -327,6 +412,36 @@ pub fn get_relevant_events(db: &Db, actor_id: String) -> Result<Vec<Event>, Stri
     db.get_events_by_actor(&actor_id)
 }
 
+/// Set game mode - for manual transition from Consequences to Free
+/// Scenario → Consequences is automatic only (via milestone with triggers_collapse)
+/// Consequences → Free is manual (via this function)
+/// Free → any is not allowed (one-way transition)
+pub fn set_game_mode(
+    state: &mut AppState,
+    new_mode: crate::core::GameMode,
+) -> Result<(), String> {
+    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
+    let current_mode = world_state.game_mode;
+    
+    // Validate transitions
+    match (current_mode, new_mode) {
+        // Scenario → Consequences: automatic only, not allowed here
+        (crate::core::GameMode::Scenario, _) => {
+            return Err("Переход из Scenario возможен только автоматически при срабатывании milestone события".to_string());
+        }
+        // Consequences → Free: allowed
+        (crate::core::GameMode::Consequences, crate::core::GameMode::Free) => {
+            world_state.game_mode = crate::core::GameMode::Free;
+            eprintln!("[GAME_MODE] Manual transition from Consequences to Free at tick {}", world_state.tick);
+            Ok(())
+        }
+        // Any other transition: not allowed
+        _ => {
+            Err(format!("Недопустимый переход из {:?} в {:?}", current_mode, new_mode))
+        }
+    }
+}
+
 /// Load a scenario
 pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveResponse, String> {
     let scenario = match scenario_id.as_str() {
@@ -408,14 +523,25 @@ pub fn generate_narrative_prompt(
     event_log: &EventLog,
     db: &Db,
 ) -> String {
-    // Determine which context to use based on game mode
-    let scenario_context = match world_state.game_mode {
-        crate::core::GameMode::Consequences => &scenario.consequence_context,
-        _ => &scenario.llm_context,
-    };
-
-    // Section 1: Scenario context (most important)
-    let mut prompt = format!("{}\n\n", scenario_context);
+    let mut prompt = String::new();
+    
+    // Section 1: Scenario context (depends on game mode)
+    match world_state.game_mode {
+        crate::core::GameMode::Consequences => {
+            // Consequences mode: use consequence_context
+            prompt.push_str(&scenario.consequence_context);
+            prompt.push_str("\n\n");
+        }
+        crate::core::GameMode::Free => {
+            // Free mode: no scenario context at all, just world state
+            // Don't add any scenario context
+        }
+        _ => {
+            // Scenario mode (default): use llm_context
+            prompt.push_str(&scenario.llm_context);
+            prompt.push_str("\n\n");
+        }
+    }
 
     // Section 2: World state - foreground actors only
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");

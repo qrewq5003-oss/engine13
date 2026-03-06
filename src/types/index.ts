@@ -61,7 +61,7 @@ export interface ActorTag {
 // World State
 // ============================================================================
 
-export type GameMode = 'sandbox' | 'scenario' | 'consequences';
+export type GameMode = 'sandbox' | 'scenario' | 'consequences' | 'free';
 
 export interface DeadActor {
   id: string;

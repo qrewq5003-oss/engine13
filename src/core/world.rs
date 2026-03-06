@@ -30,12 +30,13 @@ pub struct Alliance {
 }
 
 /// Game mode
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum GameMode {
     Sandbox,
     Scenario,
     Consequences,
+    Free,
 }
 
 /// Current state of the world simulation

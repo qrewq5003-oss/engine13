@@ -216,6 +216,27 @@ async fn cmd_get_narrative(
 }
 
 #[tauri::command]
+fn cmd_set_game_mode(
+    state: State<Mutex<AppState>>,
+    mode: String,
+) -> Result<(), String> {
+    eprintln!("[RUST] cmd_set_game_mode - acquiring lock, mode: {}", mode);
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    
+    let new_mode = match mode.as_str() {
+        "free" => crate::core::GameMode::Free,
+        "scenario" => crate::core::GameMode::Scenario,
+        "consequences" => crate::core::GameMode::Consequences,
+        "sandbox" => crate::core::GameMode::Sandbox,
+        _ => return Err(format!("Unknown game mode: {}", mode)),
+    };
+    
+    let result = commands::set_game_mode(&mut *s, new_mode);
+    eprintln!("[RUST] cmd_set_game_mode - result: {:?}", result);
+    result
+}
+
+#[tauri::command]
 fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     eprintln!("[RUST] cmd_get_available_models - provider: {}", provider);
     let result = commands::cmd_get_available_models(provider, base_url, api_key);
@@ -264,6 +285,7 @@ fn main() {
             cmd_load_scenario,
             cmd_get_scenario_list,
             cmd_get_narrative,
+            cmd_set_game_mode,
             cmd_get_available_models,
             cmd_save_llm_config,
         ])
