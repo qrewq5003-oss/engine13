@@ -313,12 +313,52 @@ fn apply_global_auto_delta(world: &mut WorldState, auto_delta: &crate::core::Aut
 
     // Apply noise using deterministic RNG
     let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
-    let final_delta = delta + noise;
+    let mut final_delta = delta + noise;
+
+    // Apply dynamic federation weight for federation_progress
+    if auto_delta.metric == "federation_progress" {
+        // Calculate average weight from all federation members
+        let avg_weight = calculate_federation_weight_avg(world);
+        final_delta *= avg_weight;
+    }
 
     // Apply delta to global metric
     let current = world.global_metrics.get(&auto_delta.metric).copied().unwrap_or(0.0);
     let new_value = (current + final_delta).max(0.0).min(100.0);
     world.global_metrics.insert(auto_delta.metric.clone(), new_value);
+}
+
+/// Calculate average federation weight from Venice, Genoa, Milan
+fn calculate_federation_weight_avg(world: &WorldState) -> f64 {
+    let mut total_weight = 0.0;
+    let mut count = 0;
+
+    for actor_id in &["venice", "genoa", "milan"] {
+        if let Some(actor) = world.actors.get(*actor_id) {
+            let weight = match *actor_id {
+                "venice" => {
+                    if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
+                    else if actor.metrics.treasury > 600.0 { 1.5 }
+                    else { 1.0 }
+                }
+                "genoa" => {
+                    if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
+                    else if actor.metrics.treasury > 500.0 { 1.0 }
+                    else { 0.5 }
+                }
+                "milan" => {
+                    if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
+                    else if actor.metrics.legitimacy > 55.0 { 1.0 }
+                    else { 0.5 }
+                }
+                _ => 1.0,
+            };
+            total_weight += weight;
+            count += 1;
+        }
+    }
+
+    if count > 0 { total_weight / count as f64 } else { 1.0 }
 }
 
 /// Check condition against global metrics, family metrics, and actor metrics

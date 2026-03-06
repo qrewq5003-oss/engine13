@@ -1189,11 +1189,19 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
 
     let action = scenario.patron_actions.iter()
         .find(|a| a.id == action_input.action_id)
-        .ok_or_else(|| format!("Action '{}' not found", action_input.action_id))?;
+        .ok_or_else(|| format!("Action '{}' not found", action_input.action_id))?
+        .clone();
 
-    let player_actor = world_state.actors.get_mut("rome").ok_or("Player actor not found")?;
+    // Handle scenarios without player_actor (e.g., Constantinople 1430)
+    if scenario.player_actor_id.is_none() {
+        return apply_action_no_player(state, &action, action_input);
+    }
 
-    if !is_action_available(action, player_actor, &world_state.family_metrics) {
+    // Scenarios with player_actor (e.g., Rome 375)
+    let player_actor_id = scenario.player_actor_id.as_ref().ok_or("Player actor not found")?;
+    let player_actor = world_state.actors.get_mut(player_actor_id).ok_or("Player actor not found")?;
+
+    if !is_action_available(&action, player_actor, &world_state.family_metrics) {
         return Err("Action is not available".to_string());
     }
 
@@ -1246,6 +1254,116 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     state.event_log.add(event);
 
     Ok((applied_effects, applied_costs))
+}
+
+/// Apply action for scenarios without player_actor (e.g., Constantinople 1430)
+/// Metric format: "actor_id.metric" (e.g., "venice.treasury") or "federation_progress"
+fn apply_action_no_player(state: &mut AppState, action: &crate::core::PatronAction, _action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
+    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
+
+    // Apply cost
+    let mut applied_costs = HashMap::new();
+    for (metric, cost) in &action.cost {
+        if metric.contains('.') {
+            // Actor-specific metric: "actor_id.metric"
+            let parts: Vec<&str> = metric.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                let actor_id = parts[0].to_string();
+                let metric_name = parts[1].to_string();
+                if let Some(actor) = world_state.actors.get_mut(&actor_id) {
+                    apply_metric_delta(&mut actor.metrics, &metric_name, *cost);
+                    applied_costs.insert(metric.clone(), *cost);
+                }
+            }
+        } else if metric.starts_with("family_") {
+            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.family_metrics.insert(metric.clone(), current + *cost);
+            applied_costs.insert(metric.clone(), *cost);
+        } else {
+            // Global metrics (e.g., federation_progress) - no cost typically
+        }
+    }
+
+    // Apply effects with dynamic federation weights
+    let mut applied_effects = HashMap::new();
+    for (metric, effect) in &action.effects {
+        if metric.contains('.') {
+            // Actor-specific metric: "actor_id.metric"
+            let parts: Vec<&str> = metric.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                let actor_id = parts[0].to_string();
+                let metric_name = parts[1].to_string();
+                if let Some(actor) = world_state.actors.get_mut(&actor_id) {
+                    apply_metric_delta(&mut actor.metrics, &metric_name, *effect);
+                    applied_effects.insert(metric.clone(), *effect);
+                }
+            }
+        } else if metric.starts_with("family_") {
+            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.family_metrics.insert(metric.clone(), current + *effect);
+            applied_effects.insert(metric.clone(), *effect);
+        } else if metric == "federation_progress" {
+            // Apply federation_progress with dynamic weight based on the action's source
+            // Determine source actor from action name or default to 1.0
+            let weight = determine_action_source_weight(action, world_state);
+            let weighted_effect = effect * weight;
+            let current = world_state.global_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.global_metrics.insert(metric.clone(), current + weighted_effect);
+            applied_effects.insert(metric.clone(), weighted_effect);
+        } else {
+            // Other global metrics
+            let current = world_state.global_metrics.get(metric).copied().unwrap_or(0.0);
+            world_state.global_metrics.insert(metric.clone(), current + *effect);
+            applied_effects.insert(metric.clone(), *effect);
+        }
+    }
+
+    // Record event
+    let event = Event::new(
+        format!("player_action_{}", _action_input.action_id),
+        world_state.tick,
+        world_state.year,
+        "byzantium".to_string(),
+        crate::core::EventType::PlayerAction,
+        true,
+        format!("Действие игрока: {}", action.name),
+    );
+    state.event_log.add(event);
+
+    Ok((applied_effects, applied_costs))
+}
+
+/// Determine the weight multiplier for federation_progress based on action source
+fn determine_action_source_weight(action: &crate::core::PatronAction, world_state: &WorldState) -> f64 {
+    // Extract source actor from action ID (e.g., "venice_naval_support" -> "venice")
+    let source_actor = action.id.split('_').next().unwrap_or("");
+    calculate_federation_weight(source_actor, world_state)
+}
+
+/// Calculate dynamic federation weight for an actor
+fn calculate_federation_weight(actor_id: &str, world_state: &WorldState) -> f64 {
+    let actor = match world_state.actors.get(actor_id) {
+        Some(a) => a,
+        None => return 0.0,
+    };
+    match actor_id {
+        "venice" => {
+            if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
+            else if actor.metrics.treasury > 600.0 { 1.5 }
+            else { 1.0 }
+        }
+        "genoa" => {
+            if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
+            else if actor.metrics.treasury > 500.0 { 1.0 }
+            else { 0.5 }
+        }
+        "milan" => {
+            if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
+            else if actor.metrics.legitimacy > 55.0 { 1.0 }
+            else { 0.5 }
+        }
+        _ => 1.0,
+    }
 }
 
 fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor, family_metrics: &HashMap<String, f64>) -> bool {

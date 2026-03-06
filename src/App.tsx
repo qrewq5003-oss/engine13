@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { WorldPanel } from './components/WorldPanel';
 import { FamilyPanel } from './components/FamilyPanel';
+import { GlobalMetricsPanel } from './components/GlobalMetricsPanel';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -328,6 +329,9 @@ const App: React.FC = () => {
               currentYear={worldState.year}
               currentTick={worldState.tick}
             />
+          )}
+          {worldState.scenario_id === 'constantinople_1430' && (
+            <GlobalMetricsPanel worldState={worldState} />
           )}
         </div>
 

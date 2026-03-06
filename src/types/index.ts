@@ -93,6 +93,7 @@ export interface WorldState {
   alliances: Alliance[];
   milestone_events_fired: string[];
   family_metrics: Record<string, number>;
+  global_metrics: Record<string, number>;
 }
 
 // ============================================================================
