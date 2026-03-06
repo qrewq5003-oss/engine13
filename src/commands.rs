@@ -412,7 +412,7 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
     let response = if config.provider == "anthropic" {
         // Anthropic format
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| format!("Client build failed: {}", e))?;
         let mut headers = reqwest::header::HeaderMap::new();
@@ -463,7 +463,7 @@ pub fn cmd_get_narrative(state: &AppState) -> Result<String, String> {
     } else {
         // OpenAI-compatible format (LM Studio, nano-gpt, etc.)
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| format!("Client build failed: {}", e))?;
         let mut headers = reqwest::header::HeaderMap::new();
