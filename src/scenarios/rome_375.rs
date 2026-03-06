@@ -26,7 +26,7 @@ pub fn load_rome_375() -> Scenario {
         generation_mechanics: Some(create_generation_mechanics()),
         llm_context: create_llm_context(),
         consequence_context: create_consequence_context(),
-        player_actor_id: "rome".to_string(),
+        player_actor_id: Some("rome".to_string()),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

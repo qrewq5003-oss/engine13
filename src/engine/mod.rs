@@ -223,6 +223,19 @@ fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
             apply_family_auto_delta(world, auto_delta, rng);
         }
     }
+
+    // Apply global auto_deltas (e.g., federation_progress)
+    for auto_delta in &scenario.auto_deltas {
+        if !auto_delta.metric.starts_with("family_") 
+            && !auto_delta.metric.contains('.') 
+            && auto_delta.actor_id.is_none() {
+            // Check if this metric is not an actor metric
+            let is_actor_metric = world.actors.keys().any(|id| auto_delta.metric.starts_with(&format!("{}.", id)));
+            if !is_actor_metric {
+                apply_global_auto_delta(world, auto_delta, rng);
+            }
+        }
+    }
 }
 
 /// Apply treasury calculation: treasury += incomes - expenses
@@ -271,7 +284,7 @@ fn apply_family_auto_delta(world: &mut WorldState, auto_delta: &crate::core::Aut
     // Calculate delta: base + sum of matching conditions
     let mut delta = auto_delta.base;
     for cond in &auto_delta.conditions {
-        if check_family_condition(world, cond) {
+        if check_global_condition(world, cond) {
             delta += cond.delta;
         }
     }
@@ -286,20 +299,47 @@ fn apply_family_auto_delta(world: &mut WorldState, auto_delta: &crate::core::Aut
     world.family_metrics.insert(auto_delta.metric.clone(), new_value);
 }
 
-/// Check condition against family metrics and actor metrics
-fn check_family_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
+/// Apply auto_delta to global metrics (e.g., federation_progress)
+fn apply_global_auto_delta(world: &mut WorldState, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
+    use rand::Rng;
+
+    // Calculate delta: base + sum of matching conditions
+    let mut delta = auto_delta.base;
+    for cond in &auto_delta.conditions {
+        if check_global_condition(world, cond) {
+            delta += cond.delta;
+        }
+    }
+
+    // Apply noise using deterministic RNG
+    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
+    let final_delta = delta + noise;
+
+    // Apply delta to global metric
+    let current = world.global_metrics.get(&auto_delta.metric).copied().unwrap_or(0.0);
+    let new_value = (current + final_delta).max(0.0).min(100.0);
+    world.global_metrics.insert(auto_delta.metric.clone(), new_value);
+}
+
+/// Check condition against global metrics, family metrics, and actor metrics
+fn check_global_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
     let value = if cond.metric.starts_with("family_") {
         world.family_metrics.get(&cond.metric).copied().unwrap_or(0.0)
-    } else if cond.metric.starts_with("rome.") {
-        let rome_metric = cond.metric.strip_prefix("rome.").unwrap();
-        world.actors.get("rome")
-            .map(|a| get_metric_value(&a.metrics, rome_metric))
-            .unwrap_or(50.0)
+    } else if cond.metric.contains('.') {
+        // Actor metric (e.g., "venice.cohesion")
+        let parts: Vec<&str> = cond.metric.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            let actor_id = parts[0];
+            let metric_name = parts[1];
+            world.actors.get(actor_id)
+                .map(|a| get_metric_value(&a.metrics, metric_name))
+                .unwrap_or(50.0)
+        } else {
+            50.0
+        }
     } else {
-        // Assume it's an actor metric for "rome" by default
-        world.actors.get("rome")
-            .map(|a| get_metric_value(&a.metrics, &cond.metric))
-            .unwrap_or(50.0)
+        // Global metric (e.g., federation_progress)
+        world.global_metrics.get(&cond.metric).copied().unwrap_or(0.0)
     };
 
     match cond.operator {
@@ -947,6 +987,9 @@ fn check_milestone_events(
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
 
+            // Apply one-time effects for specific milestones
+            apply_milestone_effects(world, &milestone.id);
+
             let event_type = if milestone.triggers_collapse {
                 EventType::Collapse
             } else {
@@ -964,6 +1007,22 @@ fn check_milestone_events(
             );
             event_log.add(event);
         }
+    }
+}
+
+/// Apply one-time effects for specific milestone events
+fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
+    match milestone_id {
+        "mehmed_accelerates" => {
+            // Ottoman response: all-in acceleration
+            // military_quality -15, treasury -200, cohesion -10
+            if let Some(ottomans) = world.actors.get_mut("ottomans") {
+                ottomans.metrics.military_quality = (ottomans.metrics.military_quality - 15.0).max(0.0);
+                ottomans.metrics.treasury -= 200.0;
+                ottomans.metrics.cohesion = (ottomans.metrics.cohesion - 10.0).max(0.0);
+            }
+        }
+        _ => {}
     }
 }
 

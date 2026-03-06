@@ -6,7 +6,7 @@ use tauri::Emitter;
 use crate::core::{Actor, Event, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::{tick, EventLog};
-use crate::scenarios::load_rome_375;
+use crate::scenarios::{load_rome_375, load_constantinople_1430};
 
 // ============================================================================
 // Application State
@@ -493,6 +493,7 @@ pub fn set_game_mode(
 pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveResponse, String> {
     let scenario = match scenario_id.as_str() {
         "rome_375" => load_rome_375(),
+        "constantinople_1430" => load_constantinople_1430(),
         _ => return Err(format!("Unknown scenario: {}", scenario_id)),
     };
 
@@ -505,11 +506,12 @@ pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveRe
     }
 
     // Initialize family_metrics from player actor's scenario_metrics
-    let player_actor_id = &scenario.player_actor_id;
-    if let Some(player_actor) = world_state.actors.get(player_actor_id) {
-        for (key, value) in &player_actor.scenario_metrics {
-            if key.starts_with("family_") {
-                world_state.family_metrics.insert(key.clone(), *value);
+    if let Some(ref player_actor_id) = scenario.player_actor_id {
+        if let Some(player_actor) = world_state.actors.get(player_actor_id) {
+            for (key, value) in &player_actor.scenario_metrics {
+                if key.starts_with("family_") {
+                    world_state.family_metrics.insert(key.clone(), *value);
+                }
             }
         }
     }
@@ -537,6 +539,12 @@ pub fn get_scenario_list() -> Vec<ScenarioMeta> {
             label: "Rome 375 — Семья Ди Милано".to_string(),
             description: "375 год. Медиолан — фактическая столица Западной Империи.".to_string(),
             start_year: 375,
+        },
+        ScenarioMeta {
+            id: "constantinople_1430".to_string(),
+            label: "Constantinople 1430 — Федерация".to_string(),
+            description: "1430 год. Фессалоники пали. Константинополь стоит — но ненадолго.".to_string(),
+            start_year: 1430,
         },
     ]
 }

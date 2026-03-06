@@ -59,6 +59,8 @@ pub struct WorldState {
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     pub family_metrics: HashMap<String, f64>,
+    /// Global scenario metrics (e.g., federation_progress) - key: metric_name, value: current value
+    pub global_metrics: HashMap<String, f64>,
     /// Metric history for relevance threshold tracking - key: "actor_id:metric_name", value: last 5 ticks
     pub metric_history: HashMap<String, VecDeque<f64>>,
     /// Ticks since last internal upheaval for each actor - for background return check
@@ -99,6 +101,7 @@ impl WorldState {
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
+            global_metrics: HashMap::new(),
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
@@ -121,6 +124,7 @@ impl WorldState {
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             family_metrics: HashMap::new(),
+            global_metrics: HashMap::new(),
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
