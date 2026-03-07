@@ -436,6 +436,7 @@ pub fn load_game(
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
         match db_save.scenario_id.as_str() {
             "rome_375" => { state.current_scenario = Some(load_rome_375()); }
+            "constantinople_1430" => { state.current_scenario = Some(load_constantinople_1430()); }
             _ => return Err(format!("Unknown scenario: {}", db_save.scenario_id)),
         }
     }
