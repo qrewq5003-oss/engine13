@@ -116,6 +116,8 @@ fn create_rome() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.9, lng: 12.5 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Latin,
     }
 }
 
@@ -154,6 +156,8 @@ fn create_huns() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 48.0, lng: 60.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Turkic,
     }
 }
 
@@ -191,6 +195,8 @@ fn create_visigoths() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 25.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -227,6 +233,8 @@ fn create_ostrogoths() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 47.0, lng: 32.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -266,6 +274,8 @@ fn create_sassanids() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 33.0, lng: 44.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Other,
+        culture: crate::core::Culture::Persian,
     }
 }
 
@@ -301,6 +311,8 @@ fn create_vandals() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.0, lng: 25.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -336,6 +348,8 @@ fn create_burgundians() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 49.0, lng: 8.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -371,6 +385,8 @@ fn create_franks() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 50.0, lng: 6.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -406,6 +422,8 @@ fn create_saxons() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 53.0, lng: 9.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -440,6 +458,8 @@ fn create_alamanni() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 48.5, lng: 9.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Germanic,
     }
 }
 
@@ -475,6 +495,8 @@ fn create_berbers() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 10.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Pagan,
+        culture: crate::core::Culture::Arabic,
     }
 }
 
@@ -512,6 +534,8 @@ fn create_armenia() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 40.0, lng: 45.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Other,
+        culture: crate::core::Culture::Persian,
     }
 }
 
@@ -550,6 +574,8 @@ fn create_kushans() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 36.0, lng: 68.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Buddhist,
+        culture: crate::core::Culture::Indian,
     }
 }
 
@@ -587,6 +613,8 @@ fn create_guptas() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 24.0, lng: 82.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Hindu,
+        culture: crate::core::Culture::Indian,
     }
 }
 
@@ -624,6 +652,8 @@ fn create_eastern_jin() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 118.0 }),
         is_successor_template: false,
+        religion: crate::core::Religion::Buddhist,
+        culture: crate::core::Culture::EastAsian,
     }
 }
 
@@ -674,6 +704,8 @@ fn create_rome_west() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.0, lng: 9.0 }),  // Mediolanum
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Latin,
     }
 }
 
@@ -720,6 +752,8 @@ fn create_rome_east() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 28.0 }),  // Constantinople
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
@@ -758,6 +792,8 @@ pub fn create_visigoth_kingdom_template() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 25.0 }),
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
@@ -792,6 +828,8 @@ pub fn create_ostrogoth_kingdom_template() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 47.0, lng: 32.0 }),
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
@@ -826,6 +864,8 @@ pub fn create_late_sassanids_template() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 33.0, lng: 44.0 }),
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
@@ -860,6 +900,8 @@ pub fn create_vandal_kingdom_africa_template() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 32.0, lng: 10.0 }),
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
@@ -894,6 +936,8 @@ pub fn create_frankish_kingdom_template() -> Actor {
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 50.0, lng: 6.0 }),
         is_successor_template: true,
+        religion: crate::core::Religion::Catholic,
+        culture: crate::core::Culture::Greek,
     }
 }
 
