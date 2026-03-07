@@ -123,12 +123,11 @@ fn cmd_save_game(
     state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
     slot: Option<String>,
-    name: Option<String>,
 ) -> Result<commands::SaveResponse, String> {
     eprintln!("[RUST] cmd_save_game - acquiring locks");
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::save_game(&mut *s, &*db_guard, slot, name);
+    let result = commands::save_game(&mut *s, &*db_guard, slot);
     eprintln!("[RUST] cmd_save_game - result: {:?}", result);
     result
 }
@@ -160,7 +159,7 @@ fn cmd_list_saves(db: State<Mutex<Db>>) -> Result<Vec<commands::SaveData>, Strin
 fn cmd_list_saves_with_slots(
     db: State<Mutex<Db>>,
     scenario_id: String,
-) -> Result<commands::SaveSlotList, String> {
+) -> Result<engine13::application::SaveSlotList, String> {
     eprintln!("[RUST] cmd_list_saves_with_slots - acquiring lock, scenario: {}", scenario_id);
     let db_guard = db.lock().map_err(|e| e.to_string())?;
     let result = commands::list_saves_with_slots(&*db_guard, &scenario_id);

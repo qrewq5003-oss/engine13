@@ -1,3 +1,4 @@
+pub mod application;
 pub mod core;
 pub mod engine;
 pub mod llm;
@@ -10,3 +11,4 @@ pub use engine::EventLog;
 pub use commands::{AppState, SaveData, AdvanceTickResponse, SubmitActionResponse, SaveResponse, LoadResponse, ScenarioMeta};
 pub use db::{Db, DbSave, DbDeadActor};
 pub use llm::{LlmConfig, LlmTrigger, LlmContext, TriggerType, get_llm_config, save_llm_config, generate_narrative_prompt, stream_narrative_anthropic, stream_narrative_openai, get_available_models};
+pub use application::{get_scenario_list, list_saves, list_saves_with_slots, load_game, load_scenario, save_game, set_game_mode, get_available_actions, submit_action, cmd_get_narrative, SaveSlotData, SaveSlotList};
