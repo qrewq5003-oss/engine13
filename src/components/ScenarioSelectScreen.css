@@ -91,6 +91,24 @@
   box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
 }
 
+.scenario-continue-button {
+  background: linear-gradient(135deg, #50c878 0%, #3da866 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.scenario-continue-button:hover {
+  background: linear-gradient(135deg, #60d888 0%, #50c878 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(80, 200, 120, 0.4);
+}
+
 .scenario-actions {
   display: flex;
   gap: 12px;
@@ -187,6 +205,12 @@
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.save-empty {
+  color: #808080;
+  font-size: 0.9rem;
+  font-style: italic;
 }
 
 .scenario-start-button:disabled,

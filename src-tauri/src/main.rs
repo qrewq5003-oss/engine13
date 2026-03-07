@@ -156,6 +156,18 @@ fn cmd_list_saves(db: State<Mutex<Db>>) -> Result<Vec<commands::SaveData>, Strin
 }
 
 #[tauri::command]
+fn cmd_list_saves_with_slots(
+    db: State<Mutex<Db>>,
+    scenario_id: String,
+) -> Result<commands::SaveSlotList, String> {
+    eprintln!("[RUST] cmd_list_saves_with_slots - acquiring lock, scenario: {}", scenario_id);
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let result = commands::list_saves_with_slots(&*db_guard, &scenario_id);
+    eprintln!("[RUST] cmd_list_saves_with_slots - result: {:?}", result.is_ok());
+    result
+}
+
+#[tauri::command]
 fn cmd_get_relevant_events(
     db: State<Mutex<Db>>,
     actor_ids: Vec<String>,
@@ -291,6 +303,7 @@ fn main() {
             cmd_save_game,
             cmd_load_game,
             cmd_list_saves,
+            cmd_list_saves_with_slots,
             cmd_get_relevant_events,
             cmd_load_scenario,
             cmd_get_scenario_list,

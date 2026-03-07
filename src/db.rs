@@ -646,6 +646,38 @@ impl Db {
         Ok(result)
     }
 
+    /// List saves for a specific scenario
+    pub fn list_saves_by_scenario(&self, scenario_id: &str) -> Result<Vec<DbSave>, String> {
+        let mut stmt = self.conn
+            .prepare("SELECT * FROM saves WHERE scenario_id = ? ORDER BY created_at DESC")
+            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let saves = stmt
+            .query_map(params![scenario_id], |row| {
+                Ok(DbSave {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    scenario_id: row.get(2)?,
+                    tick: row.get(3)?,
+                    year: row.get(4)?,
+                    created_at: row.get(5)?,
+                    world_state_json: row.get(6)?,
+                    player_state_json: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("Failed to query saves: {}", e))?;
+
+        let mut result = Vec::new();
+        for save in saves {
+            match save {
+                Ok(s) => result.push(s),
+                Err(e) => eprintln!("Error parsing save: {}", e),
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Delete a save
     pub fn delete_save(&self, save_id: &str) -> Result<(), String> {
         self.conn

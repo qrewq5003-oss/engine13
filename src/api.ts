@@ -7,6 +7,7 @@ import type {
   PatronAction,
   Event,
   SaveData,
+  SaveSlotList,
   ScenarioMeta,
   AdvanceTickResponse,
   SubmitActionResponse,
@@ -120,6 +121,10 @@ export async function loadGame(saveId: string): Promise<SaveResponse> {
 
 export async function listSaves(): Promise<SaveData[]> {
   return invoke<SaveData[]>('cmd_list_saves');
+}
+
+export async function listSavesWithSlots(scenarioId: string): Promise<SaveSlotList> {
+  return invoke<SaveSlotList>('cmd_list_saves_with_slots', { scenarioId });
 }
 
 // ============================================================================

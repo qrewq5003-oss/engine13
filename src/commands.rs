@@ -169,6 +169,29 @@ pub struct ScenarioMeta {
 }
 
 // ============================================================================
+// Save Slot Types
+// ============================================================================
+
+/// Save data with slot information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveSlotData {
+    pub id: String,
+    pub name: String,
+    pub scenario_id: String,
+    pub tick: u32,
+    pub year: i32,
+    pub created_at: u64,
+    pub slot: String, // "auto" | "slot_1" | "slot_2" | "slot_3"
+}
+
+/// Response from list_saves - grouped by slots
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveSlotList {
+    pub auto: Option<SaveSlotData>,
+    pub slots: [Option<SaveSlotData>; 3],
+}
+
+// ============================================================================
 // Input Types
 // ============================================================================
 
@@ -367,17 +390,28 @@ pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitAc
 }
 
 /// Save current game state
+/// slot: "auto" | "slot_1" | "slot_2" | "slot_3"
+/// Save ID format: "{scenario_id}_{slot}" - one save per slot per scenario
 pub fn save_game(
     state: &mut AppState,
     db: &Db,
     slot: Option<String>,
-    name: Option<String>,
+    _name: Option<String>,
 ) -> Result<SaveResponse, String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state to save")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
-    let save_id = slot.unwrap_or_else(|| format!("autosave_{}", world_state.tick));
-    let save_name = name.unwrap_or_else(|| format!("Tick {} - Year {}", world_state.tick, world_state.year));
+    // Determine slot name
+    let slot_name = slot.unwrap_or_else(|| "auto".to_string());
+    
+    // Validate slot name
+    if !["auto", "slot_1", "slot_2", "slot_3"].contains(&slot_name.as_str()) {
+        return Err(format!("Invalid slot: {}. Must be 'auto', 'slot_1', 'slot_2', or 'slot_3'", slot_name));
+    }
+
+    // Save ID format: "{scenario_id}_{slot}" - ensures one save per slot per scenario
+    let save_id = format!("{}_{}", scenario.id, slot_name);
+    let save_name = format!("Tick {} - Year {}", world_state.tick, world_state.year);
 
     // Serialize world_state to JSON
     let world_state_json = serde_json::to_string(&world_state)
@@ -466,6 +500,49 @@ pub fn list_saves(db: &Db) -> Vec<SaveData> {
             vec![]
         }
     }
+}
+
+/// List saves grouped by slots for a specific scenario
+pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<SaveSlotList, String> {
+    let db_saves = db.list_saves_by_scenario(scenario_id)?;
+    
+    let mut auto: Option<SaveSlotData> = None;
+    let mut slots: [Option<SaveSlotData>; 3] = [None, None, None];
+    
+    for db_save in db_saves {
+        // Extract slot from save_id format: "{scenario_id}_{slot}"
+        let slot = if db_save.id.starts_with(&format!("{}_auto", scenario_id)) {
+            "auto".to_string()
+        } else if db_save.id.starts_with(&format!("{}_slot_1", scenario_id)) {
+            "slot_1".to_string()
+        } else if db_save.id.starts_with(&format!("{}_slot_2", scenario_id)) {
+            "slot_2".to_string()
+        } else if db_save.id.starts_with(&format!("{}_slot_3", scenario_id)) {
+            "slot_3".to_string()
+        } else {
+            continue; // Skip saves with invalid format
+        };
+        
+        let save_data = SaveSlotData {
+            id: db_save.id.clone(),
+            name: db_save.name.clone(),
+            scenario_id: db_save.scenario_id.clone(),
+            tick: db_save.tick,
+            year: db_save.year,
+            created_at: db_save.created_at,
+            slot: slot.clone(),
+        };
+        
+        match slot.as_str() {
+            "auto" => auto = Some(save_data),
+            "slot_1" => slots[0] = Some(save_data),
+            "slot_2" => slots[1] = Some(save_data),
+            "slot_3" => slots[2] = Some(save_data),
+            _ => {}
+        }
+    }
+    
+    Ok(SaveSlotList { auto, slots })
 }
 
 /// Get relevant events

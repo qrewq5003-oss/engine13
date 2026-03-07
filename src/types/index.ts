@@ -275,6 +275,21 @@ export interface SaveData {
   event_log: Event[];
 }
 
+export interface SaveSlotData {
+  id: string;
+  name: string;
+  scenario_id: string;
+  tick: number;
+  year: number;
+  created_at: number;
+  slot: string; // "auto" | "slot_1" | "slot_2" | "slot_3"
+}
+
+export interface SaveSlotList {
+  auto: SaveSlotData | null;
+  slots: [SaveSlotData | null, SaveSlotData | null, SaveSlotData | null];
+}
+
 // ============================================================================
 // Family/Di Milano Specific Types
 // ============================================================================

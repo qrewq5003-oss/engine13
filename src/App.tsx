@@ -6,6 +6,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
+import { SaveSlotModal } from './components/SaveSlotModal';
 import {
   loadScenario,
   getWorldState,
@@ -16,10 +17,11 @@ import {
   getNarrative,
   getScenarioList,
   listSaves,
+  listSavesWithSlots,
   loadGame,
   saveGame,
 } from './api';
-import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveData } from './types';
+import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveSlotData, SaveSlotList } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -96,19 +98,19 @@ const App: React.FC = () => {
   };
 
   // Handle continuing from save
-  const handleContinue = async (saves: SaveData[]) => {
+  const handleContinue = async (saves: SaveSlotData[]) => {
     try {
       setIsLoading(true);
       setLoadingStep('Loading save...');
-      
+
       // Sort by tick descending to get latest save
       const sortedSaves = [...saves].sort((a, b) => b.tick - a.tick);
       const latestSave = sortedSaves[0];
-      
+
       if (!latestSave) {
         throw new Error('No saves found');
       }
-      
+
       const loadResult = await loadGame(latestSave.id);
       if (!loadResult.success) {
         throw new Error(loadResult.error || 'Failed to load save');
@@ -246,13 +248,23 @@ const App: React.FC = () => {
     }
   }, [isLoading, refreshState]);
 
-  // Handle save game
-  const handleSaveGame = useCallback(async () => {
+  // Handle save game - opens modal
+  const handleOpenSaveModal = useCallback(() => {
+    setShowSaveModal(true);
+    // Fetch current saves for this scenario
+    if (worldState) {
+      listSavesWithSlots(worldState.scenario_id)
+        .then(setCurrentSaves)
+        .catch(err => console.error('Failed to fetch saves:', err));
+    }
+  }, [worldState]);
+
+  // Handle actual save to slot
+  const handleSaveToSlot = useCallback(async (slot: string) => {
     try {
-      const response = await saveGame();
+      const response = await saveGame(slot);
       if (response.success) {
-        // Show brief notification
-        setSaveNotification('Сохранено!');
+        setSaveNotification(`Сохранено в ${slot === 'auto' ? 'автослот' : slot}`);
         setTimeout(() => setSaveNotification(null), 2000);
       } else {
         setError(response.error || 'Failed to save');
@@ -264,6 +276,10 @@ const App: React.FC = () => {
 
   // Save notification state
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
+  
+  // Save modal state
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [currentSaves, setCurrentSaves] = useState<SaveSlotList | null>(null);
 
   // Render menu screen
   if (gameState === 'menu') {
@@ -363,7 +379,7 @@ const App: React.FC = () => {
             recentEvents={recentEvents}
             onAdvanceTick={handleAdvanceTick}
             onActionSubmit={handleActionSubmit}
-            onSaveGame={handleSaveGame}
+            onSaveGame={handleOpenSaveModal}
             isLoading={isLoading || isGeneratingNarrative}
           />
         </div>
@@ -374,6 +390,13 @@ const App: React.FC = () => {
           {saveNotification}
         </div>
       )}
+
+      <SaveSlotModal
+        isOpen={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        onSave={handleSaveToSlot}
+        saves={currentSaves}
+      />
 
       <SettingsPanel
         isOpen={isSettingsOpen}

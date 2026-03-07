@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { listSaves, loadGame } from '../api';
-import type { ScenarioMeta, SaveData } from '../types';
+import { listSavesWithSlots, loadGame } from '../api';
+import type { ScenarioMeta, SaveSlotData, SaveSlotList } from '../types';
 import './ScenarioSelectScreen.css';
 
 interface ScenarioSelectScreenProps {
   scenarios: ScenarioMeta[];
   hasSaves: boolean;
   onStartScenario: (scenarioId: string) => void;
-  onContinue: (saves: SaveData[]) => void;
+  onContinue: (saves: SaveSlotData[]) => void;
 }
 
 export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
@@ -16,21 +16,25 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
   onStartScenario,
   onContinue,
 }) => {
-  const [saves, setSaves] = useState<SaveData[]>([]);
+  const [savesByScenario, setSavesByScenario] = useState<Record<string, SaveSlotList>>({});
   const [expandedScenario, setExpandedScenario] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const fetchSaves = async () => {
-      const allSaves = await listSaves();
-      setSaves(allSaves);
+      const savesMap: Record<string, SaveSlotList> = {};
+      for (const scenario of scenarios) {
+        try {
+          const slotList = await listSavesWithSlots(scenario.id);
+          savesMap[scenario.id] = slotList;
+        } catch (err) {
+          console.error(`Failed to fetch saves for ${scenario.id}:`, err);
+        }
+      }
+      setSavesByScenario(savesMap);
     };
     fetchSaves();
-  }, []);
-
-  const getSavesForScenario = (scenarioId: string) => {
-    return saves.filter(save => save.scenario_id === scenarioId);
-  };
+  }, [scenarios]);
 
   const formatDateTime = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
@@ -48,7 +52,6 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
     try {
       const result = await loadGame(saveId);
       if (result.success) {
-        // Reload the page to refresh state
         window.location.reload();
       }
     } catch (err) {
@@ -59,7 +62,11 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
   };
 
   const handleContinue = async () => {
-    const allSaves = await listSaves();
+    const allSaves: SaveSlotData[] = [];
+    Object.values(savesByScenario).forEach(slotList => {
+      if (slotList.auto) allSaves.push(slotList.auto);
+      slotList.slots.forEach(slot => { if (slot) allSaves.push(slot); });
+    });
     onContinue(allSaves);
   };
 
@@ -71,7 +78,8 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
 
         <div className="scenario-list">
           {scenarios.map((scenario) => {
-            const scenarioSaves = getSavesForScenario(scenario.id);
+            const slotList = savesByScenario[scenario.id];
+            const hasAutoSave = slotList?.auto !== null && slotList?.auto !== undefined;
             const isExpanded = expandedScenario === scenario.id;
 
             return (
@@ -91,37 +99,51 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
                     Начать
                   </button>
                   
-                  {scenarioSaves.length > 0 && (
+                  {hasAutoSave && (
                     <button
-                      className="scenario-loadsaves-button"
-                      onClick={() => setExpandedScenario(isExpanded ? null : scenario.id)}
+                      className="scenario-continue-button"
+                      onClick={() => handleLoadGame(slotList.auto!.id)}
                       disabled={isLoading}
                     >
-                      Сохранения ({scenarioSaves.length})
+                      Продолжить ({slotList.auto!.year} AD)
                     </button>
                   )}
+                  
+                  <button
+                    className="scenario-loadsaves-button"
+                    onClick={() => setExpandedScenario(isExpanded ? null : scenario.id)}
+                    disabled={isLoading}
+                  >
+                    Загрузить →
+                  </button>
                 </div>
 
-                {isExpanded && scenarioSaves.length > 0 && (
+                {isExpanded && (
                   <div className="saves-list">
-                    {scenarioSaves
-                      .sort((a, b) => b.tick - a.tick)
-                      .map((save) => (
-                        <div key={save.id} className="save-item">
-                          <div className="save-info">
-                            <span className="save-year">Год: {save.year}</span>
-                            <span className="save-date">{formatDateTime(save.created_at)}</span>
-                            <span className="save-tick">Тик: {save.tick}</span>
+                    {slotList?.slots.map((slot, index) => (
+                      <div key={`slot_${index + 1}`} className="save-item">
+                        {slot ? (
+                          <>
+                            <div className="save-info">
+                              <span className="save-year">{slot.year} AD</span>
+                              <span className="save-date">{formatDateTime(slot.created_at)}</span>
+                              <span className="save-tick">Тик: {slot.tick}</span>
+                            </div>
+                            <button
+                              className="save-load-button"
+                              onClick={() => handleLoadGame(slot.id)}
+                              disabled={isLoading}
+                            >
+                              Загрузить
+                            </button>
+                          </>
+                        ) : (
+                          <div className="save-empty">
+                            <span>Слот {index + 1}: Пусто</span>
                           </div>
-                          <button
-                            className="save-load-button"
-                            onClick={() => handleLoadGame(save.id)}
-                            disabled={isLoading}
-                          >
-                            Загрузить
-                          </button>
-                        </div>
-                      ))}
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
