@@ -6,6 +6,9 @@ pub mod scenarios;
 pub mod commands;
 pub mod db;
 
+#[cfg(test)]
+mod tests;
+
 pub use core::*;
 pub use engine::EventLog;
 pub use commands::{AppState, SaveData, AdvanceTickResponse, SubmitActionResponse, SaveResponse, LoadResponse, ScenarioMeta};

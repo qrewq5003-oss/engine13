@@ -33,6 +33,17 @@ pub struct DbDeadActor {
 }
 
 impl Db {
+    /// Open in-memory database connection (for testing)
+    pub fn open_in_memory() -> Result<Self, String> {
+        let conn = Connection::open_in_memory()
+            .map_err(|e| format!("Failed to open in-memory database: {}", e))?;
+
+        let db = Db { conn };
+        db.migrate_schema()?;
+
+        Ok(db)
+    }
+
     /// Open database connection with appropriate flags
     /// Creates the database file and directory if they don't exist
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -90,6 +101,7 @@ impl Db {
                     involved_actors TEXT,
                     tags TEXT,
                     is_key INTEGER NOT NULL DEFAULT 0,
+                    scenario_id TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 

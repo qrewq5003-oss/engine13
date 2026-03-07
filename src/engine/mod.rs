@@ -1712,6 +1712,7 @@ mod tests {
             generation_mechanics: None,
             llm_context: "".to_string(),
             consequence_context: "".to_string(),
+            player_actor_id: None,
         };
         let mut event_log = EventLog::new();
 
