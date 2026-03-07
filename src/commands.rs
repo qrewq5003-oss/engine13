@@ -1323,33 +1323,7 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
 fn determine_action_source_weight(action: &crate::core::PatronAction, world_state: &WorldState) -> f64 {
     // Extract source actor from action ID (e.g., "venice_naval_support" -> "venice")
     let source_actor = action.id.split('_').next().unwrap_or("");
-    calculate_federation_weight(source_actor, world_state)
-}
-
-/// Calculate dynamic federation weight for an actor
-fn calculate_federation_weight(actor_id: &str, world_state: &WorldState) -> f64 {
-    let actor = match world_state.actors.get(actor_id) {
-        Some(a) => a,
-        None => return 0.0,
-    };
-    match actor_id {
-        "venice" => {
-            if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
-            else if actor.metrics.treasury > 600.0 { 1.5 }
-            else { 1.0 }
-        }
-        "genoa" => {
-            if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
-            else if actor.metrics.treasury > 500.0 { 1.0 }
-            else { 0.5 }
-        }
-        "milan" => {
-            if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
-            else if actor.metrics.legitimacy > 55.0 { 1.0 }
-            else { 0.5 }
-        }
-        _ => 1.0,
-    }
+    crate::scenarios::constantinople_1430::federation_weight(source_actor, world_state)
 }
 
 /// Unified action availability check - works for all scenarios via MetricRef

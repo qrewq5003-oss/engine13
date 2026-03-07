@@ -334,28 +334,9 @@ fn calculate_federation_weight_avg(world: &WorldState) -> f64 {
     let mut count = 0;
 
     for actor_id in &["venice", "genoa", "milan"] {
-        if let Some(actor) = world.actors.get(*actor_id) {
-            let weight = match *actor_id {
-                "venice" => {
-                    if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
-                    else if actor.metrics.treasury > 600.0 { 1.5 }
-                    else { 1.0 }
-                }
-                "genoa" => {
-                    if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
-                    else if actor.metrics.treasury > 500.0 { 1.0 }
-                    else { 0.5 }
-                }
-                "milan" => {
-                    if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
-                    else if actor.metrics.legitimacy > 55.0 { 1.0 }
-                    else { 0.5 }
-                }
-                _ => 1.0,
-            };
-            total_weight += weight;
-            count += 1;
-        }
+        let weight = crate::scenarios::constantinople_1430::federation_weight(actor_id, world);
+        total_weight += weight;
+        count += 1;
     }
 
     if count > 0 { total_weight / count as f64 } else { 1.0 }

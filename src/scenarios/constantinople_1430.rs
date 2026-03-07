@@ -878,3 +878,30 @@ fn create_consequence_context() -> String {
 Османская империя продолжает экспансию или остановлена.
 Нарратив охватывает более широкий период истории."#.to_string()
 }
+
+/// Calculate dynamic federation weight for an actor
+/// Used for federation_progress effects weighting
+pub fn federation_weight(actor_id: &str, world_state: &crate::core::WorldState) -> f64 {
+    let actor = match world_state.actors.get(actor_id) {
+        Some(a) => a,
+        None => return 1.0,
+    };
+    match actor_id {
+        "venice" => {
+            if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
+            else if actor.metrics.treasury > 600.0 { 1.5 }
+            else { 1.0 }
+        }
+        "genoa" => {
+            if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
+            else if actor.metrics.treasury > 500.0 { 1.0 }
+            else { 0.5 }
+        }
+        "milan" => {
+            if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
+            else if actor.metrics.legitimacy > 55.0 { 1.0 }
+            else { 0.5 }
+        }
+        _ => 1.0,
+    }
+}
