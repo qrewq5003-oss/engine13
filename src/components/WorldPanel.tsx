@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Actor } from '../types';
+import ActorDetailPanel from './ActorDetailPanel';
 import './WorldPanel.css';
 
 interface WorldPanelProps {
@@ -13,6 +14,8 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
   selectedActorId,
   onSelectActor,
 }) => {
+  const [detailActor, setDetailActor] = useState<Actor | null>(null);
+
   // Sort actors: foreground first, then by name
   const sortedActors = [...actors].sort((a, b) => {
     if (a.narrative_status === 'foreground' && b.narrative_status === 'background') {
@@ -34,7 +37,11 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
             className={`actor-card ${actor.narrative_status} ${
               selectedActorId === actor.id ? 'selected' : ''
             }`}
-            onClick={() => onSelectActor(actor.id)}
+            onClick={() => {
+              onSelectActor(actor.id);
+              setDetailActor(actor);
+            }}
+            style={{ cursor: 'pointer' }}
           >
             <div className="actor-header">
               <span className="actor-name">{actor.name_short}</span>
@@ -69,6 +76,13 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
           </div>
         ))}
       </div>
+
+      {detailActor && (
+        <ActorDetailPanel
+          actor={detailActor}
+          onClose={() => setDetailActor(null)}
+        />
+      )}
     </div>
   );
 };
