@@ -913,6 +913,9 @@ fn check_milestone_events(
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
 
+            // Log milestone firing
+            eprintln!("[MILESTONE] {} fired at year {}", milestone.id, current_year);
+
             // Apply one-time effects for specific milestones
             apply_milestone_effects(world, &milestone.id);
 
@@ -1402,6 +1405,11 @@ fn check_collapses(
     let mut to_collapse: Vec<(String, Vec<crate::core::Successor>)> = Vec::new();
 
     for (actor_id, actor) in &world.actors {
+        // Skip if already dead (check dead_actors list)
+        if world.dead_actors.iter().any(|d| d.id == *actor_id) {
+            continue;
+        }
+
         // cohesion < 10 OR legitimacy < 5
         if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
             // Collapse regardless of whether on_collapse is empty
