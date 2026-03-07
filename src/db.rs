@@ -93,9 +93,6 @@ impl Db {
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
-                -- Add scenario_id column if not exists (migration for existing databases)
-                ALTER TABLE events ADD COLUMN scenario_id TEXT;
-
                 -- Indexes for events
                 CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_id);
                 CREATE INDEX IF NOT EXISTS idx_events_tick ON events(tick);
@@ -131,6 +128,32 @@ impl Db {
                 ",
             )
             .map_err(|e| format!("Failed to migrate schema: {}", e))?;
+
+        // Idempotent migration: add scenario_id column to events table if not exists
+        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check manually
+        let mut stmt = self.conn
+            .prepare("PRAGMA table_info(events)")
+            .map_err(|e| format!("Failed to prepare pragma: {}", e))?;
+        
+        let column_names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("Failed to query columns: {}", e))?;
+        
+        let mut has_scenario_id = false;
+        for col_result in column_names {
+            if let Ok(col_name) = col_result {
+                if col_name == "scenario_id" {
+                    has_scenario_id = true;
+                    break;
+                }
+            }
+        }
+
+        if !has_scenario_id {
+            self.conn
+                .execute("ALTER TABLE events ADD COLUMN scenario_id TEXT", [])
+                .map_err(|e| format!("Failed to add scenario_id column: {}", e))?;
+        }
 
         Ok(())
     }
