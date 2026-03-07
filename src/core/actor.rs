@@ -119,6 +119,39 @@ pub struct Actor {
     pub center: Option<GeoCoordinate>,
     /// If true, this actor is a template for successor creation and should not be added to world.actors at start
     pub is_successor_template: bool,
+    /// Religion of the actor
+    pub religion: Religion,
+    /// Culture of the actor
+    pub culture: Culture,
+}
+
+/// Religion enum for actors
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Religion {
+    Catholic,
+    Orthodox,
+    Muslim,
+    Pagan,
+    Buddhist,
+    Hindu,
+    Other,
+}
+
+/// Culture enum for actors
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Culture {
+    Latin,
+    Greek,
+    Slavic,
+    Germanic,
+    Arabic,
+    Turkic,
+    Persian,
+    Indian,
+    EastAsian,
+    Other,
 }
 
 /// Geographic coordinate
