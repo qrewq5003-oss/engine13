@@ -1267,6 +1267,8 @@ pub fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<S
 // ============================================================================
 
 fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
+    use crate::core::MetricRef;
+
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
@@ -1291,16 +1293,9 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     // Apply cost
     let mut applied_costs = HashMap::new();
     for (metric, cost) in &action.cost {
-        if metric.starts_with("rome.") {
-            let rome_metric = metric.strip_prefix("rome.").unwrap();
-            apply_metric_delta(&mut player_actor.metrics, rome_metric, *cost);
-            applied_costs.insert(metric.clone(), *cost);
-        } else if metric.starts_with("family_") {
-            // Family metrics cost - applied directly to world_state.family_metrics
-            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.family_metrics.insert(metric.clone(), current + *cost);
-            applied_costs.insert(metric.clone(), *cost);
-        }
+        let metric_ref = MetricRef::parse(metric);
+        metric_ref.apply(world_state, *cost);
+        applied_costs.insert(metric.clone(), *cost);
     }
 
     eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
@@ -1309,16 +1304,9 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     // Apply effects
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
-        if metric.starts_with("rome.") {
-            let rome_metric = metric.strip_prefix("rome.").unwrap();
-            apply_metric_delta(&mut player_actor.metrics, rome_metric, *effect);
-            applied_effects.insert(metric.clone(), *effect);
-        } else if metric.starts_with("family_") {
-            // Family metrics effects - applied directly to world_state.family_metrics
-            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.family_metrics.insert(metric.clone(), current + *effect);
-            applied_effects.insert(metric.clone(), *effect);
-        }
+        let metric_ref = MetricRef::parse(metric);
+        metric_ref.apply(world_state, *effect);
+        applied_effects.insert(metric.clone(), *effect);
     }
 
     eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
@@ -1342,61 +1330,31 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
 /// Apply action for scenarios without player_actor (e.g., Constantinople 1430)
 /// Metric format: "actor_id.metric" (e.g., "venice.treasury") or "federation_progress"
 fn apply_action_no_player(state: &mut AppState, action: &crate::core::PatronAction, _action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
+    use crate::core::MetricRef;
+
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
     // Apply cost
     let mut applied_costs = HashMap::new();
     for (metric, cost) in &action.cost {
-        if metric.contains('.') {
-            // Actor-specific metric: "actor_id.metric"
-            let parts: Vec<&str> = metric.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                let actor_id = parts[0].to_string();
-                let metric_name = parts[1].to_string();
-                if let Some(actor) = world_state.actors.get_mut(&actor_id) {
-                    apply_metric_delta(&mut actor.metrics, &metric_name, *cost);
-                    applied_costs.insert(metric.clone(), *cost);
-                }
-            }
-        } else if metric.starts_with("family_") {
-            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.family_metrics.insert(metric.clone(), current + *cost);
-            applied_costs.insert(metric.clone(), *cost);
-        } else {
-            // Global metrics (e.g., federation_progress) - no cost typically
-        }
+        let metric_ref = MetricRef::parse(metric);
+        metric_ref.apply(world_state, *cost);
+        applied_costs.insert(metric.clone(), *cost);
     }
 
     // Apply effects with dynamic federation weights
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
-        if metric.contains('.') {
-            // Actor-specific metric: "actor_id.metric"
-            let parts: Vec<&str> = metric.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                let actor_id = parts[0].to_string();
-                let metric_name = parts[1].to_string();
-                if let Some(actor) = world_state.actors.get_mut(&actor_id) {
-                    apply_metric_delta(&mut actor.metrics, &metric_name, *effect);
-                    applied_effects.insert(metric.clone(), *effect);
-                }
-            }
-        } else if metric.starts_with("family_") {
-            let current = world_state.family_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.family_metrics.insert(metric.clone(), current + *effect);
-            applied_effects.insert(metric.clone(), *effect);
-        } else if metric == "federation_progress" {
+        if metric == "federation_progress" {
             // Apply federation_progress with dynamic weight based on the action's source
-            // Determine source actor from action name or default to 1.0
             let weight = determine_action_source_weight(action, world_state);
             let weighted_effect = effect * weight;
-            let current = world_state.global_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.global_metrics.insert(metric.clone(), current + weighted_effect);
+            let metric_ref = MetricRef::parse(metric);
+            metric_ref.apply(world_state, weighted_effect);
             applied_effects.insert(metric.clone(), weighted_effect);
         } else {
-            // Other global metrics
-            let current = world_state.global_metrics.get(metric).copied().unwrap_or(0.0);
-            world_state.global_metrics.insert(metric.clone(), current + *effect);
+            let metric_ref = MetricRef::parse(metric);
+            metric_ref.apply(world_state, *effect);
             applied_effects.insert(metric.clone(), *effect);
         }
     }
@@ -1456,7 +1414,18 @@ fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor,
             let current = if metric.starts_with("family_") {
                 family_metrics.get(metric).copied().unwrap_or(0.0)
             } else {
-                get_metric_value(&player_actor.metrics, metric)
+                // Get metric directly from player_actor
+                match metric.as_str() {
+                    "population" => player_actor.metrics.population,
+                    "military_size" => player_actor.metrics.military_size,
+                    "military_quality" => player_actor.metrics.military_quality,
+                    "economic_output" => player_actor.metrics.economic_output,
+                    "cohesion" => player_actor.metrics.cohesion,
+                    "legitimacy" => player_actor.metrics.legitimacy,
+                    "external_pressure" => player_actor.metrics.external_pressure,
+                    "treasury" => player_actor.metrics.treasury,
+                    _ => 0.0,
+                }
             };
             compare_value(current, operator, value)
         }
@@ -1464,40 +1433,17 @@ fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor,
 }
 
 /// Check if action is available for scenarios without player_actor (e.g., Constantinople 1430)
-/// Metric format:
-/// - "family_*" - from world_state.family_metrics
-/// - "actor_id.metric" (e.g., "venice.treasury") - from world_state.actors.get(actor_id).metrics
-/// - Other (e.g., "federation_progress") - from world_state.global_metrics
+/// Uses MetricRef to parse and get metric values
 fn is_action_available_no_player(action: &crate::core::PatronAction, world_state: &WorldState) -> bool {
+    use crate::core::MetricRef;
+
     match &action.available_if {
         crate::core::ActionCondition::Always => true,
         crate::core::ActionCondition::Metric { metric, operator, value } => {
-            let current = get_metric_value_no_player(metric, world_state);
+            let metric_ref = MetricRef::parse(metric);
+            let current = metric_ref.get(world_state);
             compare_value(current, operator, value)
         }
-    }
-}
-
-/// Get metric value for scenarios without player_actor
-fn get_metric_value_no_player(metric: &str, world_state: &WorldState) -> f64 {
-    if metric.starts_with("family_") {
-        // Family metrics
-        world_state.family_metrics.get(metric).copied().unwrap_or(0.0)
-    } else if metric.contains('.') {
-        // Actor-specific metric: "actor_id.metric" (e.g., "venice.treasury")
-        let parts: Vec<&str> = metric.splitn(2, '.').collect();
-        if parts.len() == 2 {
-            let actor_id = parts[0];
-            let metric_name = parts[1];
-            world_state.actors.get(actor_id)
-                .map(|actor| get_metric_value(&actor.metrics, metric_name))
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        }
-    } else {
-        // Global metric (e.g., "federation_progress")
-        world_state.global_metrics.get(metric).copied().unwrap_or(0.0)
     }
 }
 
@@ -1508,34 +1454,6 @@ fn compare_value(value: f64, operator: &crate::core::ComparisonOperator, target:
         crate::core::ComparisonOperator::Greater => value > *target,
         crate::core::ComparisonOperator::GreaterOrEqual => value >= *target,
         crate::core::ComparisonOperator::Equal => (value - target).abs() < 0.001,
-    }
-}
-
-fn get_metric_value(metrics: &crate::core::ActorMetrics, name: &str) -> f64 {
-    match name {
-        "population" => metrics.population,
-        "military_size" => metrics.military_size,
-        "military_quality" => metrics.military_quality,
-        "economic_output" => metrics.economic_output,
-        "cohesion" => metrics.cohesion,
-        "legitimacy" => metrics.legitimacy,
-        "external_pressure" => metrics.external_pressure,
-        "treasury" => metrics.treasury,
-        _ => 0.0,
-    }
-}
-
-fn apply_metric_delta(metrics: &mut crate::core::ActorMetrics, metric: &str, delta: f64) {
-    match metric {
-        "population" => metrics.population += delta,
-        "military_size" => metrics.military_size += delta,
-        "military_quality" => metrics.military_quality += delta,
-        "economic_output" => metrics.economic_output += delta,
-        "cohesion" => metrics.cohesion += delta,
-        "legitimacy" => metrics.legitimacy += delta,
-        "external_pressure" => metrics.external_pressure += delta,
-        "treasury" => metrics.treasury += delta,
-        _ => {}
     }
 }
 
