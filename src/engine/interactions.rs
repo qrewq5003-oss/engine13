@@ -226,21 +226,24 @@ fn calculate_military_interaction(
         return;
     }
 
-    // Determine stronger and weaker actor
-    let (stronger_id, weaker_id) = if actor_a.metrics.military_size >= actor_b.metrics.military_size {
-        (actor_a_id.to_string(), actor_b_id.to_string())
-    } else {
-        (actor_b_id.to_string(), actor_a_id.to_string())
-    };
+    // Get all neighbors for force projection calculation
+    let actor_a_neighbors: Vec<&crate::core::Actor> = actor_a.neighbors.iter()
+        .filter_map(|n| world.actors.get(&n.id))
+        .collect();
+    let actor_b_neighbors: Vec<&crate::core::Actor> = actor_b.neighbors.iter()
+        .filter_map(|n| world.actors.get(&n.id))
+        .collect();
 
-    // Protect weak actors - don't provoke war if weaker has military_size < 30
-    let weaker_military = {
-        let weaker = world.actors.get(&weaker_id).unwrap();
-        weaker.metrics.military_size
+    // Calculate effective military with force projection
+    let eff_mil_a = effective_military(actor_a, actor_a_neighbors);
+    let eff_mil_b = effective_military(actor_b, actor_b_neighbors);
+
+    // Determine stronger and weaker actor by effective military
+    let (stronger_id, weaker_id, stronger_eff, weaker_eff) = if eff_mil_a >= eff_mil_b {
+        (actor_a_id.to_string(), actor_b_id.to_string(), eff_mil_a, eff_mil_b)
+    } else {
+        (actor_b_id.to_string(), actor_a_id.to_string(), eff_mil_b, eff_mil_a)
     };
-    if weaker_military < 30.0 {
-        return;
-    }
 
     // Check cooldown
     let cooldown_key = format!("{}_vs_{}", stronger_id, weaker_id);
@@ -250,20 +253,20 @@ fn calculate_military_interaction(
         }
     }
 
-    // Calculate probability
+    // Calculate probability with affinity modifier
     let external_pressure_avg = (actor_a.metrics.external_pressure + actor_b.metrics.external_pressure) / 2.0;
-    let military_ratio = if actor_a.metrics.military_size > actor_b.metrics.military_size {
-        actor_a.metrics.military_size / actor_b.metrics.military_size.max(1.0)
-    } else {
-        actor_b.metrics.military_size / actor_a.metrics.military_size.max(1.0)
-    };
+    let military_ratio = stronger_eff / weaker_eff.max(1.0);
     let land_bonus = if border_type == crate::core::BorderType::Land { 1.0 } else { 0.4 };
 
-    let probability = (external_pressure_avg / 100.0) * military_ratio.min(3.0) * land_bonus;
+    // Get affinity between actors
+    let affinity_mod = affinity(actor_a, actor_b);
+    // Lower affinity = more likely to fight
 
-    // Roll for interaction
+    let probability = (external_pressure_avg / 100.0) * military_ratio.min(3.0) * land_bonus * (1.0 - affinity_mod * 0.5);
+
+    // Roll for interaction - threshold lowered to 0.15
     let roll: f64 = rng.gen();
-    if roll >= probability || probability <= 0.3 {
+    if roll >= probability || probability <= 0.15 {
         return;
     }
 
@@ -328,6 +331,14 @@ fn calculate_trade_interaction(
         return;
     }
 
+    // Check 3-tick cooldown
+    let trade_key = format!("trade_{}_{}", actor_a_id, actor_b_id);
+    if let Some(&last_tick) = world.interaction_cooldowns.get(&trade_key) {
+        if current_tick - last_tick < 3 {
+            return;
+        }
+    }
+
     // Calculate bonus
     let distance_modifier = match distance {
         1 => 1.0,
@@ -344,6 +355,9 @@ fn calculate_trade_interaction(
     if let Some(actor) = world.actors.get_mut(actor_b_id) {
         actor.metrics.treasury += bonus;
     }
+
+    // Set cooldown
+    world.interaction_cooldowns.insert(trade_key, current_tick);
 
     eprintln!("[INTERACTION] Trade: {} vs {}", actor_a_id, actor_b_id);
 
@@ -507,7 +521,7 @@ fn calculate_vassalage_interaction(
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
 ) {
-    // Condition: power_diff > 4.0, distance == 1
+    // Condition: power_diff > 4.0, distance == 1, weak actor external_pressure > 75
     if distance != 1 {
         return;
     }
@@ -530,6 +544,15 @@ fn calculate_vassalage_interaction(
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string())
     };
+
+    // Weak actor must have high external_pressure to be vulnerable to vassalage
+    let weak_pressure = {
+        let weak = world.actors.get(&weak_id).unwrap();
+        weak.metrics.external_pressure
+    };
+    if weak_pressure <= 75.0 {
+        return;
+    }
 
     // Softer penalties
     let legitimacy_loss = power_diff * 0.2;
