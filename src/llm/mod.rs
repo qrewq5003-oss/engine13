@@ -178,6 +178,19 @@ pub fn generate_narrative_prompt(
         current_year, current_year
     ));
 
+    // Section 1.6: Strict narrative rules — no raw numbers
+    prompt.push_str(
+        "=== СТРОГИЕ ПРАВИЛА НАРРАТИВА ===\n\
+         - НИКОГДА не упоминать числа, проценты, метрики, единицы\n\
+         - НИКОГДА не писать \"+13.6\", \"legitimacy: 70\", \"military_size +15\"\n\
+         - НИКОГДА не перечислять статистику акторов в тексте\n\
+         - Описывать только события, решения, настроения, последствия\n\
+         - \"Венеция переживала подъём\" — не \"economic_output вырос на 8\"\n\
+         - \"Армия Византии окрепла\" — не \"military_size +15\"\n\
+         - \"Казна Генуи истощилась\" — не \"treasury: -40\"\n\
+         - Хроника — это литература, не таблица данных\n\n"
+    );
+
     // Section 2: World state - foreground actors only
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
     prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
