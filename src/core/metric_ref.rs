@@ -57,7 +57,14 @@ impl MetricRef {
         match self {
             MetricRef::Actor { actor_id, metric } => {
                 if let Some(actor) = world_state.actors.get_mut(actor_id) {
-                    Self::apply_actor_metric_delta(&mut actor.metrics, metric, delta);
+                    let metric_name = metric.as_str();
+                    let current = Self::get_actor_metric(&actor.metrics, metric_name);
+                    let new_value = match metric_name {
+                        "treasury" => current + delta, // can go negative (debts)
+                        "economic_output" | "military_size" | "population" => (current + delta).max(0.0),
+                        _ => (current + delta).clamp(0.0, 100.0), // cohesion, legitimacy, etc.
+                    };
+                    Self::set_actor_metric(&mut actor.metrics, metric_name, new_value);
                 }
             }
             MetricRef::Family { key } => {
@@ -86,17 +93,17 @@ impl MetricRef {
         }
     }
 
-    /// Apply delta to actor metric
-    fn apply_actor_metric_delta(metrics: &mut crate::core::ActorMetrics, metric: &str, delta: f64) {
-        match metric {
-            "population" => metrics.population += delta,
-            "military_size" => metrics.military_size += delta,
-            "military_quality" => metrics.military_quality += delta,
-            "economic_output" => metrics.economic_output += delta,
-            "cohesion" => metrics.cohesion += delta,
-            "legitimacy" => metrics.legitimacy += delta,
-            "external_pressure" => metrics.external_pressure += delta,
-            "treasury" => metrics.treasury += delta,
+    /// Set actor metric value by name
+    fn set_actor_metric(metrics: &mut crate::core::ActorMetrics, name: &str, value: f64) {
+        match name {
+            "population" => metrics.population = value,
+            "military_size" => metrics.military_size = value,
+            "military_quality" => metrics.military_quality = value,
+            "economic_output" => metrics.economic_output = value,
+            "cohesion" => metrics.cohesion = value,
+            "legitimacy" => metrics.legitimacy = value,
+            "external_pressure" => metrics.external_pressure = value,
+            "treasury" => metrics.treasury = value,
             _ => {}
         }
     }
