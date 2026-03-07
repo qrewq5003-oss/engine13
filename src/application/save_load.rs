@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use crate::core::{Scenario, WorldState};
+use crate::core::WorldState;
 use crate::db::{Db, DbSave};
-use crate::scenarios::{load_constantinople_1430, load_rome_375};
 use crate::AppState;
 
 /// Save current game state
@@ -84,11 +83,9 @@ pub fn load_game(
     }
 
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
-        match db_save.scenario_id.as_str() {
-            "rome_375" => { state.current_scenario = Some(load_rome_375()); }
-            "constantinople_1430" => { state.current_scenario = Some(load_constantinople_1430()); }
-            _ => return Err(format!("Unknown scenario: {}", db_save.scenario_id)),
-        }
+        let scenario = crate::scenarios::registry::load_by_id(&db_save.scenario_id)
+            .ok_or_else(|| format!("Unknown scenario: {}", db_save.scenario_id))?;
+        state.current_scenario = Some(scenario);
     }
 
     Ok(crate::commands::LoadResponse { success: true, world_state: Some(world_state), error: None })
@@ -103,11 +100,8 @@ pub fn load_scenario(
     // Delete events from previous playthrough of this scenario
     db.delete_events_for_scenario(&scenario_id)?;
 
-    let scenario = match scenario_id.as_str() {
-        "rome_375" => load_rome_375(),
-        "constantinople_1430" => load_constantinople_1430(),
-        _ => return Err(format!("Unknown scenario: {}", scenario_id)),
-    };
+    let scenario = crate::scenarios::registry::load_by_id(&scenario_id)
+        .ok_or_else(|| format!("Unknown scenario: {}", scenario_id))?;
 
     let mut world_state = WorldState::new(scenario.id.clone(), scenario.start_year);
     // Only add actors that are not successor templates

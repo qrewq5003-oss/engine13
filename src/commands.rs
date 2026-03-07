@@ -193,9 +193,9 @@ pub fn load_scenario(state: &mut AppState, db: &Db, scenario_id: String) -> Resu
     crate::application::load_scenario(state, db, scenario_id)
 }
 
-/// Get scenario list - delegates to application::save_load
+/// Get scenario list - delegates to scenarios::registry
 pub fn get_scenario_list() -> Vec<ScenarioMeta> {
-    crate::application::get_scenario_list()
+    crate::scenarios::registry::get_scenario_meta()
 }
 
 /// Get narrative from LLM - delegates to application::narrative
