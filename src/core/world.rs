@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::actor::{Actor, ActorMetrics};
 
@@ -55,6 +55,8 @@ pub struct WorldState {
     pub game_mode: GameMode,
     pub actors: HashMap<String, Actor>,
     pub dead_actors: Vec<DeadActor>,
+    /// Set of dead actor IDs for fast lookup (prevents duplicate death events)
+    pub dead_actor_ids: HashSet<String>,
     pub alliances: Vec<Alliance>,
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
@@ -97,6 +99,7 @@ impl WorldState {
             game_mode: GameMode::Scenario,
             actors: HashMap::new(),
             dead_actors: Vec::new(),
+            dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
@@ -120,6 +123,7 @@ impl WorldState {
             game_mode: GameMode::Scenario,
             actors: HashMap::new(),
             dead_actors: Vec::new(),
+            dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),

@@ -891,6 +891,11 @@ fn check_milestone_events(
             continue;
         }
 
+        // Outcome milestones require tick >= 20 to fire
+        if milestone.id.starts_with("outcome_") && current_tick < 20 {
+            continue;
+        }
+
         let condition_met = check_event_condition(world, &milestone.condition);
         
         // Handle duration: condition must be met for `duration` consecutive ticks
@@ -1405,8 +1410,8 @@ fn check_collapses(
     let mut to_collapse: Vec<(String, Vec<crate::core::Successor>)> = Vec::new();
 
     for (actor_id, actor) in &world.actors {
-        // Skip if already dead (check dead_actors list)
-        if world.dead_actors.iter().any(|d| d.id == *actor_id) {
+        // Skip if already dead (use HashSet for fast lookup)
+        if world.dead_actor_ids.contains(actor_id) {
             continue;
         }
 
@@ -1436,7 +1441,7 @@ fn check_collapses(
 
             event_log.add(event);
 
-            // Move to dead_actors
+            // Move to dead_actors and add to dead_actor_ids HashSet
             let dead_actor = crate::core::DeadActor {
                 id: actor_id.clone(),
                 tick_death: current_tick,
@@ -1451,6 +1456,7 @@ fn check_collapses(
                     .collect(),
             };
             world.dead_actors.push(dead_actor);
+            world.dead_actor_ids.insert(actor_id.clone());
 
             // Remove from active actors
             world.actors.remove(&actor_id);
