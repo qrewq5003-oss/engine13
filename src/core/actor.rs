@@ -123,6 +123,8 @@ pub struct Actor {
     pub religion: Religion,
     /// Culture of the actor
     pub culture: Culture,
+    /// Minimum ticks this actor must survive before collapse is possible
+    pub minimum_survival_ticks: Option<u32>,
 }
 
 /// Religion enum for actors

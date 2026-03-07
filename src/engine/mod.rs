@@ -1157,6 +1157,13 @@ fn check_collapses(
             continue;
         }
 
+        // Skip if actor has minimum survival guarantee
+        if let Some(min_ticks) = actor.minimum_survival_ticks {
+            if current_tick < min_ticks {
+                continue;
+            }
+        }
+
         // cohesion < 10 OR legitimacy < 5
         if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
             // Collapse regardless of whether on_collapse is empty

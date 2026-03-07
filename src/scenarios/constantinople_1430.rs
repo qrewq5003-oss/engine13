@@ -90,6 +90,7 @@ fn create_byzantium() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Greek,
+        minimum_survival_ticks: Some(10), // Constantinople holds for at least 10 years
     }
 }
 
@@ -132,6 +133,7 @@ fn create_ottomans() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Muslim,
         culture: crate::core::Culture::Turkic,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -173,6 +175,7 @@ fn create_venice() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -214,6 +217,7 @@ fn create_genoa() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -253,6 +257,7 @@ fn create_milan() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -293,6 +298,7 @@ fn create_papacy() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -333,6 +339,7 @@ fn create_hungary() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Germanic,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -374,6 +381,7 @@ fn create_serbia() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Slavic,
+        minimum_survival_ticks: None,
     }
 }
 
@@ -414,6 +422,7 @@ fn create_trebizond() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Greek,
+        minimum_survival_ticks: None,
     }
 }
 
