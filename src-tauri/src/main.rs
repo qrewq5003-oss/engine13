@@ -5,6 +5,7 @@
 
 use engine13::commands::{self, AppState};
 use engine13::db::Db;
+use engine13::llm;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -222,9 +223,9 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        let prompt = commands::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard);
+        let prompt = llm::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard);
         let placeholder = format!("Медиолан, {} год. Семья наблюдает за судьбой Империи.", world_state.year);
-        let config = commands::get_llm_config();
+        let config = llm::get_llm_config();
         let year = world_state.year;
         (prompt, placeholder, config, year)
     }; // All locks released here
@@ -234,9 +235,9 @@ async fn cmd_get_narrative(
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
     
     let result = if config.provider == "anthropic" {
-        commands::stream_narrative_anthropic(prompt, placeholder, config, app).await
+        llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
     } else {
-        commands::stream_narrative_openai(prompt, placeholder, config, app).await
+        llm::stream_narrative_openai(prompt, placeholder, config, app).await
     };
     
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
@@ -266,7 +267,7 @@ fn cmd_set_game_mode(
 #[tauri::command]
 fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     eprintln!("[RUST] cmd_get_available_models - provider: {}", provider);
-    let result = commands::cmd_get_available_models(provider, base_url, api_key);
+    let result = llm::get_available_models(provider, base_url, api_key);
     eprintln!("[RUST] cmd_get_available_models - result: {:?}", result.as_ref().map(|m| m.len()));
     result
 }
@@ -274,7 +275,13 @@ fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<
 #[tauri::command]
 fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<String>, model: String) -> Result<(), String> {
     eprintln!("[RUST] cmd_save_llm_config - provider: {}, model: {}", provider, model);
-    let result = commands::cmd_save_llm_config(provider, base_url, api_key, model);
+    let config = engine13::llm::LlmConfig {
+        provider,
+        api_key,
+        model,
+        base_url,
+    };
+    let result = llm::save_llm_config(&config);
     eprintln!("[RUST] cmd_save_llm_config - result: {:?}", result.is_ok());
     result
 }
