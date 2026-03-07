@@ -76,7 +76,11 @@ const App: React.FC = () => {
     try {
       setIsLoading(true);
       setLoadingStep('Loading scenario...');
-      
+
+      // Reset UI state for clean start
+      setNarrative("");
+      setRecentEvents([]);
+
       const loadResult = await loadScenario(scenarioId);
       if (!loadResult.success) {
         throw new Error(loadResult.error || 'Failed to load scenario');

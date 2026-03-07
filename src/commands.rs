@@ -357,34 +357,20 @@ fn get_universal_actions(_world_state: &WorldState) -> Vec<crate::core::PatronAc
     actions
 }
 
-/// Submit a player action
+/// Submit a player action - applies effects/costs WITHOUT advancing tick
 pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitActionResponse, String> {
     let action_input = PlayerActionInput { action_id: action_id.clone(), target_actor_id: None };
     let (effects, costs) = apply_player_action(state, &action_input)?;
 
-    // Get action details for trigger
-    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-    let action = scenario.patron_actions.iter().find(|a| a.id == action_id)
-        .ok_or_else(|| format!("Action '{}' not found", action_id))?;
-    let action_info = (action.clone(), effects.clone(), costs.clone());
-
-    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
-    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-
-    tick(world_state, scenario, &mut state.event_log);
-
-    let scenario_clone = scenario.clone();
-    let event_log_clone = state.event_log.clone();
-
-    // Pass action info to trigger check - this will reset ticks_since_last_narrative if trigger fires
-    let llm_trigger = check_llm_trigger_with_data(world_state, &scenario_clone, &event_log_clone, Some((&action_info.0, &action_info.1, &action_info.2)));
+    // Note: We do NOT call tick() here - action application is separate from time advancement
+    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
 
     Ok(SubmitActionResponse {
         success: true,
         effects,
         costs,
         new_state: world_state.clone(),
-        llm_trigger,
+        llm_trigger: None,
         error: None,
     })
 }
