@@ -1,8 +1,105 @@
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::core::{Event, EventType, WorldState, Scenario};
+use crate::core::{Event, EventType, WorldState, Scenario, Religion, Culture};
 use crate::engine::EventLog;
+
+/// Cultural affinity between two cultures (0.0 = hostile, 1.0 = identical)
+pub fn cultural_affinity(a_culture: &Culture, b_culture: &Culture) -> f64 {
+    use Culture::*;
+    match (a_culture, b_culture) {
+        (x, y) if x == y => 0.2,  // Same culture has low friction
+
+        // Latin
+        (Latin, Greek) | (Greek, Latin)       => 0.4,
+        (Latin, Germanic) | (Germanic, Latin) => 0.3,
+        (Latin, Slavic) | (Slavic, Latin)     => 0.7,
+        (Latin, Arabic) | (Arabic, Latin)     => 0.8,
+        (Latin, Turkic) | (Turkic, Latin)     => 1.0,
+        (Latin, Persian) | (Persian, Latin)   => 0.9,
+        (Latin, Indian) | (Indian, Latin)     => 1.0,
+        (Latin, EastAsian) | (EastAsian, Latin) => 1.0,
+
+        // Greek
+        (Greek, Slavic) | (Slavic, Greek)     => 0.3,
+        (Greek, Germanic) | (Germanic, Greek) => 0.8,
+        (Greek, Arabic) | (Arabic, Greek)     => 0.7,
+        (Greek, Turkic) | (Turkic, Greek)     => 0.9,
+        (Greek, Persian) | (Persian, Greek)   => 0.8,
+        (Greek, Indian) | (Indian, Greek)     => 1.0,
+        (Greek, EastAsian) | (EastAsian, Greek) => 1.0,
+
+        // Slavic
+        (Slavic, Germanic) | (Germanic, Slavic) => 0.7,
+        (Slavic, Arabic) | (Arabic, Slavic)     => 0.9,
+        (Slavic, Turkic) | (Turkic, Slavic)     => 0.8,
+        (Slavic, Persian) | (Persian, Slavic)   => 0.9,
+        (Slavic, Indian) | (Indian, Slavic)     => 1.0,
+        (Slavic, EastAsian) | (EastAsian, Slavic) => 1.0,
+
+        // Germanic
+        (Germanic, Arabic) | (Arabic, Germanic) => 0.9,
+        (Germanic, Turkic) | (Turkic, Germanic) => 1.0,
+        (Germanic, Persian) | (Persian, Germanic) => 0.9,
+        (Germanic, Indian) | (Indian, Germanic) => 1.0,
+        (Germanic, EastAsian) | (EastAsian, Germanic) => 1.0,
+
+        // Arabic
+        (Arabic, Turkic) | (Turkic, Arabic)   => 0.4,
+        (Arabic, Persian) | (Persian, Arabic) => 0.4,
+        (Arabic, Indian) | (Indian, Arabic)   => 0.7,
+        (Arabic, EastAsian) | (EastAsian, Arabic) => 0.9,
+
+        // Turkic
+        (Turkic, Persian) | (Persian, Turkic) => 0.5,
+        (Turkic, Indian) | (Indian, Turkic)   => 0.8,
+        (Turkic, EastAsian) | (EastAsian, Turkic) => 0.7,
+
+        // Persian
+        (Persian, Indian) | (Indian, Persian) => 0.6,
+        (Persian, EastAsian) | (EastAsian, Persian) => 0.9,
+
+        // Indian
+        (Indian, EastAsian) | (EastAsian, Indian) => 0.7,
+
+        _ => 0.8,
+    }
+}
+
+/// Religious modifier for interactions (-0.2 = harmonious, +0.3 = hostile)
+pub fn religious_modifier(a_religion: &Religion, b_religion: &Religion) -> f64 {
+    use Religion::*;
+    match (a_religion, b_religion) {
+        (x, y) if x == y                          => -0.2,  // Same religion
+        (Catholic, Orthodox) | (Orthodox, Catholic) => 0.2,
+        (Catholic, Muslim) | (Muslim, Catholic)     => 0.3,
+        (Orthodox, Muslim) | (Muslim, Orthodox)     => 0.3,
+        (Buddhist, Muslim) | (Muslim, Buddhist)     => 0.2,
+        (Hindu, Muslim) | (Muslim, Hindu)           => 0.3,
+        _                                           => 0.0,
+    }
+}
+
+/// Overall affinity between two actors (0.0 = hostile, 1.0 = allied)
+pub fn affinity(a: &crate::core::Actor, b: &crate::core::Actor) -> f64 {
+    let base = cultural_affinity(&a.culture, &b.culture);
+    let modifier = religious_modifier(&a.religion, &b.religion);
+    (base + modifier).clamp(0.0, 1.0)
+}
+
+/// Effective military strength accounting for force projection through neighbors
+pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
+    let active_neighbors = neighbors.len().max(1);
+    
+    // Average affinity with all neighbors
+    let avg_affinity: f64 = neighbors.iter()
+        .map(|n| affinity(actor, n))
+        .sum::<f64>() / active_neighbors as f64;
+    
+    // More foreign neighbors = more military stretched
+    let divisor = (active_neighbors as f64 * avg_affinity).max(1.0);
+    actor.metrics.military_size / divisor
+}
 
 /// Type of interaction between actors
 #[derive(Debug, Clone, Copy, PartialEq)]
