@@ -129,6 +129,30 @@ fn calculate_military_interaction(
         return;
     }
 
+    // Determine stronger and weaker actor
+    let (stronger_id, weaker_id) = if actor_a.metrics.military_size >= actor_b.metrics.military_size {
+        (actor_a_id.to_string(), actor_b_id.to_string())
+    } else {
+        (actor_b_id.to_string(), actor_a_id.to_string())
+    };
+
+    // Protect weak actors - don't provoke war if weaker has military_size < 30
+    let weaker_military = {
+        let weaker = world.actors.get(&weaker_id).unwrap();
+        weaker.metrics.military_size
+    };
+    if weaker_military < 30.0 {
+        return;
+    }
+
+    // Check cooldown
+    let cooldown_key = format!("{}_vs_{}", stronger_id, weaker_id);
+    if let Some(&last_tick) = world.interaction_cooldowns.get(&cooldown_key) {
+        if current_tick - last_tick < 5 {
+            return;
+        }
+    }
+
     // Calculate probability
     let external_pressure_avg = (actor_a.metrics.external_pressure + actor_b.metrics.external_pressure) / 2.0;
     let military_ratio = if actor_a.metrics.military_size > actor_b.metrics.military_size {
@@ -146,12 +170,7 @@ fn calculate_military_interaction(
         return;
     }
 
-    // Determine stronger and weaker actor
-    let (stronger_id, weaker_id) = if actor_a.metrics.military_size >= actor_b.metrics.military_size {
-        (actor_a_id.to_string(), actor_b_id.to_string())
-    } else {
-        (actor_b_id.to_string(), actor_a_id.to_string())
-    };
+    eprintln!("[INTERACTION] Military: {} vs {}", actor_a_id, actor_b_id);
 
     // Apply losses
     let stronger_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
@@ -168,6 +187,9 @@ fn calculate_military_interaction(
         weaker.metrics.cohesion = (weaker.metrics.cohesion - cohesion_loss).max(0.0);
         weaker.metrics.external_pressure += pressure_gain;
     }
+
+    // Set cooldown
+    world.interaction_cooldowns.insert(cooldown_key, current_tick);
 
     // Record event
     let intensity = probability;
@@ -226,6 +248,8 @@ fn calculate_trade_interaction(
         actor.metrics.treasury += bonus;
     }
 
+    eprintln!("[INTERACTION] Trade: {} vs {}", actor_a_id, actor_b_id);
+
     // Record event if significant
     if should_record_event(&InteractionType::Trade, bonus) {
         let event = Event::new(
@@ -273,6 +297,8 @@ fn calculate_diplomatic_interaction(
     if let Some(influenced) = world.actors.get_mut(&influenced_id) {
         influenced.metrics.cohesion = (influenced.metrics.cohesion + influence).min(100.0);
     }
+
+    eprintln!("[INTERACTION] Diplomatic: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
     if should_record_event(&InteractionType::Diplomatic, influence) {
@@ -356,6 +382,8 @@ fn calculate_migration_interaction(
         neighbor.metrics.population += pop_gain;
     }
 
+    eprintln!("[INTERACTION] Migration: {} vs {}", actor_a_id, actor_b_id);
+
     // Record event if significant
     if should_record_event(&InteractionType::Migration, pressure_transfer) {
         let event = Event::new(
@@ -382,7 +410,7 @@ fn calculate_vassalage_interaction(
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
 ) {
-    // Condition: power_diff > 2.0, distance == 1
+    // Condition: power_diff > 4.0, distance == 1
     if distance != 1 {
         return;
     }
@@ -395,7 +423,7 @@ fn calculate_vassalage_interaction(
     let power_b = actor_b.metrics.military_size * actor_b.metrics.legitimacy / 100.0;
     let power_diff = (power_a - power_b).abs();
 
-    if power_diff <= 2.0 {
+    if power_diff <= 4.0 {
         return;
     }
 
@@ -406,8 +434,9 @@ fn calculate_vassalage_interaction(
         (actor_b_id.to_string(), actor_a_id.to_string())
     };
 
-    let legitimacy_loss = power_diff * 0.5;
-    let cohesion_loss = power_diff * 0.3;
+    // Softer penalties
+    let legitimacy_loss = power_diff * 0.2;
+    let cohesion_loss = power_diff * 0.2;
     let economic_gain = 1.0; // tribute
 
     let weak_legitimacy_before = {
@@ -424,6 +453,8 @@ fn calculate_vassalage_interaction(
     if let Some(dominant) = world.actors.get_mut(&dominant_id) {
         dominant.metrics.economic_output += economic_gain;
     }
+
+    eprintln!("[INTERACTION] Vassalage: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if legitimacy dropped below 30 for the first time
     let _weak_legitimacy_after = {
@@ -477,6 +508,8 @@ fn calculate_cultural_interaction(
     if let Some(actor) = world.actors.get_mut(actor_b_id) {
         actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
     }
+
+    eprintln!("[INTERACTION] Cultural: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event rarely — only if cohesion changed > 3.0
     if should_record_event(&InteractionType::Cultural, cohesion_change.abs()) {

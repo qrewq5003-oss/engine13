@@ -75,6 +75,8 @@ pub struct WorldState {
     pub prev_metrics: HashMap<String, ActorMetrics>,
     /// Ticks since last narrative trigger - for time-based trigger
     pub ticks_since_last_narrative: u32,
+    /// Interaction cooldowns - key: "actor_a_vs_actor_b", value: last tick
+    pub interaction_cooldowns: HashMap<String, u32>,
 }
 
 impl WorldState {
@@ -111,6 +113,7 @@ impl WorldState {
             rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
+            interaction_cooldowns: HashMap::new(),
         }
     }
 
@@ -135,6 +138,7 @@ impl WorldState {
             rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
+            interaction_cooldowns: HashMap::new(),
         }
     }
 
