@@ -54,6 +54,38 @@
   cursor: not-allowed;
 }
 
+.control-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.control-buttons .advance-button {
+  flex: 1;
+}
+
+.save-button {
+  padding: 14px 20px;
+  background: #a6e3a1;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #94e2d5;
+}
+
+.save-button:disabled {
+  background: #45475a;
+  color: #6c7086;
+  cursor: not-allowed;
+}
+
 .actions-section,
 .events-section {
   display: flex;

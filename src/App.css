@@ -213,3 +213,30 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* Save notification */
+.save-notification {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  background: #a6e3a1;
+  color: #1e1e2e;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

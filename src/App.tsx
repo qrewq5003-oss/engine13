@@ -17,6 +17,7 @@ import {
   getScenarioList,
   listSaves,
   loadGame,
+  saveGame,
 } from './api';
 import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveData } from './types';
 import './App.css';
@@ -245,6 +246,25 @@ const App: React.FC = () => {
     }
   }, [isLoading, refreshState]);
 
+  // Handle save game
+  const handleSaveGame = useCallback(async () => {
+    try {
+      const response = await saveGame();
+      if (response.success) {
+        // Show brief notification
+        setSaveNotification('Сохранено!');
+        setTimeout(() => setSaveNotification(null), 2000);
+      } else {
+        setError(response.error || 'Failed to save');
+      }
+    } catch (err) {
+      setError(`Failed to save: ${err}`);
+    }
+  }, []);
+
+  // Save notification state
+  const [saveNotification, setSaveNotification] = useState<string | null>(null);
+
   // Render menu screen
   if (gameState === 'menu') {
     return (
@@ -343,10 +363,17 @@ const App: React.FC = () => {
             recentEvents={recentEvents}
             onAdvanceTick={handleAdvanceTick}
             onActionSubmit={handleActionSubmit}
+            onSaveGame={handleSaveGame}
             isLoading={isLoading || isGeneratingNarrative}
           />
         </div>
       </main>
+
+      {saveNotification && (
+        <div className="save-notification">
+          {saveNotification}
+        </div>
+      )}
 
       <SettingsPanel
         isOpen={isSettingsOpen}

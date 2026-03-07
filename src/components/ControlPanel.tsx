@@ -9,6 +9,7 @@ interface ControlPanelProps {
   recentEvents: Event[];
   onAdvanceTick: () => void;
   onActionSubmit: (actionId: string) => void;
+  onSaveGame: () => void;
   isLoading: boolean;
 }
 
@@ -19,6 +20,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   recentEvents,
   onAdvanceTick,
   onActionSubmit,
+  onSaveGame,
   isLoading,
 }) => {
   const [expandedAction, setExpandedAction] = useState<string | null>(null);
@@ -41,13 +43,22 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <span className="tick">Tick {currentTick}</span>
       </div>
 
-      <button
-        className="advance-button"
-        onClick={onAdvanceTick}
-        disabled={isLoading}
-      >
-        {isLoading ? 'Processing...' : 'Next Tick →'}
-      </button>
+      <div className="control-buttons">
+        <button
+          className="advance-button"
+          onClick={onAdvanceTick}
+          disabled={isLoading}
+        >
+          {isLoading ? 'Processing...' : 'Next Tick →'}
+        </button>
+        <button
+          className="save-button"
+          onClick={onSaveGame}
+          disabled={isLoading}
+        >
+          Сохранить
+        </button>
+      </div>
 
       <div className="actions-section">
         <h3 className="section-title">Available Actions</h3>
