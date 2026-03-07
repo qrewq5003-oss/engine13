@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
+use rand::Rng;
 use crate::core::{
     Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
-    EventType, Scenario, WorldState,
+    EventType, MetricRef, Scenario, WorldState,
 };
 
 /// Coefficients for dependency graph relationships
@@ -113,17 +114,16 @@ impl EventLog {
 }
 
 /// Main simulation tick function
-/// 
-/// Order of operations (from architecture):
-/// 1. Apply auto_deltas from scenario
-/// 2. Apply dependency graph coefficients
-/// 3. Calculate neighbor interactions (trade, pressure, migration)
-/// 4. Apply actor tags effects
-/// 5. Clamp all metrics to valid bounds
-/// 6. Check threshold effects, rank_conditions, milestone_events
-/// 7. Check on_collapse conditions
-/// 8. Record events to EventLog
-/// 9. Update tick and year in WorldState
+///
+/// Canonical 8-phase pipeline:
+/// 1. Auto-deltas via MetricRef (treasury, scenario metrics)
+/// 2. Dependency graph and interactions
+/// 3. Actor tag effects
+/// 4. Clamp metrics to bounds
+/// 5. Events: thresholds, ranks, milestones, game mode, relevance
+/// 6. Actor collapses
+/// 7. Record changes and generation mechanics
+/// 8. Advance tick state
 pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
@@ -141,107 +141,140 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
         .map(|(id, actor)| (id.clone(), actor.metrics.clone()))
         .collect();
 
-    // Step 1: Apply auto_deltas
-    apply_auto_deltas(world, scenario, &mut rng);
+    // Phase 1: Auto-deltas via MetricRef
+    phase_auto_deltas(world, scenario, &mut rng);
 
-    // Step 1b: Apply treasury calculation (incomes - expenses)
+    // Phase 2: Dependency graph and interactions
+    phase_interactions(world);
+
+    // Phase 3: Actor tag effects
+    phase_actor_tags(world, scenario);
+
+    // Phase 4: Clamp metrics
+    phase_clamp(world);
+
+    // Phase 5: Events (thresholds, ranks, milestones, game mode, relevance)
+    phase_events(world, scenario, event_log);
+
+    // Phase 6: Actor collapses
+    phase_collapses(world, scenario, event_log);
+
+    // Phase 7: Record changes and generation mechanics
+    phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
+
+    // Phase 8: Advance tick state
+    phase_advance(world, scenario, &mut rng);
+}
+
+// ============================================================================
+// Phase 1: Auto-deltas via MetricRef
+// ============================================================================
+
+fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
+    // Treasury via income/expenses formula (separate from auto_deltas)
     apply_treasury(world);
 
-    // Step 2: Apply dependency graph coefficients
+    // Apply auto_deltas via MetricRef - unified for actor/family/global
+    for auto_delta in &scenario.auto_deltas {
+        // Check conditions
+        let mut delta = auto_delta.base;
+        for cond in &auto_delta.conditions {
+            if check_auto_delta_condition(world, cond) {
+                delta += cond.delta;
+            }
+        }
+
+        // Apply noise
+        let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
+        let final_delta = delta + noise;
+
+        // Apply via MetricRef - single path for all metric types
+        MetricRef::parse(&auto_delta.metric).apply(world, final_delta);
+    }
+}
+
+/// Check auto_delta condition against world state
+fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
+    let value = MetricRef::parse(&cond.metric).get(world);
+    match cond.operator {
+        crate::core::ComparisonOperator::Less => value < cond.value,
+        crate::core::ComparisonOperator::LessOrEqual => value <= cond.value,
+        crate::core::ComparisonOperator::Greater => value > cond.value,
+        crate::core::ComparisonOperator::GreaterOrEqual => value >= cond.value,
+        crate::core::ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
+    }
+}
+
+// ============================================================================
+// Phase 2: Dependency graph and interactions
+// ============================================================================
+
+fn phase_interactions(world: &mut WorldState) {
+    // Apply dependency graph coefficients
     apply_dependency_graph(world);
 
-    // Step 3: Calculate neighbor interactions
+    // Calculate neighbor interactions (trade, pressure, migration)
     calculate_interactions(world);
+}
 
-    // Step 4: Apply actor tags effects
+// ============================================================================
+// Phase 3: Actor tag effects
+// ============================================================================
+
+fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     apply_actor_tags(world, scenario);
+}
 
-    // Step 5: Clamp metrics to valid bounds
+// ============================================================================
+// Phase 4: Clamp metrics
+// ============================================================================
+
+fn phase_clamp(world: &mut WorldState) {
     clamp_metrics(world);
+}
 
-    // Step 6: Check threshold effects, rank_conditions, milestone_events
+// ============================================================================
+// Phase 5: Events (thresholds, ranks, milestones, game mode, relevance)
+// ============================================================================
+
+fn phase_events(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     check_threshold_effects(world, scenario, event_log);
     check_rank_conditions(world, scenario, event_log);
     check_milestone_events(world, scenario, event_log);
-
-    // Step 6b: Check game mode transitions (after milestone events)
     check_game_mode_transitions(world, scenario, event_log);
-
-    // Step 6c: Check relevance thresholds for actor promotion/demotion
     check_relevance_thresholds(world, scenario, event_log);
+}
 
-    // Step 7: Check on_collapse conditions
+// ============================================================================
+// Phase 6: Actor collapses
+// ============================================================================
+
+fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     check_collapses(world, scenario, event_log);
+}
 
-    // Step 8: Record metric change events if significant
-    record_metric_changes(world, &initial_states, current_tick, current_year, event_log);
+// ============================================================================
+// Phase 7: Record changes and generation mechanics
+// ============================================================================
 
-    // Step 8b: Check generation transfer (patriarch aging)
+fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &HashMap<String, ActorMetrics>, current_tick: u32, current_year: i32, event_log: &mut EventLog) {
+    record_metric_changes(world, initial_states, current_tick, current_year, event_log);
     check_generation_transfer(world, scenario, event_log);
-
-    // Step 8d: Update metric history for relevance tracking
     update_metric_history(world);
-
-    // Step 8e: Update prev_metrics for delta calculation
     update_prev_metrics(world);
-
-    // Step 8f: Increment ticks_since_last_narrative counter
     world.ticks_since_last_narrative += 1;
+}
 
-    // Save RNG state once at the end of the tick
+// ============================================================================
+// Phase 8: Advance tick state
+// ============================================================================
+
+fn phase_advance(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
     world.rng_state = rng.get_seed();
-
-    // Step 9: Update tick and year
     world.tick += 1;
     world.year += scenario.tick_span as i32;
 }
 
-// ============================================================================
-// Step 1: Auto Deltas
-// ============================================================================
-
-fn apply_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
-    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-
-    for actor_id in actor_ids {
-        if let Some(actor) = world.actors.get_mut(&actor_id) {
-            for auto_delta in &scenario.auto_deltas {
-                // Filter by actor_id if specified
-                if let Some(ref delta_actor_id) = auto_delta.actor_id {
-                    if delta_actor_id != &actor.id {
-                        continue;
-                    }
-                }
-                apply_single_auto_delta(actor, auto_delta, rng);
-            }
-        }
-    }
-
-    // Apply family auto_deltas (metrics starting with "family_")
-    for auto_delta in &scenario.auto_deltas {
-        if auto_delta.metric.starts_with("family_") {
-            apply_family_auto_delta(world, auto_delta, rng);
-        }
-    }
-
-    // Apply global auto_deltas (e.g., federation_progress)
-    for auto_delta in &scenario.auto_deltas {
-        if !auto_delta.metric.starts_with("family_") 
-            && !auto_delta.metric.contains('.') 
-            && auto_delta.actor_id.is_none() {
-            // Check if this metric is not an actor metric
-            let is_actor_metric = world.actors.keys().any(|id| auto_delta.metric.starts_with(&format!("{}.", id)));
-            if !is_actor_metric {
-                apply_global_auto_delta(world, auto_delta, rng);
-            }
-        }
-    }
-}
-
-/// Apply treasury calculation: treasury += incomes - expenses
-/// Formula:
-///   incomes = economic_output × population × 0.001
-///   expenses = military_size × 0.8
 fn apply_treasury(world: &mut WorldState) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
@@ -254,135 +287,7 @@ fn apply_treasury(world: &mut WorldState) {
     }
 }
 
-fn apply_single_auto_delta(actor: &mut Actor, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
-    use rand::Rng;
-
-    // Treasury is calculated separately via income/expenses formula
-    if auto_delta.metric == "treasury" {
-        return;
-    }
-
-    // Calculate delta: base + sum of matching conditions
-    let mut delta = auto_delta.base;
-    for cond in &auto_delta.conditions {
-        if check_condition(&actor.metrics, cond) {
-            delta += cond.delta;
-        }
-    }
-
-    // Apply noise using deterministic RNG
-    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
-    let final_delta = delta + noise;
-
-    apply_metric_delta(&mut actor.metrics, &auto_delta.metric, final_delta);
-}
-
-/// Apply auto_delta to family metrics
-fn apply_family_auto_delta(world: &mut WorldState, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
-    use rand::Rng;
-
-    // Calculate delta: base + sum of matching conditions
-    let mut delta = auto_delta.base;
-    for cond in &auto_delta.conditions {
-        if check_global_condition(world, cond) {
-            delta += cond.delta;
-        }
-    }
-
-    // Apply noise using deterministic RNG
-    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
-    let final_delta = delta + noise;
-
-    // Apply delta to family metric
-    let current = world.family_metrics.get(&auto_delta.metric).copied().unwrap_or(0.0);
-    let new_value = (current + final_delta).max(0.0).min(100.0);
-    world.family_metrics.insert(auto_delta.metric.clone(), new_value);
-}
-
-/// Apply auto_delta to global metrics (e.g., federation_progress)
-fn apply_global_auto_delta(world: &mut WorldState, auto_delta: &crate::core::AutoDelta, rng: &mut rand_chacha::ChaCha8Rng) {
-    use rand::Rng;
-
-    // Calculate delta: base + sum of matching conditions
-    let mut delta = auto_delta.base;
-    for cond in &auto_delta.conditions {
-        if check_global_condition(world, cond) {
-            delta += cond.delta;
-        }
-    }
-
-    // Apply noise using deterministic RNG
-    let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
-    let mut final_delta = delta + noise;
-
-    // Apply dynamic federation weight for federation_progress
-    if auto_delta.metric == "federation_progress" {
-        // Calculate average weight from all federation members
-        let avg_weight = calculate_federation_weight_avg(world);
-        final_delta *= avg_weight;
-    }
-
-    // Apply delta to global metric
-    let current = world.global_metrics.get(&auto_delta.metric).copied().unwrap_or(0.0);
-    let new_value = (current + final_delta).max(0.0).min(100.0);
-    world.global_metrics.insert(auto_delta.metric.clone(), new_value);
-}
-
-/// Calculate average federation weight from Venice, Genoa, Milan
-fn calculate_federation_weight_avg(world: &WorldState) -> f64 {
-    let mut total_weight = 0.0;
-    let mut count = 0;
-
-    for actor_id in &["venice", "genoa", "milan"] {
-        let weight = crate::scenarios::constantinople_1430::federation_weight(actor_id, world);
-        total_weight += weight;
-        count += 1;
-    }
-
-    if count > 0 { total_weight / count as f64 } else { 1.0 }
-}
-
-/// Check condition against global metrics, family metrics, and actor metrics
-fn check_global_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
-    let value = if cond.metric.starts_with("family_") {
-        world.family_metrics.get(&cond.metric).copied().unwrap_or(0.0)
-    } else if cond.metric.contains('.') {
-        // Actor metric (e.g., "venice.cohesion")
-        let parts: Vec<&str> = cond.metric.splitn(2, '.').collect();
-        if parts.len() == 2 {
-            let actor_id = parts[0];
-            let metric_name = parts[1];
-            world.actors.get(actor_id)
-                .map(|a| get_metric_value(&a.metrics, metric_name))
-                .unwrap_or(50.0)
-        } else {
-            50.0
-        }
-    } else {
-        // Global metric (e.g., federation_progress)
-        world.global_metrics.get(&cond.metric).copied().unwrap_or(0.0)
-    };
-
-    match cond.operator {
-        ComparisonOperator::Less => value < cond.value,
-        ComparisonOperator::LessOrEqual => value <= cond.value,
-        ComparisonOperator::Greater => value > cond.value,
-        ComparisonOperator::GreaterOrEqual => value >= cond.value,
-        ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
-    }
-}
-
-fn check_condition(metrics: &ActorMetrics, cond: &crate::core::DeltaCondition) -> bool {
-    let value = get_metric_value(metrics, &cond.metric);
-    match cond.operator {
-        ComparisonOperator::Less => value < cond.value,
-        ComparisonOperator::LessOrEqual => value <= cond.value,
-        ComparisonOperator::Greater => value > cond.value,
-        ComparisonOperator::GreaterOrEqual => value >= cond.value,
-        ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
-    }
-}
-
+// Helper functions for metric operations
 fn get_metric_value(metrics: &ActorMetrics, name: &str) -> f64 {
     match name {
         "population" => metrics.population,
