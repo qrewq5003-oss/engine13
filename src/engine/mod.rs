@@ -1,10 +1,13 @@
 use std::collections::{HashMap, VecDeque};
 
 use rand::Rng;
+use rand_chacha::ChaCha8Rng;
 use crate::core::{
     Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
+
+mod interactions;
 
 /// Coefficients for dependency graph relationships
 #[derive(Debug, Clone, Copy)]
@@ -145,7 +148,7 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     phase_auto_deltas(world, scenario, &mut rng);
 
     // Phase 2: Dependency graph and interactions
-    phase_interactions(world);
+    phase_interactions(world, scenario, event_log, &mut rng);
 
     // Phase 3: Actor tag effects
     phase_actor_tags(world, scenario);
@@ -209,12 +212,12 @@ fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondi
 // Phase 2: Dependency graph and interactions
 // ============================================================================
 
-fn phase_interactions(world: &mut WorldState) {
+fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
     // Apply dependency graph coefficients
     apply_dependency_graph(world);
 
-    // Calculate neighbor interactions (trade, pressure, migration)
-    calculate_interactions(world);
+    // Calculate neighbor interactions (six types: military, trade, diplomatic, migration, vassalage, cultural)
+    interactions::calculate_interactions(world, scenario, event_log, rng);
 }
 
 // ============================================================================
@@ -458,267 +461,6 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
 // ============================================================================
 // Step 3: Neighbor Interactions
-// ============================================================================
-
-fn calculate_interactions(world: &mut WorldState) {
-    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-
-    // Collect all interactions first to avoid borrow issues
-    let mut interactions: Vec<(String, String, InteractionType, f64)> = Vec::new();
-
-    for actor_id in &actor_ids {
-        if let Some(actor) = world.actors.get(actor_id) {
-            for neighbor in &actor.neighbors {
-                if world.actors.contains_key(&neighbor.id) {
-                    // Get ALL interactions (trade, pressure, migration, cultural) not just the first one
-                    let actor_interactions = determine_all_interactions(actor, &neighbor.id, world);
-                    // Add source actor_id to each interaction
-                    for (target_id, itype, magnitude) in actor_interactions {
-                        interactions.push((actor_id.clone(), target_id, itype, magnitude));
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply interactions
-    for (source_id, target_id, itype, magnitude) in interactions {
-        apply_interaction(world, &source_id, &target_id, itype, magnitude);
-    }
-}
-
-#[derive(Debug, Clone)]
-enum InteractionType {
-    Trade,
-    MilitaryPressure,
-    Migration,
-    CulturalInfluence,
-}
-
-/// Determine ALL possible interactions between two actors (not just the first one)
-fn determine_all_interactions(
-    actor: &Actor,
-    neighbor_id: &str,
-    world: &WorldState,
-) -> Vec<(String, InteractionType, f64)> {
-    let mut result = Vec::new();
-
-    let neighbor = match world.actors.get(neighbor_id) {
-        Some(n) => n,
-        None => return result,
-    };
-
-    // Military pressure - calculate first to determine trade suppression
-    let pressure = calculate_military_pressure(actor, neighbor);
-    if pressure > 0.1 {
-        result.push((neighbor.id.clone(), InteractionType::MilitaryPressure, pressure));
-    }
-
-    // Trade suppression logic based on military pressure
-    // > 0.4: full suppression (war suppresses trade)
-    // 0.2 - 0.4: trade with 0.5 coefficient (border tensions)
-    // < 0.2: trade works normally
-    let trade_suppressed = pressure > 0.4;
-    let trade_coefficient = if pressure > 0.4 {
-        0.0
-    } else if pressure > 0.2 {
-        0.5
-    } else {
-        1.0
-    };
-
-    // Check if trade is possible (adjacent OR has trade_networks tag)
-    let can_trade = neighbor.neighbors.iter().any(|n| n.id == actor.id)
-        || actor.tags.contains(&"trade_networks".to_string());
-
-    // Trade - both actors get a small bonus (if not suppressed by military pressure)
-    if !trade_suppressed && can_trade && neighbor.metrics.economic_output > 0.0 && actor.metrics.economic_output > 0.0 {
-        let distance_mod = distance_modifier(neighbor.neighbors.iter().find(|n| n.id == actor.id));
-        let trade_bonus = if actor.tags.contains(&"trade_networks".to_string())
-            || neighbor.tags.contains(&"trade_networks".to_string()) {
-            1.0
-        } else {
-            distance_mod
-        };
-
-        // Both actors gain equally: small base bonus × distance modifier × pressure coefficient
-        let base_gain = 2.0; // Small fixed base gain
-        let gain = ((base_gain * trade_bonus * trade_coefficient).min(3.0 * trade_coefficient)).max(0.0);
-        if gain > 0.0 {
-            result.push((neighbor.id.clone(), InteractionType::Trade, gain));
-        }
-    }
-
-    // Migration
-    let migration = calculate_migration(actor, neighbor);
-    if migration > 0.01 {
-        result.push((neighbor.id.clone(), InteractionType::Migration, migration));
-    }
-
-    // Cultural influence
-    let cultural = calculate_cultural_influence(actor, neighbor);
-    if cultural > 0.1 {
-        result.push((neighbor.id.clone(), InteractionType::CulturalInfluence, cultural));
-    }
-
-    result
-}
-
-/// Legacy function - kept for compatibility, returns only the first interaction
-#[allow(dead_code)]
-fn determine_interaction(
-    actor: &Actor,
-    neighbor_id: &str,
-    world: &WorldState,
-) -> Option<(String, InteractionType, f64)> {
-    let all = determine_all_interactions(actor, neighbor_id, world);
-    all.into_iter().next()
-}
-
-fn distance_modifier(neighbor: Option<&crate::core::Neighbor>) -> f64 {
-    match neighbor {
-        Some(n) => match n.distance {
-            1 => 1.0,
-            2 => 0.7,
-            3 => 0.4,
-            _ => 0.1,
-        },
-        None => 0.1,
-    }
-}
-
-fn border_type_modifier(border_type: &crate::core::BorderType) -> f64 {
-    match border_type {
-        crate::core::BorderType::Land => 1.0,
-        crate::core::BorderType::Sea => 0.5,
-    }
-}
-
-fn calculate_military_pressure(actor: &Actor, target: &Actor) -> f64 {
-    let neighbor_info = target.neighbors.iter().find(|n| n.id == actor.id);
-    let distance_mod = distance_modifier(neighbor_info);
-    let border_mod = neighbor_info
-        .map(|n| border_type_modifier(&n.border_type))
-        .unwrap_or(0.5);
-
-    let power_ratio = actor.power_projection(1.0) / target.power_projection(1.0).max(1.0);
-    power_ratio * distance_mod * border_mod
-}
-
-fn calculate_migration(actor: &Actor, _target: &Actor) -> f64 {
-    let mut rate: f64 = 0.0;
-
-    if actor.metrics.external_pressure > 70.0 {
-        rate += 0.05;
-    }
-    if actor.metrics.economic_output < 20.0 {
-        rate += 0.03;
-    }
-    if actor.metrics.cohesion < 25.0 {
-        rate += 0.04;
-    }
-
-    // Combination bonuses
-    let conditions = [
-        actor.metrics.external_pressure > 70.0,
-        actor.metrics.economic_output < 20.0,
-        actor.metrics.cohesion < 25.0,
-    ]
-    .iter()
-    .filter(|&&c| c)
-    .count();
-
-    if conditions >= 2 {
-        rate += 0.04;
-    }
-    if conditions >= 3 {
-        rate += 0.04;
-    }
-
-    rate.min(0.15)
-}
-
-fn calculate_cultural_influence(actor: &Actor, target: &Actor) -> f64 {
-    let neighbor_info = target.neighbors.iter().find(|n| n.id == actor.id);
-    let distance_mod = distance_modifier(neighbor_info);
-
-    let cultural_strength = (actor.metrics.legitimacy * 0.4
-        + actor.metrics.cohesion * 0.3
-        + actor.metrics.economic_output * 0.3)
-        * distance_mod;
-
-    let target_strength = target.metrics.legitimacy * 0.4
-        + target.metrics.cohesion * 0.3
-        + target.metrics.economic_output * 0.3;
-
-    if cultural_strength > target_strength {
-        cultural_strength - target_strength
-    } else {
-        0.0
-    }
-}
-
-fn apply_interaction(
-    world: &mut WorldState,
-    source_id: &str,
-    target_id: &str,
-    itype: InteractionType,
-    magnitude: f64,
-) {
-    match itype {
-        InteractionType::Trade => {
-            // Both actors get the trade bonus equally
-            if let Some(source) = world.actors.get_mut(source_id) {
-                source.metrics.economic_output += magnitude * 0.5;
-                source.metrics.economic_output = source.metrics.economic_output.min(100.0);
-            }
-            if let Some(target) = world.actors.get_mut(target_id) {
-                target.metrics.economic_output += magnitude * 0.5;
-                target.metrics.economic_output = target.metrics.economic_output.min(100.0);
-            }
-        }
-        InteractionType::MilitaryPressure => {
-            if let Some(target) = world.actors.get_mut(target_id) {
-                target.metrics.external_pressure += magnitude * 10.0;
-                target.metrics.external_pressure = target.metrics.external_pressure.min(100.0);
-            }
-        }
-        InteractionType::Migration => {
-            if let Some(source) = world.actors.get_mut(source_id) {
-                let migration_amount = source.metrics.population * magnitude;
-                source.metrics.population -= migration_amount;
-                source.metrics.military_size -= migration_amount * 0.0003;
-
-                if let Some(target) = world.actors.get_mut(target_id) {
-                    target.metrics.population += migration_amount;
-                    let rel_amount = migration_amount / target.metrics.population.max(1.0);
-                    target.metrics.cohesion -= rel_amount * 0.5;
-                    target.metrics.external_pressure += rel_amount * 0.3;
-                }
-            }
-        }
-        InteractionType::CulturalInfluence => {
-            if let Some(target) = world.actors.get_mut(target_id) {
-                // If target cohesion > 60, reduce the effect magnitude by 70%
-                let effective_magnitude = if target.metrics.cohesion > 60.0 {
-                    magnitude * 0.3
-                } else {
-                    magnitude
-                };
-
-                target.metrics.cohesion -= effective_magnitude * 0.1;
-                target.metrics.legitimacy -= effective_magnitude * 0.05;
-
-                // Overwhelming superiority
-                if effective_magnitude > target.metrics.cohesion * 2.0 {
-                    target.metrics.cohesion -= effective_magnitude * 0.15;
-                    target.metrics.legitimacy -= effective_magnitude * 0.075;
-                }
-            }
-        }
-    }
-}
-
 // ============================================================================
 // Step 4: Actor Tags Effects
 // ============================================================================
