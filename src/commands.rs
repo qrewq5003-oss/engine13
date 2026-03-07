@@ -665,7 +665,8 @@ pub fn generate_narrative_prompt(
     db: &Db,
 ) -> String {
     let mut prompt = String::new();
-    
+    let current_year = world_state.year;
+
     // Section 1: Scenario context (depends on game mode)
     match world_state.game_mode {
         crate::core::GameMode::Consequences => {
@@ -683,6 +684,16 @@ pub fn generate_narrative_prompt(
             prompt.push_str("\n\n");
         }
     }
+
+    // Section 1.5: Year anchoring instruction
+    prompt.push_str(&format!(
+        "=== ИНСТРУКЦИЯ ===\n\
+         ТЕКУЩИЙ ГОД: {}. \n\
+         Пиши ТОЛЬКО про события этого года.\n\
+         Не упоминай будущие годы.\n\
+         Не экстраполируй за пределы {}.\n\n",
+        current_year, current_year
+    ));
 
     // Section 2: World state - foreground actors only
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
@@ -757,17 +768,18 @@ pub fn generate_narrative_prompt(
         &narrative_actor_ids,
     );
     
-    let events_to_show = match relevant_events {
+    let events_to_show: Vec<crate::core::Event> = match relevant_events {
         Ok(events) => {
             eprintln!("[NARRATIVE] Got {} relevant events from DB", events.len());
-            events
+            // Filter out events from the future
+            events.into_iter().filter(|e| e.year <= current_year).collect()
         }
         Err(e) => {
             eprintln!("[NARRATIVE] Failed to get relevant events from DB: {}", e);
             // Fallback to simple event_log query
             event_log.events.iter()
                 .filter(|e| {
-                    e.is_key || narrative_actor_ids.contains(&e.actor_id)
+                    (e.is_key || narrative_actor_ids.contains(&e.actor_id)) && e.year <= current_year
                 })
                 .cloned()
                 .collect()
