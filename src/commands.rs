@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tauri::Emitter;
 
-use crate::core::{Actor, Event, Scenario, WorldState};
+use crate::core::{Event, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::{tick, EventLog};
 use crate::scenarios::{load_rome_375, load_constantinople_1430};
@@ -255,25 +255,11 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
     // In Scenario mode, use scenario-specific actions
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
-    // Handle scenarios without player_actor (e.g., Constantinople 1430)
-    if scenario.player_actor_id.is_none() {
-        let available_actions = scenario
-            .patron_actions
-            .iter()
-            .filter(|action| is_action_available_no_player(action, world_state))
-            .cloned()
-            .collect();
-        return Ok(available_actions);
-    }
-
-    // Scenarios with player_actor (e.g., Rome 375)
-    let player_actor_id = scenario.player_actor_id.as_ref().ok_or("Player actor not found")?;
-    let player_actor = world_state.actors.get(player_actor_id).ok_or("Player actor not found")?;
-
+    // Unified action filtering - works for all scenarios via MetricRef
     let available_actions = scenario
         .patron_actions
         .iter()
-        .filter(|action| is_action_available(action, player_actor, &world_state.family_metrics))
+        .filter(|action| is_action_available(action, world_state))
         .cloned()
         .collect();
 
@@ -1266,6 +1252,7 @@ pub fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<S
 // Helper Functions
 // ============================================================================
 
+/// Apply player action - unified for all scenarios via MetricRef
 fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
     use crate::core::MetricRef;
 
@@ -1277,16 +1264,8 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
         .ok_or_else(|| format!("Action '{}' not found", action_input.action_id))?
         .clone();
 
-    // Handle scenarios without player_actor (e.g., Constantinople 1430)
-    if scenario.player_actor_id.is_none() {
-        return apply_action_no_player(state, &action, action_input);
-    }
-
-    // Scenarios with player_actor (e.g., Rome 375)
-    let player_actor_id = scenario.player_actor_id.as_ref().ok_or("Player actor not found")?;
-    let player_actor = world_state.actors.get_mut(player_actor_id).ok_or("Player actor not found")?;
-
-    if !is_action_available(&action, player_actor, &world_state.family_metrics) {
+    // Check availability using unified function
+    if !is_action_available(&action, world_state) {
         return Err("Action is not available".to_string());
     }
 
@@ -1301,70 +1280,36 @@ fn apply_player_action(state: &mut AppState, action_input: &PlayerActionInput) -
     eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
     eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.family_metrics);
 
-    // Apply effects
-    let mut applied_effects = HashMap::new();
-    for (metric, effect) in &action.effects {
-        let metric_ref = MetricRef::parse(metric);
-        metric_ref.apply(world_state, *effect);
-        applied_effects.insert(metric.clone(), *effect);
-    }
-
-    eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
-    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.family_metrics);
-
-    // Record event
-    let event = Event::new(
-        format!("player_action_{}", action_input.action_id),
-        world_state.tick,
-        world_state.year,
-        "rome".to_string(),
-        crate::core::EventType::PlayerAction,
-        true,
-        format!("Действие игрока: {}", action.name),
-    );
-    state.event_log.add(event);
-
-    Ok((applied_effects, applied_costs))
-}
-
-/// Apply action for scenarios without player_actor (e.g., Constantinople 1430)
-/// Metric format: "actor_id.metric" (e.g., "venice.treasury") or "federation_progress"
-fn apply_action_no_player(state: &mut AppState, action: &crate::core::PatronAction, _action_input: &PlayerActionInput) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
-    use crate::core::MetricRef;
-
-    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
-
-    // Apply cost
-    let mut applied_costs = HashMap::new();
-    for (metric, cost) in &action.cost {
-        let metric_ref = MetricRef::parse(metric);
-        metric_ref.apply(world_state, *cost);
-        applied_costs.insert(metric.clone(), *cost);
-    }
-
     // Apply effects with dynamic federation weights
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
+        let metric_ref = MetricRef::parse(metric);
         if metric == "federation_progress" {
             // Apply federation_progress with dynamic weight based on the action's source
-            let weight = determine_action_source_weight(action, world_state);
+            let weight = determine_action_source_weight(&action, world_state);
             let weighted_effect = effect * weight;
-            let metric_ref = MetricRef::parse(metric);
             metric_ref.apply(world_state, weighted_effect);
             applied_effects.insert(metric.clone(), weighted_effect);
         } else {
-            let metric_ref = MetricRef::parse(metric);
             metric_ref.apply(world_state, *effect);
             applied_effects.insert(metric.clone(), *effect);
         }
     }
 
-    // Record event
+    eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
+    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.family_metrics);
+
+    // Record event - use first foreground actor or default
+    let event_actor = world_state.actors.values()
+        .find(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
     let event = Event::new(
-        format!("player_action_{}", _action_input.action_id),
+        format!("player_action_{}", action_input.action_id),
         world_state.tick,
         world_state.year,
-        "byzantium".to_string(),
+        event_actor,
         crate::core::EventType::PlayerAction,
         true,
         format!("Действие игрока: {}", action.name),
@@ -1407,34 +1352,8 @@ fn calculate_federation_weight(actor_id: &str, world_state: &WorldState) -> f64 
     }
 }
 
-fn is_action_available(action: &crate::core::PatronAction, player_actor: &Actor, family_metrics: &HashMap<String, f64>) -> bool {
-    match &action.available_if {
-        crate::core::ActionCondition::Always => true,
-        crate::core::ActionCondition::Metric { metric, operator, value } => {
-            let current = if metric.starts_with("family_") {
-                family_metrics.get(metric).copied().unwrap_or(0.0)
-            } else {
-                // Get metric directly from player_actor
-                match metric.as_str() {
-                    "population" => player_actor.metrics.population,
-                    "military_size" => player_actor.metrics.military_size,
-                    "military_quality" => player_actor.metrics.military_quality,
-                    "economic_output" => player_actor.metrics.economic_output,
-                    "cohesion" => player_actor.metrics.cohesion,
-                    "legitimacy" => player_actor.metrics.legitimacy,
-                    "external_pressure" => player_actor.metrics.external_pressure,
-                    "treasury" => player_actor.metrics.treasury,
-                    _ => 0.0,
-                }
-            };
-            compare_value(current, operator, value)
-        }
-    }
-}
-
-/// Check if action is available for scenarios without player_actor (e.g., Constantinople 1430)
-/// Uses MetricRef to parse and get metric values
-fn is_action_available_no_player(action: &crate::core::PatronAction, world_state: &WorldState) -> bool {
+/// Unified action availability check - works for all scenarios via MetricRef
+fn is_action_available(action: &crate::core::PatronAction, world_state: &WorldState) -> bool {
     use crate::core::MetricRef;
 
     match &action.available_if {
