@@ -93,11 +93,15 @@ impl Db {
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                -- Add scenario_id column if not exists (migration for existing databases)
+                ALTER TABLE events ADD COLUMN scenario_id TEXT;
+
                 -- Indexes for events
                 CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_id);
                 CREATE INDEX IF NOT EXISTS idx_events_tick ON events(tick);
                 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
                 CREATE INDEX IF NOT EXISTS idx_events_key ON events(is_key);
+                CREATE INDEX IF NOT EXISTS idx_events_scenario ON events(scenario_id);
 
                 -- Saves table
                 CREATE TABLE IF NOT EXISTS saves (
@@ -147,9 +151,9 @@ impl Db {
         self.conn
             .execute(
                 "
-                INSERT OR REPLACE INTO events 
-                (event_id, tick, year, actor_id, event_type, description, metrics_snapshot, involved_actors, tags, is_key)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                INSERT OR REPLACE INTO events
+                (event_id, tick, year, actor_id, event_type, description, metrics_snapshot, involved_actors, tags, is_key, scenario_id)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                 ",
                 params![
                     event.id,
@@ -161,10 +165,23 @@ impl Db {
                     metrics_snapshot,
                     involved_actors,
                     tags,
-                    if event.is_key { 1 } else { 0 }
+                    if event.is_key { 1 } else { 0 },
+                    event.scenario_id,
                 ],
             )
             .map_err(|e| format!("Failed to insert event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Delete all events for a scenario
+    pub fn delete_events_for_scenario(&self, scenario_id: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "DELETE FROM events WHERE scenario_id = ?1",
+                params![scenario_id],
+            )
+            .map_err(|e| format!("Failed to delete events: {}", e))?;
 
         Ok(())
     }
@@ -237,6 +254,7 @@ impl Db {
                     serde_json::from_str(&involved_actors_str).unwrap_or_default();
                 let tags: Vec<String> =
                     serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
 
                 Ok(Event {
                     id: event_id,
@@ -249,6 +267,7 @@ impl Db {
                     involved_actors,
                     tags,
                     is_key: is_key != 0,
+                    scenario_id,
                 })
             })
             .map_err(|e| format!("Failed to query events: {}", e))?;
@@ -294,6 +313,7 @@ impl Db {
                     serde_json::from_str(&involved_actors_str).unwrap_or_default();
                 let tags: Vec<String> =
                     serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
 
                 Ok(Event {
                     id: event_id,
@@ -306,6 +326,7 @@ impl Db {
                     involved_actors,
                     tags,
                     is_key: is_key != 0,
+                    scenario_id,
                 })
             })
             .map_err(|e| format!("Failed to query events: {}", e))?;
@@ -347,6 +368,7 @@ impl Db {
                     serde_json::from_str(&involved_actors_str).unwrap_or_default();
                 let tags: Vec<String> =
                     serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
 
                 Ok(Event {
                     id: event_id,
@@ -359,6 +381,7 @@ impl Db {
                     involved_actors,
                     tags,
                     is_key: is_key != 0,
+                    scenario_id,
                 })
             })
             .map_err(|e| format!("Failed to query events: {}", e))?;
@@ -495,6 +518,7 @@ impl Db {
                     serde_json::from_str(&involved_actors_str).unwrap_or_default();
                 let tags: Vec<String> =
                     serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
 
                 Ok(Event {
                     id: event_id,
@@ -507,6 +531,7 @@ impl Db {
                     involved_actors,
                     tags,
                     is_key: is_key != 0,
+                    scenario_id,
                 })
             })
             .map_err(|e| format!("Failed to query key events: {}", e))?;

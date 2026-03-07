@@ -582,7 +582,14 @@ pub fn set_game_mode(
 }
 
 /// Load a scenario
-pub fn load_scenario(state: &mut AppState, scenario_id: String) -> Result<SaveResponse, String> {
+pub fn load_scenario(
+    state: &mut AppState,
+    db: &Db,
+    scenario_id: String,
+) -> Result<SaveResponse, String> {
+    // Delete events from previous playthrough of this scenario
+    db.delete_events_for_scenario(&scenario_id)?;
+
     let scenario = match scenario_id.as_str() {
         "rome_375" => load_rome_375(),
         "constantinople_1430" => load_constantinople_1430(),

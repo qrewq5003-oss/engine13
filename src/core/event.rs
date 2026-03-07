@@ -32,6 +32,7 @@ pub struct Event {
     pub involved_actors: Vec<String>,
     pub metrics_snapshot: HashMap<String, f64>,
     pub tags: Vec<String>,
+    pub scenario_id: String,
 }
 
 impl Event {
@@ -56,7 +57,14 @@ impl Event {
             involved_actors: Vec::new(),
             metrics_snapshot: HashMap::new(),
             tags: Vec::new(),
+            scenario_id: String::new(),
         }
+    }
+
+    /// Set scenario_id
+    pub fn with_scenario_id(mut self, scenario_id: String) -> Self {
+        self.scenario_id = scenario_id;
+        self
     }
 
     /// Add involved actors

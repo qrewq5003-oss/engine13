@@ -185,14 +185,19 @@ fn cmd_get_relevant_events(
 }
 
 #[tauri::command]
-fn cmd_load_scenario(state: State<Mutex<AppState>>, scenario_id: String) -> Result<commands::SaveResponse, String> {
+fn cmd_load_scenario(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+    scenario_id: String,
+) -> Result<commands::SaveResponse, String> {
     eprintln!("[RUST] cmd_load_scenario - acquiring lock, scenario_id: {}", scenario_id);
     let mut s = state.lock().map_err(|e| {
         eprintln!("[RUST] cmd_load_scenario - lock error: {}", e);
         e.to_string()
     })?;
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
     eprintln!("[RUST] cmd_load_scenario - calling commands::load_scenario");
-    let result = commands::load_scenario(&mut *s, scenario_id);
+    let result = commands::load_scenario(&mut *s, &*db_guard, scenario_id);
     eprintln!("[RUST] cmd_load_scenario - result: {:?}", result);
     result
 }
