@@ -509,7 +509,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
                 ("federation_progress".to_string(), 3.0),
                 ("venice.economic_output".to_string(), -3.0),
             ]),
-            cost: HashMap::new(),
+            cost: HashMap::from([("venice.treasury".to_string(), -20.0)]),
         },
         PatronAction {
             id: "venice_diplomacy".to_string(),
@@ -531,7 +531,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
                 ("byzantium.military_quality".to_string(), 5.0),
                 ("genoa.military_size".to_string(), -3.0),
             ]),
-            cost: HashMap::new(),
+            cost: HashMap::from([("genoa.treasury".to_string(), -30.0)]),
         },
         PatronAction {
             id: "genoa_financial_aid".to_string(),
@@ -574,7 +574,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
                 ("federation_progress".to_string(), 3.0),
                 ("milan.economic_output".to_string(), -5.0),
             ]),
-            cost: HashMap::new(),
+            cost: HashMap::from([("milan.treasury".to_string(), -40.0)]),
         },
         PatronAction {
             id: "milan_legitimacy".to_string(),
@@ -584,7 +584,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
                 ("byzantium.legitimacy".to_string(), 8.0),
                 ("federation_progress".to_string(), 4.0),
             ]),
-            cost: HashMap::from([("milan.legitimacy".to_string(), -5.0)]),
+            cost: HashMap::from([("milan.treasury".to_string(), -25.0), ("milan.legitimacy".to_string(), -5.0)]),
         },
         // Destructive actions (2)
         PatronAction {
