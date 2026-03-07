@@ -218,6 +218,11 @@ fn calculate_military_interaction(
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
 ) {
+    // No military conflicts in first 3 ticks (stabilization period)
+    if world.tick < 3 {
+        return;
+    }
+
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
 
