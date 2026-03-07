@@ -71,7 +71,7 @@ fn create_byzantium() -> Actor {
             economic_output: 25.0,
             cohesion: 45.0,
             legitimacy: 50.0,
-            external_pressure: 75.0, // ottoman siege
+            external_pressure: 60.0, // ottoman siege pressure
             treasury: 80.0,
         },
         scenario_metrics: HashMap::new(),
@@ -480,6 +480,17 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![],
             noise: 0.1,
             actor_id: Some("ottomans".to_string()),
+        },
+        // Byzantium external pressure growth (ottoman siege pressure)
+        AutoDelta {
+            metric: "byzantium.external_pressure".to_string(),
+            base: 2.5,
+            conditions: vec![
+                // Acceleration if Ottomans are strong
+                DeltaCondition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
+            ],
+            noise: 0.5,
+            actor_id: Some("byzantium".to_string()),
         },
         // Federation progress auto-deltas
         AutoDelta {
