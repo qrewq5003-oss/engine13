@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::actor::{Actor, ActorMetrics};
 
+/// Current save format version
+pub const SAVE_FORMAT_VERSION: u32 = 1;
+
 /// Dead actor record - preserves history after collapse
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadActor {
@@ -80,6 +83,8 @@ pub struct WorldState {
     pub fired_events: HashSet<String>,
     /// Milestone cooldowns - milestone_id -> tick of last firing
     pub milestone_cooldowns: HashMap<String, u32>,
+    /// Save format version for compatibility checking
+    pub save_version: u32,
 }
 
 impl WorldState {
@@ -118,6 +123,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            save_version: SAVE_FORMAT_VERSION,
         }
     }
 
@@ -144,6 +150,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            save_version: SAVE_FORMAT_VERSION,
         }
     }
 

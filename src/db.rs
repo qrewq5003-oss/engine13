@@ -152,9 +152,14 @@ impl Db {
                     successor_ids_json TEXT NOT NULL,
                     died_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
-                ",
+                "
             )
             .map_err(|e| format!("Failed to migrate schema: {}", e))?;
+
+        // Migration: add save_version column if it doesn't exist
+        self.conn
+            .execute("ALTER TABLE saves ADD COLUMN save_version INTEGER NOT NULL DEFAULT 1", [])
+            .ok();
 
         // Idempotent migration: add scenario_id column to events table if not exists
         // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check manually

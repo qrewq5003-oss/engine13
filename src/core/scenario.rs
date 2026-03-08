@@ -175,6 +175,17 @@ pub struct EventCondition {
     pub duration: Option<u32>,
 }
 
+impl EventCondition {
+    /// Extract all metric strings from condition
+    pub fn to_metric_strings(&self) -> Vec<String> {
+        match &self.condition_type {
+            EventConditionType::Metric { metric, .. } => vec![metric.clone()],
+            EventConditionType::ActorState { actor_id, .. } => vec![actor_id.clone()],
+            EventConditionType::Tick { .. } => vec![],
+        }
+    }
+}
+
 /// Type of event condition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

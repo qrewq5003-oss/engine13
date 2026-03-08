@@ -82,6 +82,15 @@ pub fn load_game(
     let mut world_state: WorldState = serde_json::from_str(&db_save.world_state_json)
         .map_err(|e| format!("Failed to deserialize world state: {}", e))?;
 
+    // Check save format version
+    if world_state.save_version != crate::core::SAVE_FORMAT_VERSION {
+        return Err(format!(
+            "Save format version {} incompatible with current version {}",
+            world_state.save_version,
+            crate::core::SAVE_FORMAT_VERSION
+        ));
+    }
+
     // Deserialize player_state and merge into global_metrics
     let player_state: HashMap<String, f64> = serde_json::from_str(&db_save.player_state_json)
         .unwrap_or_else(|_| HashMap::new());
