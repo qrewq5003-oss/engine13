@@ -5,9 +5,16 @@ use crate::core::WorldState;
 use crate::db::{Db, DbSave};
 use crate::AppState;
 
+/// Validate slot name - any alphanumeric string with underscores, max 32 chars
+fn validate_slot(slot: &str) -> bool {
+    !slot.is_empty() 
+    && slot.len() <= 32 
+    && slot.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
 /// Save current game state
-/// slot: "auto" | "slot_1" | "slot_2" | "slot_3"
-/// Save ID format: "{scenario_id}_{slot}" - one save per slot per scenario
+/// slot: any valid slot name (default "auto")
+/// Save ID format: "{scenario_id}__{slot}" - one save per slot per scenario
 pub fn save_game(
     state: &mut AppState,
     db: &Db,
@@ -20,12 +27,12 @@ pub fn save_game(
     let slot_name = slot.unwrap_or_else(|| "auto".to_string());
 
     // Validate slot name
-    if !["auto", "slot_1", "slot_2", "slot_3"].contains(&slot_name.as_str()) {
-        return Err(format!("Invalid slot: {}. Must be 'auto', 'slot_1', 'slot_2', or 'slot_3'", slot_name));
+    if !validate_slot(&slot_name) {
+        return Err(format!("Invalid slot: {}. Must be alphanumeric with underscores, max 32 chars", slot_name));
     }
 
-    // Save ID format: "{scenario_id}_{slot}" - ensures one save per slot per scenario
-    let save_id = format!("{}_{}", scenario.id, slot_name);
+    // Save ID format: "{scenario_id}__{slot}" - double underscore as separator
+    let save_id = format!("{}__{}", scenario.id, slot_name);
     let save_name = format!("Tick {} - Year {}", world_state.tick, world_state.year);
 
     // Serialize world_state to JSON
@@ -185,64 +192,54 @@ pub struct SaveSlotList {
     pub slots: [Option<SaveSlotData>; 3],
 }
 
+/// Parse slot from save_id format: "{scenario_id}__{slot}"
+fn parse_slot(save_id: &str, scenario_id: &str) -> Option<String> {
+    let prefix = format!("{}__", scenario_id);
+    save_id.strip_prefix(&prefix).map(|s| s.to_string())
+}
+
 /// List saves grouped by slots for a specific scenario
+/// Returns dynamic slot list based on existing saves
 pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<SaveSlotList, String> {
     let db_saves = db.list_saves_by_scenario(scenario_id)
         .map_err(|e| format!("Failed to list saves: {}", e))?;
 
     let mut auto: Option<SaveSlotData> = None;
-    let mut slots: [Option<SaveSlotData>; 3] = [None, None, None];
+    let mut slots_map: HashMap<String, SaveSlotData> = HashMap::new();
 
     for db_save in db_saves {
-        // Extract slot from save_id format: "{scenario_id}_{slot}"
-        let slot = if db_save.id.starts_with(&format!("{}_auto", scenario_id)) {
-            "auto".to_string()
-        } else if db_save.id.starts_with(&format!("{}_slot_1", scenario_id)) {
-            "slot_1".to_string()
-        } else if db_save.id.starts_with(&format!("{}_slot_2", scenario_id)) {
-            "slot_2".to_string()
-        } else if db_save.id.starts_with(&format!("{}_slot_3", scenario_id)) {
-            "slot_3".to_string()
-        } else {
-            continue; // Skip saves with invalid format
-        };
+        // Extract slot from save_id format: "{scenario_id}__{slot}"
+        if let Some(slot) = parse_slot(&db_save.id, scenario_id) {
+            let save_data = SaveSlotData {
+                id: db_save.id.clone(),
+                name: db_save.name.clone(),
+                scenario_id: db_save.scenario_id.clone(),
+                tick: db_save.tick,
+                year: db_save.year,
+                created_at: db_save.created_at,
+                slot: slot.clone(),
+            };
 
-        let save_data = SaveSlotData {
-            id: db_save.id.clone(),
-            name: db_save.name.clone(),
-            scenario_id: db_save.scenario_id.clone(),
-            tick: db_save.tick,
-            year: db_save.year,
-            created_at: db_save.created_at,
-            slot: slot.clone(),
-        };
-
-        match slot.as_str() {
-            "auto" => auto = Some(save_data),
-            "slot_1" => slots[0] = Some(save_data),
-            "slot_2" => slots[1] = Some(save_data),
-            "slot_3" => slots[2] = Some(save_data),
-            _ => {}
+            if slot == "auto" {
+                auto = Some(save_data);
+            } else {
+                slots_map.insert(slot, save_data);
+            }
         }
     }
+
+    // Convert HashMap to fixed array (first 3 slots for backward compat)
+    let mut slots: [Option<SaveSlotData>; 3] = [None, None, None];
+    for (i, slot_name) in ["slot_1", "slot_2", "slot_3"].iter().enumerate() {
+        slots[i] = slots_map.remove(*slot_name);
+    }
+
+    // Note: Additional slots beyond slot_3 are available via the HashMap if needed
 
     Ok(SaveSlotList { auto, slots })
 }
 
-/// Get scenario list
+/// Get scenario list from registry
 pub fn get_scenario_list() -> Vec<crate::commands::ScenarioMeta> {
-    vec![
-        crate::commands::ScenarioMeta {
-            id: "rome_375".to_string(),
-            label: "Rome 375 — Семья Ди Милано".to_string(),
-            description: "375 год. Медиолан — фактическая столица Западной Империи.".to_string(),
-            start_year: 375,
-        },
-        crate::commands::ScenarioMeta {
-            id: "constantinople_1430".to_string(),
-            label: "Constantinople 1430 — Федерация".to_string(),
-            description: "1430 год. Фессалоники пали. Константинополь стоит — но ненадолго.".to_string(),
-            start_year: 1430,
-        },
-    ]
+    crate::scenarios::registry::get_scenario_meta()
 }

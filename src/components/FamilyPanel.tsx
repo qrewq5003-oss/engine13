@@ -13,26 +13,32 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   currentYear,
   currentTick: _currentTick,
 }) => {
-  const familyMetrics = {
-    family_influence: worldState.global_metrics?.family_influence || 0,
-    family_knowledge: worldState.global_metrics?.family_knowledge || 0,
-    family_wealth: worldState.global_metrics?.family_wealth || 0,
-    family_connections: worldState.global_metrics?.family_connections || 0,
-    patriarch_age: worldState.global_metrics?.patriarch_age || 42, // Default to 42 if not set
-  };
+  // Dynamically render all family_* metrics from global_metrics
+  const familyMetrics = Object.entries(worldState.global_metrics || {})
+    .filter(([key]) => key.startsWith('family_'))
+    .map(([key, value]) => ({
+      key,
+      label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      value: value as number,
+    }));
 
-  // Calculate generation info from patriarch_age
-  // patriarch_start_age = 42, patriarch_end_age = 75, so generation length ~33 years
-  const patriarchAge = Math.floor(familyMetrics.patriarch_age);
-  const yearsSinceStart = currentYear - 375;
+  // Get patriarch age from global_metrics with default
+  const patriarchAge = Math.floor(worldState.global_metrics?.patriarch_age || 42);
+
+  // Calculate generation info - use scenario start year from global_metrics or default
+  const startYear = (worldState.global_metrics?.scenario_start_year as number) || 375;
+  const yearsSinceStart = currentYear - startYear;
   const generationLength = 33;
   const generationNumber = Math.floor(yearsSinceStart / generationLength) + 1;
-  const generationStartYear = 375 + (generationNumber - 1) * generationLength;
+  const generationStartYear = startYear + (generationNumber - 1) * generationLength;
+
+  // Use generic label (scenario-specific labels would require API changes)
+  const scenarioLabel = 'Family';
 
   return (
     <div className="family-panel">
-      <h2 className="panel-title">Family Di Milano</h2>
-      
+      <h2 className="panel-title">{scenarioLabel}</h2>
+
       <div className="generation-info">
         <div className="generation-header">
           <span className="generation-label">Generation</span>
@@ -45,48 +51,34 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
       </div>
 
       <div className="family-metrics">
-        <FamilyMetricBar
-          label="Influence"
-          value={familyMetrics.family_influence}
-          description="Political weight in the city"
-          color="#f38ba8"
-        />
-        <FamilyMetricBar
-          label="Knowledge"
-          value={familyMetrics.family_knowledge}
-          description="Accumulated learning, archives"
-          color="#89b4fa"
-        />
-        <FamilyMetricBar
-          label="Wealth"
-          value={familyMetrics.family_wealth}
-          description="Financial base, trade connections"
-          color="#fab387"
-        />
-        <FamilyMetricBar
-          label="Connections"
-          value={familyMetrics.family_connections}
-          description="Network of owed favors"
-          color="#a6e3a1"
-        />
+        {familyMetrics.map((metric) => (
+          <FamilyMetricBar
+            key={metric.key}
+            label={metric.label}
+            value={metric.value}
+            description={`${metric.label} metric`}
+            color="#89b4fa"
+          />
+        ))}
       </div>
 
       <div className="family-context">
         <p className="context-text">
-          {getContextText(currentYear)}
+          {getContextText(currentYear, scenarioLabel)}
         </p>
       </div>
     </div>
   );
 };
 
-function getContextText(year: number): string {
-  if (year < 378) {
-    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Huns press on the Goths beyond the horizon. The Goths seek refuge across the Danube. Three years until Adrianople — but that has not happened yet.`;
-  } else if (year <= 410) {
-    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Empire reels from Adrianople's disaster. Barbarian kings carve their kingdoms from Roman soil. The old order crumbles.`;
+function getContextText(year: number, scenarioLabel: string): string {
+  // Generic context text based on era
+  if (year < 400) {
+    return `${scenarioLabel}, ${year} AD. The old order crumbles as new powers rise.`;
+  } else if (year <= 500) {
+    return `${scenarioLabel}, ${year} AD. Kingdoms carve their realms from the ashes of empire.`;
   } else {
-    return `Mediolanum, ${year} AD. You are the head of an unnoticed family. The Western Empire has fallen. Rome itself was sacked. In the chaos, new powers rise from the ashes of civilization.`;
+    return `${scenarioLabel}, ${year} AD. New powers rise from the ashes of civilization.`;
   }
 }
 

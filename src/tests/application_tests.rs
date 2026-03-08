@@ -130,9 +130,9 @@ fn test_save_load_preserves_state() {
     // Save to slot_1
     let save_result = save_game(&mut state, &db, Some("slot_1".to_string()));
     assert!(save_result.is_ok(), "save_game failed: {:?}", save_result);
-    
-    // Load the save
-    let save_id = format!("constantinople_1430_slot_1");
+
+    // Load the save - use double underscore separator
+    let save_id = format!("constantinople_1430__slot_1");
     let load_result = crate::application::load_game(&mut state, &db, save_id);
     assert!(load_result.is_ok(), "load_game failed: {:?}", load_result);
     
