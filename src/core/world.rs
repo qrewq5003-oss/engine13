@@ -47,6 +47,7 @@ pub enum GameMode {
     Scenario,
     Consequences,
     Free,
+    Ended,
 }
 
 /// Current state of the world simulation
@@ -91,6 +92,10 @@ pub struct WorldState {
     pub scenario_start_year: Option<i32>,
     /// Generation length in years (for family scenarios)
     pub generation_length: Option<u32>,
+    /// Actions taken this tick (for actions_per_tick limit)
+    pub actions_this_tick: u32,
+    /// Victory achieved flag
+    pub victory_achieved: bool,
 }
 
 impl WorldState {
@@ -133,6 +138,8 @@ impl WorldState {
             debug_mode: false,
             scenario_start_year: Some(start_year),
             generation_length: None,
+            actions_this_tick: 0,
+            victory_achieved: false,
         }
     }
 
@@ -163,6 +170,8 @@ impl WorldState {
             debug_mode: false,
             scenario_start_year: Some(start_year),
             generation_length: None,
+            actions_this_tick: 0,
+            victory_achieved: false,
         }
     }
 

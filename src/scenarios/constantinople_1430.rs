@@ -44,6 +44,14 @@ pub fn load_constantinople_1430() -> Scenario {
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
         generation_length: None,
+        actions_per_tick: 3,
+        victory_condition: Some(crate::core::VictoryCondition {
+            metric: "global:federation_progress".to_string(),
+            threshold: 100.0,
+            title: "Федерация Севера основана".to_string(),
+            description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
+            minimum_tick: 20,
+        }),
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

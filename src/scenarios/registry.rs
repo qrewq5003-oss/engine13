@@ -125,11 +125,16 @@ pub fn get_scenario_meta() -> Vec<crate::commands::ScenarioMeta> {
     use crate::commands::ScenarioMeta;
     get_registry()
         .iter()
-        .map(|e| ScenarioMeta {
-            id: e.id.to_string(),
-            label: e.name.to_string(),
-            description: e.description.to_string(),
-            start_year: e.year,
+        .map(|e| {
+            let scenario = (e.loader)();
+            ScenarioMeta {
+                id: e.id.to_string(),
+                label: e.name.to_string(),
+                description: e.description.to_string(),
+                start_year: e.year,
+                victory_title: scenario.victory_condition.as_ref().map(|vc| vc.title.clone()),
+                victory_description: scenario.victory_condition.as_ref().map(|vc| vc.description.clone()),
+            }
         })
         .collect()
 }

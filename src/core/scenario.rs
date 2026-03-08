@@ -37,6 +37,20 @@ pub struct Scenario {
     pub random_events: Vec<RandomEvent>,
     /// Generation length in years (for family scenarios, None = not a family scenario)
     pub generation_length: Option<u32>,
+    /// Maximum actions per tick (0 = unlimited)
+    pub actions_per_tick: u32,
+    /// Victory condition for the scenario (None = no victory condition)
+    pub victory_condition: Option<VictoryCondition>,
+}
+
+/// Victory condition for scenario completion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VictoryCondition {
+    pub metric: String,
+    pub threshold: f64,
+    pub title: String,
+    pub description: String,
+    pub minimum_tick: u32,
 }
 
 /// Status indicator for UI display

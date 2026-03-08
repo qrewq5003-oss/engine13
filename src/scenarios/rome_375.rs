@@ -38,6 +38,14 @@ pub fn load_rome_375() -> Scenario {
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),
         generation_length: Some(33),
+        actions_per_tick: 2,
+        victory_condition: Some(crate::core::VictoryCondition {
+            metric: "family:influence".to_string(),
+            threshold: 90.0,
+            title: "Семья достигла величия".to_string(),
+            description: "Ди Милано стали опорой угасающей империи.".to_string(),
+            minimum_tick: 15,
+        }),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

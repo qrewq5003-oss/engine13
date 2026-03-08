@@ -20,6 +20,16 @@ pub fn apply_player_action(
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
+    // Check actions_per_tick limit
+    if scenario.actions_per_tick > 0 
+        && world_state.actions_this_tick >= scenario.actions_per_tick {
+        return Err(format!(
+            "Достигнут лимит действий за тик: {}/{}",
+            world_state.actions_this_tick,
+            scenario.actions_per_tick
+        ));
+    }
+
     let action = scenario.patron_actions.iter()
         .find(|a| a.id == action_input.action_id)
         .ok_or_else(|| format!("Action '{}' not found", action_input.action_id))?
@@ -37,9 +47,6 @@ pub fn apply_player_action(
         metric_ref.apply(world_state, *cost);
         applied_costs.insert(metric.clone(), *cost);
     }
-
-    eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
-    eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.global_metrics);
 
     // Apply effects with global metric weights from scenario
     let mut applied_effects = HashMap::new();
@@ -61,9 +68,6 @@ pub fn apply_player_action(
         applied_effects.insert(metric.clone(), weighted_effect);
     }
 
-    eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
-    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.global_metrics);
-
     // Record event - use first foreground actor or default
     let event_actor = world_state.actors.values()
         .find(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
@@ -84,6 +88,9 @@ pub fn apply_player_action(
     )
     .with_metadata(effects_json);
     state.event_log.add(event);
+
+    // Increment actions counter
+    world_state.actions_this_tick += 1;
 
     Ok((applied_effects, applied_costs))
 }

@@ -102,6 +102,28 @@
   letter-spacing: 0.5px;
 }
 
+.actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions-counter {
+  font-size: 11px;
+  color: #a6adc8;
+  background: #313244;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.actions-counter.limit-reached {
+  color: #f38ba8;
+  background: #45475a;
+  font-weight: 600;
+}
+
 .actions-list,
 .events-list {
   display: flex;

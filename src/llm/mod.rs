@@ -144,7 +144,6 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
     fs::write(&config_path, json)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
-    eprintln!("[DEBUG] Config saved to {:?}", config_path);
     Ok(())
 }
 

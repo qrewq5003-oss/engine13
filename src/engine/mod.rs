@@ -309,6 +309,9 @@ fn phase_random_events(
         .chain(scenario.random_events.iter().cloned())
         .collect();
 
+    #[cfg(debug_assertions)]
+    eprintln!("[RANDOM_EVENTS] tick={} checking {} events", world.tick, all_events.len());
+
     // Get sea actor IDs for SeaActors target
     let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
         .filter(|a| a.tags.contains(&"maritime".to_string()) || a.tags.contains(&"trade_empire".to_string()))
@@ -328,7 +331,11 @@ fn phase_random_events(
         }
 
         // Roll for event probability
-        if rng.gen::<f64>() > event.probability {
+        let roll: f64 = rng.gen();
+        #[cfg(debug_assertions)]
+        eprintln!("[RANDOM_EVENTS] event='{}' prob={:.3} roll={:.3}", event.id, event.probability, roll);
+        
+        if roll > event.probability {
             continue;
         }
 
@@ -365,6 +372,9 @@ fn phase_random_events(
                 cond.operator.evaluate(value, cond.value)
             });
 
+            #[cfg(debug_assertions)]
+            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' conditions_met={}", event.id, target_id, conditions_met);
+
             if !conditions_met {
                 continue;
             }
@@ -386,6 +396,9 @@ fn phase_random_events(
                 event.llm_context.clone(),
             );
             event_log.add(event_record);
+
+            #[cfg(debug_assertions)]
+            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' FIRED", event.id, target_id);
 
             // Mark one-time event as fired
             if event.one_time {
@@ -421,6 +434,24 @@ fn phase_events(world: &mut WorldState, scenario: &Scenario, event_log: &mut Eve
     check_milestone_events(world, scenario, event_log);
     check_game_mode_transitions(world, scenario, event_log);
     check_relevance_thresholds(world, scenario, event_log);
+    check_victory_condition(world, scenario);
+}
+
+/// Check victory condition
+fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
+    if world.victory_achieved {
+        return;
+    }
+
+    if let Some(ref vc) = scenario.victory_condition {
+        if world.tick >= vc.minimum_tick {
+            let value = crate::core::MetricRef::parse(&vc.metric).get(world);
+            if value >= vc.threshold {
+                world.victory_achieved = true;
+                world.game_mode = crate::core::GameMode::Ended;
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -451,6 +482,7 @@ fn phase_advance(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_cha
     world.rng_state = rng.get_seed();
     world.tick += 1;
     world.year += scenario.tick_span as i32;
+    world.actions_this_tick = 0;
 }
 
 fn apply_treasury(world: &mut WorldState) {
@@ -1573,6 +1605,8 @@ mod tests {
             naval_conflict_probability: 0.1,
             random_events: vec![],
             generation_length: None,
+            actions_per_tick: 0,
+            victory_condition: None,
         };
         let mut event_log = EventLog::new();
 

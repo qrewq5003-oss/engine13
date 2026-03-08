@@ -9,6 +9,7 @@ import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
 import { SaveSlotModal } from './components/SaveSlotModal';
+import VictoryScreen from './components/VictoryScreen';
 import {
   loadScenario,
   getWorldState,
@@ -367,6 +368,18 @@ const App: React.FC = () => {
         <StatusPanel indicators={statusIndicators} />
       )}
 
+      {worldState?.victory_achieved && (
+        <VictoryScreen
+          worldState={worldState}
+          victoryTitle={worldState.scenario_id === 'constantinople_1430' ? 'Федерация Севера основана' :
+                      worldState.scenario_id === 'rome_375' ? 'Семья достигла величия' : 'Победа!'}
+          victoryDescription={worldState.scenario_id === 'constantinople_1430' ? 'Торговые республики объединились. Константинополь получил шанс на спасение.' :
+                              worldState.scenario_id === 'rome_375' ? 'Ди Милано стали опорой угасающей империи.' : 'Вы достигли цели сценария.'}
+          onContinue={() => {}}
+          onNewGame={() => setGameState('menu')}
+        />
+      )}
+
       <main className="app-main">
         <div className="panel-column left-column">
           <WorldPanel
@@ -397,6 +410,7 @@ const App: React.FC = () => {
           <ControlPanel
             currentYear={worldState.year}
             currentTick={worldState.tick}
+            worldState={worldState}
             availableActions={availableActions}
             recentEvents={recentEvents}
             onAdvanceTick={handleAdvanceTick}

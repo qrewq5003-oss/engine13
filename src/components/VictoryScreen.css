@@ -1,0 +1,93 @@
+.victory-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.victory-panel {
+  background: #1e1e2e;
+  border: 2px solid #89b4fa;
+  border-radius: 12px;
+  padding: 40px 60px;
+  max-width: 600px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(137, 180, 250, 0.3);
+}
+
+.victory-year {
+  font-size: 14px;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+}
+
+.victory-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: #89b4fa;
+  margin: 0 0 16px 0;
+}
+
+.victory-description {
+  font-size: 16px;
+  color: #cdd6f4;
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+
+.victory-stats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  padding: 16px 0;
+  border-top: 1px solid #313244;
+  border-bottom: 1px solid #313244;
+  margin-bottom: 24px;
+}
+
+.victory-stats span {
+  font-size: 14px;
+  color: #a6adc8;
+}
+
+.victory-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.victory-actions button {
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.victory-actions button:first-child {
+  background: #89b4fa;
+  color: #1e1e2e;
+}
+
+.victory-actions button:first-child:hover {
+  background: #b4befe;
+}
+
+.victory-actions button:last-child {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
+.victory-actions button:last-child:hover {
+  background: #585b70;
+}

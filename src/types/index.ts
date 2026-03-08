@@ -100,6 +100,21 @@ export interface WorldState {
   scenario_start_year?: number;
   /// Generation length in years (for family scenarios)
   generation_length?: number;
+  /// Actions taken this tick
+  actions_this_tick: number;
+  /// Actions allowed per tick (0 = unlimited)
+  actions_per_tick: number;
+  /// Victory achieved flag
+  victory_achieved: boolean;
+}
+
+/// Victory condition for scenario
+export interface VictoryCondition {
+  metric: string;
+  threshold: number;
+  title: string;
+  description: string;
+  minimum_tick: number;
 }
 
 /// Scenario feature flags for UI
@@ -232,6 +247,8 @@ export interface ScenarioMeta {
   label: string;
   description: string;
   start_year: number;
+  victory_title?: string;
+  victory_description?: string;
 }
 
 // ============================================================================

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import type { PatronAction, Event } from '../types';
+import type { PatronAction, Event, WorldState } from '../types';
 import './ControlPanel.css';
 
 interface ControlPanelProps {
   currentYear: number;
   currentTick: number;
+  worldState: WorldState;
   availableActions: PatronAction[];
   recentEvents: Event[];
   onAdvanceTick: () => void;
@@ -16,6 +17,7 @@ interface ControlPanelProps {
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   currentYear,
   currentTick,
+  worldState,
   availableActions,
   recentEvents,
   onAdvanceTick,
@@ -32,6 +34,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       setExpandedAction(actionId);
     }
   };
+
+  const actionsLimitReached = worldState.actions_per_tick > 0 
+    && worldState.actions_this_tick >= worldState.actions_per_tick;
 
   // Get last 3 events
   const lastThreeEvents = recentEvents.slice(-3).reverse();
@@ -61,7 +66,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       <div className="actions-section">
-        <h3 className="section-title">Available Actions</h3>
+        <div className="actions-header">
+          <h3 className="section-title">Available Actions</h3>
+          {worldState.actions_per_tick > 0 && (
+            <div className={`actions-counter ${actionsLimitReached ? 'limit-reached' : ''}`}>
+              Действия: {worldState.actions_this_tick} / {worldState.actions_per_tick}
+            </div>
+          )}
+        </div>
         <div className="actions-list">
           {availableActions.length === 0 ? (
             <div className="no-actions">No actions available</div>
@@ -103,7 +115,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                         e.preventDefault();
                         onActionSubmit(action.id);
                       }}
-                      disabled={isLoading}
+                      disabled={isLoading || actionsLimitReached}
                     >
                       Execute
                     </button>

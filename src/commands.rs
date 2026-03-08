@@ -81,6 +81,8 @@ pub struct ScenarioMeta {
     pub label: String,
     pub description: String,
     pub start_year: i32,
+    pub victory_title: Option<String>,
+    pub victory_description: Option<String>,
 }
 
 // ============================================================================
