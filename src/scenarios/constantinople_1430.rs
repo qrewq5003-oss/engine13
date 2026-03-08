@@ -28,6 +28,13 @@ pub fn load_constantinople_1430() -> Scenario {
         consequence_context: create_consequence_context(),
         player_actor_id: None,
         status_indicators: create_status_indicators(),
+        global_metric_weights: HashMap::from([
+            ("federation_progress".to_string(), HashMap::from([
+                ("venice".to_string(), 2.0),
+                ("genoa".to_string(), 1.5),
+                ("milan".to_string(), 1.0),
+            ])),
+        ]),
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -540,6 +547,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "venice_naval_support".to_string(),
             name: "Венецианский флот".to_string(),
+            source_actor_id: Some("venice".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "venice.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
             effects: HashMap::from([
                 ("byzantium.military_size".to_string(), 5.0),
@@ -551,6 +559,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "venice_trade_deal".to_string(),
             name: "Торговая сделка".to_string(),
+            source_actor_id: Some("venice".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "venice.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
                 ("byzantium.economic_output".to_string(), 8.0),
@@ -562,6 +571,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "venice_diplomacy".to_string(),
             name: "Венецианская дипломатия".to_string(),
+            source_actor_id: Some("venice".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "venice.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
                 ("federation_progress".to_string(), 5.0),
@@ -573,6 +583,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "genoa_galata_garrison".to_string(),
             name: "Гарнизон Галаты".to_string(),
+            source_actor_id: Some("genoa".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "genoa.military_size".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
             effects: HashMap::from([
                 ("byzantium.military_size".to_string(), 4.0),
@@ -584,6 +595,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "genoa_financial_aid".to_string(),
             name: "Финансовая помощь".to_string(),
+            source_actor_id: Some("genoa".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "genoa.treasury".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
             effects: HashMap::from([
                 ("byzantium.treasury".to_string(), 60.0),
@@ -595,6 +607,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "genoa_mercenaries".to_string(),
             name: "Генуэзские наёмники".to_string(),
+            source_actor_id: Some("genoa".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
             effects: HashMap::from([
                 ("byzantium.military_size".to_string(), 6.0),
@@ -606,6 +619,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "milan_condottieri".to_string(),
             name: "Кондотьеры Милана".to_string(),
+            source_actor_id: Some("milan".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "milan.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
             effects: HashMap::from([
                 ("byzantium.military_quality".to_string(), 10.0),
@@ -616,6 +630,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "milan_bankers".to_string(),
             name: "Миланские банкиры".to_string(),
+            source_actor_id: Some("milan".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "milan.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
                 ("byzantium.treasury".to_string(), 80.0),
@@ -627,6 +642,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "milan_legitimacy".to_string(),
             name: "Миланский престиж".to_string(),
+            source_actor_id: Some("milan".to_string()),
             available_if: crate::core::ActionCondition::Metric { metric: "milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
                 ("byzantium.legitimacy".to_string(), 8.0),
@@ -638,6 +654,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "sabotage_federation".to_string(),
             name: "Саботаж федерации".to_string(),
+            source_actor_id: None,
             available_if: crate::core::ActionCondition::Always,
             effects: HashMap::from([
                 ("federation_progress".to_string(), -15.0),
@@ -649,6 +666,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         PatronAction {
             id: "ottoman_bribe".to_string(),
             name: "Османский подкуп".to_string(),
+            source_actor_id: None,
             available_if: crate::core::ActionCondition::Metric { metric: "byzantium.treasury".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
             effects: HashMap::from([
                 ("ottomans.external_pressure".to_string(), -10.0),
@@ -962,31 +980,4 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
             ],
         },
     ]
-}
-
-/// Calculate dynamic federation weight for an actor
-/// Used for federation_progress effects weighting
-pub fn federation_weight(actor_id: &str, world_state: &crate::core::WorldState) -> f64 {
-    let actor = match world_state.actors.get(actor_id) {
-        Some(a) => a,
-        None => return 1.0,
-    };
-    match actor_id {
-        "venice" => {
-            if actor.metrics.treasury > 1000.0 && actor.metrics.cohesion > 70.0 { 2.0 }
-            else if actor.metrics.treasury > 600.0 { 1.5 }
-            else { 1.0 }
-        }
-        "genoa" => {
-            if actor.metrics.cohesion > 65.0 && actor.metrics.military_size > 20.0 { 1.5 }
-            else if actor.metrics.treasury > 500.0 { 1.0 }
-            else { 0.5 }
-        }
-        "milan" => {
-            if actor.metrics.legitimacy > 65.0 && actor.metrics.treasury > 700.0 { 1.5 }
-            else if actor.metrics.legitimacy > 55.0 { 1.0 }
-            else { 0.5 }
-        }
-        _ => 1.0,
-    }
 }

@@ -28,6 +28,7 @@ pub fn load_rome_375() -> Scenario {
         consequence_context: create_consequence_context(),
         player_actor_id: Some("rome".to_string()),
         status_indicators: create_status_indicators(),
+        global_metric_weights: HashMap::new(),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1173,6 +1174,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
     // Family actions
     let actions = vec![
         PatronAction {
+            source_actor_id: None,
             id: "expand_network".to_string(),
             name: "Расширить связи".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
@@ -1180,6 +1182,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -4.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "gather_information".to_string(),
             name: "Собрать информацию".to_string(),
             available_if: crate::core::ActionCondition::Always,
@@ -1187,6 +1190,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -2.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "invest_wealth".to_string(),
             name: "Вложить средства".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
@@ -1194,6 +1198,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_connections".to_string(), -2.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "build_reputation".to_string(),
             name: "Укрепить репутацию".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
@@ -1201,6 +1206,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -5.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "educate_family".to_string(),
             name: "Образование семьи".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
@@ -1208,6 +1214,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -6.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "lay_low".to_string(),
             name: "Затаиться".to_string(),
             available_if: crate::core::ActionCondition::Always,
@@ -1216,6 +1223,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
         },
         // City support actions
         PatronAction {
+            source_actor_id: None,
             id: "support_city".to_string(),
             name: "Поддержать город".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
@@ -1227,6 +1235,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -8.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "back_administration".to_string(),
             name: "Поддержать администрацию".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
@@ -1237,6 +1246,7 @@ fn create_patron_actions() -> Vec<PatronAction> {
             cost: HashMap::from([("family_wealth".to_string(), -6.0)]),
         },
         PatronAction {
+            source_actor_id: None,
             id: "fund_defense".to_string(),
             name: "Вложить в оборону".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },

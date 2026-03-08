@@ -1382,6 +1382,7 @@ mod tests {
             consequence_context: "".to_string(),
             player_actor_id: None,
             status_indicators: vec![],
+            global_metric_weights: HashMap::new(),
         };
         let mut event_log = EventLog::new();
 

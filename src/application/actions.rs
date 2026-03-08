@@ -41,20 +41,24 @@ pub fn apply_player_action(
     eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
     eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.family_metrics);
 
-    // Apply effects with dynamic federation weights
+    // Apply effects with global metric weights from scenario
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
         let metric_ref = MetricRef::parse(metric);
-        if metric == "federation_progress" {
-            // Apply federation_progress with dynamic weight based on the action's source
-            let weight = determine_action_source_weight(&action, world_state);
-            let weighted_effect = effect * weight;
-            metric_ref.apply(world_state, weighted_effect);
-            applied_effects.insert(metric.clone(), weighted_effect);
-        } else {
-            metric_ref.apply(world_state, *effect);
-            applied_effects.insert(metric.clone(), *effect);
-        }
+        
+        // Get weight from scenario.global_metric_weights
+        let weight = scenario.global_metric_weights
+            .get(metric)
+            .and_then(|weights| {
+                action.source_actor_id.as_deref()
+                    .and_then(|source| weights.get(source))
+            })
+            .copied()
+            .unwrap_or(1.0);
+        
+        let weighted_effect = effect * weight;
+        metric_ref.apply(world_state, weighted_effect);
+        applied_effects.insert(metric.clone(), weighted_effect);
     }
 
     eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
@@ -78,13 +82,6 @@ pub fn apply_player_action(
     state.event_log.add(event);
 
     Ok((applied_effects, applied_costs))
-}
-
-/// Determine the weight multiplier for federation_progress based on action source
-fn determine_action_source_weight(action: &PatronAction, world_state: &WorldState) -> f64 {
-    // Extract source actor from action ID (e.g., "venice_naval_support" -> "venice")
-    let source_actor = action.id.split('_').next().unwrap_or("");
-    crate::scenarios::constantinople_1430::federation_weight(source_actor, world_state)
 }
 
 /// Unified action availability check - works for all scenarios via MetricRef
@@ -119,6 +116,7 @@ pub fn get_universal_actions(_world_state: &WorldState) -> Vec<PatronAction> {
     actions.push(PatronAction {
         id: "observe".to_string(),
         name: "Наблюдать".to_string(),
+        source_actor_id: None,
         available_if: ActionCondition::Always,
         effects: HashMap::new(),
         cost: HashMap::new(),
@@ -134,6 +132,7 @@ pub fn get_universal_actions(_world_state: &WorldState) -> Vec<PatronAction> {
     actions.push(PatronAction {
         id: "support_stability".to_string(),
         name: "Поддержать стабильность".to_string(),
+        source_actor_id: None,
         available_if: ActionCondition::Metric {
             metric: "treasury".to_string(),
             operator: ComparisonOperator::Greater,
@@ -152,6 +151,7 @@ pub fn get_universal_actions(_world_state: &WorldState) -> Vec<PatronAction> {
     actions.push(PatronAction {
         id: "raise_taxes".to_string(),
         name: "Повысить налоги".to_string(),
+        source_actor_id: None,
         available_if: ActionCondition::Always,
         effects: taxes_effects,
         cost: HashMap::new(),
@@ -167,6 +167,7 @@ pub fn get_universal_actions(_world_state: &WorldState) -> Vec<PatronAction> {
     actions.push(PatronAction {
         id: "recruit_soldiers".to_string(),
         name: "Нанять солдат".to_string(),
+        source_actor_id: None,
         available_if: ActionCondition::Metric {
             metric: "treasury".to_string(),
             operator: ComparisonOperator::Greater,

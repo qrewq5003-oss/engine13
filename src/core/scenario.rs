@@ -25,6 +25,8 @@ pub struct Scenario {
     pub player_actor_id: Option<String>,
     /// Status indicators for UI display
     pub status_indicators: Vec<StatusIndicator>,
+    /// Global metric weights by source actor: metric_name -> {source_actor -> weight}
+    pub global_metric_weights: HashMap<String, HashMap<String, f64>>,
 }
 
 /// Status indicator for UI display
@@ -71,6 +73,7 @@ pub enum ComparisonOperator {
 pub struct PatronAction {
     pub id: String,
     pub name: String,
+    pub source_actor_id: Option<String>,
     pub available_if: ActionCondition,
     pub effects: HashMap<String, f64>,
     pub cost: HashMap<String, f64>,
