@@ -85,6 +85,8 @@ pub struct WorldState {
     pub milestone_cooldowns: HashMap<String, u32>,
     /// Save format version for compatibility checking
     pub save_version: u32,
+    /// Debug mode - enables detailed tick explanations
+    pub debug_mode: bool,
 }
 
 impl WorldState {
@@ -124,6 +126,7 @@ impl WorldState {
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
+            debug_mode: false,
         }
     }
 
@@ -151,6 +154,7 @@ impl WorldState {
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
+            debug_mode: false,
         }
     }
 

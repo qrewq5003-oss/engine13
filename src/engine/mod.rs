@@ -6,8 +6,59 @@ use crate::core::{
     Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
+use serde::Serialize;
 
 mod interactions;
+
+/// Tick explanation for debug mode
+#[derive(Debug, Default, Serialize)]
+pub struct TickExplanation {
+    pub tick: u32,
+    pub year: i32,
+    pub auto_deltas_applied: Vec<DeltaEntry>,
+    pub interactions_fired: Vec<InteractionEntry>,
+    pub milestones_fired: Vec<MilestoneEntry>,
+    pub random_events_fired: Vec<RandomEventEntry>,
+    pub foreground_changes: Vec<ForegroundChange>,
+    pub collapses: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeltaEntry {
+    pub metric: String,
+    pub base_delta: f64,
+    pub ratio_delta: f64,
+    pub final_delta: f64,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InteractionEntry {
+    pub interaction_type: String,
+    pub actor_a: String,
+    pub actor_b: String,
+    pub details: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MilestoneEntry {
+    pub id: String,
+    pub conditions_met: Vec<String>,
+    pub effects_applied: HashMap<String, f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RandomEventEntry {
+    pub id: String,
+    pub target: String,
+    pub effects_applied: HashMap<String, f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForegroundChange {
+    pub actor_id: String,
+    pub reason: String,
+}
 
 /// Coefficients for dependency graph relationships
 #[derive(Debug, Clone, Copy)]
@@ -1532,4 +1583,61 @@ mod tests {
         assert_eq!(world.tick, initial_tick + 1);
         assert_eq!(world.year, initial_year + 5);
     }
+}
+
+// ============================================================================
+// Debug/Explain mode
+// ============================================================================
+
+/// Generate explanation for the last tick from event log
+pub fn generate_tick_explanation(
+    world: &WorldState,
+    event_log: &EventLog,
+) -> TickExplanation {
+    let current_tick = world.tick;
+    let current_year = world.year;
+
+    let mut explanation = TickExplanation {
+        tick: current_tick,
+        year: current_year,
+        ..Default::default()
+    };
+
+    // Get events from the last tick
+    let tick_events: Vec<&Event> = event_log.events.iter()
+        .filter(|e| e.tick == current_tick)
+        .collect();
+
+    for event in tick_events {
+        match event.event_type {
+            EventType::Milestone => {
+                explanation.milestones_fired.push(MilestoneEntry {
+                    id: event.id.clone(),
+                    conditions_met: vec![event.description.clone()],
+                    effects_applied: HashMap::new(),
+                });
+            }
+            EventType::Threshold => {
+                explanation.random_events_fired.push(RandomEventEntry {
+                    id: event.id.clone(),
+                    target: event.actor_id.clone(),
+                    effects_applied: HashMap::new(),
+                });
+            }
+            EventType::War => {
+                explanation.interactions_fired.push(InteractionEntry {
+                    interaction_type: "military".to_string(),
+                    actor_a: event.actor_id.clone(),
+                    actor_b: String::new(),
+                    details: event.description.clone(),
+                });
+            }
+            EventType::Collapse => {
+                explanation.collapses.push(event.actor_id.clone());
+            }
+            _ => {}
+        }
+    }
+
+    explanation
 }

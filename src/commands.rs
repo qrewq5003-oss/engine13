@@ -335,3 +335,9 @@ pub fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<S
     };
     crate::llm::save_llm_config(&config)
 }
+
+/// Get tick explanation for debug mode
+pub fn get_tick_explanation(state: &AppState) -> Result<crate::engine::TickExplanation, String> {
+    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
+    Ok(crate::engine::generate_tick_explanation(world_state, &state.event_log))
+}

@@ -211,6 +211,17 @@ fn cmd_get_action_history(
 }
 
 #[tauri::command]
+fn cmd_get_tick_explanation(
+    state: State<Mutex<AppState>>,
+) -> Result<engine13::TickExplanation, String> {
+    eprintln!("[RUST] cmd_get_tick_explanation - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let result = commands::get_tick_explanation(&*s);
+    eprintln!("[RUST] cmd_get_tick_explanation - result: {:?}", result.as_ref().map(|e| e.tick));
+    result
+}
+
+#[tauri::command]
 fn cmd_load_scenario(
     state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
@@ -349,6 +360,7 @@ fn main() {
             cmd_list_saves_with_slots,
             cmd_get_relevant_events,
             cmd_get_action_history,
+            cmd_get_tick_explanation,
             cmd_load_scenario,
             cmd_get_scenario_list,
             cmd_get_narrative,
