@@ -106,6 +106,14 @@ export interface WorldState {
   actions_per_tick: number;
   /// Victory achieved flag
   victory_achieved: boolean;
+  /// Family state for family-based scenarios
+  family_state?: FamilyState;
+}
+
+/// Family state for family-based scenarios
+export interface FamilyState {
+  metrics: Record<string, number>;
+  patriarch_age: number;
 }
 
 /// Victory condition for scenario

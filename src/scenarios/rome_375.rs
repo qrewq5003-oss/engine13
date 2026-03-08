@@ -46,6 +46,7 @@ pub fn load_rome_375() -> Scenario {
             description: "Ди Милано стали опорой угасающей империи.".to_string(),
             minimum_tick: 15,
         }),
+        universal_actions: create_universal_actions(),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1659,6 +1660,72 @@ mod tests {
             "Economic output growth should be limited: grew by {} (from {} to {})",
             growth, initial_economic_output, final_economic_output);
     }
+}
+
+fn create_universal_actions() -> Vec<crate::core::PatronAction> {
+    use crate::core::{PatronAction, ActionCondition, ComparisonOperator};
+    use std::collections::HashMap;
+
+    vec![
+        // 1. Observe - always available, no effects, no cost
+        PatronAction {
+            id: "observe".to_string(),
+            name: "Наблюдать".to_string(),
+            source_actor_id: None,
+            available_if: ActionCondition::Always,
+            effects: HashMap::new(),
+            cost: HashMap::new(),
+        },
+        // 2. Support Stability - requires family_wealth > 50
+        PatronAction {
+            id: "support_stability".to_string(),
+            name: "Поддержать стабильность".to_string(),
+            source_actor_id: None,
+            available_if: ActionCondition::Metric {
+                metric: "family:family_wealth".to_string(),
+                operator: ComparisonOperator::Greater,
+                value: 50.0,
+            },
+            effects: HashMap::from([
+                ("family:family_cohesion".to_string(), 3.0),
+                ("family:family_legitimacy".to_string(), 2.0),
+            ]),
+            cost: HashMap::from([
+                ("family:family_wealth".to_string(), -50.0),
+            ]),
+        },
+        // 3. Raise Taxes - always available
+        PatronAction {
+            id: "raise_taxes".to_string(),
+            name: "Повысить налоги".to_string(),
+            source_actor_id: None,
+            available_if: ActionCondition::Always,
+            effects: HashMap::from([
+                ("family:family_wealth".to_string(), 80.0),
+                ("family:family_cohesion".to_string(), -3.0),
+                ("family:family_legitimacy".to_string(), -5.0),
+            ]),
+            cost: HashMap::new(),
+        },
+        // 4. Recruit Soldiers - requires family_wealth > 100
+        PatronAction {
+            id: "recruit_soldiers".to_string(),
+            name: "Нанять солдат".to_string(),
+            source_actor_id: None,
+            available_if: ActionCondition::Metric {
+                metric: "family:family_wealth".to_string(),
+                operator: ComparisonOperator::Greater,
+                value: 100.0,
+            },
+            effects: HashMap::from([
+                ("actor:rome.military_size".to_string(), 10.0),
+                ("actor:rome.military_quality".to_string(), -5.0),
+            ]),
+            cost: HashMap::from([
+                ("family:family_wealth".to_string(), -100.0),
+            ]),
+        },
+    ]
 }
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {

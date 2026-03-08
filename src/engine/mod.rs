@@ -1297,47 +1297,40 @@ fn check_generation_transfer(
         return; // No generation mechanics defined for this scenario
     };
 
+    // Only process if family_state exists
+    let Some(ref mut family_state) = world.family_state else {
+        return;
+    };
+
     let current_tick = world.tick;
     let current_year = world.year;
 
-    // Get current patriarch age (default to start age if not set)
-    let patriarch_age_key = "patriarch_age".to_string();
-    let current_age = world.global_metrics
-        .get(&patriarch_age_key)
-        .copied()
-        .unwrap_or(gen_mechanics.patriarch_start_age as f64);
-
     // Age the patriarch by tick_span years
-    let new_age = current_age + scenario.tick_span as f64;
-    world.global_metrics.insert(patriarch_age_key.clone(), new_age);
+    family_state.patriarch_age += scenario.tick_span;
 
     // Check if patriarch has reached end age - trigger generation transfer
-    if new_age >= gen_mechanics.patriarch_end_age as f64 {
+    if family_state.patriarch_age >= gen_mechanics.patriarch_end_age as u32 {
         // Apply inheritance coefficients to all family metrics
         // Per architecture: new generation starts with reduced metrics
         // Use scenario-specific coefficients if available, default to 0.7
 
-        // Scale all family_ metrics (metrics starting with "family_")
-        let family_metric_keys: Vec<String> = world.global_metrics
-            .keys()
-            .filter(|k| k.starts_with("family_"))
-            .cloned()
-            .collect();
+        // Scale all family metrics
+        let family_metric_keys: Vec<String> = family_state.metrics.keys().cloned().collect();
 
         for metric in &family_metric_keys {
-            if let Some(value) = world.global_metrics.get(metric) {
+            if let Some(value) = family_state.metrics.get(metric) {
                 // Get coefficient from scenario, default to 0.7
                 let coefficient = gen_mechanics.inheritance_coefficients
                     .get(metric)
                     .copied()
                     .unwrap_or(0.7);
                 let new_value = value * coefficient;
-                world.global_metrics.insert(metric.clone(), new_value);
+                family_state.metrics.insert(metric.clone(), new_value);
             }
         }
 
         // Reset patriarch age to start age for new generation
-        world.global_metrics.insert(patriarch_age_key, gen_mechanics.patriarch_start_age as f64);
+        family_state.patriarch_age = gen_mechanics.patriarch_start_age as u32;
 
         // Record generation transfer event
         let event = Event::new(
@@ -1607,6 +1600,7 @@ mod tests {
             generation_length: None,
             actions_per_tick: 0,
             victory_condition: None,
+            universal_actions: vec![],
         };
         let mut event_log = EventLog::new();
 

@@ -117,89 +117,16 @@ fn compare_value(value: f64, operator: &crate::core::ComparisonOperator, target:
     }
 }
 
-/// Get universal actions available in Consequences and Free modes
-pub fn get_universal_actions(_world_state: &WorldState) -> Vec<PatronAction> {
-    use crate::core::{ActionCondition, ComparisonOperator};
-
-    let mut actions = Vec::new();
-
-    // 1. Observe - always available, no effects, no cost
-    actions.push(PatronAction {
-        id: "observe".to_string(),
-        name: "Наблюдать".to_string(),
-        source_actor_id: None,
-        available_if: ActionCondition::Always,
-        effects: HashMap::new(),
-        cost: HashMap::new(),
-    });
-
-    // 2. Support Stability - requires treasury > 50
-    let mut support_effects = HashMap::new();
-    support_effects.insert("family_cohesion".to_string(), 3.0);
-    support_effects.insert("family_legitimacy".to_string(), 2.0);
-    let mut support_cost = HashMap::new();
-    support_cost.insert("treasury".to_string(), -50.0);
-
-    actions.push(PatronAction {
-        id: "support_stability".to_string(),
-        name: "Поддержать стабильность".to_string(),
-        source_actor_id: None,
-        available_if: ActionCondition::Metric {
-            metric: "treasury".to_string(),
-            operator: ComparisonOperator::Greater,
-            value: 50.0,
-        },
-        effects: support_effects,
-        cost: support_cost,
-    });
-
-    // 3. Raise Taxes - always available
-    let mut taxes_effects = HashMap::new();
-    taxes_effects.insert("treasury".to_string(), 80.0);
-    taxes_effects.insert("family_cohesion".to_string(), -3.0);
-    taxes_effects.insert("family_legitimacy".to_string(), -5.0);
-
-    actions.push(PatronAction {
-        id: "raise_taxes".to_string(),
-        name: "Повысить налоги".to_string(),
-        source_actor_id: None,
-        available_if: ActionCondition::Always,
-        effects: taxes_effects,
-        cost: HashMap::new(),
-    });
-
-    // 4. Recruit Soldiers - requires treasury > 100
-    let mut recruit_effects = HashMap::new();
-    recruit_effects.insert("rome.military_size".to_string(), 10.0);
-    recruit_effects.insert("rome.military_quality".to_string(), -5.0);
-    let mut recruit_cost = HashMap::new();
-    recruit_cost.insert("treasury".to_string(), -100.0);
-
-    actions.push(PatronAction {
-        id: "recruit_soldiers".to_string(),
-        name: "Нанять солдат".to_string(),
-        source_actor_id: None,
-        available_if: ActionCondition::Metric {
-            metric: "treasury".to_string(),
-            operator: ComparisonOperator::Greater,
-            value: 100.0,
-        },
-        effects: recruit_effects,
-        cost: recruit_cost,
-    });
-
-    actions
-}
-
 /// Get available actions for the player
 pub fn get_available_actions(state: &AppState) -> Result<Vec<PatronAction>, String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
 
-    // In Consequences and Free modes, return universal actions only
+    // In Consequences and Free modes, return universal actions from scenario
     if world_state.game_mode == crate::core::GameMode::Consequences
         || world_state.game_mode == crate::core::GameMode::Free
     {
-        return Ok(get_universal_actions(world_state));
+        let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+        return Ok(scenario.universal_actions.clone());
     }
 
     // In Scenario mode, use scenario-specific actions

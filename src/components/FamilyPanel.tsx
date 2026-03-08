@@ -13,19 +13,21 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   currentYear,
   currentTick: _currentTick,
 }) => {
-  // Dynamically render all family_* metrics from global_metrics
-  const familyMetrics = Object.entries(worldState.global_metrics || {})
-    .filter(([key]) => key.startsWith('family_'))
-    .map(([key, value]) => ({
-      key,
-      label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      value: value as number,
-    }));
+  // Use family_state if available
+  const familyState = worldState.family_state;
+  if (!familyState) {
+    return <div className="family-panel">No family data available</div>;
+  }
 
-  // Get patriarch age - no default, show dash if missing
-  const patriarchAge = worldState.global_metrics?.patriarch_age != null
-    ? Math.floor(worldState.global_metrics.patriarch_age)
-    : null;
+  // Dynamically render all family metrics from family_state
+  const familyMetrics = Object.entries(familyState.metrics).map(([key, value]) => ({
+    key,
+    label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    value: value as number,
+  }));
+
+  // Get patriarch age from family_state
+  const patriarchAge = familyState.patriarch_age;
 
   // Calculate generation info - use scenario start year from worldState
   const startYear = worldState.scenario_start_year ?? 375;

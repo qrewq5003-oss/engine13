@@ -6,6 +6,13 @@ use super::actor::{Actor, ActorMetrics};
 /// Current save format version
 pub const SAVE_FORMAT_VERSION: u32 = 1;
 
+/// Family state for family-based scenarios (e.g., Rome 375)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FamilyState {
+    pub metrics: HashMap<String, f64>,
+    pub patriarch_age: u32,
+}
+
 /// Dead actor record - preserves history after collapse
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadActor {
@@ -96,6 +103,8 @@ pub struct WorldState {
     pub actions_this_tick: u32,
     /// Victory achieved flag
     pub victory_achieved: bool,
+    /// Family state for family-based scenarios (None if not a family scenario)
+    pub family_state: Option<FamilyState>,
 }
 
 impl WorldState {
@@ -140,6 +149,7 @@ impl WorldState {
             generation_length: None,
             actions_this_tick: 0,
             victory_achieved: false,
+            family_state: None,
         }
     }
 
@@ -172,6 +182,7 @@ impl WorldState {
             generation_length: None,
             actions_this_tick: 0,
             victory_achieved: false,
+            family_state: None,
         }
     }
 

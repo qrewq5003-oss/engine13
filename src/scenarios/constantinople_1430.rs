@@ -52,6 +52,16 @@ pub fn load_constantinople_1430() -> Scenario {
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
             minimum_tick: 20,
         }),
+        universal_actions: vec![
+            crate::core::PatronAction {
+                id: "observe".to_string(),
+                name: "Наблюдать".to_string(),
+                source_actor_id: None,
+                available_if: crate::core::ActionCondition::Always,
+                effects: HashMap::new(),
+                cost: HashMap::new(),
+            },
+        ],
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

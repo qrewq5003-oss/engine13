@@ -14,14 +14,14 @@ pub enum MetricRef {
 
 impl MetricRef {
     /// Parse a string into a MetricRef
-    /// 
+    ///
     /// Explicit prefixes (new format):
     /// - "family:key" → MetricRef::Family
     /// - "global:key" → MetricRef::Global
     /// - "actor:id.metric" → MetricRef::Actor
-    /// 
+    ///
     /// Backward compatibility (old format):
-    /// - "family_*" → MetricRef::Family
+    /// - "family_*" → MetricRef::Family (for migration)
     /// - "id.metric" → MetricRef::Actor
     /// - other → MetricRef::Global
     pub fn parse(s: &str) -> Self {
@@ -39,7 +39,7 @@ impl MetricRef {
                 MetricRef::Global { key: s.to_string() }
             }
         }
-        // Backward compatibility
+        // Backward compatibility for family_* (migration path)
         else if s.starts_with("family_") {
             MetricRef::Family { key: s.to_string() }
         } else if s.contains('.') {
@@ -61,8 +61,11 @@ impl MetricRef {
                     .unwrap_or(0.0)
             }
             MetricRef::Family { key } => {
-                // Family metrics now stored in global_metrics
-                world_state.global_metrics.get(key)
+                // Family metrics stored in family_state.metrics
+                // Handle both "family:key" format (key without prefix) and "family_*" format (key with prefix)
+                let metric_key = key.strip_prefix("family_").unwrap_or(key);
+                world_state.family_state.as_ref()
+                    .and_then(|fs| fs.metrics.get(metric_key))
                     .copied()
                     .unwrap_or(0.0)
             }
@@ -90,9 +93,13 @@ impl MetricRef {
                 }
             }
             MetricRef::Family { key } => {
-                // Family metrics now stored in global_metrics
-                let val = world_state.global_metrics.entry(key.clone()).or_insert(0.0);
-                *val += delta;
+                // Family metrics stored in family_state.metrics
+                // Handle both "family:key" format (key without prefix) and "family_*" format (key with prefix)
+                let metric_key = key.strip_prefix("family_").unwrap_or(key).to_string();
+                if let Some(ref mut fs) = world_state.family_state {
+                    let val = fs.metrics.entry(metric_key).or_insert(0.0);
+                    *val += delta;
+                }
             }
             MetricRef::Global { key } => {
                 let val = world_state.global_metrics.entry(key.clone()).or_insert(0.0);
