@@ -78,6 +78,8 @@ pub struct WorldState {
     pub interaction_cooldowns: HashMap<String, u32>,
     /// Set of fired one-time random event IDs
     pub fired_events: HashSet<String>,
+    /// Milestone cooldowns - milestone_id -> tick of last firing
+    pub milestone_cooldowns: HashMap<String, u32>,
 }
 
 impl WorldState {
@@ -115,6 +117,7 @@ impl WorldState {
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
+            milestone_cooldowns: HashMap::new(),
         }
     }
 
@@ -140,6 +143,7 @@ impl WorldState {
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
+            milestone_cooldowns: HashMap::new(),
         }
     }
 

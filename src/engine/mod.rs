@@ -752,9 +752,18 @@ fn check_milestone_events(
     let current_year = world.year;
 
     for milestone in &scenario.milestone_events {
-        // Skip if already fired
+        // Skip if already fired (one-time)
         if world.milestone_events_fired.contains(&milestone.id) {
             continue;
+        }
+
+        // Check cooldown
+        if let Some(cooldown) = milestone.cooldown_ticks {
+            if let Some(last_tick) = world.milestone_cooldowns.get(&milestone.id) {
+                if current_tick - last_tick < cooldown {
+                    continue;  // Still on cooldown
+                }
+            }
         }
 
         // Outcome milestones require tick >= 20 to fire
@@ -763,11 +772,11 @@ fn check_milestone_events(
         }
 
         let condition_met = check_event_condition(world, &milestone.condition);
-        
+
         // Handle duration: condition must be met for `duration` consecutive ticks
         let should_trigger = if let Some(duration) = milestone.condition.duration {
             let counter = world.milestone_condition_ticks.entry(milestone.id.clone()).or_insert(0);
-            
+
             if condition_met {
                 *counter += 1;
                 *counter >= duration
@@ -783,6 +792,7 @@ fn check_milestone_events(
 
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
+            world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
 
             // Log milestone firing
             eprintln!("[MILESTONE] {} fired at year {}", milestone.id, current_year);

@@ -7,6 +7,14 @@ use crate::core::{ActorDelta, Event, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 
+/// Narrative season for dual-phase chronicle
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NarrativeSeason {
+    Spring,  // Beginning of year, overview, anticipations
+    Autumn,  // End of year, outcomes, consequences
+}
+
 /// LLM configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -140,15 +148,54 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// System prompt for chronicler persona
+fn system_prompt(season: NarrativeSeason) -> &'static str {
+    match season {
+        NarrativeSeason::Spring => {
+            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
+
+ОБЯЗАТЕЛЬНО:
+- Первое предложение содержит год и сезон: 'Весной 1436 года...'
+- Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
+- Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
+- Упоминай правителей по имени когда это драматично
+- НИКОГДА не перечисляй акторов по очереди
+- НИКОГДА не называй числа и проценты
+- НИКОГДА не пиши 'актор X имеет Y единиц'
+- Пиши как будто читатель уже знает кто эти люди
+- Фокус на предчувствиях, расстановке сил, напряжении"
+        }
+        NarrativeSeason::Autumn => {
+            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
+
+ОБЯЗАТЕЛЬНО:
+- Первое предложение содержит год и сезон: 'Осенью 1435 года...'
+- Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
+- Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
+- Упоминай правителей по имени когда это драматично
+- НИКОГДА не перечисляй акторов по очереди
+- НИКОГДА не называй числа и проценты
+- НИКОГДА не пиши 'актор X имеет Y единиц'
+- Пиши как будто читатель уже знает кто эти люди
+- Фокус на том что произошло за год, последствиях, итогах"
+        }
+    }
+}
+
 /// Generate narrative prompt from world state and scenario
 pub fn generate_narrative_prompt(
     world_state: &WorldState,
     scenario: &Scenario,
     event_log: &EventLog,
     db: &Db,
+    season: NarrativeSeason,
 ) -> String {
     let mut prompt = String::new();
     let current_year = world_state.year;
+
+    // Section 0: System prompt - chronicler persona
+    prompt.push_str(system_prompt(season));
+    prompt.push_str("\n\n");
 
     // Section 1: Scenario context (depends on game mode)
     match world_state.game_mode {
@@ -168,14 +215,18 @@ pub fn generate_narrative_prompt(
         }
     }
 
-    // Section 1.5: Year anchoring instruction
+    // Section 1.5: Year and season anchoring instruction
+    let season_name = match season {
+        NarrativeSeason::Spring => "весна",
+        NarrativeSeason::Autumn => "осень",
+    };
     prompt.push_str(&format!(
         "=== ИНСТРУКЦИЯ ===\n\
-         ТЕКУЩИЙ ГОД: {}. \n\
+         ТЕКУЩИЙ ГОД: {}, СЕЗОН: {}. \n\
          Пиши ТОЛЬКО про события этого года.\n\
          Не упоминай будущие годы.\n\
          Не экстраполируй за пределы {}.\n\n",
-        current_year, current_year
+        current_year, season_name, current_year
     ));
 
     // Section 1.6: Strict narrative rules — no raw numbers

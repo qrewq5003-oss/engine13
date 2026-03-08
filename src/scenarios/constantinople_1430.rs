@@ -784,6 +784,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Уния церквей подписана. Папа обещает помощь. Православные недовольны.".to_string(),
+            cooldown_ticks: None,
         },
         // Varna crusade
         MilestoneEvent {
@@ -800,6 +801,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Варненский крестовый поход собран. Венгрия ведёт католиков против осман.".to_string(),
+            cooldown_ticks: None,
         },
         // Mehmed accelerates due to federation
         MilestoneEvent {
@@ -816,6 +818,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Мехмед форсирует подготовку. Федерация работает — османы торопятся.".to_string(),
+            cooldown_ticks: None,
         },
         // Mehmed rises naturally
         MilestoneEvent {
@@ -832,6 +835,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Мехмед II восходит на трон. Молодой амбициозный султан.".to_string(),
+            cooldown_ticks: None,
         },
         // Final assault
         MilestoneEvent {
@@ -848,6 +852,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: true,
             llm_context_shift: "Финальный штурм Константинополя начался.".to_string(),
+            cooldown_ticks: None,
         },
         // Constantinople holds
         MilestoneEvent {
@@ -864,6 +869,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Константинополь выстоял! Город непобедим.".to_string(),
+            cooldown_ticks: None,
         },
         // Outcome: Best case - byzantium alive AND federation >= 100
         MilestoneEvent {
@@ -880,6 +886,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Север Италии — новый центр Запада. Черноморская торговля под контролем федерации. Константинополь как протекторат. Венеция, Генуя, Милан выходят из этого сильнее чем вошли.".to_string(),
+            cooldown_ticks: None,
         },
         // Outcome: Survived alone - byzantium alive but federation < 50
         // This fires when byzantium survives but federation is weak
@@ -895,6 +902,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова.".to_string(),
+            cooldown_ticks: None,
         },
         // Outcome: Fell with federation - federation >= 80 but byzantium fell
         MilestoneEvent {
@@ -911,6 +919,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Константинополь пал. Но федерация выжила. Греческие учёные бегут на север — в Венецию, в Милан. Знания, рукописи, мастера. Ренессанс ускоряется. Север Италии выигрывает от трагедии которую не смог предотвратить.".to_string(),
+            cooldown_ticks: None,
         },
         // Outcome: Historical - byzantium dead AND federation < 50
         MilestoneEvent {
@@ -925,6 +934,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             is_key: true,
             triggers_collapse: false,
             llm_context_shift: "Исторический исход. Город пал. Федерация не сложилась. Ottoman давит на Адриатику. Венеция платит дань. Генуя теряет Галату. Милан смотрит в сторону.".to_string(),
+            cooldown_ticks: None,
         },
     ]
 }

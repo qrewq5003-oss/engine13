@@ -164,6 +164,7 @@ pub struct MilestoneEvent {
     pub is_key: bool,
     pub triggers_collapse: bool,
     pub llm_context_shift: String,
+    pub cooldown_ticks: Option<u32>,  // Minimum ticks between firings
 }
 
 /// Condition for milestone event triggering

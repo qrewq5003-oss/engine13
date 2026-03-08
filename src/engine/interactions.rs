@@ -163,11 +163,6 @@ pub fn calculate_interactions(
             current_tick, current_year, event_log, rng,
         );
 
-        calculate_vassalage_interaction(
-            world, &actor_a_id, &actor_b_id, distance,
-            current_tick, current_year, event_log, rng,
-        );
-
         calculate_cultural_interaction(
             world, &actor_a_id, &actor_b_id, distance,
             current_tick, current_year, event_log, rng,
@@ -523,92 +518,6 @@ fn calculate_migration_interaction(
             EventType::Migration,
             false,
             format!("Миграция из {} в {}", pressuring_id, neighbor_id),
-        );
-        event_log.add(event);
-    }
-}
-
-/// Vassalage interaction — power projection
-fn calculate_vassalage_interaction(
-    world: &mut WorldState,
-    actor_a_id: &str,
-    actor_b_id: &str,
-    distance: u32,
-    current_tick: u32,
-    current_year: i32,
-    event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
-) {
-    // Condition: power_diff > 4.0, distance == 1, weak actor external_pressure > 75
-    if distance != 1 {
-        return;
-    }
-
-    let actor_a = world.actors.get(actor_a_id).unwrap();
-    let actor_b = world.actors.get(actor_b_id).unwrap();
-
-    // Calculate power projection (simplified: military_size * legitimacy / 100)
-    let power_a = actor_a.metrics.military_size * actor_a.metrics.legitimacy / 100.0;
-    let power_b = actor_b.metrics.military_size * actor_b.metrics.legitimacy / 100.0;
-    let power_diff = (power_a - power_b).abs();
-
-    if power_diff <= 4.0 {
-        return;
-    }
-
-    // Determine dominant and weak actor
-    let (dominant_id, weak_id) = if power_a > power_b {
-        (actor_a_id.to_string(), actor_b_id.to_string())
-    } else {
-        (actor_b_id.to_string(), actor_a_id.to_string())
-    };
-
-    // Weak actor must have high external_pressure to be vulnerable to vassalage
-    let weak_pressure = {
-        let weak = world.actors.get(&weak_id).unwrap();
-        weak.metrics.external_pressure
-    };
-    if weak_pressure <= 75.0 {
-        return;
-    }
-
-    // Softer penalties
-    let legitimacy_loss = power_diff * 0.2;
-    let cohesion_loss = power_diff * 0.2;
-    let economic_gain = 1.0; // tribute
-
-    let weak_legitimacy_before = {
-        let weak = world.actors.get(&weak_id).unwrap();
-        weak.metrics.legitimacy
-    };
-    let _weak_legitimacy_before = weak_legitimacy_before;
-
-    if let Some(weak) = world.actors.get_mut(&weak_id) {
-        weak.metrics.legitimacy = (weak.metrics.legitimacy - legitimacy_loss).max(0.0);
-        weak.metrics.cohesion = (weak.metrics.cohesion - cohesion_loss).max(0.0);
-    }
-
-    if let Some(dominant) = world.actors.get_mut(&dominant_id) {
-        dominant.metrics.economic_output += economic_gain;
-    }
-
-    eprintln!("[INTERACTION] Vassalage: {} vs {}", actor_a_id, actor_b_id);
-
-    // Record event if legitimacy dropped below 30 for the first time
-    let _weak_legitimacy_after = {
-        let weak = world.actors.get(&weak_id).unwrap();
-        weak.metrics.legitimacy
-    };
-
-    if should_record_event(&InteractionType::Vassalage, legitimacy_loss) {
-        let event = Event::new(
-            format!("vassalage_{}_{}", dominant_id, weak_id),
-            current_tick,
-            current_year,
-            dominant_id.clone(),
-            EventType::Diplomatic,
-            false,
-            format!("{} устанавливает вассальную зависимость над {}", dominant_id, weak_id),
         );
         event_log.add(event);
     }

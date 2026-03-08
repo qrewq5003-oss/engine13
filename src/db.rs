@@ -85,6 +85,7 @@ impl Db {
 
     /// Initialize database schema (CREATE TABLE IF NOT EXISTS)
     fn migrate_schema(&self) -> Result<(), String> {
+        // Create tables and indexes
         self.conn
             .execute_batch(
                 "
@@ -112,7 +113,20 @@ impl Db {
                 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
                 CREATE INDEX IF NOT EXISTS idx_events_key ON events(is_key);
                 CREATE INDEX IF NOT EXISTS idx_events_scenario ON events(scenario_id);
+            "
+            )
+            .map_err(|e| format!("Failed to create events table: {}", e))?;
 
+        // Migration: add metadata column if it doesn't exist (for existing databases)
+        // Ignore errors - column may already exist
+        self.conn
+            .execute("ALTER TABLE events ADD COLUMN metadata TEXT NOT NULL DEFAULT ''", [])
+            .ok();
+
+        // Create saves table
+        self.conn
+            .execute_batch(
+                "
                 -- Saves table
                 CREATE TABLE IF NOT EXISTS saves (
                     id TEXT PRIMARY KEY,

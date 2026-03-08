@@ -311,8 +311,13 @@ pub fn get_scenario_list() -> Vec<ScenarioMeta> {
 }
 
 /// Get narrative from LLM - delegates to application::narrative
-pub async fn cmd_get_narrative(state: &AppState, db: &Db, app: tauri::AppHandle) -> Result<(), String> {
-    crate::application::cmd_get_narrative(state, db, app).await
+pub async fn cmd_get_narrative(
+    state: &AppState,
+    db: &Db,
+    app: tauri::AppHandle,
+    season: crate::llm::NarrativeSeason,
+) -> Result<(), String> {
+    crate::application::cmd_get_narrative(state, db, app, season).await
 }
 
 /// Get available models from LLM provider - delegates to llm module
