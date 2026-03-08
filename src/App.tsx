@@ -380,14 +380,14 @@ const App: React.FC = () => {
             narrative={narrative}
             isLoading={narrativeLoading}
           />
-          {worldState.scenario_id === 'rome_375' && (
+          {worldState.features?.family_panel && (
             <FamilyPanel
               worldState={worldState}
               currentYear={worldState.year}
               currentTick={worldState.tick}
             />
           )}
-          {worldState.scenario_id === 'constantinople_1430' && (
+          {worldState.features?.global_metrics_panel && (
             <GlobalMetricsPanel worldState={worldState} />
           )}
         </div>

@@ -1383,6 +1383,7 @@ mod tests {
             player_actor_id: None,
             status_indicators: vec![],
             global_metric_weights: HashMap::new(),
+            features: crate::core::ScenarioFeatures::default(),
         };
         let mut event_log = EventLog::new();
 

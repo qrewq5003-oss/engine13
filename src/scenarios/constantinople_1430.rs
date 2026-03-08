@@ -35,6 +35,11 @@ pub fn load_constantinople_1430() -> Scenario {
                 ("milan".to_string(), 1.0),
             ])),
         ]),
+        features: crate::core::ScenarioFeatures {
+            family_panel: false,
+            global_metrics_panel: true,
+            patron_actions: true,
+        },
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

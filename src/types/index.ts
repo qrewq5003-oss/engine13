@@ -94,6 +94,15 @@ export interface WorldState {
   milestone_events_fired: string[];
   /// Global scenario metrics (includes family_*, federation_progress, etc.)
   global_metrics: Record<string, number>;
+  /// Feature flags for UI
+  features?: ScenarioFeatures;
+}
+
+/// Scenario feature flags for UI
+export interface ScenarioFeatures {
+  family_panel: boolean;
+  global_metrics_panel: boolean;
+  patron_actions: boolean;
 }
 
 // ============================================================================

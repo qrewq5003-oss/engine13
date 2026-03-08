@@ -27,6 +27,8 @@ pub struct Scenario {
     pub status_indicators: Vec<StatusIndicator>,
     /// Global metric weights by source actor: metric_name -> {source_actor -> weight}
     pub global_metric_weights: HashMap<String, HashMap<String, f64>>,
+    /// Feature flags for UI
+    pub features: ScenarioFeatures,
 }
 
 /// Status indicator for UI display
@@ -36,6 +38,14 @@ pub struct StatusIndicator {
     pub metric: String,
     pub invert: bool,
     pub thresholds: Vec<(f64, String)>,
+}
+
+/// Scenario feature flags for UI
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScenarioFeatures {
+    pub family_panel: bool,
+    pub global_metrics_panel: bool,
+    pub patron_actions: bool,
 }
 
 /// Autonomous delta configuration for metrics

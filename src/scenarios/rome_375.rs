@@ -29,6 +29,11 @@ pub fn load_rome_375() -> Scenario {
         player_actor_id: Some("rome".to_string()),
         status_indicators: create_status_indicators(),
         global_metric_weights: HashMap::new(),
+        features: crate::core::ScenarioFeatures {
+            family_panel: true,
+            global_metrics_panel: false,
+            patron_actions: false,
+        },
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
