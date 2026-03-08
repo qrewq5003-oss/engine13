@@ -35,6 +35,8 @@ pub struct Scenario {
     pub naval_conflict_probability: f64,
     /// Random events pool for this scenario
     pub random_events: Vec<RandomEvent>,
+    /// Generation length in years (for family scenarios, None = not a family scenario)
+    pub generation_length: Option<u32>,
 }
 
 /// Status indicator for UI display

@@ -96,6 +96,10 @@ export interface WorldState {
   global_metrics: Record<string, number>;
   /// Feature flags for UI
   features?: ScenarioFeatures;
+  /// Scenario start year for generation calculation
+  scenario_start_year?: number;
+  /// Generation length in years (for family scenarios)
+  generation_length?: number;
 }
 
 /// Scenario feature flags for UI
@@ -296,7 +300,7 @@ export interface SaveSlotData {
 
 export interface SaveSlotList {
   auto: SaveSlotData | null;
-  slots: [SaveSlotData | null, SaveSlotData | null, SaveSlotData | null];
+  slots: Record<string, SaveSlotData>;
 }
 
 // ============================================================================

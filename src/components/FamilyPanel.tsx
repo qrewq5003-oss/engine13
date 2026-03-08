@@ -22,13 +22,15 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
       value: value as number,
     }));
 
-  // Get patriarch age from global_metrics with default
-  const patriarchAge = Math.floor(worldState.global_metrics?.patriarch_age || 42);
+  // Get patriarch age - no default, show dash if missing
+  const patriarchAge = worldState.global_metrics?.patriarch_age != null
+    ? Math.floor(worldState.global_metrics.patriarch_age)
+    : null;
 
-  // Calculate generation info - use scenario start year from global_metrics or default
-  const startYear = (worldState.global_metrics?.scenario_start_year as number) || 375;
+  // Calculate generation info - use scenario start year from worldState
+  const startYear = worldState.scenario_start_year ?? 375;
   const yearsSinceStart = currentYear - startYear;
-  const generationLength = 33;
+  const generationLength = worldState.generation_length ?? 33;
   const generationNumber = Math.floor(yearsSinceStart / generationLength) + 1;
   const generationStartYear = startYear + (generationNumber - 1) * generationLength;
 
@@ -45,7 +47,7 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
           <span className="generation-number">{generationNumber}</span>
         </div>
         <div className="patriarch-info">
-          <span className="patriarch-age">Age: {patriarchAge}</span>
+          <span className="patriarch-age">Age: {patriarchAge !== null ? `${patriarchAge} лет` : '—'}</span>
           <span className="generation-year">Since {generationStartYear}</span>
         </div>
       </div>

@@ -87,6 +87,10 @@ pub struct WorldState {
     pub save_version: u32,
     /// Debug mode - enables detailed tick explanations
     pub debug_mode: bool,
+    /// Scenario start year for generation calculation
+    pub scenario_start_year: Option<i32>,
+    /// Generation length in years (for family scenarios)
+    pub generation_length: Option<u32>,
 }
 
 impl WorldState {
@@ -127,6 +131,8 @@ impl WorldState {
             milestone_cooldowns: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
+            scenario_start_year: Some(start_year),
+            generation_length: None,
         }
     }
 
@@ -155,6 +161,8 @@ impl WorldState {
             milestone_cooldowns: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
+            scenario_start_year: Some(start_year),
+            generation_length: None,
         }
     }
 

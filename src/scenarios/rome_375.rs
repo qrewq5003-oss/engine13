@@ -37,6 +37,7 @@ pub fn load_rome_375() -> Scenario {
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),
+        generation_length: Some(33),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

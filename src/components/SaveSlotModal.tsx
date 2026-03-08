@@ -46,20 +46,20 @@ export const SaveSlotModal: React.FC<SaveSlotModalProps> = ({
             )}
           </button>
 
-          {/* Manual save slots */}
-          {saves?.slots.map((slot, index) => (
+          {/* Manual save slots - dynamic */}
+          {saves?.slots && Object.entries(saves.slots).map(([slotName, slotData]) => (
             <button
-              key={`slot_${index + 1}`}
+              key={slotName}
               className="save-slot-card"
-              onClick={() => handleSlotClick(`slot_${index + 1}`)}
+              onClick={() => handleSlotClick(slotName)}
             >
               <div className="save-slot-header">
-                <span className="save-slot-name">Слот {index + 1}</span>
+                <span className="save-slot-name">{slotName.replace('_', ' ')}</span>
               </div>
-              {slot ? (
+              {slotData ? (
                 <div className="save-slot-info">
-                  <span className="save-slot-year">{slot.year} AD</span>
-                  <span className="save-slot-tick">Тик {slot.tick}</span>
+                  <span className="save-slot-year">{slotData.year} AD</span>
+                  <span className="save-slot-tick">Тик {slotData.tick}</span>
                 </div>
               ) : (
                 <span className="save-slot-empty">Пусто</span>

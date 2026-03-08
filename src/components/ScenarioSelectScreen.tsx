@@ -65,7 +65,7 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
     const allSaves: SaveSlotData[] = [];
     Object.values(savesByScenario).forEach(slotList => {
       if (slotList.auto) allSaves.push(slotList.auto);
-      slotList.slots.forEach(slot => { if (slot) allSaves.push(slot); });
+      Object.values(slotList.slots).forEach(slot => { allSaves.push(slot); });
     });
     onContinue(allSaves);
   };
@@ -120,8 +120,8 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
 
                 {isExpanded && (
                   <div className="saves-list">
-                    {slotList?.slots.map((slot, index) => (
-                      <div key={`slot_${index + 1}`} className="save-item">
+                    {slotList && Object.entries(slotList.slots).map(([slotName, slot]) => (
+                      <div key={slotName} className="save-item">
                         {slot ? (
                           <>
                             <div className="save-info">
@@ -139,7 +139,7 @@ export const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({
                           </>
                         ) : (
                           <div className="save-empty">
-                            <span>Слот {index + 1}: Пусто</span>
+                            <span>{slotName}: Пусто</span>
                           </div>
                         )}
                       </div>

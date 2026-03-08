@@ -151,6 +151,9 @@ pub fn load_scenario(
         );
     }
 
+    // Set generation_length from scenario
+    world_state.generation_length = scenario.generation_length;
+
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
     state.event_log = crate::engine::EventLog::new();
@@ -198,7 +201,7 @@ pub struct SaveSlotData {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SaveSlotList {
     pub auto: Option<SaveSlotData>,
-    pub slots: [Option<SaveSlotData>; 3],
+    pub slots: HashMap<String, SaveSlotData>,
 }
 
 /// Parse slot from save_id format: "{scenario_id}__{slot}"
@@ -214,7 +217,7 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<SaveSlotList,
         .map_err(|e| format!("Failed to list saves: {}", e))?;
 
     let mut auto: Option<SaveSlotData> = None;
-    let mut slots_map: HashMap<String, SaveSlotData> = HashMap::new();
+    let mut slots: HashMap<String, SaveSlotData> = HashMap::new();
 
     for db_save in db_saves {
         // Extract slot from save_id format: "{scenario_id}__{slot}"
@@ -232,18 +235,10 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<SaveSlotList,
             if slot == "auto" {
                 auto = Some(save_data);
             } else {
-                slots_map.insert(slot, save_data);
+                slots.insert(slot, save_data);
             }
         }
     }
-
-    // Convert HashMap to fixed array (first 3 slots for backward compat)
-    let mut slots: [Option<SaveSlotData>; 3] = [None, None, None];
-    for (i, slot_name) in ["slot_1", "slot_2", "slot_3"].iter().enumerate() {
-        slots[i] = slots_map.remove(*slot_name);
-    }
-
-    // Note: Additional slots beyond slot_3 are available via the HashMap if needed
 
     Ok(SaveSlotList { auto, slots })
 }

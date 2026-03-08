@@ -1572,6 +1572,7 @@ mod tests {
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
+            generation_length: None,
         };
         let mut event_log = EventLog::new();
 

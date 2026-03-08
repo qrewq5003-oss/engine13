@@ -164,7 +164,7 @@ fn test_list_saves_with_slots() {
 
     let slot_list = result.unwrap();
     assert!(slot_list.auto.is_some(), "auto save should exist");
-    assert!(slot_list.slots[0].is_some(), "slot_1 should exist");
-    assert!(slot_list.slots[1].is_none(), "slot_2 should be empty");
-    assert!(slot_list.slots[2].is_none(), "slot_3 should be empty");
+    assert!(slot_list.slots.contains_key("slot_1"), "slot_1 should exist");
+    assert!(!slot_list.slots.contains_key("slot_2"), "slot_2 should be empty");
+    assert!(!slot_list.slots.contains_key("slot_3"), "slot_3 should be empty");
 }

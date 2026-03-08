@@ -43,6 +43,7 @@ pub fn load_constantinople_1430() -> Scenario {
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
+        generation_length: None,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
