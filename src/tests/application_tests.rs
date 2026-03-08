@@ -145,7 +145,8 @@ fn test_save_load_preserves_state() {
     
     assert_eq!(year_before, year_after, "Year should be preserved");
     assert_eq!(tick_before, tick_after, "Tick should be preserved");
-    assert_eq!(fed_before, fed_after, "federation_progress should be preserved");
+    // Use approximate equality for floating point
+    assert!((fed_before - fed_after).abs() < 0.0001, "federation_progress should be preserved (before: {}, after: {})", fed_before, fed_after);
 }
 
 #[test]

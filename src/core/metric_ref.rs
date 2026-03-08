@@ -40,7 +40,8 @@ impl MetricRef {
                     .unwrap_or(0.0)
             }
             MetricRef::Family { key } => {
-                world_state.family_metrics.get(key)
+                // Family metrics now stored in global_metrics
+                world_state.global_metrics.get(key)
                     .copied()
                     .unwrap_or(0.0)
             }
@@ -68,7 +69,8 @@ impl MetricRef {
                 }
             }
             MetricRef::Family { key } => {
-                let val = world_state.family_metrics.entry(key.clone()).or_insert(0.0);
+                // Family metrics now stored in global_metrics
+                let val = world_state.global_metrics.entry(key.clone()).or_insert(0.0);
                 *val += delta;
             }
             MetricRef::Global { key } => {

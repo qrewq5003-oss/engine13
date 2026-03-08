@@ -14,11 +14,11 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   currentTick: _currentTick,
 }) => {
   const familyMetrics = {
-    family_influence: worldState.family_metrics.family_influence || 0,
-    family_knowledge: worldState.family_metrics.family_knowledge || 0,
-    family_wealth: worldState.family_metrics.family_wealth || 0,
-    family_connections: worldState.family_metrics.family_connections || 0,
-    patriarch_age: worldState.family_metrics.patriarch_age || 42, // Default to 42 if not set
+    family_influence: worldState.global_metrics?.family_influence || 0,
+    family_knowledge: worldState.global_metrics?.family_knowledge || 0,
+    family_wealth: worldState.global_metrics?.family_wealth || 0,
+    family_connections: worldState.global_metrics?.family_connections || 0,
+    patriarch_age: worldState.global_metrics?.patriarch_age || 42, // Default to 42 if not set
   };
 
   // Calculate generation info from patriarch_age

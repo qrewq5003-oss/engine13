@@ -39,7 +39,7 @@ pub fn apply_player_action(
     }
 
     eprintln!("[DEBUG] apply_player_action - applied_costs: {:?}", applied_costs);
-    eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.family_metrics);
+    eprintln!("[DEBUG] apply_player_action - family_metrics after cost: {:?}", world_state.global_metrics);
 
     // Apply effects with global metric weights from scenario
     let mut applied_effects = HashMap::new();
@@ -62,7 +62,7 @@ pub fn apply_player_action(
     }
 
     eprintln!("[DEBUG] apply_player_action - applied_effects: {:?}", applied_effects);
-    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.family_metrics);
+    eprintln!("[DEBUG] apply_player_action - family_metrics after effects: {:?}", world_state.global_metrics);
 
     // Record event - use first foreground actor or default
     let event_actor = world_state.actors.values()

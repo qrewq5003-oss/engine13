@@ -32,8 +32,13 @@ pub fn save_game(
     let world_state_json = serde_json::to_string(&world_state)
         .map_err(|e| format!("Failed to serialize world state: {}", e))?;
 
-    // Create player_state (for now just family_metrics, can be extended)
-    let player_state_json = serde_json::to_string(&world_state.family_metrics)
+    // Create player_state - filter global_metrics for family_* and patriarch_* keys
+    let player_state: HashMap<String, f64> = world_state.global_metrics
+        .iter()
+        .filter(|(k, _)| k.starts_with("family_") || k.starts_with("patriarch_"))
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
+    let player_state_json = serde_json::to_string(&player_state)
         .map_err(|e| format!("Failed to serialize player state: {}", e))?;
 
     let db_save = DbSave {
@@ -67,20 +72,20 @@ pub fn load_game(
         .ok_or_else(|| format!("Save '{}' not found", save_id))?;
 
     // Deserialize world_state from JSON
-    let world_state: WorldState = serde_json::from_str(&db_save.world_state_json)
+    let mut world_state: WorldState = serde_json::from_str(&db_save.world_state_json)
         .map_err(|e| format!("Failed to deserialize world state: {}", e))?;
 
-    // Deserialize player_state (family_metrics)
-    let family_metrics: HashMap<String, f64> = serde_json::from_str(&db_save.player_state_json)
+    // Deserialize player_state and merge into global_metrics
+    let player_state: HashMap<String, f64> = serde_json::from_str(&db_save.player_state_json)
         .unwrap_or_else(|_| HashMap::new());
+
+    // Merge player_state into global_metrics
+    for (key, value) in player_state {
+        world_state.global_metrics.insert(key, value);
+    }
 
     state.world_state = Some(world_state.clone());
     state.event_log = crate::engine::EventLog::new();
-
-    // Update family_metrics in world_state
-    if let Some(ref mut ws) = state.world_state {
-        ws.family_metrics = family_metrics;
-    }
 
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
         let scenario = crate::scenarios::registry::load_by_id(&db_save.scenario_id)
@@ -111,12 +116,12 @@ pub fn load_scenario(
         }
     }
 
-    // Initialize family_metrics from player actor's scenario_metrics
+    // Initialize family metrics from player actor's scenario_metrics
     if let Some(ref player_actor_id) = scenario.player_actor_id {
         if let Some(player_actor) = world_state.actors.get(player_actor_id) {
             for (key, value) in &player_actor.scenario_metrics {
                 if key.starts_with("family_") {
-                    world_state.family_metrics.insert(key.clone(), *value);
+                    world_state.global_metrics.insert(key.clone(), *value);
                 }
             }
         }
@@ -124,7 +129,7 @@ pub fn load_scenario(
 
     // Initialize patriarch_age from generation_mechanics if available
     if let Some(gen_mechanics) = &scenario.generation_mechanics {
-        world_state.family_metrics.insert(
+        world_state.global_metrics.insert(
             "patriarch_age".to_string(),
             gen_mechanics.patriarch_start_age as f64,
         );

@@ -92,7 +92,7 @@ export interface WorldState {
   dead_actors: DeadActor[];
   alliances: Alliance[];
   milestone_events_fired: string[];
-  family_metrics: Record<string, number>;
+  /// Global scenario metrics (includes family_*, federation_progress, etc.)
   global_metrics: Record<string, number>;
 }
 

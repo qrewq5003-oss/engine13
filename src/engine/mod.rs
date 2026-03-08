@@ -1085,14 +1085,14 @@ fn check_generation_transfer(
 
     // Get current patriarch age (default to start age if not set)
     let patriarch_age_key = "patriarch_age".to_string();
-    let current_age = world.family_metrics
+    let current_age = world.global_metrics
         .get(&patriarch_age_key)
         .copied()
         .unwrap_or(gen_mechanics.patriarch_start_age as f64);
 
     // Age the patriarch by tick_span years
     let new_age = current_age + scenario.tick_span as f64;
-    world.family_metrics.insert(patriarch_age_key.clone(), new_age);
+    world.global_metrics.insert(patriarch_age_key.clone(), new_age);
 
     // Check if patriarch has reached end age - trigger generation transfer
     if new_age >= gen_mechanics.patriarch_end_age as f64 {
@@ -1101,26 +1101,26 @@ fn check_generation_transfer(
         // Use scenario-specific coefficients if available, default to 0.7
 
         // Scale all family_ metrics (metrics starting with "family_")
-        let family_metric_keys: Vec<String> = world.family_metrics
+        let family_metric_keys: Vec<String> = world.global_metrics
             .keys()
             .filter(|k| k.starts_with("family_"))
             .cloned()
             .collect();
 
         for metric in &family_metric_keys {
-            if let Some(value) = world.family_metrics.get(metric) {
+            if let Some(value) = world.global_metrics.get(metric) {
                 // Get coefficient from scenario, default to 0.7
                 let coefficient = gen_mechanics.inheritance_coefficients
                     .get(metric)
                     .copied()
                     .unwrap_or(0.7);
                 let new_value = value * coefficient;
-                world.family_metrics.insert(metric.clone(), new_value);
+                world.global_metrics.insert(metric.clone(), new_value);
             }
         }
 
         // Reset patriarch age to start age for new generation
-        world.family_metrics.insert(patriarch_age_key, gen_mechanics.patriarch_start_age as f64);
+        world.global_metrics.insert(patriarch_age_key, gen_mechanics.patriarch_start_age as f64);
 
         // Record generation transfer event
         let event = Event::new(
