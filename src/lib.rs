@@ -1,6 +1,7 @@
 pub mod application;
 pub mod core;
 pub mod engine;
+pub mod events;
 pub mod llm;
 pub mod scenarios;
 pub mod commands;

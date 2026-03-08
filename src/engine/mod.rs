@@ -150,22 +150,25 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     // Phase 2: Dependency graph and interactions
     phase_interactions(world, scenario, event_log, &mut rng);
 
-    // Phase 3: Actor tag effects
+    // Phase 3: Random events
+    phase_random_events(world, scenario, event_log, &mut rng);
+
+    // Phase 4: Actor tag effects
     phase_actor_tags(world, scenario);
 
-    // Phase 4: Clamp metrics
+    // Phase 5: Clamp metrics
     phase_clamp(world);
 
-    // Phase 5: Events (thresholds, ranks, milestones, game mode, relevance)
+    // Phase 6: Events (thresholds, ranks, milestones, game mode, relevance)
     phase_events(world, scenario, event_log);
 
-    // Phase 6: Actor collapses
+    // Phase 7: Actor collapses
     phase_collapses(world, scenario, event_log);
 
-    // Phase 7: Record changes and generation mechanics
+    // Phase 8: Record changes and generation mechanics
     phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
 
-    // Phase 8: Advance tick state
+    // Phase 9: Advance tick state
     phase_advance(world, scenario, &mut rng);
 }
 
@@ -221,7 +224,111 @@ fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &m
 }
 
 // ============================================================================
-// Phase 3: Actor tag effects
+// Phase 3: Random events
+// ============================================================================
+
+fn phase_random_events(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    event_log: &mut EventLog,
+    rng: &mut rand_chacha::ChaCha8Rng,
+) {
+    use rand::seq::SliceRandom;
+
+    // Combine common events with scenario-specific events
+    let all_events: Vec<crate::core::RandomEvent> = crate::events::common_events()
+        .into_iter()
+        .chain(scenario.random_events.iter().cloned())
+        .collect();
+
+    // Get sea actor IDs for SeaActors target
+    let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
+        .filter(|a| a.tags.contains(&"maritime".to_string()) || a.tags.contains(&"trade_empire".to_string()))
+        .map(|a| a.id.clone())
+        .collect();
+
+    // Get foreground actor IDs
+    let foreground_ids: Vec<String> = world.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground && !world.dead_actor_ids.contains(&a.id))
+        .map(|a| a.id.clone())
+        .collect();
+
+    for event in &all_events {
+        // Skip one-time events that already fired
+        if event.one_time && world.fired_events.contains(&event.id) {
+            continue;
+        }
+
+        // Roll for event probability
+        if rng.gen::<f64>() > event.probability {
+            continue;
+        }
+
+        // Determine target actor(s)
+        let target_ids: Vec<String> = match &event.target {
+            crate::core::EventTarget::Actor(id) => {
+                if world.actors.contains_key(id) && !world.dead_actor_ids.contains(id) {
+                    vec![id.clone()]
+                } else {
+                    vec![]
+                }
+            },
+            crate::core::EventTarget::Any => {
+                foreground_ids.choose(rng).cloned().into_iter().collect()
+            },
+            crate::core::EventTarget::SeaActors => {
+                let sea_foreground: Vec<&String> = foreground_ids.iter()
+                    .filter(|id| sea_actor_ids.contains(*id))
+                    .collect();
+                sea_foreground.choose(rng).cloned().cloned().into_iter().collect()
+            },
+            crate::core::EventTarget::All => foreground_ids.clone(),
+        };
+
+        if target_ids.is_empty() {
+            continue;
+        }
+
+        // Check conditions for each target
+        for target_id in &target_ids {
+            let conditions_met = event.conditions.iter().all(|cond| {
+                let metric = cond.metric.replace("self.", &format!("{}.", target_id));
+                let value = crate::core::MetricRef::parse(&metric).get(world);
+                cond.operator.evaluate(value, cond.value)
+            });
+
+            if !conditions_met {
+                continue;
+            }
+
+            // Apply effects
+            for (metric, delta) in &event.effects {
+                let resolved = metric.replace("self.", &format!("{}.", target_id));
+                crate::core::MetricRef::parse(&resolved).apply(world, *delta);
+            }
+
+            // Record event
+            let event_record = crate::core::Event::new(
+                event.id.clone(),
+                world.tick,
+                world.year,
+                target_id.clone(),
+                crate::core::EventType::Threshold,
+                true,
+                event.llm_context.clone(),
+            );
+            event_log.add(event_record);
+
+            // Mark one-time event as fired
+            if event.one_time {
+                world.fired_events.insert(event.id.clone());
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Phase 4: Actor tag effects
 // ============================================================================
 
 fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
@@ -1384,6 +1491,9 @@ mod tests {
             status_indicators: vec![],
             global_metric_weights: HashMap::new(),
             features: crate::core::ScenarioFeatures::default(),
+            military_conflict_probability: 0.3,
+            naval_conflict_probability: 0.1,
+            random_events: vec![],
         };
         let mut event_log = EventLog::new();
 

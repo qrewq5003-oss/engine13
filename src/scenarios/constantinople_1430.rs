@@ -40,6 +40,9 @@ pub fn load_constantinople_1430() -> Scenario {
             global_metrics_panel: true,
             patron_actions: true,
         },
+        military_conflict_probability: 0.35,
+        naval_conflict_probability: 0.20,
+        random_events: create_random_events(),
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -983,6 +986,123 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
                 (150.0, "нарастает".to_string()),
                 (200.0, "готова к штурму".to_string()),
             ],
+        },
+    ]
+}
+
+fn create_random_events() -> Vec<crate::core::RandomEvent> {
+    use crate::core::{Condition, EventTarget, ComparisonOperator, RandomEvent};
+    use std::collections::HashMap;
+
+    vec![
+        RandomEvent {
+            id: "cardinal_death".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("papacy".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("global:federation_progress".to_string(), -8.0),
+                ("papacy.legitimacy".to_string(), -5.0),
+            ]),
+            llm_context: "Смерть кардинала сорвала переговоры о федерации".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "ottoman_embassy".to_string(),
+            probability: 0.08,
+            target: EventTarget::Actor("byzantium".to_string()),
+            conditions: vec![
+                Condition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            ],
+            effects: HashMap::from([
+                ("byzantium.legitimacy".to_string(), -8.0),
+                ("byzantium.treasury".to_string(), -150.0),
+            ]),
+            llm_context: "Османское посольство потребовало унизительной дани".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "genoese_bankers".to_string(),
+            probability: 0.07,
+            target: EventTarget::Actor("genoa".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("genoa.treasury".to_string(), 200.0),
+                ("global:federation_progress".to_string(), 3.0),
+            ]),
+            llm_context: "Генуэзские банкиры выделили займ на укрепление союза".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "greek_scholars_flee".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("byzantium".to_string()),
+            conditions: vec![
+                Condition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0 },
+            ],
+            effects: HashMap::from([
+                ("byzantium.cohesion".to_string(), -8.0),
+                ("byzantium.legitimacy".to_string(), -5.0),
+                ("global:federation_progress".to_string(), 2.0),
+            ]),
+            llm_context: "Греческие учёные и философы бегут на Запад, унося с собой знания".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "ottoman_spy_caught".to_string(),
+            probability: 0.07,
+            target: EventTarget::Actor("byzantium".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("byzantium.legitimacy".to_string(), 5.0),
+                ("ottomans.external_pressure".to_string(), -3.0),
+                ("global:federation_progress".to_string(), 4.0),
+            ]),
+            llm_context: "Пойманный османский шпион доказал угрозу — союзники насторожились".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "crusade_call".to_string(),
+            probability: 0.05,
+            target: EventTarget::Actor("papacy".to_string()),
+            conditions: vec![
+                Condition { metric: "papacy.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            ],
+            effects: HashMap::from([
+                ("global:federation_progress".to_string(), 10.0),
+                ("papacy.treasury".to_string(), -200.0),
+                ("hungary.military_size".to_string(), 20.0),
+            ]),
+            llm_context: "Папа призвал к новому крестовому походу против турок".to_string(),
+            one_time: true,
+        },
+        RandomEvent {
+            id: "venetian_fleet_storm".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("venice".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("venice.military_size".to_string(), -25.0),
+                ("venice.treasury".to_string(), -100.0),
+                ("global:federation_progress".to_string(), -5.0),
+            ]),
+            llm_context: "Буря разметала венецианский флот в Эгейском море".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "mehmed_threatens".to_string(),
+            probability: 0.08,
+            target: EventTarget::Actor("ottomans".to_string()),
+            conditions: vec![
+                Condition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0 },
+            ],
+            effects: HashMap::from([
+                ("byzantium.external_pressure".to_string(), 10.0),
+                ("byzantium.cohesion".to_string(), -8.0),
+                ("global:federation_progress".to_string(), 5.0),
+            ]),
+            llm_context: "Открытые угрозы Мехмеда в адрес Константинополя встревожили Европу".to_string(),
+            one_time: false,
         },
     ]
 }

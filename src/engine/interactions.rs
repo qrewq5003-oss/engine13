@@ -145,7 +145,7 @@ pub fn calculate_interactions(
         // Calculate all six interaction types sequentially
         calculate_military_interaction(
             world, &actor_a_id, &actor_b_id, distance, bt.clone(),
-            current_tick, current_year, event_log, rng,
+            current_tick, current_year, event_log, rng, scenario,
         );
 
         calculate_trade_interaction(
@@ -217,6 +217,7 @@ fn calculate_military_interaction(
     current_year: i32,
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
+    scenario: &Scenario,
 ) {
     // No military conflicts in first 3 ticks (stabilization period)
     if world.tick < 3 {
@@ -226,7 +227,7 @@ fn calculate_military_interaction(
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
 
-    // Condition: both alive, distance == 1, border Land
+    // Condition: both alive, distance == 1
     if distance != 1 {
         return;
     }
@@ -243,70 +244,82 @@ fn calculate_military_interaction(
     let eff_mil_a = effective_military(actor_a, actor_a_neighbors);
     let eff_mil_b = effective_military(actor_b, actor_b_neighbors);
 
-    // Determine stronger and weaker actor by effective military
-    let (stronger_id, weaker_id, stronger_eff, weaker_eff) = if eff_mil_a >= eff_mil_b {
+    // Determine stronger (attacker) and weaker (defender) actor by effective military
+    let (attacker_id, defender_id, attacker_eff, defender_eff) = if eff_mil_a >= eff_mil_b {
         (actor_a_id.to_string(), actor_b_id.to_string(), eff_mil_a, eff_mil_b)
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string(), eff_mil_b, eff_mil_a)
     };
 
     // Check cooldown
-    let cooldown_key = format!("{}_vs_{}", stronger_id, weaker_id);
+    let cooldown_key = format!("{}_vs_{}", attacker_id, defender_id);
     if let Some(&last_tick) = world.interaction_cooldowns.get(&cooldown_key) {
         if current_tick - last_tick < 5 {
             return;
         }
     }
 
-    // Calculate probability with affinity modifier
-    let external_pressure_avg = (actor_a.metrics.external_pressure + actor_b.metrics.external_pressure) / 2.0;
-    let military_ratio = stronger_eff / weaker_eff.max(1.0);
-    let land_bonus = if border_type == crate::core::BorderType::Land { 1.0 } else { 0.4 };
+    // Get base probability from scenario based on connection type
+    let base_prob = match border_type {
+        crate::core::BorderType::Land => scenario.military_conflict_probability,
+        crate::core::BorderType::Sea => scenario.naval_conflict_probability,
+    };
+
+    // Calculate modifiers
+    let attacker = world.actors.get(&attacker_id).unwrap();
+    let defender = world.actors.get(&defender_id).unwrap();
+    
+    let pressure_mod = (attacker.metrics.external_pressure / 100.0) * 0.2;
+    let military_mod = if attacker.metrics.military_size > defender.metrics.military_size * 1.5 {
+        0.15
+    } else {
+        0.0
+    };
 
     // Get affinity between actors
-    let affinity_mod = affinity(actor_a, actor_b);
-    // Lower affinity = more likely to fight
+    let affinity_mod = affinity(attacker, defender);
+    
+    // Calculate final probability (capped at 0.8)
+    let final_prob = (base_prob + pressure_mod + military_mod * (1.0 - affinity_mod * 0.5)).min(0.8);
 
-    let probability = (external_pressure_avg / 100.0) * military_ratio.min(3.0) * land_bonus * (1.0 - affinity_mod * 0.5);
-
-    // Roll for interaction - threshold lowered to 0.15
+    // Roll for interaction
     let roll: f64 = rng.gen();
-    if roll >= probability || probability <= 0.15 {
+    if roll > final_prob {
         return;
     }
 
-    eprintln!("[INTERACTION] Military: {} vs {}", actor_a_id, actor_b_id);
+    eprintln!("[INTERACTION] Military: {} vs {}", attacker_id, defender_id);
 
     // Apply losses
-    let stronger_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
-    let weaker_loss = 0.15 + rng.gen::<f64>() * 0.15;   // 15-30%
+    let attacker_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
+    let defender_loss = 0.15 + rng.gen::<f64>() * 0.15;   // 15-30%
     let cohesion_loss = 10.0 + rng.gen::<f64>() * 10.0;  // 10-20
     let pressure_gain = 15.0 + rng.gen::<f64>() * 10.0;  // 15-25
 
-    if let Some(stronger) = world.actors.get_mut(&stronger_id) {
-        stronger.metrics.military_size *= 1.0 - stronger_loss;
+    if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
+        attacker_actor.metrics.military_size *= 1.0 - attacker_loss;
     }
 
-    if let Some(weaker) = world.actors.get_mut(&weaker_id) {
-        weaker.metrics.military_size *= 1.0 - weaker_loss;
-        weaker.metrics.cohesion = (weaker.metrics.cohesion - cohesion_loss).max(0.0);
-        weaker.metrics.external_pressure += pressure_gain;
+    if let Some(defender_actor) = world.actors.get_mut(&defender_id) {
+        defender_actor.metrics.military_size *= 1.0 - defender_loss;
+        defender_actor.metrics.cohesion = (defender_actor.metrics.cohesion - cohesion_loss).max(0.0);
+        defender_actor.metrics.external_pressure += pressure_gain;
     }
 
     // Set cooldown
     world.interaction_cooldowns.insert(cooldown_key, current_tick);
 
     // Record event
-    let intensity = probability;
+    let intensity = final_prob;
     if should_record_event(&InteractionType::Military, intensity) {
         let event = Event::new(
-            format!("military_conflict_{}_{}", stronger_id, weaker_id),
+            format!("military_conflict_{}_{}", attacker_id, defender_id),
             current_tick,
             current_year,
-            stronger_id.clone(),
+            attacker_id.clone(),
             EventType::War,
             true,
-            format!("Военный конфликт между {} и {}", stronger_id, weaker_id),
+            format!("Военный конфликт между {} и {}", attacker_id, defender_id),
         );
         event_log.add(event);
     }

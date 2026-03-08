@@ -29,6 +29,12 @@ pub struct Scenario {
     pub global_metric_weights: HashMap<String, HashMap<String, f64>>,
     /// Feature flags for UI
     pub features: ScenarioFeatures,
+    /// Base probability for land military conflicts (0.0-1.0)
+    pub military_conflict_probability: f64,
+    /// Base probability for naval conflicts (0.0-1.0)
+    pub naval_conflict_probability: f64,
+    /// Random events pool for this scenario
+    pub random_events: Vec<RandomEvent>,
 }
 
 /// Status indicator for UI display
@@ -46,6 +52,35 @@ pub struct ScenarioFeatures {
     pub family_panel: bool,
     pub global_metrics_panel: bool,
     pub patron_actions: bool,
+}
+
+/// Condition for random event triggering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Condition {
+    pub metric: String,
+    pub operator: ComparisonOperator,
+    pub value: f64,
+}
+
+/// Target for random event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EventTarget {
+    Actor(String),
+    Any,
+    All,
+    SeaActors,
+}
+
+/// Random event definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomEvent {
+    pub id: String,
+    pub probability: f64,
+    pub target: EventTarget,
+    pub conditions: Vec<Condition>,
+    pub effects: HashMap<String, f64>,
+    pub llm_context: String,
+    pub one_time: bool,
 }
 
 /// Autonomous delta configuration for metrics
@@ -76,6 +111,18 @@ pub enum ComparisonOperator {
     Greater,
     GreaterOrEqual,
     Equal,
+}
+
+impl ComparisonOperator {
+    pub fn evaluate(&self, value: f64, target: f64) -> bool {
+        match self {
+            ComparisonOperator::Less => value < target,
+            ComparisonOperator::LessOrEqual => value <= target,
+            ComparisonOperator::Greater => value > target,
+            ComparisonOperator::GreaterOrEqual => value >= target,
+            ComparisonOperator::Equal => (value - target).abs() < 0.001,
+        }
+    }
 }
 
 /// Player action definition

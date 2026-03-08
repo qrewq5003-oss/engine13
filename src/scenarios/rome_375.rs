@@ -34,6 +34,9 @@ pub fn load_rome_375() -> Scenario {
             global_metrics_panel: false,
             patron_actions: false,
         },
+        military_conflict_probability: 0.45,
+        naval_conflict_probability: 0.10,
+        random_events: create_random_events(),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1602,8 +1605,129 @@ mod tests {
         // Old coefficient would give 1.5/tick from population alone = 15+ points
         // New coefficient gives 0.25/tick from population = 2.5 points
         let growth = final_economic_output - initial_economic_output;
-        assert!(growth < 60.0, 
-            "Economic output growth should be limited: grew by {} (from {} to {})", 
+        assert!(growth < 60.0,
+            "Economic output growth should be limited: grew by {} (from {} to {})",
             growth, initial_economic_output, final_economic_output);
     }
+}
+
+fn create_random_events() -> Vec<crate::core::RandomEvent> {
+    use crate::core::{Condition, EventTarget, ComparisonOperator, RandomEvent};
+    use std::collections::HashMap;
+
+    vec![
+        RandomEvent {
+            id: "legate_betrayal".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("family:influence".to_string(), -10.0),
+                ("rome.legitimacy".to_string(), -5.0),
+            ]),
+            llm_context: "Предательство легата ослабило позиции семьи при дворе".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "barbarian_raid".to_string(),
+            probability: 0.10,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![
+                Condition { metric: "visigoths.military_size".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
+            ],
+            effects: HashMap::from([
+                ("rome.cohesion".to_string(), -10.0),
+                ("rome.economic_output".to_string(), -8.0),
+                ("rome.external_pressure".to_string(), 5.0),
+            ]),
+            llm_context: "Варварский набег разорил приграничные провинции".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "oracle_revelation".to_string(),
+            probability: 0.04,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("rome.legitimacy".to_string(), 8.0),
+                ("family:influence".to_string(), 5.0),
+            ]),
+            llm_context: "Пророчество оракула укрепило авторитет власти".to_string(),
+            one_time: true,
+        },
+        RandomEvent {
+            id: "senator_bribe".to_string(),
+            probability: 0.07,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![
+                Condition { metric: "family:wealth".to_string(), operator: ComparisonOperator::Greater, value: 200.0 },
+            ],
+            effects: HashMap::from([
+                ("family:influence".to_string(), 8.0),
+                ("family:wealth".to_string(), -100.0),
+                ("rome.legitimacy".to_string(), 3.0),
+            ]),
+            llm_context: "Подкуп сенаторов укрепил позиции семьи в Риме".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "gladiator_revolt".to_string(),
+            probability: 0.05,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![
+                Condition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
+            ],
+            effects: HashMap::from([
+                ("rome.cohesion".to_string(), -12.0),
+                ("rome.legitimacy".to_string(), -8.0),
+                ("family:influence".to_string(), -5.0),
+            ]),
+            llm_context: "Восстание гладиаторов обнажило слабость императорской власти".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "silk_road_caravan".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![
+                Condition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 30.0 },
+            ],
+            effects: HashMap::from([
+                ("family:wealth".to_string(), 120.0),
+                ("family:connections".to_string(), 5.0),
+                ("rome.economic_output".to_string(), 3.0),
+            ]),
+            llm_context: "Богатый торговый караван с Востока принёс редкие товары и новые связи".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "army_mutiny".to_string(),
+            probability: 0.06,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![
+                Condition { metric: "rome.military_size".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
+                Condition { metric: "rome.treasury".to_string(), operator: ComparisonOperator::Less, value: 150.0 },
+            ],
+            effects: HashMap::from([
+                ("rome.military_size".to_string(), -30.0),
+                ("rome.legitimacy".to_string(), -12.0),
+                ("rome.cohesion".to_string(), -8.0),
+            ]),
+            llm_context: "Мятеж легионов потряс Рим — солдаты требуют жалования".to_string(),
+            one_time: false,
+        },
+        RandomEvent {
+            id: "divine_omen".to_string(),
+            probability: 0.04,
+            target: EventTarget::Actor("rome".to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                ("rome.cohesion".to_string(), 12.0),
+                ("family:influence".to_string(), 8.0),
+                ("rome.legitimacy".to_string(), 6.0),
+            ]),
+            llm_context: "Знамение богов укрепило веру народа в предназначение Рима".to_string(),
+            one_time: true,
+        },
+    ]
 }
