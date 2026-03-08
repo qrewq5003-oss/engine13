@@ -23,6 +23,17 @@ pub struct Scenario {
     pub llm_context: String,
     pub consequence_context: String,
     pub player_actor_id: Option<String>,
+    /// Status indicators for UI display
+    pub status_indicators: Vec<StatusIndicator>,
+}
+
+/// Status indicator for UI display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusIndicator {
+    pub label: String,
+    pub metric: String,
+    pub invert: bool,
+    pub thresholds: Vec<(f64, String)>,
 }
 
 /// Autonomous delta configuration for metrics

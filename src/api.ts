@@ -12,6 +12,7 @@ import type {
   AdvanceTickResponse,
   SubmitActionResponse,
   SaveResponse,
+  StatusIndicatorState,
 } from './types/index';
 
 // ============================================================================
@@ -148,4 +149,8 @@ export async function loadScenario(scenarioId: string): Promise<SaveResponse> {
 
 export async function getScenarioList(): Promise<ScenarioMeta[]> {
   return invoke<ScenarioMeta[]>('cmd_get_scenario_list');
+}
+
+export async function getStatusIndicators(): Promise<StatusIndicatorState[]> {
+  return invoke<StatusIndicatorState[]>('cmd_get_status_indicators');
 }

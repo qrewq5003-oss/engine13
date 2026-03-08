@@ -27,6 +27,7 @@ pub fn load_constantinople_1430() -> Scenario {
         llm_context: create_llm_context(),
         consequence_context: create_consequence_context(),
         player_actor_id: None,
+        status_indicators: create_status_indicators(),
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -924,6 +925,43 @@ fn create_consequence_context() -> String {
 Федерация итальянских государств либо сложилась либо распалась.
 Османская империя продолжает экспансию или остановлена.
 Нарратив охватывает более широкий период истории."#.to_string()
+}
+
+fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
+    use crate::core::StatusIndicator;
+    vec![
+        StatusIndicator {
+            label: "Константинополь".to_string(),
+            metric: "byzantium.external_pressure".to_string(),
+            invert: true,
+            thresholds: vec![
+                (0.0, "держится".to_string()),
+                (60.0, "под давлением".to_string()),
+                (80.0, "критическое положение".to_string()),
+            ],
+        },
+        StatusIndicator {
+            label: "Федерация".to_string(),
+            metric: "federation_progress".to_string(),
+            invert: false,
+            thresholds: vec![
+                (0.0, "не сформирована".to_string()),
+                (30.0, "формируется".to_string()),
+                (60.0, "укрепляется".to_string()),
+                (80.0, "готова".to_string()),
+            ],
+        },
+        StatusIndicator {
+            label: "Османская угроза".to_string(),
+            metric: "ottomans.military_size".to_string(),
+            invert: true,
+            thresholds: vec![
+                (0.0, "сдержана".to_string()),
+                (150.0, "нарастает".to_string()),
+                (200.0, "готова к штурму".to_string()),
+            ],
+        },
+    ]
 }
 
 /// Calculate dynamic federation weight for an actor

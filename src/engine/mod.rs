@@ -1381,6 +1381,7 @@ mod tests {
             llm_context: "".to_string(),
             consequence_context: "".to_string(),
             player_actor_id: None,
+            status_indicators: vec![],
         };
         let mut event_log = EventLog::new();
 

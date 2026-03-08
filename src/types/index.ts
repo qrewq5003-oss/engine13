@@ -307,3 +307,15 @@ export interface Generation {
   age: number;
   start_year: number;
 }
+
+// ============================================================================
+// Status Panel Types
+// ============================================================================
+
+export interface StatusIndicatorState {
+  label: string;
+  value: number;
+  status_text: string;
+  progress: number; // 0.0-1.0
+  invert: boolean;
+}

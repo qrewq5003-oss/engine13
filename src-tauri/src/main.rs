@@ -23,6 +23,20 @@ fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13:
 }
 
 #[tauri::command]
+fn cmd_get_status_indicators(
+    state: State<Mutex<AppState>>,
+) -> Result<Vec<commands::StatusIndicatorState>, String> {
+    eprintln!("[RUST] cmd_get_status_indicators - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
+
+    let world_state = s.world_state.as_ref().ok_or("No world state")?;
+    let scenario = s.current_scenario.as_ref().ok_or("No scenario")?;
+
+    let indicators = commands::compute_status_indicators(world_state, scenario);
+    Ok(indicators)
+}
+
+#[tauri::command]
 fn cmd_advance_tick(
     state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
@@ -307,6 +321,7 @@ fn main() {
         .manage(Mutex::new(db))
         .invoke_handler(tauri::generate_handler![
             cmd_get_world_state,
+            cmd_get_status_indicators,
             cmd_advance_tick,
             cmd_get_narrative_actors,
             cmd_get_available_actions,

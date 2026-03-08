@@ -27,6 +27,7 @@ pub fn load_rome_375() -> Scenario {
         llm_context: create_llm_context(),
         consequence_context: create_consequence_context(),
         player_actor_id: Some("rome".to_string()),
+        status_indicators: create_status_indicators(),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1463,6 +1464,42 @@ Patriarch начинает в 42 года. При ~75 — передача вл�
 - Не предрешать падение Рима
 - Не игнорировать масштаб семьи — они малые люди в большой истории
 - Гунны в 375 году невидимы для большинства"#.to_string()
+}
+
+fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
+    use crate::core::StatusIndicator;
+    vec![
+        StatusIndicator {
+            label: "Западная Империя".to_string(),
+            metric: "rome.external_pressure".to_string(),
+            invert: true,
+            thresholds: vec![
+                (0.0, "стабильна".to_string()),
+                (50.0, "под давлением".to_string()),
+                (75.0, "распадается".to_string()),
+            ],
+        },
+        StatusIndicator {
+            label: "Натиск варваров".to_string(),
+            metric: "visigoths.military_size".to_string(),
+            invert: true,
+            thresholds: vec![
+                (0.0, "слабый".to_string()),
+                (80.0, "опасный".to_string()),
+                (150.0, "неудержимый".to_string()),
+            ],
+        },
+        StatusIndicator {
+            label: "Семья Ди Милано".to_string(),
+            metric: "family_influence".to_string(),
+            invert: false,
+            thresholds: vec![
+                (0.0, "незначительна".to_string()),
+                (30.0, "заметна".to_string()),
+                (60.0, "влиятельна".to_string()),
+            ],
+        },
+    ]
 }
 
 fn create_consequence_context() -> String {

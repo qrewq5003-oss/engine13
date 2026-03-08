@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { WorldPanel } from './components/WorldPanel';
 import { FamilyPanel } from './components/FamilyPanel';
 import { GlobalMetricsPanel } from './components/GlobalMetricsPanel';
+import { StatusPanel } from './components/StatusPanel';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -20,8 +21,9 @@ import {
   listSavesWithSlots,
   loadGame,
   saveGame,
+  getStatusIndicators,
 } from './api';
-import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveSlotData, SaveSlotList } from './types';
+import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -46,6 +48,9 @@ const App: React.FC = () => {
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
+
+  // Status panel state
+  const [statusIndicators, setStatusIndicators] = useState<StatusIndicatorState[]>([]);
 
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -152,6 +157,14 @@ const App: React.FC = () => {
           .map(a => a.id);
         const events = await getRelevantEvents(narrativeActorIds);
         setRecentEvents(events);
+
+        // Get status indicators
+        try {
+          const indicators = await getStatusIndicators();
+          setStatusIndicators(indicators);
+        } catch (err) {
+          console.warn('Failed to get status indicators:', err);
+        }
       }
 
       setAvailableActions(actions || []);
@@ -347,6 +360,10 @@ const App: React.FC = () => {
           {error}
           <button onClick={() => setError(null)} className="error-dismiss">×</button>
         </div>
+      )}
+
+      {statusIndicators.length > 0 && (
+        <StatusPanel indicators={statusIndicators} />
       )}
 
       <main className="app-main">

@@ -183,6 +183,58 @@ pub fn get_relevant_events(db: &Db, actor_id: String) -> Result<Vec<Event>, Stri
         .map_err(|e| format!("Failed to get events: {}", e))
 }
 
+/// Status indicator state for UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusIndicatorState {
+    pub label: String,
+    pub value: f64,
+    pub status_text: String,
+    pub progress: f64, // 0.0-1.0
+    pub invert: bool,
+}
+
+/// Compute status indicators from world state and scenario
+pub fn compute_status_indicators(
+    world_state: &WorldState,
+    scenario: &Scenario,
+) -> Vec<StatusIndicatorState> {
+    use crate::core::MetricRef;
+
+    scenario.status_indicators.iter().map(|indicator| {
+        let metric_ref = MetricRef::parse(&indicator.metric);
+        let value = metric_ref.get(world_state);
+
+        // Find current status text - last threshold where value >= threshold
+        let mut status_text = indicator.thresholds.first()
+            .map(|(_, text)| text.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        for (threshold, text) in &indicator.thresholds {
+            if value >= *threshold {
+                status_text = text.clone();
+            }
+        }
+
+        // Calculate progress (value / max_threshold)
+        let max_threshold = indicator.thresholds.last()
+            .map(|(t, _)| *t)
+            .unwrap_or(100.0);
+        let progress = if max_threshold > 0.0 {
+            (value / max_threshold).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        StatusIndicatorState {
+            label: indicator.label.clone(),
+            value,
+            status_text,
+            progress,
+            invert: indicator.invert,
+        }
+    }).collect()
+}
+
 /// Set game mode - delegates to application::modes
 pub fn set_game_mode(state: &mut AppState, new_mode: crate::core::GameMode) -> Result<(), String> {
     crate::application::set_game_mode(state, new_mode)

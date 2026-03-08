@@ -1,0 +1,75 @@
+.status-panel {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.status-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.status-card {
+  background: #313244;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a6adc8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cdd6f4;
+}
+
+.status-bar-container {
+  width: 100%;
+  height: 6px;
+  background: #45475a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.status-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.status-bar-fill.status-green {
+  background: #a6e3a1;
+}
+
+.status-bar-fill.status-yellow {
+  background: #fab387;
+}
+
+.status-bar-fill.status-red {
+  background: #f38ba8;
+}
+
+/* Responsive: stack cards on small screens */
+@media (max-width: 600px) {
+  .status-cards {
+    grid-template-columns: 1fr;
+  }
+}
