@@ -456,6 +456,8 @@ fn create_trebizond() -> Actor {
 // ============================================================================
 
 fn create_auto_deltas() -> Vec<AutoDelta> {
+    use crate::core::DeltaConditionRatio;
+
     vec![
         // Actor auto-deltas
         AutoDelta {
@@ -465,6 +467,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.3 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
@@ -475,6 +478,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 50.0, delta: -0.5 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.4 },
             ],
+            ratio_conditions: vec![],
             noise: 0.2,
             actor_id: None,
         },
@@ -485,6 +489,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: 0.2 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
             ],
+            ratio_conditions: vec![],
             noise: 0.15,
             actor_id: None,
         },
@@ -495,6 +500,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
@@ -504,6 +510,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: 5.0 },
             ],
+            ratio_conditions: vec![],
             noise: 0.3,
             actor_id: None,
         },
@@ -512,10 +519,12 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: "ottomans.military_size".to_string(),
             base: 0.5,
             conditions: vec![],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: Some("ottomans".to_string()),
         },
         // Byzantium external pressure growth (ottoman siege pressure)
+        // Pressure grows slower if Byzantium has strong military relative to Ottomans
         AutoDelta {
             metric: "byzantium.external_pressure".to_string(),
             base: 2.5,
@@ -523,8 +532,75 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 // Acceleration if Ottomans are strong
                 DeltaCondition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
             ],
+            ratio_conditions: vec![
+                DeltaConditionRatio {
+                    metric_a: "byzantium.military_size".to_string(),
+                    metric_b: "ottomans.military_size".to_string(),
+                    ratio: 0.167, // byzantium > 1/6 of ottoman army
+                    operator: ComparisonOperator::Greater,
+                    delta: -2.0, // compensates pressure growth
+                },
+                DeltaConditionRatio {
+                    metric_a: "byzantium.military_size".to_string(),
+                    metric_b: "ottomans.military_size".to_string(),
+                    ratio: 0.25, // byzantium > 1/4 — actively resisting
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.5, // additional compensation
+                },
+            ],
             noise: 0.5,
             actor_id: Some("byzantium".to_string()),
+        },
+        // Serbia external pressure from Ottomans
+        AutoDelta {
+            metric: "serbia.external_pressure".to_string(),
+            base: 1.5,
+            conditions: vec![],
+            ratio_conditions: vec![
+                DeltaConditionRatio {
+                    metric_a: "serbia.military_size".to_string(),
+                    metric_b: "ottomans.military_size".to_string(),
+                    ratio: 0.2,
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.5,
+                },
+            ],
+            noise: 0.3,
+            actor_id: Some("serbia".to_string()),
+        },
+        // Trebizond external pressure from Ottomans
+        AutoDelta {
+            metric: "trebizond.external_pressure".to_string(),
+            base: 1.8,
+            conditions: vec![],
+            ratio_conditions: vec![
+                DeltaConditionRatio {
+                    metric_a: "trebizond.military_size".to_string(),
+                    metric_b: "ottomans.military_size".to_string(),
+                    ratio: 0.1,
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.5,
+                },
+            ],
+            noise: 0.3,
+            actor_id: Some("trebizond".to_string()),
+        },
+        // Hungary external pressure
+        AutoDelta {
+            metric: "hungary.external_pressure".to_string(),
+            base: 0.8,
+            conditions: vec![],
+            ratio_conditions: vec![
+                DeltaConditionRatio {
+                    metric_a: "hungary.military_size".to_string(),
+                    metric_b: "ottomans.military_size".to_string(),
+                    ratio: 0.3,
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.0,
+                },
+            ],
+            noise: 0.2,
+            actor_id: Some("hungary".to_string()),
         },
         // Federation progress auto-deltas
         AutoDelta {
@@ -539,6 +615,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -2.0 },
                 DeltaCondition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 220.0, delta: -3.0 },
             ],
+            ratio_conditions: vec![],
             noise: 0.2,
             actor_id: None,
         },

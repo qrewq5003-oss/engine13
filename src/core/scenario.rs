@@ -89,6 +89,7 @@ pub struct AutoDelta {
     pub metric: String,
     pub base: f64,
     pub conditions: Vec<DeltaCondition>,
+    pub ratio_conditions: Vec<DeltaConditionRatio>,
     pub noise: f64,
     pub actor_id: Option<String>,
 }
@@ -100,6 +101,17 @@ pub struct DeltaCondition {
     pub operator: ComparisonOperator,
     pub value: f64,
     pub delta: f64,
+}
+
+/// Ratio-based condition for auto delta modification
+/// Applies additional delta if ratio between two metrics meets threshold
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeltaConditionRatio {
+    pub metric_a: String,  // numerator
+    pub metric_b: String,  // denominator
+    pub ratio: f64,        // threshold ratio
+    pub operator: ComparisonOperator,
+    pub delta: f64,        // additional delta if condition met
 }
 
 /// Comparison operator for conditions

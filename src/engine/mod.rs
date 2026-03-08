@@ -190,6 +190,23 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
             }
         }
 
+        // Check ratio conditions
+        for ratio_cond in &auto_delta.ratio_conditions {
+            let val_a = crate::core::MetricRef::parse(&ratio_cond.metric_a).get(world);
+            let val_b = crate::core::MetricRef::parse(&ratio_cond.metric_b).get(world);
+            
+            if val_b == 0.0 {
+                continue;
+            }
+            
+            let actual_ratio = val_a / val_b;
+            let condition_met = ratio_cond.operator.evaluate(actual_ratio, ratio_cond.ratio);
+            
+            if condition_met {
+                delta += ratio_cond.delta;
+            }
+        }
+
         // Apply noise
         let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
         let final_delta = delta + noise;

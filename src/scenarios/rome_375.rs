@@ -1000,6 +1000,8 @@ pub fn create_frankish_kingdom_template() -> Actor {
 // ============================================================================
 
 fn create_auto_deltas() -> Vec<AutoDelta> {
+    use crate::core::DeltaConditionRatio;
+
     vec![
         // Actor auto-deltas for Rome
         AutoDelta {
@@ -1010,6 +1012,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: Some("rome".to_string()),
         },
@@ -1020,6 +1023,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -1.0 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.3 },
             ],
+            ratio_conditions: vec![],
             noise: 0.3,
             actor_id: Some("rome".to_string()),
         },
@@ -1030,6 +1034,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Greater, value: 200.0, delta: 0.2 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
             ],
+            ratio_conditions: vec![],
             noise: 0.2,
             actor_id: Some("rome".to_string()),
         },
@@ -1040,6 +1045,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.4 },
                 DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Less, value: 25.0, delta: -0.5 },
             ],
+            ratio_conditions: vec![],
             noise: 0.4,
             actor_id: Some("rome".to_string()),
         },
@@ -1051,6 +1057,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.4 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.2,
             actor_id: Some("rome".to_string()),
         },
@@ -1062,13 +1069,32 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
                 DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: Some("rome".to_string()),
         },
+        // Rome external pressure from barbarians
+        // Pressure grows slower if Rome maintains military parity
         AutoDelta {
-            metric: "external_pressure".to_string(),
-            base: -0.3,
+            metric: "rome.external_pressure".to_string(),
+            base: 2.0,
             conditions: vec![],
+            ratio_conditions: vec![
+                DeltaConditionRatio {
+                    metric_a: "rome.military_size".to_string(),
+                    metric_b: "visigoths.military_size".to_string(),
+                    ratio: 0.8, // Rome should maintain parity
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.8,
+                },
+                DeltaConditionRatio {
+                    metric_a: "rome.military_size".to_string(),
+                    metric_b: "huns.military_size".to_string(),
+                    ratio: 0.5,
+                    operator: ComparisonOperator::Greater,
+                    delta: -1.0,
+                },
+            ],
             noise: 0.3,
             actor_id: Some("rome".to_string()),
         },
@@ -1082,6 +1108,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
                 DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
@@ -1091,6 +1118,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
             ],
+            ratio_conditions: vec![],
             noise: 0.05,
             actor_id: None,
         },
@@ -1102,6 +1130,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
                 DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
@@ -1111,6 +1140,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
             ],
+            ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
@@ -1121,6 +1151,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
@@ -1131,6 +1162,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
                 DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
@@ -1140,6 +1172,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
@@ -1150,6 +1183,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "family_influence".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: Some("rome".to_string()),
         },
@@ -1159,6 +1193,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: Some("rome".to_string()),
         },
@@ -1168,6 +1203,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             conditions: vec![
                 DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
             ],
+            ratio_conditions: vec![],
             noise: 0.0,
             actor_id: Some("rome".to_string()),
         },
