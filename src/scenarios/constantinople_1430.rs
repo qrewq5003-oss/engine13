@@ -91,6 +91,7 @@ fn create_byzantium() -> Actor {
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: Some(10), // Constantinople holds for at least 10 years
+        leader: Some("Иоанн VIII Палеолог".to_string()),
     }
 }
 
@@ -134,6 +135,7 @@ fn create_ottomans() -> Actor {
         religion: crate::core::Religion::Muslim,
         culture: crate::core::Culture::Turkic,
         minimum_survival_ticks: None,
+        leader: Some("Мурад II".to_string()),
     }
 }
 
@@ -176,6 +178,7 @@ fn create_venice() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: Some("Дож Франческо Фоскари".to_string()),
     }
 }
 
@@ -218,6 +221,7 @@ fn create_genoa() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: Some("Томмазо Кампофрегозо".to_string()),
     }
 }
 
@@ -258,6 +262,7 @@ fn create_milan() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: Some("Филиппо Мария Висконти".to_string()),
     }
 }
 
@@ -299,6 +304,7 @@ fn create_papacy() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: Some("Папа Евгений IV".to_string()),
     }
 }
 
@@ -340,6 +346,7 @@ fn create_hungary() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: Some("Янош Хуньяди".to_string()),
     }
 }
 
@@ -382,6 +389,7 @@ fn create_serbia() -> Actor {
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Slavic,
         minimum_survival_ticks: None,
+        leader: Some("Ђурађ Бранковић".to_string()),
     }
 }
 
@@ -423,6 +431,7 @@ fn create_trebizond() -> Actor {
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: Some("Иоанн IV Великий Комнин".to_string()),
     }
 }
 

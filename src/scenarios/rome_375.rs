@@ -119,6 +119,7 @@ fn create_rome() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: Some("Император Грациан".to_string()),
     }
 }
 
@@ -160,6 +161,7 @@ fn create_huns() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Turkic,
         minimum_survival_ticks: None,
+        leader: Some("Баламир".to_string()),
     }
 }
 
@@ -200,6 +202,7 @@ fn create_visigoths() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: Some("Фритигерн".to_string()),
     }
 }
 
@@ -239,6 +242,7 @@ fn create_ostrogoths() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -281,6 +285,7 @@ fn create_sassanids() -> Actor {
         religion: crate::core::Religion::Other,
         culture: crate::core::Culture::Persian,
         minimum_survival_ticks: None,
+        leader: Some("Шапур II".to_string()),
     }
 }
 
@@ -319,6 +324,7 @@ fn create_vandals() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -357,6 +363,7 @@ fn create_burgundians() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -395,6 +402,7 @@ fn create_franks() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: Some("Хлодион".to_string()),
     }
 }
 
@@ -433,6 +441,7 @@ fn create_saxons() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -470,6 +479,7 @@ fn create_alamanni() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Germanic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -508,6 +518,7 @@ fn create_berbers() -> Actor {
         religion: crate::core::Religion::Pagan,
         culture: crate::core::Culture::Arabic,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -548,6 +559,7 @@ fn create_armenia() -> Actor {
         religion: crate::core::Religion::Other,
         culture: crate::core::Culture::Persian,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -589,6 +601,7 @@ fn create_kushans() -> Actor {
         religion: crate::core::Religion::Buddhist,
         culture: crate::core::Culture::Indian,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -629,6 +642,7 @@ fn create_guptas() -> Actor {
         religion: crate::core::Religion::Hindu,
         culture: crate::core::Culture::Indian,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -669,6 +683,7 @@ fn create_eastern_jin() -> Actor {
         religion: crate::core::Religion::Buddhist,
         culture: crate::core::Culture::EastAsian,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -722,6 +737,7 @@ fn create_rome_west() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Latin,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -771,6 +787,7 @@ fn create_rome_east() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: Some("Феодосий I".to_string()),
     }
 }
 
@@ -812,6 +829,7 @@ pub fn create_visigoth_kingdom_template() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -849,6 +867,7 @@ pub fn create_ostrogoth_kingdom_template() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -886,6 +905,7 @@ pub fn create_late_sassanids_template() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -923,6 +943,7 @@ pub fn create_vandal_kingdom_africa_template() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 
@@ -960,6 +981,7 @@ pub fn create_frankish_kingdom_template() -> Actor {
         religion: crate::core::Religion::Catholic,
         culture: crate::core::Culture::Greek,
         minimum_survival_ticks: None,
+        leader: None,
     }
 }
 

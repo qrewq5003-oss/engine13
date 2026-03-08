@@ -202,10 +202,13 @@ pub fn generate_narrative_prompt(
         .collect();
 
     for actor in &foreground_actors {
-        prompt.push_str(&format!(
-            "{} ({}):\n",
-            actor.name, actor.name_short
-        ));
+        // Format actor name with leader if present
+        let actor_header = if let Some(ref leader) = actor.leader {
+            format!("{} ({}):\n", actor.name, leader)
+        } else {
+            format!("{} ({}):\n", actor.name, actor.name_short)
+        };
+        prompt.push_str(&actor_header);
         prompt.push_str(&format!(
             "  population: {:.0}, military: {:.0}, quality: {:.0}\n",
             actor.metrics.population,
