@@ -70,6 +70,9 @@ pub fn apply_player_action(
         .map(|a| a.id.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
+    // Serialize effects to metadata for action history
+    let effects_json = serde_json::to_string(&applied_effects).unwrap_or_default();
+
     let event = crate::core::Event::new(
         format!("player_action_{}", action_input.action_id),
         world_state.tick,
@@ -78,7 +81,8 @@ pub fn apply_player_action(
         crate::core::EventType::PlayerAction,
         true,
         format!("Действие игрока: {}", action.name),
-    );
+    )
+    .with_metadata(effects_json);
     state.event_log.add(event);
 
     Ok((applied_effects, applied_costs))

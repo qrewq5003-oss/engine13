@@ -3,6 +3,7 @@ import { WorldPanel } from './components/WorldPanel';
 import { FamilyPanel } from './components/FamilyPanel';
 import { GlobalMetricsPanel } from './components/GlobalMetricsPanel';
 import { StatusPanel } from './components/StatusPanel';
+import { ActionHistory } from './components/ActionHistory';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -403,6 +404,9 @@ const App: React.FC = () => {
             onSaveGame={handleOpenSaveModal}
             isLoading={isLoading || isGeneratingNarrative}
           />
+          {worldState.features?.patron_actions && (
+            <ActionHistory tick={worldState.tick} />
+          )}
         </div>
       </main>
 

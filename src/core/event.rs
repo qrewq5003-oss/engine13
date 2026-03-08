@@ -33,6 +33,7 @@ pub struct Event {
     pub metrics_snapshot: HashMap<String, f64>,
     pub tags: Vec<String>,
     pub scenario_id: String,
+    pub metadata: String,
 }
 
 impl Event {
@@ -58,6 +59,7 @@ impl Event {
             metrics_snapshot: HashMap::new(),
             tags: Vec::new(),
             scenario_id: String::new(),
+            metadata: String::new(),
         }
     }
 
@@ -82,6 +84,12 @@ impl Event {
     /// Add tags
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
+        self
+    }
+
+    /// Set metadata (for storing effects, etc.)
+    pub fn with_metadata(mut self, metadata: String) -> Self {
+        self.metadata = metadata;
         self
     }
 }

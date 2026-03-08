@@ -199,6 +199,18 @@ fn cmd_get_relevant_events(
 }
 
 #[tauri::command]
+fn cmd_get_action_history(
+    db: State<Mutex<Db>>,
+    limit: usize,
+) -> Result<Vec<commands::ActionHistoryEntry>, String> {
+    eprintln!("[RUST] cmd_get_action_history - acquiring lock");
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let result = commands::get_action_history(&*db_guard, limit);
+    eprintln!("[RUST] cmd_get_action_history - result: {:?}", result.as_ref().map(|h| h.len()));
+    result
+}
+
+#[tauri::command]
 fn cmd_load_scenario(
     state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
@@ -331,6 +343,7 @@ fn main() {
             cmd_list_saves,
             cmd_list_saves_with_slots,
             cmd_get_relevant_events,
+            cmd_get_action_history,
             cmd_load_scenario,
             cmd_get_scenario_list,
             cmd_get_narrative,

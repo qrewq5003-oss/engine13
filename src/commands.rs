@@ -193,6 +193,66 @@ pub struct StatusIndicatorState {
     pub invert: bool,
 }
 
+/// Action history entry for UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionHistoryEntry {
+    pub tick: u32,
+    pub year: i32,
+    pub action_id: String,
+    pub action_name: String,
+    pub effects_summary: Vec<String>,
+}
+
+/// Get action history from database
+pub fn get_action_history(db: &Db, limit: usize) -> Result<Vec<ActionHistoryEntry>, String> {
+    let events = db.get_events_by_type("PlayerAction", limit)
+        .map_err(|e| format!("Failed to get action history: {}", e))?;
+
+    let history = events
+        .into_iter()
+        .map(|event| {
+            let effects_summary = parse_effects_summary(&event.metadata);
+            ActionHistoryEntry {
+                tick: event.tick,
+                year: event.year,
+                action_id: event.id.clone(),
+                action_name: event.description.clone(),
+                effects_summary,
+            }
+        })
+        .collect();
+
+    Ok(history)
+}
+
+fn parse_effects_summary(metadata: &str) -> Vec<String> {
+    if metadata.is_empty() {
+        return vec![];
+    }
+
+    serde_json::from_str::<HashMap<String, f64>>(metadata)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(metric, delta)| {
+            let sign = if delta > 0.0 { "+" } else { "" };
+            format!("{}: {}{:.0}", format_metric_name(&metric), sign, delta)
+        })
+        .collect()
+}
+
+fn format_metric_name(metric: &str) -> String {
+    metric
+        .replace("global:federation_progress", "Федерация")
+        .replace("venice.treasury", "Казна Венеции")
+        .replace("genoa.treasury", "Казна Генуи")
+        .replace("milan.treasury", "Казна Милана")
+        .replace(".treasury", " казна")
+        .replace(".military_size", " армия")
+        .replace(".legitimacy", " легитимность")
+        .replace("family:influence", "Влияние семьи")
+        .replace("family:wealth", "Богатство семьи")
+}
+
 /// Compute status indicators from world state and scenario
 pub fn compute_status_indicators(
     world_state: &WorldState,

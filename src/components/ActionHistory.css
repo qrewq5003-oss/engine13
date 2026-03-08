@@ -1,0 +1,72 @@
+.action-history {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.action-history-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cdd6f4;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.action-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.action-entry {
+  background: #313244;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.action-year {
+  font-size: 11px;
+  color: #6c7086;
+  font-weight: 600;
+}
+
+.action-name {
+  font-size: 12px;
+  color: #bac2de;
+  font-weight: 500;
+}
+
+.action-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-effect {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.action-effect.positive {
+  background: #a6e3a133;
+  color: #a6e3a1;
+}
+
+.action-effect.negative {
+  background: #f38ba833;
+  color: #f38ba8;
+}
