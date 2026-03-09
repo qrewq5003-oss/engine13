@@ -3,6 +3,23 @@ use std::collections::HashMap;
 
 use super::actor::{Actor, Era};
 
+/// Narrative configuration for data-driven chronicle generation
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NarrativeConfig {
+    /// Key metrics to include in factual block
+    pub key_metrics: Vec<String>,
+    /// Narrative axes for framing (e.g., "stability vs ambition", "tradition vs innovation")
+    pub narrative_axes: Vec<String>,
+    /// Tone tags for chronicler style (e.g., "formal", "epic", "intimate")
+    pub tone_tags: Vec<String>,
+    /// Claims the chronicler should NOT make (anti-hallucination guards)
+    pub forbidden_claims: Vec<String>,
+    /// Target paragraph count for generation
+    pub paragraph_target: u32,
+    /// Output length hint for model (e.g., "long-form chronicle", "detailed account")
+    pub output_length_hint: String,
+}
+
 /// Main Scenario configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scenario {
@@ -49,6 +66,8 @@ pub struct Scenario {
     pub initial_family_metrics: Option<HashMap<String, f64>>,
     /// Maximum random events per tick (0 = unlimited)
     pub max_random_events_per_tick: u32,
+    /// Narrative configuration for data-driven chronicle generation
+    pub narrative_config: NarrativeConfig,
 }
 
 /// Metric display configuration for UI

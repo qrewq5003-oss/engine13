@@ -7,12 +7,37 @@ use crate::core::{ActorDelta, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 
-/// Narrative season for dual-phase chronicle
+/// Half-year narrative unit for chronicle generation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum NarrativeSeason {
-    Spring,  // Beginning of year, overview, anticipations
-    Autumn,  // End of year, outcomes, consequences
+pub enum HalfYear {
+    FirstHalf,   // January-June, first chronicle of the year
+    SecondHalf,  // July-December, second chronicle of the year
+}
+
+impl HalfYear {
+    pub fn from_tick(tick: u32) -> Self {
+        // Even ticks = FirstHalf, Odd ticks = SecondHalf
+        if tick % 2 == 0 {
+            HalfYear::FirstHalf
+        } else {
+            HalfYear::SecondHalf
+        }
+    }
+    
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            HalfYear::FirstHalf => "первая половина",
+            HalfYear::SecondHalf => "вторая половина",
+        }
+    }
+    
+    pub fn display_name_en(&self) -> &'static str {
+        match self {
+            HalfYear::FirstHalf => "first half",
+            HalfYear::SecondHalf => "second half",
+        }
+    }
 }
 
 /// LLM configuration
@@ -148,13 +173,11 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
 }
 
 /// System prompt for chronicler persona
-fn system_prompt(season: NarrativeSeason) -> &'static str {
-    match season {
-        NarrativeSeason::Spring => {
-            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
+fn system_prompt(_half_year: HalfYear) -> &'static str {
+    // Generic chronicler persona - half-year specific framing done in prompt body
+    "Ты летописец XIV-XV века. Пишешь подробную хронику событий.
 
 ОБЯЗАТЕЛЬНО:
-- Первое предложение содержит год и сезон: 'Весной 1436 года...'
 - Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
 - Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
 - Упоминай правителей по имени когда это драматично
@@ -163,22 +186,6 @@ fn system_prompt(season: NarrativeSeason) -> &'static str {
 - НИКОГДА не пиши 'актор X имеет Y единиц'
 - Пиши как будто читатель уже знает кто эти люди
 - Фокус на предчувствиях, расстановке сил, напряжении"
-        }
-        NarrativeSeason::Autumn => {
-            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
-
-ОБЯЗАТЕЛЬНО:
-- Первое предложение содержит год и сезон: 'Осенью 1435 года...'
-- Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
-- Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
-- Упоминай правителей по имени когда это драматично
-- НИКОГДА не перечисляй акторов по очереди
-- НИКОГДА не называй числа и проценты
-- НИКОГДА не пиши 'актор X имеет Y единиц'
-- Пиши как будто читатель уже знает кто эти люди
-- Фокус на том что произошло за год, последствиях, итогах"
-        }
-    }
 }
 
 /// Generate narrative prompt from world state and scenario
@@ -187,16 +194,16 @@ pub fn generate_narrative_prompt(
     scenario: &Scenario,
     event_log: &EventLog,
     db: &Db,
-    season: NarrativeSeason,
+    half_year: HalfYear,
 ) -> String {
     let mut prompt = String::new();
     let current_year = world_state.year;
 
     // Section 0: System prompt - chronicler persona
-    prompt.push_str(system_prompt(season));
+    prompt.push_str(system_prompt(half_year));
     prompt.push_str("\n\n");
 
-    // Section 0.5: Factual block - prevent hallucination
+    // Section 0.5: Factual block - prevent hallucination (data-driven from config)
     let alive_actors: Vec<&str> = world_state.actors.keys()
         .filter(|id| !world_state.dead_actors.iter().any(|d| &d.id == *id))
         .map(|s| s.as_str())
@@ -205,12 +212,35 @@ pub fn generate_narrative_prompt(
     let dead_actors: Vec<&str> = world_state.dead_actors.iter()
         .map(|a| a.id.as_str())
         .collect();
+    
+    // Get foreground actors
+    let foreground_actors: Vec<&str> = world_state.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.as_str())
+        .collect();
+    
+    // Get key milestones and recent events
+    let recent_milestones: Vec<&str> = scenario.milestone_events.iter()
+        .filter(|m| world_state.milestone_events_fired.contains(&m.id))
+        .map(|m| m.id.as_str())
+        .take(5)
+        .collect();
+    
+    let recent_events: Vec<&str> = event_log.events.iter()
+        .rev()
+        .take(10)
+        .map(|e| e.description.as_str())
+        .collect();
 
     let factual_block = format!(
         "=== ВАЖНЫЕ ФАКТЫ ИГРЫ (не противоречь им) ===\n\
          Год: {}\n\
+         Половина года: {}\n\
          Живые акторы: {}\n\
          Павшие акторы: {}\n\
+         Передний план (foreground): {}\n\
+         Ключевые вехи: {}\n\
+         Недавние события: {}\n\
          Победа достигнута: {}\n\n\
          Правила:\n\
          - Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\
@@ -218,8 +248,12 @@ pub fn generate_narrative_prompt(
          - Для живых акторов в упадке используй формулировки: \"под угрозой\", \"ослаблен\", \"на грани\" — но не \"пал\".\n\
          - Не придумывай победы, смерти правителей, падения городов или коллапсы, которых нет в фактах.\n\n",
         world_state.year,
+        half_year.display_name(),
         if alive_actors.is_empty() { "нет".to_string() } else { alive_actors.join(", ") },
         if dead_actors.is_empty() { "нет".to_string() } else { dead_actors.join(", ") },
+        if foreground_actors.is_empty() { "нет".to_string() } else { foreground_actors.join(", ") },
+        if recent_milestones.is_empty() { "нет".to_string() } else { recent_milestones.join(", ") },
+        if recent_events.is_empty() { "нет".to_string() } else { recent_events.join(", ") },
         if world_state.victory_achieved { "да" } else { "нет" },
     );
     prompt.push_str(&factual_block);
@@ -242,18 +276,14 @@ pub fn generate_narrative_prompt(
         }
     }
 
-    // Section 1.5: Year and season anchoring instruction
-    let season_name = match season {
-        NarrativeSeason::Spring => "весна",
-        NarrativeSeason::Autumn => "осень",
-    };
+    // Section 1.5: Year and half-year anchoring instruction
     prompt.push_str(&format!(
         "=== ИНСТРУКЦИЯ ===\n\
-         ТЕКУЩИЙ ГОД: {}, СЕЗОН: {}. \n\
+         ТЕКУЩИЙ ГОД: {}, ПОЛОВИНА: {}. \n\
          Пиши ТОЛЬКО про события этого года.\n\
          Не упоминай будущие годы.\n\
          Не экстраполируй за пределы {}.\n\n",
-        current_year, season_name, current_year
+        current_year, half_year.display_name(), current_year
     ));
 
     // Section 1.6: Strict narrative rules — no raw numbers
@@ -273,13 +303,13 @@ pub fn generate_narrative_prompt(
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
     prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
 
-    let foreground_actors: Vec<_> = world_state
+    let foreground_actors_list: Vec<_> = world_state
         .actors
         .values()
         .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
         .collect();
 
-    for actor in &foreground_actors {
+    for actor in &foreground_actors_list {
         // Format actor name with leader if present
         let actor_header = if let Some(ref leader) = actor.leader {
             format!("{} ({}):\n", actor.name, leader)
@@ -317,14 +347,14 @@ pub fn generate_narrative_prompt(
     let mut query_tags: Vec<String> = Vec::new();
 
     // Add narrative actor names (short) and regions
-    for actor in &foreground_actors {
+    for actor in &foreground_actors_list {
         query_tags.push(actor.name_short.clone());
         query_tags.push(actor.region.clone());
     }
 
     // Add interaction types from recent events
     let recent_event_types: std::collections::HashSet<String> = event_log.events.iter()
-        .filter(|e| e.is_key || foreground_actors.iter().any(|a| a.id == e.actor_id))
+        .filter(|e| e.is_key || foreground_actors_list.iter().any(|a| a.id == e.actor_id))
         .flat_map(|e| {
             match e.event_type {
                 crate::core::EventType::War => Some("war".to_string()),
@@ -337,7 +367,7 @@ pub fn generate_narrative_prompt(
     query_tags.extend(recent_event_types);
 
     // Get scored relevant events from database
-    let narrative_actor_ids: Vec<String> = foreground_actors.iter().map(|a| a.id.clone()).collect();
+    let narrative_actor_ids: Vec<String> = foreground_actors_list.iter().map(|a| a.id.clone()).collect();
 
     let relevant_events = db.get_relevant_events_scored(
         world_state.tick,

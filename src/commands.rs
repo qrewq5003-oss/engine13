@@ -373,9 +373,9 @@ pub async fn cmd_get_narrative(
     state: &AppState,
     db: &Db,
     app: tauri::AppHandle,
-    season: crate::llm::NarrativeSeason,
+    half_year: crate::llm::HalfYear,
 ) -> Result<(), String> {
-    crate::application::cmd_get_narrative(state, db, app, season).await
+    crate::application::cmd_get_narrative(state, db, app, half_year).await
 }
 
 /// Get available models from LLM provider - delegates to llm module

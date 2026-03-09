@@ -1616,6 +1616,7 @@ mod tests {
             global_metrics_display: vec![],
             initial_family_metrics: None,
             max_random_events_per_tick: 0,
+            narrative_config: crate::core::NarrativeConfig::default(),
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

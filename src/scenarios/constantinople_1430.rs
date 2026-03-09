@@ -85,6 +85,33 @@ pub fn load_constantinople_1430() -> Scenario {
         ],
         initial_family_metrics: None,
         max_random_events_per_tick: 3,
+        narrative_config: crate::core::NarrativeConfig {
+            key_metrics: vec![
+                "federation_progress".to_string(),
+                "byzantium.external_pressure".to_string(),
+                "byzantium.legitimacy".to_string(),
+                "byzantium.cohesion".to_string(),
+                "ottomans.military_size".to_string(),
+            ],
+            narrative_axes: vec![
+                "survival vs surrender".to_string(),
+                "unity vs fragmentation".to_string(),
+                "faith vs pragmatism".to_string(),
+            ],
+            tone_tags: vec![
+                "formal chronicle".to_string(),
+                "epic scope".to_string(),
+                "tragic grandeur".to_string(),
+            ],
+            forbidden_claims: vec![
+                "Do not claim Byzantium has fallen unless byzantium is in dead_actors".to_string(),
+                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
+                "Do not mention specific numbers, percentages, or game metrics".to_string(),
+                "Do not claim the Ottomans have won unless the scenario explicitly states so".to_string(),
+            ],
+            paragraph_target: 6,
+            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+        },
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

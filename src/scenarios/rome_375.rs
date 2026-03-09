@@ -57,6 +57,34 @@ pub fn load_rome_375() -> Scenario {
             ("family:family_connections".to_string(), 45.0),
         ])),
         max_random_events_per_tick: 2,
+        narrative_config: crate::core::NarrativeConfig {
+            key_metrics: vec![
+                "family:family_influence".to_string(),
+                "family:family_knowledge".to_string(),
+                "family:family_wealth".to_string(),
+                "family:family_connections".to_string(),
+                "rome.legitimacy".to_string(),
+                "rome.cohesion".to_string(),
+            ],
+            narrative_axes: vec![
+                "stability vs ambition".to_string(),
+                "tradition vs adaptation".to_string(),
+                "family honor vs political necessity".to_string(),
+            ],
+            tone_tags: vec![
+                "formal chronicle".to_string(),
+                "epic scope".to_string(),
+                "intimate family drama".to_string(),
+            ],
+            forbidden_claims: vec![
+                "Do not claim any actor has died unless they are in dead_actors list".to_string(),
+                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
+                "Do not mention specific numbers, percentages, or game metrics".to_string(),
+                "Do not claim Rome has fallen unless rome is in dead_actors".to_string(),
+            ],
+            paragraph_target: 6,
+            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+        },
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

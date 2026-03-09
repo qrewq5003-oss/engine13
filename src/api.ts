@@ -13,7 +13,7 @@ import type {
   SubmitActionResponse,
   SaveResponse,
   StatusIndicatorState,
-  NarrativeSeason,
+  HalfYear,
   ActionInfo,
 } from './types/index';
 
@@ -42,9 +42,9 @@ export async function getNarrative(
   onChunk: (text: string) => void,
   onDone: () => void,
   onError?: (error: string) => void,
-  season?: NarrativeSeason
+  halfYear?: HalfYear
 ): Promise<() => void> {
-  console.log('[API] Starting streaming narrative', season ? `season=${season}` : '');
+  console.log('[API] Starting streaming narrative', halfYear ? `halfYear=${halfYear}` : '');
 
   // Listen for chunks
   const unlistenChunk = await listen<string>('narrative_chunk', (event) => {
@@ -60,9 +60,9 @@ export async function getNarrative(
     onDone();
   });
 
-  // Invoke the command with season parameter
+  // Invoke the command with halfYear parameter
   try {
-    await invoke('cmd_get_narrative', { season });
+    await invoke('cmd_get_narrative', { halfYear });
   } catch (err) {
     console.error('[API] cmd_get_narrative error:', err);
     unlistenChunk();

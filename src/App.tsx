@@ -25,7 +25,7 @@ import {
   saveGame,
   getStatusIndicators,
 } from './api';
-import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, NarrativeSeason, ActionInfo } from './types';
+import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, HalfYear, ActionInfo } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -182,8 +182,8 @@ const App: React.FC = () => {
       setIsGeneratingNarrative(true);
       setNarrative(''); // Reset narrative before streaming
 
-      // Determine season based on tick - even ticks are Spring, odd are Autumn
-      const season: NarrativeSeason = worldState && worldState.tick % 2 === 0 ? 'spring' : 'autumn';
+      // Determine half-year based on tick - even ticks are FirstHalf, odd are SecondHalf
+      const halfYear: HalfYear = worldState && worldState.tick % 2 === 0 ? 'first_half' : 'second_half';
 
       await getNarrative(
         (chunk) => {
@@ -206,7 +206,7 @@ const App: React.FC = () => {
           setNarrativeLoading(false);
           setIsGeneratingNarrative(false);
         },
-        season
+        halfYear
       );
     } catch (err) {
       console.error('[Narrative] Error:', err);

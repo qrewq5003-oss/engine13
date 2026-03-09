@@ -255,7 +255,7 @@ async fn cmd_get_narrative(
     state: State<'_, Mutex<AppState>>,
     db: State<'_, Mutex<Db>>,
     app: tauri::AppHandle,
-    season: engine13::llm::NarrativeSeason,
+    half_year: engine13::llm::HalfYear,
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
 
@@ -265,19 +265,15 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        let prompt = llm::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard, season);
-        let season_name = match season {
-            engine13::llm::NarrativeSeason::Spring => "Весна",
-            engine13::llm::NarrativeSeason::Autumn => "Осень",
-        };
-        let placeholder = format!("{} {} года. Хроника продолжается.", season_name, world_state.year);
+        let prompt = llm::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard, half_year);
+        let placeholder = format!("{} {} года. Хроника продолжается.", half_year.display_name(), world_state.year);
         let config = llm::get_llm_config();
         let year = world_state.year;
         (prompt, placeholder, config, year)
     }; // All locks released here
 
     // Now do the async HTTP requests without holding any locks
-    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, season);
+    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, half_year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
     let result = if config.provider == "anthropic" {
@@ -285,7 +281,7 @@ async fn cmd_get_narrative(
     } else {
         llm::stream_narrative_openai(prompt, placeholder, config, app).await
     };
-    
+
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
     result
 }
