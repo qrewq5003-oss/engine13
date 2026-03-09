@@ -24,19 +24,178 @@ impl HalfYear {
             HalfYear::SecondHalf
         }
     }
-    
+
     pub fn display_name(&self) -> &'static str {
         match self {
             HalfYear::FirstHalf => "первая половина",
             HalfYear::SecondHalf => "вторая половина",
         }
     }
-    
+
     pub fn display_name_en(&self) -> &'static str {
         match self {
             HalfYear::FirstHalf => "first half",
             HalfYear::SecondHalf => "second half",
         }
+    }
+}
+
+/// Summary of a player action for narrative generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerActionSummary {
+    pub id: String,
+    pub name: String,
+    pub key_effects: Vec<String>,
+}
+
+/// Complete narrative world snapshot for prompt generation
+/// 
+/// This is the single source of truth for narrative generation.
+/// The prompt builder should only read from this snapshot, not from WorldState directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NarrativeWorldSnapshot {
+    pub year: i32,
+    pub half_year: HalfYear,
+    pub alive_actors: Vec<String>,
+    pub dead_actors: Vec<String>,
+    pub victory_achieved: bool,
+    pub foreground_actors: Vec<String>,
+    pub key_milestones_fired: Vec<String>,
+    pub recent_important_events: Vec<crate::core::Event>,
+    pub recent_player_actions: Vec<PlayerActionSummary>,
+    pub key_metrics: HashMap<String, f64>,
+    pub narrative_axes: Vec<String>,
+    pub tone_tags: Vec<String>,
+    pub game_mode: crate::core::GameMode,
+}
+
+/// Build narrative world snapshot from game state
+/// 
+/// This is a pure function: it reads state but has no side effects.
+/// It does NOT call LLM, modify state, or write to DB.
+pub fn build_snapshot(
+    world: &WorldState,
+    scenario: &Scenario,
+    event_log: &EventLog,
+) -> NarrativeWorldSnapshot {
+    // Half-year from tick
+    let half_year = HalfYear::from_tick(world.tick);
+    
+    // Alive actors (not in dead_actors list)
+    let alive_actors: Vec<String> = world.actors.keys()
+        .filter(|id| !world.dead_actors.iter().any(|d| &d.id == *id))
+        .cloned()
+        .collect();
+    
+    // Dead actors
+    let dead_actors: Vec<String> = world.dead_actors.iter()
+        .map(|a| a.id.clone())
+        .collect();
+    
+    // Foreground actors
+    let foreground_actors: Vec<String> = world.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.clone())
+        .collect();
+    
+    // Key milestones fired
+    let key_milestones_fired: Vec<String> = scenario.milestone_events.iter()
+        .filter(|m| world.milestone_events_fired.contains(&m.id))
+        .map(|m| m.id.clone())
+        .collect();
+    
+    // Recent important events (last 10, keyed events first)
+    let mut recent_important_events: Vec<crate::core::Event> = event_log.events.iter()
+        .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
+        .cloned()
+        .collect();
+    recent_important_events.truncate(10);
+    
+    // Recent player actions (last 5)
+    let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
+        .filter(|e| matches!(e.event_type, crate::core::EventType::PlayerAction))
+        .rev()
+        .take(5)
+        .map(|e| PlayerActionSummary {
+            id: e.id.clone(),
+            name: e.description.clone(),
+            key_effects: {
+                // Parse effects from metadata if available
+                if !e.metadata.is_empty() {
+                    serde_json::from_str::<HashMap<String, f64>>(&e.metadata)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(metric, delta)| format!("{}: {:+.1}", metric, delta))
+                        .collect()
+                } else {
+                    vec![]
+                }
+            },
+        })
+        .collect();
+    
+    // Key metrics from narrative config
+    let mut key_metrics: HashMap<String, f64> = HashMap::new();
+    for metric_key in &scenario.narrative_config.key_metrics {
+        // Try to get the metric value using existing patterns
+        let value = if metric_key.starts_with("family:") {
+            // Family metric
+            world.family_state.as_ref()
+                .and_then(|fs| fs.metrics.get(metric_key))
+                .copied()
+                .unwrap_or(0.0)
+        } else if metric_key.starts_with("actor:") {
+            // Actor metric: "actor:id.metric"
+            if let Some((actor_id, metric)) = metric_key.strip_prefix("actor:").and_then(|s| s.split_once('.')) {
+                world.actors.get(actor_id)
+                    .map(|a| get_actor_metric(&a.metrics, metric))
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        } else if metric_key.starts_with("global:") {
+            // Global metric
+            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
+        } else {
+            // Try as global metric without prefix
+            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
+        };
+        key_metrics.insert(metric_key.clone(), value);
+    }
+    
+    // Narrative axes and tone tags from config
+    let narrative_axes = scenario.narrative_config.narrative_axes.clone();
+    let tone_tags = scenario.narrative_config.tone_tags.clone();
+    
+    NarrativeWorldSnapshot {
+        year: world.year,
+        half_year,
+        alive_actors,
+        dead_actors,
+        victory_achieved: world.victory_achieved,
+        foreground_actors,
+        key_milestones_fired,
+        recent_important_events,
+        recent_player_actions,
+        key_metrics,
+        narrative_axes,
+        tone_tags,
+        game_mode: world.game_mode,
+    }
+}
+
+/// Helper to get actor metric by name
+fn get_actor_metric(metrics: &crate::core::ActorMetrics, name: &str) -> f64 {
+    match name {
+        "population" => metrics.population,
+        "military_size" => metrics.military_size,
+        "military_quality" => metrics.military_quality,
+        "economic_output" => metrics.economic_output,
+        "cohesion" => metrics.cohesion,
+        "legitimacy" => metrics.legitimacy,
+        "external_pressure" => metrics.external_pressure,
+        "treasury" => metrics.treasury,
+        _ => 0.0,
     }
 }
 
@@ -188,50 +347,22 @@ fn system_prompt(_half_year: HalfYear) -> &'static str {
 - Фокус на предчувствиях, расстановке сил, напряжении"
 }
 
-/// Generate narrative prompt from world state and scenario
+/// Generate narrative prompt from world snapshot
+/// 
+/// This function reads ONLY from the NarrativeWorldSnapshot.
+/// It does NOT read WorldState or Scenario directly.
 pub fn generate_narrative_prompt(
-    world_state: &WorldState,
+    snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
-    event_log: &EventLog,
-    db: &Db,
-    half_year: HalfYear,
+    _db: &Db,
 ) -> String {
     let mut prompt = String::new();
-    let current_year = world_state.year;
 
     // Section 0: System prompt - chronicler persona
-    prompt.push_str(system_prompt(half_year));
+    prompt.push_str(system_prompt(snapshot.half_year));
     prompt.push_str("\n\n");
 
-    // Section 0.5: Factual block - prevent hallucination (data-driven from config)
-    let alive_actors: Vec<&str> = world_state.actors.keys()
-        .filter(|id| !world_state.dead_actors.iter().any(|d| &d.id == *id))
-        .map(|s| s.as_str())
-        .collect();
-
-    let dead_actors: Vec<&str> = world_state.dead_actors.iter()
-        .map(|a| a.id.as_str())
-        .collect();
-    
-    // Get foreground actors
-    let foreground_actors: Vec<&str> = world_state.actors.values()
-        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
-        .map(|a| a.id.as_str())
-        .collect();
-    
-    // Get key milestones and recent events
-    let recent_milestones: Vec<&str> = scenario.milestone_events.iter()
-        .filter(|m| world_state.milestone_events_fired.contains(&m.id))
-        .map(|m| m.id.as_str())
-        .take(5)
-        .collect();
-    
-    let recent_events: Vec<&str> = event_log.events.iter()
-        .rev()
-        .take(10)
-        .map(|e| e.description.as_str())
-        .collect();
-
+    // Section 0.5: Factual block - prevent hallucination (from snapshot)
     let factual_block = format!(
         "=== ВАЖНЫЕ ФАКТЫ ИГРЫ (не противоречь им) ===\n\
          Год: {}\n\
@@ -247,19 +378,21 @@ pub fn generate_narrative_prompt(
          - Не называй актора павшим, уничтоженным или исчезнувшим, если его нет в списке павших.\n\
          - Для живых акторов в упадке используй формулировки: \"под угрозой\", \"ослаблен\", \"на грани\" — но не \"пал\".\n\
          - Не придумывай победы, смерти правителей, падения городов или коллапсы, которых нет в фактах.\n\n",
-        world_state.year,
-        half_year.display_name(),
-        if alive_actors.is_empty() { "нет".to_string() } else { alive_actors.join(", ") },
-        if dead_actors.is_empty() { "нет".to_string() } else { dead_actors.join(", ") },
-        if foreground_actors.is_empty() { "нет".to_string() } else { foreground_actors.join(", ") },
-        if recent_milestones.is_empty() { "нет".to_string() } else { recent_milestones.join(", ") },
-        if recent_events.is_empty() { "нет".to_string() } else { recent_events.join(", ") },
-        if world_state.victory_achieved { "да" } else { "нет" },
+        snapshot.year,
+        snapshot.half_year.display_name(),
+        if snapshot.alive_actors.is_empty() { "нет".to_string() } else { snapshot.alive_actors.join(", ") },
+        if snapshot.dead_actors.is_empty() { "нет".to_string() } else { snapshot.dead_actors.join(", ") },
+        if snapshot.foreground_actors.is_empty() { "нет".to_string() } else { snapshot.foreground_actors.join(", ") },
+        if snapshot.key_milestones_fired.is_empty() { "нет".to_string() } else { snapshot.key_milestones_fired.join(", ") },
+        if snapshot.recent_important_events.is_empty() { "нет".to_string() } else { 
+            snapshot.recent_important_events.iter().map(|e| e.description.as_str()).collect::<Vec<_>>().join(", ")
+        },
+        if snapshot.victory_achieved { "да" } else { "нет" },
     );
     prompt.push_str(&factual_block);
 
-    // Section 1: Scenario context (depends on game mode)
-    match world_state.game_mode {
+    // Section 1: Scenario context (depends on game mode from snapshot)
+    match snapshot.game_mode {
         crate::core::GameMode::Consequences => {
             // Consequences mode: use consequence_context
             prompt.push_str(&scenario.consequence_context);
@@ -276,14 +409,14 @@ pub fn generate_narrative_prompt(
         }
     }
 
-    // Section 1.5: Year and half-year anchoring instruction
+    // Section 1.5: Year and half-year anchoring instruction (from snapshot)
     prompt.push_str(&format!(
         "=== ИНСТРУКЦИЯ ===\n\
          ТЕКУЩИЙ ГОД: {}, ПОЛОВИНА: {}. \n\
          Пиши ТОЛЬКО про события этого года.\n\
          Не упоминай будущие годы.\n\
          Не экстраполируй за пределы {}.\n\n",
-        current_year, half_year.display_name(), current_year
+        snapshot.year, snapshot.half_year.display_name(), snapshot.year
     ));
 
     // Section 1.6: Strict narrative rules — no raw numbers
@@ -299,115 +432,56 @@ pub fn generate_narrative_prompt(
          - Хроника — это литература, не таблица данных\n\n"
     );
 
-    // Section 2: World state - foreground actors only
+    // Section 2: World state - foreground actors only (from snapshot key_metrics)
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
-    prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
+    prompt.push_str(&format!("Год: {}\n\n", snapshot.year));
 
-    let foreground_actors_list: Vec<_> = world_state
-        .actors
-        .values()
-        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
-        .collect();
-
-    for actor in &foreground_actors_list {
-        // Format actor name with leader if present
-        let actor_header = if let Some(ref leader) = actor.leader {
-            format!("{} ({}):\n", actor.name, leader)
-        } else {
-            format!("{} ({}):\n", actor.name, actor.name_short)
-        };
-        prompt.push_str(&actor_header);
-        prompt.push_str(&format!(
-            "  population: {:.0}, military: {:.0}, quality: {:.0}\n",
-            actor.metrics.population,
-            actor.metrics.military_size,
-            actor.metrics.military_quality
-        ));
-        prompt.push_str(&format!(
-            "  economy: {:.0}, cohesion: {:.0}, legitimacy: {:.0}, pressure: {:.0}\n",
-            actor.metrics.economic_output,
-            actor.metrics.cohesion,
-            actor.metrics.legitimacy,
-            actor.metrics.external_pressure
-        ));
-        prompt.push_str(&format!(
-            "  treasury: {:.0}\n",
-            actor.metrics.treasury
-        ));
-        if !actor.tags.is_empty() {
-            prompt.push_str(&format!("  tags: {}\n", actor.tags.join(", ")));
+    // Key metrics from snapshot
+    if !snapshot.key_metrics.is_empty() {
+        prompt.push_str("Ключевые метрики:\n");
+        for (key, value) in &snapshot.key_metrics {
+            prompt.push_str(&format!("  {}: {:.1}\n", key, value));
         }
         prompt.push('\n');
     }
 
-    // Section 3: Recent events with relevance scoring
+    // Section 3: Recent events from snapshot
     prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
+    
+    for event in &snapshot.recent_important_events {
+        prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
+    }
+    prompt.push('\n');
 
-    // Build query tags from current context
-    let mut query_tags: Vec<String> = Vec::new();
-
-    // Add narrative actor names (short) and regions
-    for actor in &foreground_actors_list {
-        query_tags.push(actor.name_short.clone());
-        query_tags.push(actor.region.clone());
+    // Section 4: Recent player actions from snapshot
+    if !snapshot.recent_player_actions.is_empty() {
+        prompt.push_str("=== ДЕЙСТВИЯ ИГРОКА ===\n");
+        for action in &snapshot.recent_player_actions {
+            prompt.push_str(&format!("- {}\n", action.name));
+            if !action.key_effects.is_empty() {
+                for effect in &action.key_effects {
+                    prompt.push_str(&format!("  → {}\n", effect));
+                }
+            }
+        }
+        prompt.push('\n');
     }
 
-    // Add interaction types from recent events
-    let recent_event_types: std::collections::HashSet<String> = event_log.events.iter()
-        .filter(|e| e.is_key || foreground_actors_list.iter().any(|a| a.id == e.actor_id))
-        .flat_map(|e| {
-            match e.event_type {
-                crate::core::EventType::War => Some("war".to_string()),
-                crate::core::EventType::Migration => Some("migration".to_string()),
-                crate::core::EventType::Trade => Some("trade".to_string()),
-                _ => None,
-            }
-        })
-        .collect();
-    query_tags.extend(recent_event_types);
-
-    // Get scored relevant events from database
-    let narrative_actor_ids: Vec<String> = foreground_actors_list.iter().map(|a| a.id.clone()).collect();
-
-    let relevant_events = db.get_relevant_events_scored(
-        world_state.tick,
-        &query_tags,
-        &narrative_actor_ids,
-    );
-
-    let events_to_show: Vec<crate::core::Event> = match relevant_events {
-        Ok(events) => {
-            eprintln!("[NARRATIVE] Got {} relevant events from DB", events.len());
-            // Filter out events from the future
-            events.into_iter().filter(|e| e.year <= current_year).collect()
+    // Section 5: Narrative guidance from config
+    if !snapshot.narrative_axes.is_empty() {
+        prompt.push_str("=== ТЕМАТИЧЕСКИЕ ОСИ ===\n");
+        for axis in &snapshot.narrative_axes {
+            prompt.push_str(&format!("- {}\n", axis));
         }
-        Err(e) => {
-            eprintln!("[NARRATIVE] Failed to get relevant events from DB: {}", e);
-            // Fallback to simple event_log query
-            event_log.events.iter()
-                .filter(|e| {
-                    (e.is_key || narrative_actor_ids.contains(&e.actor_id)) && e.year <= current_year
-                })
-                .cloned()
-                .collect()
-        }
-    };
+        prompt.push('\n');
+    }
 
-    if events_to_show.is_empty() {
-        prompt.push_str("Нет недавних событий.\n");
-    } else {
-        for event in &events_to_show {
-            // Calculate score for logging
-            let ticks_ago = world_state.tick.saturating_sub(event.tick);
-            let temporal_coeff = Db::temporal_coefficient(ticks_ago, event.is_key);
-            let thematic_sim = Db::thematic_similarity(&event.tags, &query_tags);
-            let score = temporal_coeff * thematic_sim;
-
-            prompt.push_str(&format!(
-                "{} (тик {}): {} [score: {:.2}]\n",
-                event.year, event.tick, event.description, score
-            ));
+    if !snapshot.tone_tags.is_empty() {
+        prompt.push_str("=== СТИЛЬ ПОВЕСТВОВАНИЯ ===\n");
+        for tag in &snapshot.tone_tags {
+            prompt.push_str(&format!("- {}\n", tag));
         }
+        prompt.push('\n');
     }
 
     prompt
