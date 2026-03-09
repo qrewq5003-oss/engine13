@@ -1088,6 +1088,8 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
                 DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
+                // Knowledge → legitimacy bridge (soft support role, not victory path)
+                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,

@@ -353,16 +353,17 @@ impl ScriptedStrategy {
             // Rome strategies - using actual IDs from rome_375.rs
             // Note: Many actions have availability gates (e.g., family_wealth > 10)
             // Only gather_information and lay_low are available unconditionally on tick 0
+            // New priority: exit resource loop early, get to outcome actions
             ScriptedStrategy::RomeBalanced => vec![
-                "gather_information",  // Always available, +knowledge -wealth
-                "lay_low",             // Always available, +wealth -influence
-                "expand_network",      // wealth > 10, +connections -wealth
-                "educate_family",      // wealth > 10, +knowledge -wealth
-                "build_reputation",    // connections > 15, +influence -wealth
-                "invest_wealth",       // wealth > 20, +wealth -connections
-                "support_city",        // wealth > 15, +influence +economic_output +cohesion -wealth
-                "back_administration", // connections > 15, +connections +legitimacy -wealth
-                "fund_defense",        // wealth > 20, +influence +military_quality -wealth
+                "expand_network",      // FIRST: get connections for build_reputation (uses starting wealth 50)
+                "build_reputation",    // PRIMARY: convert to influence (needs connections > 15)
+                "support_city",        // SECONDARY: influence + cohesion (needs wealth > 15)
+                "back_administration", // TERTIARY: legitimacy + more connections
+                "fund_defense",        // LATE: influence + military_quality
+                "lay_low",             // Only when influence is high enough to spare
+                "invest_wealth",       // Only when connections are high
+                "gather_information",  // Only when wealth is high (knowledge has legitimacy bridge now)
+                "educate_family",      // Lowest priority: knowledge has no direct sink
             ],
             ScriptedStrategy::RomeInfluence => vec![
                 "build_reputation",    // Priority: influence-focused
