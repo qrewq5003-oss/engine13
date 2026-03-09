@@ -1,47 +1,40 @@
 import React from 'react';
-import type { WorldState } from '../types';
+import type { WorldState, MetricDisplay } from '../types';
 import './GlobalMetricsPanel.css';
 
 interface GlobalMetricsPanelProps {
   worldState: WorldState;
+  metricsDisplay: MetricDisplay[];
 }
 
-export const GlobalMetricsPanel: React.FC<GlobalMetricsPanelProps> = ({ worldState }) => {
-  const federationProgress = worldState.global_metrics?.federation_progress ?? 0;
+export const GlobalMetricsPanel: React.FC<GlobalMetricsPanelProps> = ({ worldState, metricsDisplay }) => {
+  if (metricsDisplay.length === 0) return null;
 
   return (
     <div className="global-metrics-panel">
-      <h2 className="panel-title">Федерация</h2>
-
-      <div className="global-metric">
-        <div className="global-metric-header">
-          <span className="global-metric-label">Прогресс федерации</span>
-          <span className="global-metric-value">{Math.round(federationProgress)}%</span>
-        </div>
-        <div className="global-metric-fill-container">
-          <div
-            className="global-metric-fill"
-            style={{ width: `${Math.min(100, Math.max(0, federationProgress))}%` }}
-          />
-        </div>
-        <span className="global-metric-description">
-          {getFederationStatus(federationProgress)}
-        </span>
-      </div>
+      {metricsDisplay.map(md => {
+        const metricKey = md.metric.replace('global:', '');
+        const value = worldState.global_metrics?.[metricKey] ?? 0;
+        const statusText = md.thresholds.find(t => value < t.below)?.text ?? '';
+        return (
+          <div key={md.metric} className="global-metric">
+            <h2 className="panel-title">{md.panel_title}</h2>
+            <div className="global-metric-header">
+              <span className="global-metric-label">{md.label}</span>
+              <span className="global-metric-value">{Math.round(value)}%</span>
+            </div>
+            <div className="global-metric-fill-container">
+              <div
+                className="global-metric-fill"
+                style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+              />
+            </div>
+            <span className="global-metric-description">{statusText}</span>
+          </div>
+        );
+      })}
     </div>
   );
 };
-
-function getFederationStatus(progress: number): string {
-  if (progress < 20) {
-    return 'Разговоры ни к чему не обязывающие';
-  } else if (progress < 50) {
-    return 'Первые договорённости, взаимное недоверие';
-  } else if (progress < 80) {
-    return 'Реальный союз, совместные действия';
-  } else {
-    return 'Федерация — исторически беспрецедентное событие';
-  }
-}
 
 export default GlobalMetricsPanel;

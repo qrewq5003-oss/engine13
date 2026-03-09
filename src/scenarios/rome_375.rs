@@ -47,6 +47,7 @@ pub fn load_rome_375() -> Scenario {
             minimum_tick: 15,
         }),
         universal_actions: create_universal_actions(),
+        global_metrics_display: vec![],
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1486,6 +1487,12 @@ fn create_generation_mechanics() -> GenerationMechanics {
         patriarch_start_age: 42,
         patriarch_end_age: 75,
         inheritance_coefficients,
+        panel_label: "Семья Ди Милано".to_string(),
+        era_texts: vec![
+            crate::core::EraText { from_year: 375, to_year: 410, text: "Рим трещит по швам. Семья держит позиции при дворе.".to_string() },
+            crate::core::EraText { from_year: 410, to_year: 455, text: "Западная империя агонизирует. Влияние семьи — последний якорь.".to_string() },
+            crate::core::EraText { from_year: 455, to_year: 500, text: "Из пепла рождается новый порядок.".to_string() },
+        ],
     }
 }
 

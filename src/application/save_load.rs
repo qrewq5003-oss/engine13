@@ -149,6 +149,12 @@ pub fn load_scenario(
     // Set generation_length from scenario
     world_state.generation_length = scenario.generation_length;
 
+    // Set global_metrics_display from scenario
+    world_state.global_metrics_display = scenario.global_metrics_display.clone();
+
+    // Set generation_mechanics from scenario
+    world_state.generation_mechanics = scenario.generation_mechanics.clone();
+
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
     state.event_log = crate::engine::EventLog::new();
@@ -189,7 +195,7 @@ pub struct SaveSlotData {
     pub tick: u32,
     pub year: i32,
     pub created_at: u64,
-    pub slot: String, // "auto" | "slot_1" | "slot_2" | "slot_3"
+    pub slot: String, // any alphanumeric name (e.g., "auto", "slot_1", "quick_save")
 }
 
 /// Response from list_saves - grouped by slots

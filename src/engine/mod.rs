@@ -1601,6 +1601,7 @@ mod tests {
             actions_per_tick: 0,
             victory_condition: None,
             universal_actions: vec![],
+            global_metrics_display: vec![],
         };
         let mut event_log = EventLog::new();
 

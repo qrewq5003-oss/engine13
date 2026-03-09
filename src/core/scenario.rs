@@ -43,6 +43,24 @@ pub struct Scenario {
     pub victory_condition: Option<VictoryCondition>,
     /// Universal actions available in Consequences/Free modes (replaces get_universal_actions())
     pub universal_actions: Vec<PatronAction>,
+    /// Global metrics to display in UI (for scenarios with global_metrics_panel)
+    pub global_metrics_display: Vec<MetricDisplay>,
+}
+
+/// Metric display configuration for UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricDisplay {
+    pub metric: String,
+    pub label: String,
+    pub panel_title: String,
+    pub thresholds: Vec<MetricThreshold>,
+}
+
+/// Threshold for metric display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricThreshold {
+    pub below: f64,
+    pub text: String,
 }
 
 /// Victory condition for scenario completion
@@ -248,6 +266,14 @@ pub struct RankResult {
     pub rank: String,
 }
 
+/// Era text for family panel context
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EraText {
+    pub from_year: i32,
+    pub to_year: i32,
+    pub text: String,
+}
+
 /// Generation mechanics for family/patriarch system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationMechanics {
@@ -256,6 +282,10 @@ pub struct GenerationMechanics {
     pub patriarch_end_age: u32,
     /// Inheritance coefficients per family metric (default 0.7 if not specified)
     pub inheritance_coefficients: HashMap<String, f64>,
+    /// Panel label for FamilyPanel UI
+    pub panel_label: String,
+    /// Era-specific context texts
+    pub era_texts: Vec<EraText>,
 }
 
 /// Player context for scenario

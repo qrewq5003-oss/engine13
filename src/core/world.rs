@@ -105,6 +105,10 @@ pub struct WorldState {
     pub victory_achieved: bool,
     /// Family state for family-based scenarios (None if not a family scenario)
     pub family_state: Option<FamilyState>,
+    /// Global metrics display configuration (from scenario)
+    pub global_metrics_display: Vec<crate::core::MetricDisplay>,
+    /// Generation mechanics (from scenario, for family scenarios)
+    pub generation_mechanics: Option<crate::core::GenerationMechanics>,
 }
 
 impl WorldState {
@@ -150,6 +154,8 @@ impl WorldState {
             actions_this_tick: 0,
             victory_achieved: false,
             family_state: None,
+            global_metrics_display: vec![],
+            generation_mechanics: None,
         }
     }
 
@@ -183,6 +189,8 @@ impl WorldState {
             actions_this_tick: 0,
             victory_achieved: false,
             family_state: None,
+            global_metrics_display: vec![],
+            generation_mechanics: None,
         }
     }
 

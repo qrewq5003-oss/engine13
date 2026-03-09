@@ -402,7 +402,7 @@ const App: React.FC = () => {
             />
           )}
           {worldState.features?.global_metrics_panel && (
-            <GlobalMetricsPanel worldState={worldState} />
+            <GlobalMetricsPanel worldState={worldState} metricsDisplay={worldState.global_metrics_display || []} />
           )}
         </div>
 

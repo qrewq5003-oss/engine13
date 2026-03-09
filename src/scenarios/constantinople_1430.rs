@@ -62,6 +62,19 @@ pub fn load_constantinople_1430() -> Scenario {
                 cost: HashMap::new(),
             },
         ],
+        global_metrics_display: vec![
+            crate::core::MetricDisplay {
+                metric: "global:federation_progress".to_string(),
+                label: "Прогресс федерации".to_string(),
+                panel_title: "Федерация".to_string(),
+                thresholds: vec![
+                    crate::core::MetricThreshold { below: 20.0, text: "Разговоры ни к чему не обязывающие".to_string() },
+                    crate::core::MetricThreshold { below: 50.0, text: "Первые договорённости, взаимное недоверие".to_string() },
+                    crate::core::MetricThreshold { below: 80.0, text: "Реальный союз, совместные действия".to_string() },
+                    crate::core::MetricThreshold { below: 101.0, text: "Федерация — исторически беспрецедентное событие".to_string() },
+                ],
+            },
+        ],
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

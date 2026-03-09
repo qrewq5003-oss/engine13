@@ -15,7 +15,9 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
 }) => {
   // Use family_state if available
   const familyState = worldState.family_state;
-  if (!familyState) {
+  const genMechanics = worldState.generation_mechanics;
+  
+  if (!familyState || !genMechanics) {
     return <div className="family-panel">No family data available</div>;
   }
 
@@ -30,27 +32,32 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   const patriarchAge = familyState.patriarch_age;
 
   // Calculate generation info - use scenario start year from worldState
-  const startYear = worldState.scenario_start_year ?? 375;
+  const startYear = worldState.scenario_start_year ?? currentYear;
+  const genLength = genMechanics.tick_span;
   const yearsSinceStart = currentYear - startYear;
-  const generationLength = worldState.generation_length ?? 33;
-  const generationNumber = Math.floor(yearsSinceStart / generationLength) + 1;
-  const generationStartYear = startYear + (generationNumber - 1) * generationLength;
+  const generationNumber = Math.floor(yearsSinceStart / genLength) + 1;
+  const generationStartYear = startYear + (generationNumber - 1) * genLength;
 
-  // Use generic label (scenario-specific labels would require API changes)
-  const scenarioLabel = 'Family';
+  // Get panel label from generation_mechanics
+  const panelLabel = genMechanics.panel_label;
+
+  // Get era text from generation_mechanics
+  const eraText = genMechanics.era_texts.find(e => currentYear >= e.from_year && currentYear < e.to_year)?.text
+    ?? genMechanics.era_texts[genMechanics.era_texts.length - 1]?.text
+    ?? '';
 
   return (
     <div className="family-panel">
-      <h2 className="panel-title">{scenarioLabel}</h2>
+      <h2 className="panel-title">{panelLabel}</h2>
 
       <div className="generation-info">
         <div className="generation-header">
-          <span className="generation-label">Generation</span>
+          <span className="generation-label">Поколение</span>
           <span className="generation-number">{generationNumber}</span>
         </div>
         <div className="patriarch-info">
-          <span className="patriarch-age">Age: {patriarchAge !== null ? `${patriarchAge} лет` : '—'}</span>
-          <span className="generation-year">Since {generationStartYear}</span>
+          <span className="patriarch-age">Возраст: {patriarchAge}</span>
+          <span className="generation-year">С {generationStartYear}</span>
         </div>
       </div>
 
@@ -67,24 +74,11 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
       </div>
 
       <div className="family-context">
-        <p className="context-text">
-          {getContextText(currentYear, scenarioLabel)}
-        </p>
+        <p className="context-text">{eraText}</p>
       </div>
     </div>
   );
 };
-
-function getContextText(year: number, scenarioLabel: string): string {
-  // Generic context text based on era
-  if (year < 400) {
-    return `${scenarioLabel}, ${year} AD. The old order crumbles as new powers rise.`;
-  } else if (year <= 500) {
-    return `${scenarioLabel}, ${year} AD. Kingdoms carve their realms from the ashes of empire.`;
-  } else {
-    return `${scenarioLabel}, ${year} AD. New powers rise from the ashes of civilization.`;
-  }
-}
 
 interface FamilyMetricBarProps {
   label: string;

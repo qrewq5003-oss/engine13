@@ -108,12 +108,30 @@ export interface WorldState {
   victory_achieved: boolean;
   /// Family state for family-based scenarios
   family_state?: FamilyState;
+  /// Global metrics display configuration
+  global_metrics_display?: MetricDisplay[];
+  /// Generation mechanics (for family scenarios)
+  generation_mechanics?: GenerationMechanics | null;
 }
 
 /// Family state for family-based scenarios
 export interface FamilyState {
   metrics: Record<string, number>;
   patriarch_age: number;
+}
+
+/// Metric display configuration for UI
+export interface MetricDisplay {
+  metric: string;
+  label: string;
+  panel_title: string;
+  thresholds: MetricThreshold[];
+}
+
+/// Threshold for metric display
+export interface MetricThreshold {
+  below: number;
+  text: string;
 }
 
 /// Victory condition for scenario
@@ -244,10 +262,19 @@ export interface RankResult {
   rank: string;
 }
 
+/// Era text for family panel context
+export interface EraText {
+  from_year: number;
+  to_year: number;
+  text: string;
+}
+
 export interface GenerationMechanics {
   tick_span: number;
   patriarch_start_age: number;
   patriarch_end_age: number;
+  panel_label: string;
+  era_texts: EraText[];
 }
 
 export interface ScenarioMeta {
