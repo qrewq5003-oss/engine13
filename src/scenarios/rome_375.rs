@@ -1258,8 +1258,8 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "invest_wealth".to_string(),
             name: "Вложить средства".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
-            effects: HashMap::from([("family:family_wealth".to_string(), 8.0)]),
-            cost: HashMap::from([("family:family_connections".to_string(), -2.0)]),
+            effects: HashMap::from([("family:family_wealth".to_string(), 5.0)]),
+            cost: HashMap::from([("family:family_connections".to_string(), -3.0)]),
         },
         PatronAction {
             source_actor_id: None,
