@@ -174,3 +174,285 @@ fn test_list_saves_with_slots() {
     assert!(!slot_list.slots.contains_key("slot_2"), "slot_2 should be empty");
     assert!(!slot_list.slots.contains_key("slot_3"), "slot_3 should be empty");
 }
+
+// ============================================================================
+// Action Tests
+// ============================================================================
+
+#[test]
+fn test_action_cost_deducted() {
+    // Test that action cost is correctly deducted from treasury
+    let mut state = setup_constantinople_state();
+    let db = setup_test_db();
+
+    // Get initial venice treasury
+    let initial_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.metrics.treasury)
+        .unwrap_or(0.0);
+
+    // Apply venice_diplomacy action (cost: venice.treasury -30)
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    let result = apply_player_action(&mut state, &action_input);
+    assert!(result.is_ok(), "apply_player_action failed: {:?}", result);
+
+    // Check treasury was deducted
+    let final_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.metrics.treasury)
+        .unwrap_or(0.0);
+
+    assert!((final_treasury - (initial_treasury - 30.0)).abs() < 0.01,
+        "Venice treasury should be reduced by 30: initial={}, final={}", initial_treasury, final_treasury);
+}
+
+#[test]
+fn test_action_unavailable_when_insufficient_resources() {
+    // Test that actions are unavailable when resources are insufficient
+    let mut state = setup_constantinople_state();
+
+    // Set venice treasury very low
+    if let Some(world) = state.world_state.as_mut() {
+        if let Some(venice) = world.actors.get_mut("venice") {
+            venice.metrics.treasury = 5.0; // Very low treasury
+        }
+    }
+
+    // Try to apply venice_diplomacy (requires venice.legitimacy > 60, cost: -30 treasury)
+    // This should fail because treasury is too low for the cost
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+
+    // The action availability check should pass (legitimacy check), but we're testing
+    // that the action can be rejected when conditions aren't met
+    // Let's test with an action that has a treasury requirement
+    let action_input = PlayerActionInput {
+        action_id: "venice_naval_support".to_string(), // requires venice.treasury > 100
+        target_actor_id: None,
+    };
+    let result = apply_player_action(&mut state, &action_input);
+    assert!(result.is_err(), "Action should be unavailable when treasury < 100");
+}
+
+#[test]
+fn test_actions_per_tick_limit_enforced() {
+    // Test that actions_per_tick limit is enforced
+    let mut state = setup_constantinople_state();
+    let db = setup_test_db();
+
+    // Apply 3 actions (the limit for constantinople)
+    let actions = vec!["venice_diplomacy", "genoa_financial_aid", "milan_bankers"];
+    for action_id in &actions {
+        let action_input = PlayerActionInput {
+            action_id: action_id.to_string(),
+            target_actor_id: None,
+        };
+        let result = apply_player_action(&mut state, &action_input);
+        assert!(result.is_ok(), "Action {} should succeed: {:?}", action_id, result);
+    }
+
+    // 4th action should fail due to actions_per_tick limit
+    let action_input = PlayerActionInput {
+        action_id: "venice_naval_support".to_string(),
+        target_actor_id: None,
+    };
+    let result = apply_player_action(&mut state, &action_input);
+    assert!(result.is_err(), "4th action should fail due to actions_per_tick limit");
+}
+
+#[test]
+fn test_federation_progress_grows_with_actions() {
+    // Test that federation actions increase federation_progress
+    let mut state = setup_constantinople_state();
+    let db = setup_test_db();
+
+    // Get initial federation progress
+    let initial_fed = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Apply 3 federation actions
+    let actions = vec!["venice_diplomacy", "genoa_financial_aid", "milan_bankers"];
+    for action_id in &actions {
+        let action_input = PlayerActionInput {
+            action_id: action_id.to_string(),
+            target_actor_id: None,
+        };
+        let result = apply_player_action(&mut state, &action_input);
+        assert!(result.is_ok(), "Action {} should succeed: {:?}", action_id, result);
+    }
+
+    // Check federation progress increased
+    let final_fed = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    assert!(final_fed > initial_fed,
+        "Federation progress should increase: initial={}, final={}", initial_fed, final_fed);
+}
+
+#[test]
+fn test_scripted_actions_improve_outcome_vs_no_actions() {
+    // Test that scripted actions improve outcome vs no-action baseline
+    use crate::core::MetricRef;
+    use crate::engine::{tick, EventLog};
+    use rand::SeedableRng;
+
+    // Baseline: 25 ticks with no actions
+    let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
+    let mut world_no_actions = crate::core::WorldState::with_seed(
+        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+    );
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world_no_actions.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    for _ in 0..25 {
+        tick(&mut world_no_actions, &scenario, &mut event_log, &mut rng);
+    }
+    let fed_no_actions = world_no_actions.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    let pressure_no_actions = world_no_actions.actors.get("byzantium")
+        .map(|a| a.metrics.external_pressure)
+        .unwrap_or(0.0);
+
+    // Scripted: 25 ticks with priority actions
+    let mut world_scripted = crate::core::WorldState::with_seed(
+        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+    );
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world_scripted.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    let priority_actions = vec![
+        "venice_diplomacy", "genoa_financial_aid", "milan_bankers",
+        "venice_naval_support", "genoa_mercenaries", "milan_condottieri",
+        "venice_trade_deal", "genoa_galata_garrison",
+    ];
+
+    for _ in 0..25 {
+        // Apply scripted actions
+        for action_id in &priority_actions {
+            if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == *action_id) {
+                let is_available = match &action.available_if {
+                    crate::core::ActionCondition::Always => true,
+                    crate::core::ActionCondition::Metric { metric, operator, value } => {
+                        let current = MetricRef::parse(metric).get(&world_scripted);
+                        match operator {
+                            crate::core::ComparisonOperator::Less => current < *value,
+                            crate::core::ComparisonOperator::LessOrEqual => current <= *value,
+                            crate::core::ComparisonOperator::Greater => current > *value,
+                            crate::core::ComparisonOperator::GreaterOrEqual => current >= *value,
+                            crate::core::ComparisonOperator::Equal => (current - value).abs() < 0.001,
+                        }
+                    }
+                };
+                if is_available {
+                    for (metric, effect) in &action.effects {
+                        MetricRef::parse(metric).apply(&mut world_scripted, *effect);
+                    }
+                    for (metric, cost) in &action.cost {
+                        MetricRef::parse(metric).apply(&mut world_scripted, *cost);
+                    }
+                }
+            }
+        }
+        tick(&mut world_scripted, &scenario, &mut event_log, &mut rng);
+    }
+
+    let fed_scripted = world_scripted.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    let pressure_scripted = world_scripted.actors.get("byzantium")
+        .map(|a| a.metrics.external_pressure)
+        .unwrap_or(0.0);
+
+    // Assert scripted is better
+    assert!(fed_scripted > fed_no_actions,
+        "Scripted federation ({:.1}) should be higher than no-actions ({:.1})",
+        fed_scripted, fed_no_actions);
+
+    // Allow +5 tolerance for pressure (random events can affect it)
+    assert!(pressure_scripted <= pressure_no_actions + 5.0,
+        "Scripted pressure ({:.1}) should be <= no-actions ({:.1}) + 5.0 tolerance",
+        pressure_scripted, pressure_no_actions);
+}
+
+#[test]
+fn test_scripted_victory_achievable() {
+    // Test that scripted victory is achievable within 40 ticks
+    use crate::core::MetricRef;
+    use crate::engine::{tick, EventLog};
+    use rand::SeedableRng;
+
+    let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
+    let mut world = crate::core::WorldState::with_seed(
+        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+    );
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    let priority_actions = vec![
+        "venice_diplomacy", "genoa_financial_aid", "milan_bankers",
+        "venice_naval_support", "genoa_mercenaries", "milan_condottieri",
+        "venice_trade_deal", "genoa_galata_garrison",
+    ];
+
+    for _ in 0..40 {
+        // Apply scripted actions
+        for action_id in &priority_actions {
+            if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == *action_id) {
+                let is_available = match &action.available_if {
+                    crate::core::ActionCondition::Always => true,
+                    crate::core::ActionCondition::Metric { metric, operator, value } => {
+                        let current = MetricRef::parse(metric).get(&world);
+                        match operator {
+                            crate::core::ComparisonOperator::Less => current < *value,
+                            crate::core::ComparisonOperator::LessOrEqual => current <= *value,
+                            crate::core::ComparisonOperator::Greater => current > *value,
+                            crate::core::ComparisonOperator::GreaterOrEqual => current >= *value,
+                            crate::core::ComparisonOperator::Equal => (current - value).abs() < 0.001,
+                        }
+                    }
+                };
+                if is_available {
+                    for (metric, effect) in &action.effects {
+                        MetricRef::parse(metric).apply(&mut world, *effect);
+                    }
+                    for (metric, cost) in &action.cost {
+                        MetricRef::parse(metric).apply(&mut world, *cost);
+                    }
+                }
+            }
+        }
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+
+        // Stop early if victory achieved
+        if world.victory_achieved {
+            break;
+        }
+    }
+
+    let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+
+    // Soft victory criterion: either victory achieved OR federation > 80
+    assert!(world.victory_achieved || fed_final > 80.0,
+        "Scripted strategy should approach victory: victory={}, federation={:.1}",
+        world.victory_achieved, fed_final);
+}

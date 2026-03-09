@@ -5,6 +5,7 @@
 //! cargo run --bin sim constantinople_1430 50 42
 //! cargo run --bin sim constantinople_1430 1000 42  # 1000 ticks for balance testing
 //! cargo run --bin sim constantinople_1430 50 batch  # batch mode: 100 runs with seeds 0-99
+//! cargo run --bin sim constantinople_1430 50 scripted  # scripted mode with priority actions
 //! ```
 
 use engine13::{
@@ -19,13 +20,16 @@ fn main() {
     let scenario_id = args.get(1).map(|s| s.as_str()).unwrap_or("constantinople_1430");
     let ticks: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50);
     let batch_mode = args.get(3).map(|s| s == "batch").unwrap_or(false);
+    let scripted_mode = args.get(3).map(|s| s == "scripted").unwrap_or(false);
 
     println!("=== ENGINE13 HEADLESS SIMULATION ===");
     println!("Scenario: {}", scenario_id);
     println!("Ticks: {}", ticks);
-    
+
     if batch_mode {
         run_batch(scenario_id, ticks);
+    } else if scripted_mode {
+        run_scripted(scenario_id, ticks);
     } else {
         let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(42);
         println!("Seed: {}", seed);
@@ -145,6 +149,128 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     println!("Victory achieved: {} runs ({:.0}%)", victories.len(), victory_pct);
     println!("  median victory tick: {}", median_victory);
     println!("Avg random events per run: {:.1}", avg_events);
+}
+
+fn run_scripted(scenario_id: &str, ticks: u32) {
+    use engine13::core::MetricRef;
+
+    println!("Running scripted mode with priority actions");
+    println!();
+
+    let scenario = registry::load_by_id(scenario_id)
+        .expect("Unknown scenario");
+
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42, [0u8; 32]);
+
+    // Initialize actors from scenario
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    // Track scripted stats
+    let mut total_actions_applied = 0u32;
+    let mut total_actions_rejected = 0u32;
+
+    // Priority action list for Constantinople
+    let priority_actions = vec![
+        "venice_diplomacy",
+        "genoa_financial_aid",
+        "milan_bankers",
+        "venice_naval_support",
+        "genoa_mercenaries",
+        "milan_condottieri",
+        "venice_trade_deal",
+        "genoa_galata_garrison",
+    ];
+
+    println!("=== SCRIPTED SIMULATION ===");
+
+    for tick_num in 0..ticks {
+        // Apply scripted actions before tick
+        let mut applied_this_tick = 0u32;
+        let mut rejected_this_tick = 0u32;
+
+        for action_id in &priority_actions {
+            if applied_this_tick >= scenario.actions_per_tick {
+                break;
+            }
+
+            // Try to apply action
+            if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == *action_id) {
+                // Check if action is available
+                let is_available = match &action.available_if {
+                    engine13::core::ActionCondition::Always => true,
+                    engine13::core::ActionCondition::Metric { metric, operator, value } => {
+                        let current = MetricRef::parse(metric).get(&world);
+                        match operator {
+                            engine13::core::ComparisonOperator::Less => current < *value,
+                            engine13::core::ComparisonOperator::LessOrEqual => current <= *value,
+                            engine13::core::ComparisonOperator::Greater => current > *value,
+                            engine13::core::ComparisonOperator::GreaterOrEqual => current >= *value,
+                            engine13::core::ComparisonOperator::Equal => (current - value).abs() < 0.001,
+                        }
+                    }
+                };
+
+                if is_available {
+                    // Apply action effects
+                    for (metric, effect) in &action.effects {
+                        MetricRef::parse(metric).apply(&mut world, *effect);
+                    }
+                    // Apply action costs
+                    for (metric, cost) in &action.cost {
+                        MetricRef::parse(metric).apply(&mut world, *cost);
+                    }
+                    applied_this_tick += 1;
+                } else {
+                    rejected_this_tick += 1;
+                }
+            }
+        }
+
+        total_actions_applied += applied_this_tick;
+        total_actions_rejected += rejected_this_tick;
+
+        // Run tick
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+
+        // Print tick summary
+        let fed_progress = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+        let byz_pressure = world.actors.get("byzantium")
+            .map(|a| a.metrics.external_pressure)
+            .unwrap_or(0.0);
+        println!("tick {:2}: fed={:5.1}  byz_pressure={:5.1}  actions={}/{}", 
+            tick_num, fed_progress, byz_pressure, applied_this_tick, rejected_this_tick);
+
+        // Stop early if victory or collapse
+        if world.victory_achieved || world.dead_actor_ids.iter().any(|id| id.contains("byzantium")) {
+            println!("Early termination: victory={} byzantium_dead={}", 
+                world.victory_achieved, 
+                world.dead_actor_ids.iter().any(|id| id.contains("byzantium")));
+            break;
+        }
+    }
+
+    // Print final summary
+    let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    let byz_final = world.actors.get("byzantium")
+        .map(|a| a.metrics.external_pressure)
+        .unwrap_or(0.0);
+    let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
+
+    println!();
+    println!("=== FINAL SUMMARY ===");
+    println!("Federation progress final: {:.1}", fed_final);
+    println!("Byzantium pressure final:  {:.1}", byz_final);
+    println!("Victory achieved: {}", if world.victory_achieved { "yes" } else { "no" });
+    println!("Byzantium collapsed: {}", if byz_dead { "yes" } else { "no" });
+    println!("Total actions applied: {}", total_actions_applied);
+    println!("Total actions rejected: {}", total_actions_rejected);
 }
 
 #[derive(Default)]
