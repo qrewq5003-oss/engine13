@@ -308,7 +308,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
     // Baseline: 25 ticks with no actions
     let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
     let mut world_no_actions = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
@@ -327,7 +327,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
 
     // Scripted: 25 ticks with priority actions
     let mut world_scripted = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
@@ -398,7 +398,7 @@ fn test_scripted_victory_achievable() {
 
     let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
     let mut world = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
