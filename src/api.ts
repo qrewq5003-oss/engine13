@@ -14,6 +14,7 @@ import type {
   SaveResponse,
   StatusIndicatorState,
   NarrativeSeason,
+  ActionInfo,
 } from './types/index';
 
 // ============================================================================
@@ -101,6 +102,10 @@ export async function saveLlmConfig(
 
 export async function getAvailableActions(): Promise<PatronAction[]> {
   return invoke<PatronAction[]>('cmd_get_available_actions');
+}
+
+export async function getActionsWithAvailability(): Promise<ActionInfo[]> {
+  return invoke<ActionInfo[]>('cmd_get_actions_with_availability');
 }
 
 export async function submitAction(actionId: string): Promise<SubmitActionResponse> {

@@ -242,6 +242,19 @@ export interface PatronAction {
   cost: Record<string, number>;
 }
 
+/// Reason why an action is unavailable
+export type UnavailableReason =
+  | { type: 'InsufficientCost'; required: number; available: number; resource: string }
+  | { type: 'ActionsPerTickExhausted'; limit: number }
+  | { type: 'ConditionNotMet'; description: string };
+
+/// Action info with availability status
+export interface ActionInfo {
+  action: PatronAction;
+  available: boolean;
+  unavailable_reason?: UnavailableReason;
+}
+
 export type ActionCondition = 
   | { type: 'always' }
   | { type: 'metric'; metric: string; operator: ComparisonOperator; value: number };

@@ -289,3 +289,24 @@
   background: #45475a;
   border-radius: 2px;
 }
+
+/* Unavailable action styling */
+.action-item.unavailable {
+  opacity: 0.6;
+  background: #313244;
+}
+
+.action-item.unavailable .action-header {
+  cursor: not-allowed;
+}
+
+.action-reason {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #45475a;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #f38ba8;
+  font-style: italic;
+}

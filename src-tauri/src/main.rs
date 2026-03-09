@@ -103,6 +103,15 @@ fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine
 }
 
 #[tauri::command]
+fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Vec<commands::ActionInfo>, String> {
+    eprintln!("[RUST] cmd_get_actions_with_availability - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let result = commands::get_actions_with_availability(&*s);
+    eprintln!("[RUST] cmd_get_actions_with_availability - result: {:?}", result.as_ref().map(|a| a.len()));
+    result
+}
+
+#[tauri::command]
 fn cmd_submit_action(
     state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
@@ -353,6 +362,7 @@ fn main() {
             cmd_advance_tick,
             cmd_get_narrative_actors,
             cmd_get_available_actions,
+            cmd_get_actions_with_availability,
             cmd_submit_action,
             cmd_save_game,
             cmd_load_game,

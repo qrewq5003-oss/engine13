@@ -151,6 +151,13 @@ pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::Patron
     crate::application::get_available_actions(state)
 }
 
+/// Get all actions with availability status - delegates to application::actions
+pub fn get_actions_with_availability(state: &AppState) -> Result<Vec<crate::application::actions::ActionInfo>, String> {
+    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+    Ok(crate::application::actions::list_actions_with_availability(world_state, scenario))
+}
+
 /// Submit a player action - delegates to application::actions
 pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitActionResponse, String> {
     use crate::application::actions;

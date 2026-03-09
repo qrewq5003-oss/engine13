@@ -1,9 +1,25 @@
 use std::collections::HashMap;
 
-use crate::core::{MetricRef, PatronAction, WorldState};
+use crate::core::{ComparisonOperator, Condition, MetricRef, PatronAction, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 use crate::AppState;
+
+/// Reason why an action is unavailable - runtime check result
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type")]
+pub enum UnavailableReason {
+    InsufficientCost { required: f64, available: f64, resource: String },
+    ActionsPerTickExhausted { limit: u32 },
+    ConditionNotMet { description: String },
+}
+
+/// Action info with availability status
+pub struct ActionInfo {
+    pub action: PatronAction,
+    pub available: bool,
+    pub unavailable_reason: Option<UnavailableReason>,
+}
 
 /// Input for player action
 #[derive(Debug, Clone)]
@@ -115,6 +131,107 @@ fn compare_value(value: f64, operator: &crate::core::ComparisonOperator, target:
         crate::core::ComparisonOperator::GreaterOrEqual => value >= *target,
         crate::core::ComparisonOperator::Equal => (value - target).abs() < 0.001,
     }
+}
+
+/// Describe a condition in human-readable form
+fn describe_condition(cond: &Condition) -> String {
+    let metric = &cond.metric;
+    let op_str = match cond.operator {
+        ComparisonOperator::Less => "<",
+        ComparisonOperator::LessOrEqual => "<=",
+        ComparisonOperator::Greater => ">",
+        ComparisonOperator::GreaterOrEqual => ">=",
+        ComparisonOperator::Equal => "==",
+    };
+    
+    // Extract resource name from metric (e.g., "actor:venice.treasury" -> "Venice treasury")
+    let resource = metric
+        .strip_prefix("actor:")
+        .unwrap_or(metric)
+        .replace('.', " ")
+        .replace('_', " ");
+    
+    // Capitalize first letter
+    let mut chars = resource.chars();
+    let resource = match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    };
+    
+    format!("Требует: {} {} {}", resource, op_str, cond.value)
+}
+
+/// List all actions with availability status and reasons
+pub fn list_actions_with_availability(
+    world_state: &WorldState,
+    scenario: &Scenario,
+) -> Vec<ActionInfo> {
+    let mut actions = Vec::new();
+
+    for action in &scenario.patron_actions {
+        let mut available = true;
+        let mut unavailable_reason: Option<UnavailableReason> = None;
+
+        // Check actions_per_tick limit first
+        if scenario.actions_per_tick > 0
+            && world_state.actions_this_tick >= scenario.actions_per_tick {
+            available = false;
+            unavailable_reason = Some(UnavailableReason::ActionsPerTickExhausted {
+                limit: scenario.actions_per_tick,
+            });
+        }
+
+        // Check action conditions
+        if available {
+            match &action.available_if {
+                crate::core::ActionCondition::Always => {}
+                crate::core::ActionCondition::Metric { metric, operator, value } => {
+                    let metric_ref = MetricRef::parse(metric.as_str());
+                    let current = metric_ref.get(world_state);
+                    if !compare_value(current, operator, value) {
+                        available = false;
+                        unavailable_reason = Some(UnavailableReason::ConditionNotMet {
+                            description: describe_condition(&Condition {
+                                metric: metric.clone(),
+                                operator: operator.clone(),
+                                value: *value,
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check action costs
+        if available {
+            for (metric, cost) in &action.cost {
+                let metric_ref = MetricRef::parse(metric.as_str());
+                let current = metric_ref.get(world_state);
+                if current < cost.abs() && *cost < 0.0 {
+                    available = false;
+                    let resource = metric
+                        .strip_prefix("actor:")
+                        .unwrap_or(metric.as_str())
+                        .replace('.', " ")
+                        .replace('_', " ");
+                    unavailable_reason = Some(UnavailableReason::InsufficientCost {
+                        required: cost.abs(),
+                        available: current,
+                        resource,
+                    });
+                    break;
+                }
+            }
+        }
+
+        actions.push(ActionInfo {
+            action: action.clone(),
+            available,
+            unavailable_reason,
+        });
+    }
+
+    actions
 }
 
 /// Get available actions for the player

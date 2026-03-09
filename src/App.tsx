@@ -13,7 +13,7 @@ import VictoryScreen from './components/VictoryScreen';
 import {
   loadScenario,
   getWorldState,
-  getAvailableActions,
+  getActionsWithAvailability,
   advanceTick,
   submitAction,
   getRelevantEvents,
@@ -25,7 +25,7 @@ import {
   saveGame,
   getStatusIndicators,
 } from './api';
-import type { WorldState, Actor, PatronAction, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, NarrativeSeason } from './types';
+import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, NarrativeSeason, ActionInfo } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -38,7 +38,7 @@ const App: React.FC = () => {
   
   // Game state
   const [worldState, setWorldState] = useState<WorldState | null>(null);
-  const [availableActions, setAvailableActions] = useState<PatronAction[]>([]);
+  const [availableActions, setAvailableActions] = useState<ActionInfo[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -147,7 +147,7 @@ const App: React.FC = () => {
     try {
       const [world, actions] = await Promise.all([
         getWorldState(),
-        getAvailableActions(),
+        getActionsWithAvailability(),
       ]);
 
       if (world) {

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import type { PatronAction, Event, WorldState } from '../types';
+import type { Event, WorldState, ActionInfo, UnavailableReason } from '../types';
 import './ControlPanel.css';
 
 interface ControlPanelProps {
   currentYear: number;
   currentTick: number;
   worldState: WorldState;
-  availableActions: PatronAction[];
+  availableActions: ActionInfo[];
   recentEvents: Event[];
   onAdvanceTick: () => void;
   onActionSubmit: (actionId: string) => void;
@@ -35,8 +35,25 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
-  const actionsLimitReached = worldState.actions_per_tick > 0 
+  const actionsLimitReached = worldState.actions_per_tick > 0
     && worldState.actions_this_tick >= worldState.actions_per_tick;
+
+  // Sort: available actions first, then unavailable
+  const sortedActions = [...availableActions].sort((a, b) =>
+    (b.available ? 1 : 0) - (a.available ? 1 : 0)
+  );
+
+  // Get reason text for display
+  function reasonText(reason: UnavailableReason): string {
+    switch (reason.type) {
+      case 'InsufficientCost':
+        return `Требует ${reason.required} ${reason.resource} (есть: ${reason.available})`;
+      case 'ActionsPerTickExhausted':
+        return `Лимит действий за тик исчерпан (${reason.limit})`;
+      case 'ConditionNotMet':
+        return reason.description;
+    }
+  }
 
   // Get last 3 events
   const lastThreeEvents = recentEvents.slice(-3).reverse();
@@ -75,26 +92,26 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           )}
         </div>
         <div className="actions-list">
-          {availableActions.length === 0 ? (
+          {sortedActions.length === 0 ? (
             <div className="no-actions">No actions available</div>
           ) : (
-            availableActions.map((action) => (
+            sortedActions.map((actionInfo) => (
               <div
-                key={action.id}
-                className={`action-item ${expandedAction === action.id ? 'expanded' : ''}`}
-                onClick={() => handleActionClick(action.id)}
+                key={actionInfo.action.id}
+                className={`action-item ${expandedAction === actionInfo.action.id ? 'expanded' : ''} ${!actionInfo.available ? 'unavailable' : ''}`}
+                onClick={() => actionInfo.available && handleActionClick(actionInfo.action.id)}
               >
                 <div className="action-header">
-                  <span className="action-name">{action.name}</span>
+                  <span className="action-name">{actionInfo.action.name}</span>
                   <span className="action-arrow">
-                    {expandedAction === action.id ? '▼' : '▶'}
+                    {expandedAction === actionInfo.action.id ? '▼' : '▶'}
                   </span>
                 </div>
-                {expandedAction === action.id && (
+                {expandedAction === actionInfo.action.id && (
                   <div className="action-details">
                     <div className="action-costs">
                       <span className="cost-label">Cost:</span>
-                      {Object.entries(action.cost).map(([metric, value]) => (
+                      {Object.entries(actionInfo.action.cost).map(([metric, value]) => (
                         <span key={metric} className="cost-item">
                           {formatMetricName(metric)}: {value > 0 ? '+' : ''}{value.toFixed(0)}
                         </span>
@@ -102,7 +119,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </div>
                     <div className="action-effects">
                       <span className="effect-label">Effects:</span>
-                      {Object.entries(action.effects).map(([metric, value]) => (
+                      {Object.entries(actionInfo.action.effects).map(([metric, value]) => (
                         <span key={metric} className="effect-item">
                           {formatMetricName(metric)}: +{value.toFixed(0)}
                         </span>
@@ -113,12 +130,15 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        onActionSubmit(action.id);
+                        onActionSubmit(actionInfo.action.id);
                       }}
-                      disabled={isLoading || actionsLimitReached}
+                      disabled={isLoading || actionsLimitReached || !actionInfo.available}
                     >
                       Execute
                     </button>
+                    {!actionInfo.available && actionInfo.unavailable_reason && (
+                      <span className="action-reason">{reasonText(actionInfo.unavailable_reason)}</span>
+                    )}
                   </div>
                 )}
               </div>
