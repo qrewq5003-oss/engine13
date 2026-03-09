@@ -106,6 +106,8 @@ export interface WorldState {
   actions_per_tick: number;
   /// Victory achieved flag
   victory_achieved: boolean;
+  /// Victory sustained ticks counter
+  victory_sustained_ticks: number;
   /// Family state for family-based scenarios
   family_state?: FamilyState;
   /// Global metrics display configuration
@@ -141,6 +143,8 @@ export interface VictoryCondition {
   title: string;
   description: string;
   minimum_tick: number;
+  additional_conditions: Condition[];
+  sustained_ticks_required: number;
 }
 
 /// Scenario feature flags for UI
@@ -216,6 +220,13 @@ export interface DeltaCondition {
   operator: ComparisonOperator;
   value: number;
   delta: number;
+}
+
+/// Condition for random event triggering
+export interface Condition {
+  metric: string;
+  operator: ComparisonOperator;
+  value: number;
 }
 
 export type ComparisonOperator = 'less' | 'less_or_equal' | 'greater' | 'greater_or_equal' | 'equal';

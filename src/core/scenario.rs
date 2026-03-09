@@ -73,6 +73,8 @@ pub struct VictoryCondition {
     pub title: String,
     pub description: String,
     pub minimum_tick: u32,
+    pub additional_conditions: Vec<Condition>,
+    pub sustained_ticks_required: u32,
 }
 
 /// Status indicator for UI display

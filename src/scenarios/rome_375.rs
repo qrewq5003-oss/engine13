@@ -45,6 +45,8 @@ pub fn load_rome_375() -> Scenario {
             title: "Семья достигла величия".to_string(),
             description: "Ди Милано стали опорой угасающей империи.".to_string(),
             minimum_tick: 15,
+            additional_conditions: vec![],
+            sustained_ticks_required: 1,
         }),
         universal_actions: create_universal_actions(),
         global_metrics_display: vec![],

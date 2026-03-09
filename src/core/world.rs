@@ -103,6 +103,8 @@ pub struct WorldState {
     pub actions_this_tick: u32,
     /// Victory achieved flag
     pub victory_achieved: bool,
+    /// Victory sustained ticks counter
+    pub victory_sustained_ticks: u32,
     /// Family state for family-based scenarios (None if not a family scenario)
     pub family_state: Option<FamilyState>,
     /// Global metrics display configuration (from scenario)
@@ -153,6 +155,7 @@ impl WorldState {
             generation_length: None,
             actions_this_tick: 0,
             victory_achieved: false,
+            victory_sustained_ticks: 0,
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
@@ -188,6 +191,7 @@ impl WorldState {
             generation_length: None,
             actions_this_tick: 0,
             victory_achieved: false,
+            victory_sustained_ticks: 0,
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,

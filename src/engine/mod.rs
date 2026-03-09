@@ -446,9 +446,22 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
     if let Some(ref vc) = scenario.victory_condition {
         if world.tick >= vc.minimum_tick {
             let value = crate::core::MetricRef::parse(&vc.metric).get(world);
-            if value >= vc.threshold {
-                world.victory_achieved = true;
-                world.game_mode = crate::core::GameMode::Ended;
+            let main_condition = value >= vc.threshold;
+
+            // Check additional conditions
+            let additional_ok = vc.additional_conditions.iter().all(|cond| {
+                let metric_value = crate::core::MetricRef::parse(&cond.metric).get(world);
+                cond.operator.evaluate(metric_value, cond.value)
+            });
+
+            if main_condition && additional_ok {
+                world.victory_sustained_ticks += 1;
+                if world.victory_sustained_ticks >= vc.sustained_ticks_required.max(1) {
+                    world.victory_achieved = true;
+                    world.game_mode = crate::core::GameMode::Ended;
+                }
+            } else {
+                world.victory_sustained_ticks = 0;
             }
         }
     }

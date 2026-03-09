@@ -47,10 +47,18 @@ pub fn load_constantinople_1430() -> Scenario {
         actions_per_tick: 3,
         victory_condition: Some(crate::core::VictoryCondition {
             metric: "global:federation_progress".to_string(),
-            threshold: 100.0,
+            threshold: 80.0,
             title: "Федерация Севера основана".to_string(),
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
             minimum_tick: 20,
+            additional_conditions: vec![
+                crate::core::Condition {
+                    metric: "actor:byzantium.external_pressure".to_string(),
+                    operator: crate::core::ComparisonOperator::Less,
+                    value: 85.0,
+                },
+            ],
+            sustained_ticks_required: 3,
         }),
         universal_actions: vec![
             crate::core::PatronAction {
@@ -139,7 +147,7 @@ fn create_byzantium() -> Actor {
         is_successor_template: false,
         religion: crate::core::Religion::Orthodox,
         culture: crate::core::Culture::Greek,
-        minimum_survival_ticks: Some(10), // Constantinople holds for at least 10 years
+        minimum_survival_ticks: None,
         leader: Some("Иоанн VIII Палеолог".to_string()),
     }
 }
@@ -560,7 +568,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         // Pressure grows slower if Byzantium has strong military relative to Ottomans
         AutoDelta {
             metric: "actor:byzantium.external_pressure".to_string(),
-            base: 2.5,
+            base: 2.125, // reduced by 15% from 2.5
             conditions: vec![
                 // Acceleration if Ottomans are strong
                 DeltaCondition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
@@ -582,6 +590,28 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 },
             ],
             noise: 0.5,
+            actor_id: Some("byzantium".to_string()),
+        },
+        // Byzantium soft protection: slow recovery at low pressure
+        AutoDelta {
+            metric: "actor:byzantium.external_pressure".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Less, value: 50.0, delta: -0.5 },
+            ],
+            ratio_conditions: vec![],
+            noise: 0.0,
+            actor_id: Some("byzantium".to_string()),
+        },
+        // Byzantium soft protection: federation progress helps
+        AutoDelta {
+            metric: "actor:byzantium.external_pressure".to_string(),
+            base: 0.0,
+            conditions: vec![
+                DeltaCondition { metric: "global:federation_progress".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: -0.8 },
+            ],
+            ratio_conditions: vec![],
+            noise: 0.0,
             actor_id: Some("byzantium".to_string()),
         },
         // Serbia external pressure from Ottomans

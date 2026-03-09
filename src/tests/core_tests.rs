@@ -188,3 +188,156 @@ fn test_generation_mechanics_has_era_texts() {
     assert_eq!(gen.panel_label, "Семья Ди Милано");
     assert!(!gen.era_texts.is_empty(), "Should have era texts");
 }
+
+#[test]
+fn test_scenario_victory_requires_byzantium_alive() {
+    // Load constantinople_1430
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut event_log = crate::engine::EventLog::new();
+    
+    // Add byzantium actor
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    
+    // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 25
+    // Note: MetricRef strips "global:" prefix when storing
+    world.global_metrics.insert("federation_progress".to_string(), 100.0);
+    world.tick = 25;
+    
+    // Set byzantium.external_pressure = 90 (above threshold 85)
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.metrics.external_pressure = 90.0;
+    }
+    
+    // Run check_victory_condition via tick
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    
+    // victory_achieved should be false because pressure is too high
+    assert!(!world.victory_achieved, "Victory should not be achieved when pressure > 85");
+    
+    // Lower pressure to 70
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.metrics.external_pressure = 70.0;
+    }
+    
+    // Run tick again
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    
+    // victory_sustained_ticks should be 1, victory_achieved still false (needs 3 ticks)
+    assert_eq!(world.victory_sustained_ticks, 1, "Should have 1 sustained tick");
+    assert!(!world.victory_achieved, "Victory should not be achieved yet (needs 3 ticks)");
+}
+
+#[test]
+fn test_victory_sustained_ticks_resets() {
+    // Load constantinople_1430
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut event_log = crate::engine::EventLog::new();
+    
+    // Add byzantium actor
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    
+    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 25
+    world.global_metrics.insert("federation_progress".to_string(), 100.0);
+    world.tick = 25;
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.metrics.external_pressure = 70.0;
+    }
+    
+    // Run 2 ticks - should accumulate sustained ticks
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    
+    assert_eq!(world.victory_sustained_ticks, 2, "Should have 2 sustained ticks");
+    
+    // Raise pressure above threshold
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.metrics.external_pressure = 90.0;
+    }
+    
+    // Run another tick - should reset sustained ticks
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    
+    assert_eq!(world.victory_sustained_ticks, 0, "Sustained ticks should reset when condition fails");
+}
+
+#[test]
+fn test_generation_transfer_applies_inheritance() {
+    // Load rome_375
+    let scenario = registry::load_by_id("rome_375").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut event_log = crate::engine::EventLog::new();
+    
+    // Add rome actor
+    for actor in &scenario.actors {
+        if actor.id == "rome" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    
+    // Set family_state with patriarch_age at end age
+    let gen = scenario.generation_mechanics.as_ref().unwrap();
+    world.family_state = Some(crate::core::FamilyState {
+        metrics: [("family:family_influence".to_string(), 60.0)].into(),
+        patriarch_age: gen.patriarch_end_age,
+    });
+    
+    let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
+    
+    // Run tick - should trigger generation transfer
+    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    
+    // Check patriarch_age reset to start age
+    assert_eq!(world.family_state.as_ref().unwrap().patriarch_age, gen.patriarch_start_age, "Patriarch age should reset");
+    
+    // Check family_influence reduced by inheritance coefficient (0.85)
+    let final_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
+    let expected = initial_influence * 0.85;
+    assert!((final_influence - expected).abs() < 0.1, "Family influence should be reduced by inheritance coefficient");
+}
+
+#[test]
+fn test_initial_family_metrics_loaded() {
+    // Load rome_375
+    let scenario = registry::load_by_id("rome_375").unwrap();
+    let mut state = crate::AppState::default();
+    let db = crate::db::Db::open_in_memory().unwrap();
+    
+    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    
+    let world_state = state.world_state.as_ref().unwrap();
+    assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
+    
+    let family_state = world_state.family_state.as_ref().unwrap();
+    
+    // Check that initial metrics are loaded
+    assert!(family_state.metrics.contains_key("family:family_influence"), "Should have family_influence");
+    assert!(family_state.metrics.contains_key("family:family_knowledge"), "Should have family_knowledge");
+    assert!(family_state.metrics.contains_key("family:family_wealth"), "Should have family_wealth");
+    assert!(family_state.metrics.contains_key("family:family_connections"), "Should have family_connections");
+}
+
+#[test]
+fn test_scenario_all_metrics_valid() {
+    // Validate rome_375 scenario
+    let rome_scenario = registry::load_by_id("rome_375").unwrap();
+    let rome_result = registry::validate_scenario(&rome_scenario);
+    assert!(rome_result.is_ok(), "Rome 375 should pass validation: {:?}", rome_result.err());
+    
+    // Validate constantinople_1430 scenario
+    let constantinople_scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let constantinople_result = registry::validate_scenario(&constantinople_scenario);
+    assert!(constantinople_result.is_ok(), "Constantinople 1430 should pass validation: {:?}", constantinople_result.err());
+}

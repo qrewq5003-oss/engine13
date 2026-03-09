@@ -6,15 +6,15 @@ pub fn common_events() -> Vec<RandomEvent> {
     vec![
         RandomEvent {
             id: "plague".to_string(),
-            probability: 0.05,
+            probability: 0.10,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.population".to_string(), operator: ComparisonOperator::Greater, value: 500.0 },
                 Condition { metric: "self.cohesion".to_string(), operator: ComparisonOperator::Less, value: 60.0 },
             ],
             effects: HashMap::from([
-                ("self.population".to_string(), -50.0),
-                ("self.cohesion".to_string(), -10.0),
+                ("self.population".to_string(), -25.0),
+                ("self.cohesion".to_string(), -6.0),
                 ("self.economic_output".to_string(), -5.0),
             ]),
             llm_context: "Эпидемия чумы опустошила регион".to_string(),
@@ -22,14 +22,14 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "famine".to_string(),
-            probability: 0.08,
+            probability: 0.12,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.economic_output".to_string(), operator: ComparisonOperator::Less, value: 30.0 },
             ],
             effects: HashMap::from([
-                ("self.treasury".to_string(), -100.0),
-                ("self.cohesion".to_string(), -8.0),
+                ("self.treasury".to_string(), -60.0),
+                ("self.cohesion".to_string(), -5.0),
                 ("self.population".to_string(), -20.0),
             ]),
             llm_context: "Неурожай вызвал голод и волнения".to_string(),
@@ -49,13 +49,13 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "court_conspiracy".to_string(),
-            probability: 0.07,
+            probability: 0.12,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 60.0 },
             ],
             effects: HashMap::from([
-                ("self.legitimacy".to_string(), -10.0),
+                ("self.legitimacy".to_string(), -6.0),
                 ("self.cohesion".to_string(), -5.0),
             ]),
             llm_context: "Заговор при дворе ослабил власть правителя".to_string(),
@@ -63,14 +63,14 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "desertion".to_string(),
-            probability: 0.06,
+            probability: 0.09,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.military_size".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
                 Condition { metric: "self.treasury".to_string(), operator: ComparisonOperator::Less, value: 200.0 },
             ],
             effects: HashMap::from([
-                ("self.military_size".to_string(), -20.0),
+                ("self.military_size".to_string(), -12.0),
                 ("self.cohesion".to_string(), -5.0),
             ]),
             llm_context: "Солдаты дезертировали из-за нехватки жалования".to_string(),
@@ -78,11 +78,11 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "piracy".to_string(),
-            probability: 0.08,
+            probability: 0.11,
             target: EventTarget::SeaActors,
             conditions: vec![],
             effects: HashMap::from([
-                ("self.treasury".to_string(), -80.0),
+                ("self.treasury".to_string(), -50.0),
                 ("self.economic_output".to_string(), -5.0),
             ]),
             llm_context: "Пираты нарушили торговые пути".to_string(),
@@ -97,20 +97,20 @@ pub fn common_events() -> Vec<RandomEvent> {
             ],
             effects: HashMap::from([
                 ("self.military_size".to_string(), 30.0),
-                ("self.treasury".to_string(), -150.0),
+                ("self.treasury".to_string(), -100.0),
             ]),
             llm_context: "Отряд наёмников предложил услуги за золото".to_string(),
             one_time: false,
         },
         RandomEvent {
             id: "trade_boom".to_string(),
-            probability: 0.08,
+            probability: 0.10,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 40.0 },
             ],
             effects: HashMap::from([
-                ("self.treasury".to_string(), 150.0),
+                ("self.treasury".to_string(), 80.0),
                 ("self.economic_output".to_string(), 5.0),
             ]),
             llm_context: "Торговый подъём наполнил казну".to_string(),
@@ -118,15 +118,15 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "popular_uprising".to_string(),
-            probability: 0.06,
+            probability: 0.08,
             target: EventTarget::Any,
             conditions: vec![
                 Condition { metric: "self.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0 },
                 Condition { metric: "self.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
             ],
             effects: HashMap::from([
-                ("self.cohesion".to_string(), -15.0),
-                ("self.legitimacy".to_string(), -10.0),
+                ("self.cohesion".to_string(), -8.0),
+                ("self.legitimacy".to_string(), -6.0),
                 ("self.economic_output".to_string(), -8.0),
             ]),
             llm_context: "Народное восстание потрясло столицу".to_string(),
@@ -134,7 +134,7 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "flood".to_string(),
-            probability: 0.05,
+            probability: 0.08,
             target: EventTarget::Any,
             conditions: vec![],
             effects: HashMap::from([
@@ -147,11 +147,11 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "charismatic_preacher".to_string(),
-            probability: 0.05,
+            probability: 0.09,
             target: EventTarget::Any,
             conditions: vec![],
             effects: HashMap::from([
-                ("self.cohesion".to_string(), 10.0),
+                ("self.cohesion".to_string(), 6.0),
                 ("self.legitimacy".to_string(), 5.0),
             ]),
             llm_context: "Харизматичный проповедник сплотил народ вокруг правителя".to_string(),
