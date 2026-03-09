@@ -309,8 +309,12 @@ fn phase_random_events(
         .chain(scenario.random_events.iter().cloned())
         .collect();
 
+    // Shuffle events to avoid ordering bias - use continue not break for cap
+    let mut shuffled_events = all_events;
+    shuffled_events.shuffle(rng);
+
     #[cfg(debug_assertions)]
-    eprintln!("[RANDOM_EVENTS] tick={} checking {} events", world.tick, all_events.len());
+    eprintln!("[RANDOM_EVENTS] tick={} checking {} events", world.tick, shuffled_events.len());
 
     // Get sea actor IDs for SeaActors target
     let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
@@ -324,7 +328,16 @@ fn phase_random_events(
         .map(|a| a.id.clone())
         .collect();
 
-    for event in &all_events {
+    // Track fired events this tick for cap
+    let mut fired_this_tick = 0u32;
+
+    for event in &shuffled_events {
+        // Cap check - use continue not break to avoid ordering bias
+        if scenario.max_random_events_per_tick > 0
+            && fired_this_tick >= scenario.max_random_events_per_tick {
+            continue;
+        }
+
         // Skip one-time events that already fired
         if event.one_time && world.fired_events.contains(&event.id) {
             continue;
@@ -334,7 +347,7 @@ fn phase_random_events(
         let roll: f64 = rng.gen();
         #[cfg(debug_assertions)]
         eprintln!("[RANDOM_EVENTS] event='{}' prob={:.3} roll={:.3}", event.id, event.probability, roll);
-        
+
         if roll > event.probability {
             continue;
         }
@@ -399,6 +412,9 @@ fn phase_random_events(
 
             #[cfg(debug_assertions)]
             eprintln!("[RANDOM_EVENTS] event='{}' target='{}' FIRED", event.id, target_id);
+
+            // Increment fired counter
+            fired_this_tick += 1;
 
             // Mark one-time event as fired
             if event.one_time {
@@ -1616,6 +1632,7 @@ mod tests {
             universal_actions: vec![],
             global_metrics_display: vec![],
             initial_family_metrics: None,
+            max_random_events_per_tick: 0,
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

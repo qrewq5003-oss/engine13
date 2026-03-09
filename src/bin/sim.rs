@@ -57,6 +57,20 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
             .filter(|e| e.tick == tick_num)
             .cloned()
             .collect();
+        // Count only actual random events (not threshold events from phase_events)
+        let tick_random_events = events.iter()
+            .filter(|e| matches!(e.event_type, EventType::Threshold))
+            .filter(|e| {
+                // Random events have specific IDs, not patterns like "foreground_*" or "metrics_*"
+                !e.id.starts_with("foreground_")
+                    && !e.id.starts_with("metrics_")
+                    && !e.id.starts_with("rank_")
+                    && !e.id.starts_with("milestone_")
+                    && !e.id.starts_with("game_mode_")
+                    && !e.id.starts_with("relevance_")
+            })
+            .count();
+        eprintln!("tick {}: random_events={}", tick_num, tick_random_events);
         stats.record(tick_num, &world, &events);
 
         // Progress indicator every 10 ticks
@@ -226,9 +240,17 @@ impl BatchStats {
         if self.victory_tick.is_none() && world.victory_achieved {
             self.victory_tick = Some(tick);
         }
-        // Count random events
+        // Count random events (filter out threshold events from phase_events)
         self.random_events_fired += events.iter()
             .filter(|e| matches!(e.event_type, EventType::Threshold))
+            .filter(|e| {
+                !e.id.starts_with("foreground_")
+                    && !e.id.starts_with("metrics_")
+                    && !e.id.starts_with("rank_")
+                    && !e.id.starts_with("milestone_")
+                    && !e.id.starts_with("game_mode_")
+                    && !e.id.starts_with("relevance_")
+            })
             .count() as u32;
     }
 }

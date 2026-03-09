@@ -56,6 +56,7 @@ pub fn load_rome_375() -> Scenario {
             ("family:family_wealth".to_string(), 50.0),
             ("family:family_connections".to_string(), 45.0),
         ])),
+        max_random_events_per_tick: 2,
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

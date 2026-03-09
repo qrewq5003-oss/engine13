@@ -84,6 +84,7 @@ pub fn load_constantinople_1430() -> Scenario {
             },
         ],
         initial_family_metrics: None,
+        max_random_events_per_tick: 3,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

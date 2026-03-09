@@ -47,6 +47,8 @@ pub struct Scenario {
     pub global_metrics_display: Vec<MetricDisplay>,
     /// Initial family metrics for family-based scenarios (None = not a family scenario)
     pub initial_family_metrics: Option<HashMap<String, f64>>,
+    /// Maximum random events per tick (0 = unlimited)
+    pub max_random_events_per_tick: u32,
 }
 
 /// Metric display configuration for UI
