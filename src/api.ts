@@ -13,6 +13,7 @@ import type {
   SubmitActionResponse,
   SaveResponse,
   StatusIndicatorState,
+  NarrativeSeason,
 } from './types/index';
 
 // ============================================================================
@@ -39,16 +40,17 @@ export async function getNarrativeActors(): Promise<Actor[]> {
 export async function getNarrative(
   onChunk: (text: string) => void,
   onDone: () => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  season?: NarrativeSeason
 ): Promise<() => void> {
-  console.log('[API] Starting streaming narrative');
-  
+  console.log('[API] Starting streaming narrative', season ? `season=${season}` : '');
+
   // Listen for chunks
   const unlistenChunk = await listen<string>('narrative_chunk', (event) => {
     console.log('[API] narrative_chunk:', event.payload);
     onChunk(event.payload);
   });
-  
+
   // Listen for done
   const unlistenDone = await listen('narrative_done', () => {
     console.log('[API] narrative_done');
@@ -56,10 +58,10 @@ export async function getNarrative(
     unlistenDone();
     onDone();
   });
-  
-  // Invoke the command
+
+  // Invoke the command with season parameter
   try {
-    await invoke('cmd_get_narrative');
+    await invoke('cmd_get_narrative', { season });
   } catch (err) {
     console.error('[API] cmd_get_narrative error:', err);
     unlistenChunk();
@@ -68,7 +70,7 @@ export async function getNarrative(
       onError(String(err));
     }
   }
-  
+
   // Return unsubscribe function
   return () => {
     unlistenChunk();

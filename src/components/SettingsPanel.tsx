@@ -111,7 +111,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
         (err) => {
           setMessage({ type: 'error', text: `Test failed: ${err}` });
           setIsTesting(false);
-        }
+        },
+        'spring' // Default season for test
       );
     } catch (err) {
       setMessage({ type: 'error', text: `Test failed: ${err}` });

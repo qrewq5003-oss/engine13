@@ -231,6 +231,9 @@ export interface Condition {
 
 export type ComparisonOperator = 'less' | 'less_or_equal' | 'greater' | 'greater_or_equal' | 'equal';
 
+/// Narrative season for dual-phase chronicle
+export type NarrativeSeason = 'spring' | 'autumn';
+
 export interface PatronAction {
   id: string;
   name: string;
