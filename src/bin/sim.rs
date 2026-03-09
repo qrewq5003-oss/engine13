@@ -5,21 +5,26 @@
 //! cargo run --bin sim constantinople_1430 50 42
 //! cargo run --bin sim constantinople_1430 1000 42  # 1000 ticks for balance testing
 //! cargo run --bin sim constantinople_1430 50 batch  # batch mode: 100 runs with seeds 0-99
-//! cargo run --bin sim constantinople_1430 50 scripted  # scripted mode with priority actions
+//! cargo run --bin sim constantinople_1430 25 scripted balanced  # scripted mode with balanced strategy
+//! cargo run --bin sim constantinople_1430 25 scripted diplomacy  # diplomacy-heavy strategy
+//! cargo run --bin sim constantinople_1430 25 scripted military  # military-heavy strategy
+//! cargo run --bin sim rome_375 50 batch  # Rome batch mode
 //! ```
 
 use engine13::{
-    core::{Event, EventType, WorldState},
+    core::{Event, EventType, WorldState, NarrativeStatus},
     engine::{tick, EventLog},
     scenarios::registry,
 };
 use rand::SeedableRng;
+use std::collections::{HashMap, HashSet};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let scenario_id = args.get(1).map(|s| s.as_str()).unwrap_or("constantinople_1430");
     let ticks: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50);
     let mode = args.get(3).map(|s| s.as_str()).unwrap_or("42");
+    let submode = args.get(4).map(|s| s.as_str());
 
     println!("=== ENGINE13 HEADLESS SIMULATION ===");
     println!("Scenario: {}", scenario_id);
@@ -27,7 +32,10 @@ fn main() {
 
     match mode {
         "batch" => run_batch(scenario_id, ticks),
-        "scripted" => run_scripted(scenario_id, ticks),
+        "scripted" => {
+            let strategy = submode.unwrap_or("balanced");
+            run_scripted(scenario_id, ticks, strategy);
+        },
         _ => {
             let seed: u64 = mode.parse().unwrap_or(42);
             println!("Seed: {}", seed);
@@ -60,21 +68,7 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
             .filter(|e| e.tick == tick_num)
             .cloned()
             .collect();
-        // Count only actual random events (not threshold events from phase_events)
-        let tick_random_events = events.iter()
-            .filter(|e| matches!(e.event_type, EventType::Threshold))
-            .filter(|e| {
-                // Random events have specific IDs, not patterns like "foreground_*" or "metrics_*"
-                !e.id.starts_with("foreground_")
-                    && !e.id.starts_with("metrics_")
-                    && !e.id.starts_with("rank_")
-                    && !e.id.starts_with("milestone_")
-                    && !e.id.starts_with("game_mode_")
-                    && !e.id.starts_with("relevance_")
-            })
-            .count();
-        eprintln!("tick {}: random_events={}", tick_num, tick_random_events);
-        stats.record(tick_num, &world, &events);
+        stats.record(tick_num, &world, &events, &scenario);
 
         // Progress indicator every 10 ticks
         if (tick_num + 1) % 10 == 0 {
@@ -82,7 +76,7 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
         }
     }
 
-    stats.print_report();
+    stats.print_report(&scenario);
 }
 
 fn run_batch(scenario_id: &str, ticks: u32) {
@@ -92,9 +86,19 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     let scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
 
+    // Scenario-specific batch stats
     let mut collapses: Vec<u32> = vec![];
     let mut victories: Vec<u32> = vec![];
     let mut events_per_run: Vec<u32> = vec![];
+    
+    // Rome-specific stats
+    let mut rome_military_final: Vec<f64> = vec![];
+    let mut rome_cohesion_final: Vec<f64> = vec![];
+    let mut rome_legitimacy_final: Vec<f64> = vec![];
+    let mut family_influence_final: Vec<f64> = vec![];
+    let mut generation_transitions_per_run: Vec<u32> = vec![];
+    let mut foreground_shifts_per_run: Vec<u32> = vec![];
+    let mut collapsed_actors_all: Vec<String> = vec![];
 
     for seed in 0..100u64 {
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -109,6 +113,11 @@ fn run_batch(scenario_id: &str, ticks: u32) {
         let mut stats = BatchStats::default();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        
+        let mut prev_foreground: HashSet<String> = world.actors.values()
+            .filter(|a| a.narrative_status == NarrativeStatus::Foreground)
+            .map(|a| a.id.clone())
+            .collect();
 
         for tick_num in 0..ticks {
             tick(&mut world, &scenario, &mut event_log, &mut rng);
@@ -117,6 +126,15 @@ fn run_batch(scenario_id: &str, ticks: u32) {
                 .cloned()
                 .collect();
             stats.record(tick_num, &world, &events);
+
+            // Count foreground shifts
+            let current_foreground: HashSet<String> = world.actors.values()
+                .filter(|a| a.narrative_status == NarrativeStatus::Foreground)
+                .map(|a| a.id.clone())
+                .collect();
+            let shifts: usize = current_foreground.symmetric_difference(&prev_foreground).count();
+            stats.foreground_shifts += shifts as u32;
+            prev_foreground = current_foreground;
 
             // Stop early if victory or collapse
             if world.victory_achieved || world.dead_actor_ids.iter().any(|id| id.contains("byzantium")) {
@@ -127,6 +145,24 @@ fn run_batch(scenario_id: &str, ticks: u32) {
         if let Some(t) = stats.collapse_tick { collapses.push(t); }
         if let Some(t) = stats.victory_tick { victories.push(t); }
         events_per_run.push(stats.random_events_fired);
+        
+        // Rome-specific stats
+        if scenario_id == "rome_375" {
+            if let Some(rome) = world.actors.get("rome") {
+                rome_military_final.push(rome.metrics.military_size);
+                rome_cohesion_final.push(rome.metrics.cohesion);
+                rome_legitimacy_final.push(rome.metrics.legitimacy);
+            }
+            if let Some(ref family) = world.family_state {
+                family_influence_final.push(*family.metrics.get("family_influence").unwrap_or(&0.0));
+            }
+            generation_transitions_per_run.push(stats.generation_transitions);
+            foreground_shifts_per_run.push(stats.foreground_shifts);
+            
+            for dead_actor in &world.dead_actors {
+                collapsed_actors_all.push(dead_actor.id.clone());
+            }
+        }
     }
 
     let collapse_pct = collapses.len() as f64 / 100.0 * 100.0;
@@ -140,21 +176,138 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     let median_victory = sorted_victories.get(sorted_victories.len() / 2).copied().unwrap_or(0);
     let avg_events = events_per_run.iter().sum::<u32>() as f64 / 100.0;
 
-    println!("=== BALANCE REPORT (100 runs, {} ticks each) ===", ticks);
-    println!("Byzantium collapse: {} runs ({:.0}%)", collapses.len(), collapse_pct);
-    println!("  median collapse tick: {}", median_collapse);
-    println!("  collapses before tick 10: {}", early_collapses);
-    println!("  collapses before tick 20: {}", mid_collapses);
-    println!("Victory achieved: {} runs ({:.0}%)", victories.len(), victory_pct);
-    println!("  median victory tick: {}", median_victory);
-    println!("Avg random events per run: {:.1}", avg_events);
+    println!("=== SIMULATION REPORT (100 runs, {} ticks each) ===", ticks);
+    println!("Ticks completed: {}", ticks);
+    println!("Random events fired (avg): {:.1}", avg_events);
+    
+    // Common collapse/victory stats
+    if !collapses.is_empty() {
+        println!("Collapses: {} runs ({:.0}%)", collapses.len(), collapse_pct);
+        println!("  median collapse tick: {}", median_collapse);
+        println!("  collapses before tick 10: {}", early_collapses);
+        println!("  collapses before tick 20: {}", mid_collapses);
+    }
+    if !victories.is_empty() {
+        println!("Victory achieved: {} runs ({:.0}%)", victories.len(), victory_pct);
+        println!("  median victory tick: {}", median_victory);
+    }
+
+    // Rome-specific summary
+    if scenario_id == "rome_375" {
+        println!();
+        println!("=== BALANCE REPORT: ROME 375 (100 runs, {} ticks each, no-player) ===", ticks);
+        println!("This report reflects autonomous world behavior without player actions.");
+        println!();
+        
+        let avg_rome_military = rome_military_final.iter().sum::<f64>() / rome_military_final.len() as f64;
+        let avg_rome_cohesion = rome_cohesion_final.iter().sum::<f64>() / rome_cohesion_final.len() as f64;
+        let avg_rome_legitimacy = rome_legitimacy_final.iter().sum::<f64>() / rome_legitimacy_final.len() as f64;
+        
+        println!("Rome core metrics (final avg):");
+        println!("  military_size:   {:.1}", avg_rome_military);
+        println!("  cohesion:        {:.1}", avg_rome_cohesion);
+        println!("  legitimacy:      {:.1}", avg_rome_legitimacy);
+        
+        if !family_influence_final.is_empty() {
+            let avg_family_influence = family_influence_final.iter().sum::<f64>() / family_influence_final.len() as f64;
+            println!();
+            println!("Family metrics (final avg):");
+            println!("  family_influence: {:.1}", avg_family_influence);
+        }
+        
+        let avg_gen_transitions = generation_transitions_per_run.iter().sum::<u32>() as f64 / 100.0;
+        let avg_foreground_shifts = foreground_shifts_per_run.iter().sum::<u32>() as f64 / 100.0;
+        
+        println!();
+        println!("Dynamics (avg per run):");
+        println!("  generation transitions: {:.1}", avg_gen_transitions);
+        println!("  foreground shifts:      {:.1}", avg_foreground_shifts);
+        
+        // Most common collapsed actors
+        if !collapsed_actors_all.is_empty() {
+            let mut actor_counts: HashMap<String, u32> = HashMap::new();
+            for actor_id in &collapsed_actors_all {
+                *actor_counts.entry(actor_id.clone()).or_insert(0) += 1;
+            }
+            let mut sorted_actors: Vec<_> = actor_counts.iter().collect();
+            sorted_actors.sort_by(|a, b| b.1.cmp(a.1));
+            
+            println!();
+            println!("Most common collapsed actors:");
+            for (actor_id, count) in sorted_actors.iter().take(5) {
+                println!("  - {}: {} runs", actor_id, count);
+            }
+        }
+    }
 }
 
-fn run_scripted(scenario_id: &str, ticks: u32) {
+/// Scripted strategy for Constantinople
+enum ScriptedStrategy {
+    Balanced,
+    Diplomacy,
+    Military,
+}
+
+impl ScriptedStrategy {
+    fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "diplomacy" | "diplomatic" => ScriptedStrategy::Diplomacy,
+            "military" | "military_heavy" => ScriptedStrategy::Military,
+            _ => ScriptedStrategy::Balanced,
+        }
+    }
+    
+    fn priority_actions(&self) -> Vec<&'static str> {
+        match self {
+            ScriptedStrategy::Balanced => vec![
+                "venice_diplomacy",
+                "genoa_financial_aid",
+                "milan_bankers",
+                "venice_naval_support",
+                "genoa_mercenaries",
+                "milan_condottieri",
+                "venice_trade_deal",
+                "genoa_galata_garrison",
+            ],
+            ScriptedStrategy::Diplomacy => vec![
+                "venice_diplomacy",
+                "genoa_financial_aid",
+                "milan_bankers",
+                "venice_trade_deal",
+                "genoa_galata_garrison",
+                "venice_naval_support",
+                "genoa_mercenaries",
+                "milan_condottieri",
+            ],
+            ScriptedStrategy::Military => vec![
+                "venice_naval_support",
+                "genoa_mercenaries",
+                "milan_condottieri",
+                "genoa_galata_garrison",
+                "venice_diplomacy",
+                "genoa_financial_aid",
+                "milan_bankers",
+                "venice_trade_deal",
+            ],
+        }
+    }
+    
+    fn name(&self) -> &'static str {
+        match self {
+            ScriptedStrategy::Balanced => "balanced",
+            ScriptedStrategy::Diplomacy => "diplomacy",
+            ScriptedStrategy::Military => "military",
+        }
+    }
+}
+
+fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
     use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
-    println!("Running scripted mode with priority actions");
+    let strategy = ScriptedStrategy::from_str(strategy_str);
+    
+    println!("Running scripted mode with {} strategy", strategy.name());
     println!();
 
     let scenario = registry::load_by_id(scenario_id)
@@ -181,20 +334,11 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
     let mut total_actions_applied = 0u32;
     let mut total_actions_rejected = 0u32;
     let mut max_federation = 0.0;
+    let mut actions_by_type: HashMap<&str, u32> = HashMap::new();
 
-    // Priority action list for Constantinople
-    let priority_actions = vec![
-        "venice_diplomacy",
-        "genoa_financial_aid",
-        "milan_bankers",
-        "venice_naval_support",
-        "genoa_mercenaries",
-        "milan_condottieri",
-        "venice_trade_deal",
-        "genoa_galata_garrison",
-    ];
+    let priority_actions = strategy.priority_actions();
 
-    println!("=== SCRIPTED SIMULATION ===");
+    println!("=== SCRIPTED SIMULATION: {} ===", strategy.name().to_uppercase());
 
     for tick_num in 0..ticks {
         // Capture before values
@@ -226,6 +370,7 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
                 Ok(_) => {
                     applied_this_tick += 1;
                     actions_applied.push(*action_id);
+                    *actions_by_type.entry(*action_id).or_insert(0) += 1;
                 }
                 Err(_) => {
                     rejected_this_tick += 1;
@@ -280,14 +425,21 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
     let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
 
     println!();
-    println!("=== SCRIPTED SIM FINAL SUMMARY ===");
-    println!("Federation progress:    {:5.1} -> {:5.1}  (max: {:5.1})", 0.0, fed_final, max_federation);
-    println!("Byzantium pressure:    {:5.1} -> {:5.1}", 0.0, byz_final);
+    println!("=== SCRIPTED STRATEGY: {} ===", strategy.name().to_uppercase());
     println!("Victory achieved:      {}", if world.victory_achieved { "yes" } else { "no" });
-    println!("Victory sustained ticks: {}", world.victory_sustained_ticks);
+    println!("Victory tick:          {}", if world.victory_achieved { format!("{}", world.tick) } else { "not achieved".to_string() });
+    println!("Federation progress:   {:5.1} -> {:5.1}  (max: {:5.1})", 0.0, fed_final, max_federation);
+    println!("Byzantium pressure:    {:5.1} -> {:5.1}", 0.0, byz_final);
     println!("Byzantium collapsed:   {}", if byz_dead { "yes" } else { "no" });
     println!("Total actions applied: {}", total_actions_applied);
     println!("Total actions rejected: {}", total_actions_rejected);
+    println!();
+    println!("Actions applied by type:");
+    let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
+    sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
+    for (action_id, count) in sorted_actions {
+        println!("  - {}: {}", action_id, count);
+    }
 }
 
 #[derive(Default)]
@@ -298,10 +450,22 @@ struct SimStats {
     pub random_events_fired: u32,
     pub military_conflicts: u32,
     pub collapses: Vec<String>,
+    
+    // Rome-specific stats
+    pub rome_military_timeline: Vec<f64>,
+    pub rome_cohesion_timeline: Vec<f64>,
+    pub rome_legitimacy_timeline: Vec<f64>,
+    pub family_influence_timeline: Vec<f64>,
+    pub family_knowledge_timeline: Vec<f64>,
+    pub family_wealth_timeline: Vec<f64>,
+    pub family_connections_timeline: Vec<f64>,
+    pub generation_transitions: u32,
+    pub foreground_shifts: u32,
+    pub prev_foreground: HashSet<String>,
 }
 
 impl SimStats {
-    fn record(&mut self, _tick: u32, world: &WorldState, events: &[Event]) {
+    fn record(&mut self, _tick: u32, world: &WorldState, events: &[Event], scenario: &engine13::core::Scenario) {
         // Track federation progress
         self.federation_progress.push(
             world.global_metrics.get("federation_progress").copied().unwrap_or(0.0)
@@ -312,6 +476,31 @@ impl SimStats {
             self.byzantium_pressure.push(byz.metrics.external_pressure);
             self.byzantium_alive.push(!world.dead_actor_ids.contains("byzantium"));
         }
+        
+        // Rome-specific tracking
+        if scenario.id == "rome_375" {
+            if let Some(rome) = world.actors.get("rome") {
+                self.rome_military_timeline.push(rome.metrics.military_size);
+                self.rome_cohesion_timeline.push(rome.metrics.cohesion);
+                self.rome_legitimacy_timeline.push(rome.metrics.legitimacy);
+            }
+            
+            if let Some(ref family) = world.family_state {
+                self.family_influence_timeline.push(*family.metrics.get("family_influence").unwrap_or(&0.0));
+                self.family_knowledge_timeline.push(*family.metrics.get("family_knowledge").unwrap_or(&0.0));
+                self.family_wealth_timeline.push(*family.metrics.get("family_wealth").unwrap_or(&0.0));
+                self.family_connections_timeline.push(*family.metrics.get("family_connections").unwrap_or(&0.0));
+            }
+            
+            // Count foreground shifts
+            let current_foreground: HashSet<String> = world.actors.values()
+                .filter(|a| a.narrative_status == NarrativeStatus::Foreground)
+                .map(|a| a.id.clone())
+                .collect();
+            let shifts: usize = current_foreground.symmetric_difference(&self.prev_foreground).count();
+            self.foreground_shifts += shifts as u32;
+            self.prev_foreground = current_foreground;
+        }
 
         // Count events by type
         for event in events {
@@ -321,46 +510,78 @@ impl SimStats {
                 EventType::Collapse => self.collapses.push(event.actor_id.clone()),
                 _ => {}
             }
+            
+            // Count generation transitions
+            if event.id.contains("generation") && event.event_type == EventType::Threshold {
+                self.generation_transitions += 1;
+            }
         }
     }
 
-    fn print_report(&self) {
+    fn print_report(&self, scenario: &engine13::core::Scenario) {
         println!();
         println!("=== SIMULATION REPORT ===");
         println!("Ticks completed: {}", self.federation_progress.len());
-
-        if let Some(final_fed) = self.federation_progress.last() {
-            println!("Federation final: {:.1}", final_fed);
-        }
-        let max_fed = self.federation_progress.iter().cloned().fold(0.0_f64, f64::max);
-        println!("Federation max: {:.1}", max_fed);
-
-        if let Some(&survived) = self.byzantium_alive.last() {
-            println!("Byzantium survived: {}", survived);
-        }
-        let max_pressure = self.byzantium_pressure.iter().cloned().fold(0.0_f64, f64::max);
-        println!("Byzantium max pressure: {:.1}", max_pressure);
-
         println!("Random events fired: {}", self.random_events_fired);
         println!("Military conflicts: {}", self.military_conflicts);
+        println!("Foreground shifts: {}", self.foreground_shifts);
+        println!("Generation transitions: {}", self.generation_transitions);
 
         if !self.collapses.is_empty() {
-            println!("Collapses: {}", self.collapses.join(", "));
+            println!("Collapsed actors: {}", self.collapses.join(", "));
         }
-
-        println!();
-        println!("=== PRESSURE TIMELINE (every 5 ticks) ===");
-        for (i, p) in self.byzantium_pressure.iter().enumerate() {
-            if i % 5 == 0 {
-                let bar = "█".repeat((*p as usize) / 5);
-                println!("tick {:3}: {} {:.1}", i, bar, p);
+        
+        // Scenario-specific summary
+        if scenario.id == "rome_375" {
+            println!();
+            println!("=== ROME 375 METRICS ===");
+            
+            // Rome core metrics timeline (every 5 ticks)
+            if !self.rome_military_timeline.is_empty() {
+                println!();
+                println!("Rome core metrics timeline:");
+                for i in (0..self.rome_military_timeline.len()).step_by(5) {
+                    let mil = self.rome_military_timeline.get(i).copied().unwrap_or(0.0);
+                    let coh = self.rome_cohesion_timeline.get(i).copied().unwrap_or(0.0);
+                    let leg = self.rome_legitimacy_timeline.get(i).copied().unwrap_or(0.0);
+                    println!("tick {:3}: military={:6.1}  cohesion={:5.1}  legitimacy={:5.1}", i, mil, coh, leg);
+                }
+                
+                // Final values
+                if let Some(&last) = self.rome_military_timeline.last() {
+                    let coh = self.rome_cohesion_timeline.last().copied().unwrap_or(0.0);
+                    let leg = self.rome_legitimacy_timeline.last().copied().unwrap_or(0.0);
+                    println!("tick {:3}: military={:6.1}  cohesion={:5.1}  legitimacy={:5.1} [FINAL]", 
+                        self.rome_military_timeline.len() - 1, last, coh, leg);
+                }
             }
-        }
+            
+            // Family metrics final
+            if !self.family_influence_timeline.is_empty() {
+                println!();
+                println!("Family metrics (final):");
+                let inf = self.family_influence_timeline.last().copied().unwrap_or(0.0);
+                let kno = self.family_knowledge_timeline.last().copied().unwrap_or(0.0);
+                let wea = self.family_wealth_timeline.last().copied().unwrap_or(0.0);
+                let con = self.family_connections_timeline.last().copied().unwrap_or(0.0);
+                println!("  influence:   {:5.1}", inf);
+                println!("  knowledge:   {:5.1}", kno);
+                println!("  wealth:      {:5.1}", wea);
+                println!("  connections: {:5.1}", con);
+            }
+        } else {
+            // Constantinople / other scenarios
+            if let Some(final_fed) = self.federation_progress.last() {
+                println!("Federation final: {:.1}", final_fed);
+            }
+            let max_fed = self.federation_progress.iter().cloned().fold(0.0_f64, f64::max);
+            println!("Federation max: {:.1}", max_fed);
 
-        // Final pressure
-        if let Some(&last) = self.byzantium_pressure.last() {
-            let bar = "█".repeat((last as usize) / 5);
-            println!("tick {:3}: {} {:.1} [FINAL]", self.byzantium_pressure.len() - 1, bar, last);
+            if let Some(&survived) = self.byzantium_alive.last() {
+                println!("Byzantium survived: {}", survived);
+            }
+            let max_pressure = self.byzantium_pressure.iter().cloned().fold(0.0_f64, f64::max);
+            println!("Byzantium max pressure: {:.1}", max_pressure);
         }
     }
 }
@@ -370,6 +591,8 @@ struct BatchStats {
     pub collapse_tick: Option<u32>,
     pub victory_tick: Option<u32>,
     pub random_events_fired: u32,
+    pub generation_transitions: u32,
+    pub foreground_shifts: u32,
 }
 
 impl BatchStats {
@@ -395,5 +618,12 @@ impl BatchStats {
                     && !e.id.starts_with("relevance_")
             })
             .count() as u32;
+        
+        // Count generation transitions
+        for event in events {
+            if event.id.contains("generation") && event.event_type == EventType::Threshold {
+                self.generation_transitions += 1;
+            }
+        }
     }
 }
