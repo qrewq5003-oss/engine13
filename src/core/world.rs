@@ -71,7 +71,7 @@ pub struct WorldState {
     pub alliances: Vec<Alliance>,
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
-    /// Global scenario metrics (includes family_*, federation_progress, etc.) - key: metric_name, value: current value
+    /// Global scenario metrics (e.g. federation_progress). Family metrics live in family_state.
     pub global_metrics: HashMap<String, f64>,
     /// Metric history for relevance threshold tracking - key: "actor_id:metric_name", value: last 5 ticks
     pub metric_history: HashMap<String, VecDeque<f64>>,

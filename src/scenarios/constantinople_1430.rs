@@ -29,7 +29,7 @@ pub fn load_constantinople_1430() -> Scenario {
         player_actor_id: None,
         status_indicators: create_status_indicators(),
         global_metric_weights: HashMap::from([
-            ("federation_progress".to_string(), HashMap::from([
+            ("global:federation_progress".to_string(), HashMap::from([
                 ("venice".to_string(), 2.0),
                 ("genoa".to_string(), 1.5),
                 ("milan".to_string(), 1.0),
@@ -75,6 +75,7 @@ pub fn load_constantinople_1430() -> Scenario {
                 ],
             },
         ],
+        initial_family_metrics: None,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -548,7 +549,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Ottoman military growth (natural pressure)
         AutoDelta {
-            metric: "ottomans.military_size".to_string(),
+            metric: "actor:ottomans.military_size".to_string(),
             base: 0.5,
             conditions: vec![],
             ratio_conditions: vec![],
@@ -558,23 +559,23 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         // Byzantium external pressure growth (ottoman siege pressure)
         // Pressure grows slower if Byzantium has strong military relative to Ottomans
         AutoDelta {
-            metric: "byzantium.external_pressure".to_string(),
+            metric: "actor:byzantium.external_pressure".to_string(),
             base: 2.5,
             conditions: vec![
                 // Acceleration if Ottomans are strong
-                DeltaCondition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
+                DeltaCondition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
             ],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "byzantium.military_size".to_string(),
-                    metric_b: "ottomans.military_size".to_string(),
+                    metric_a: "actor:byzantium.military_size".to_string(),
+                    metric_b: "actor:ottomans.military_size".to_string(),
                     ratio: 0.167, // byzantium > 1/6 of ottoman army
                     operator: ComparisonOperator::Greater,
                     delta: -2.0, // compensates pressure growth
                 },
                 DeltaConditionRatio {
-                    metric_a: "byzantium.military_size".to_string(),
-                    metric_b: "ottomans.military_size".to_string(),
+                    metric_a: "actor:byzantium.military_size".to_string(),
+                    metric_b: "actor:ottomans.military_size".to_string(),
                     ratio: 0.25, // byzantium > 1/4 — actively resisting
                     operator: ComparisonOperator::Greater,
                     delta: -1.5, // additional compensation
@@ -585,13 +586,13 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Serbia external pressure from Ottomans
         AutoDelta {
-            metric: "serbia.external_pressure".to_string(),
+            metric: "actor:serbia.external_pressure".to_string(),
             base: 1.5,
             conditions: vec![],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "serbia.military_size".to_string(),
-                    metric_b: "ottomans.military_size".to_string(),
+                    metric_a: "actor:serbia.military_size".to_string(),
+                    metric_b: "actor:ottomans.military_size".to_string(),
                     ratio: 0.2,
                     operator: ComparisonOperator::Greater,
                     delta: -1.5,
@@ -602,13 +603,13 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Trebizond external pressure from Ottomans
         AutoDelta {
-            metric: "trebizond.external_pressure".to_string(),
+            metric: "actor:trebizond.external_pressure".to_string(),
             base: 1.8,
             conditions: vec![],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "trebizond.military_size".to_string(),
-                    metric_b: "ottomans.military_size".to_string(),
+                    metric_a: "actor:trebizond.military_size".to_string(),
+                    metric_b: "actor:ottomans.military_size".to_string(),
                     ratio: 0.1,
                     operator: ComparisonOperator::Greater,
                     delta: -1.5,
@@ -619,13 +620,13 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Hungary external pressure
         AutoDelta {
-            metric: "hungary.external_pressure".to_string(),
+            metric: "actor:hungary.external_pressure".to_string(),
             base: 0.8,
             conditions: vec![],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "hungary.military_size".to_string(),
-                    metric_b: "ottomans.military_size".to_string(),
+                    metric_a: "actor:hungary.military_size".to_string(),
+                    metric_b: "actor:ottomans.military_size".to_string(),
                     ratio: 0.3,
                     operator: ComparisonOperator::Greater,
                     delta: -1.0,
@@ -636,16 +637,16 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Federation progress auto-deltas
         AutoDelta {
-            metric: "federation_progress".to_string(),
+            metric: "global:federation_progress".to_string(),
             base: 0.0,
             conditions: vec![
                 // Venice + Genoa + Milan cooperation bonus
-                DeltaCondition { metric: "venice.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 65.0, delta: 0.5 },
-                DeltaCondition { metric: "genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 55.0, delta: 0.3 },
-                DeltaCondition { metric: "milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 58.0, delta: 0.2 },
+                DeltaCondition { metric: "actor:venice.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 65.0, delta: 0.5 },
+                DeltaCondition { metric: "actor:genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 55.0, delta: 0.3 },
+                DeltaCondition { metric: "actor:milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 58.0, delta: 0.2 },
                 // Ottoman pressure penalty
-                DeltaCondition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -2.0 },
-                DeltaCondition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 220.0, delta: -3.0 },
+                DeltaCondition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -2.0 },
+                DeltaCondition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 220.0, delta: -3.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.2,
@@ -665,11 +666,11 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "venice_naval_support".to_string(),
             name: "Венецианский флот".to_string(),
             source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "venice.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
             effects: HashMap::from([
-                ("byzantium.military_size".to_string(), 5.0),
-                ("byzantium.cohesion".to_string(), 3.0),
-                ("venice.treasury".to_string(), -50.0),
+                ("actor:byzantium.military_size".to_string(), 5.0),
+                ("actor:byzantium.cohesion".to_string(), 3.0),
+                ("actor:venice.treasury".to_string(), -50.0),
             ]),
             cost: HashMap::new(),
         },
@@ -677,47 +678,47 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "venice_trade_deal".to_string(),
             name: "Торговая сделка".to_string(),
             source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "venice.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
-                ("byzantium.economic_output".to_string(), 8.0),
-                ("federation_progress".to_string(), 3.0),
-                ("venice.economic_output".to_string(), -3.0),
+                ("actor:byzantium.economic_output".to_string(), 8.0),
+                ("global:federation_progress".to_string(), 3.0),
+                ("actor:venice.economic_output".to_string(), -3.0),
             ]),
-            cost: HashMap::from([("venice.treasury".to_string(), -20.0)]),
+            cost: HashMap::from([("actor:venice.treasury".to_string(), -20.0)]),
         },
         PatronAction {
             id: "venice_diplomacy".to_string(),
             name: "Венецианская дипломатия".to_string(),
             source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "venice.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
-                ("federation_progress".to_string(), 5.0),
-                ("genoa.cohesion".to_string(), 2.0),
+                ("global:federation_progress".to_string(), 5.0),
+                ("actor:genoa.cohesion".to_string(), 2.0),
             ]),
-            cost: HashMap::from([("venice.treasury".to_string(), -30.0)]),
+            cost: HashMap::from([("actor:venice.treasury".to_string(), -30.0)]),
         },
         // Genoa actions (3)
         PatronAction {
             id: "genoa_galata_garrison".to_string(),
             name: "Гарнизон Галаты".to_string(),
             source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "genoa.military_size".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.military_size".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
             effects: HashMap::from([
-                ("byzantium.military_size".to_string(), 4.0),
-                ("byzantium.military_quality".to_string(), 5.0),
-                ("genoa.military_size".to_string(), -3.0),
+                ("actor:byzantium.military_size".to_string(), 4.0),
+                ("actor:byzantium.military_quality".to_string(), 5.0),
+                ("actor:genoa.military_size".to_string(), -3.0),
             ]),
-            cost: HashMap::from([("genoa.treasury".to_string(), -30.0)]),
+            cost: HashMap::from([("actor:genoa.treasury".to_string(), -30.0)]),
         },
         PatronAction {
             id: "genoa_financial_aid".to_string(),
             name: "Финансовая помощь".to_string(),
             source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "genoa.treasury".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.treasury".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
             effects: HashMap::from([
-                ("byzantium.treasury".to_string(), 60.0),
-                ("federation_progress".to_string(), 4.0),
-                ("genoa.treasury".to_string(), -70.0),
+                ("actor:byzantium.treasury".to_string(), 60.0),
+                ("global:federation_progress".to_string(), 4.0),
+                ("actor:genoa.treasury".to_string(), -70.0),
             ]),
             cost: HashMap::new(),
         },
@@ -725,22 +726,22 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "genoa_mercenaries".to_string(),
             name: "Генуэзские наёмники".to_string(),
             source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
             effects: HashMap::from([
-                ("byzantium.military_size".to_string(), 6.0),
-                ("federation_progress".to_string(), 2.0),
+                ("actor:byzantium.military_size".to_string(), 6.0),
+                ("global:federation_progress".to_string(), 2.0),
             ]),
-            cost: HashMap::from([("genoa.treasury".to_string(), -40.0)]),
+            cost: HashMap::from([("actor:genoa.treasury".to_string(), -40.0)]),
         },
         // Milan actions (3)
         PatronAction {
             id: "milan_condottieri".to_string(),
             name: "Кондотьеры Милана".to_string(),
             source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "milan.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
             effects: HashMap::from([
-                ("byzantium.military_quality".to_string(), 10.0),
-                ("milan.treasury".to_string(), -80.0),
+                ("actor:byzantium.military_quality".to_string(), 10.0),
+                ("actor:milan.treasury".to_string(), -80.0),
             ]),
             cost: HashMap::new(),
         },
@@ -748,24 +749,24 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "milan_bankers".to_string(),
             name: "Миланские банкиры".to_string(),
             source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "milan.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
-                ("byzantium.treasury".to_string(), 80.0),
-                ("federation_progress".to_string(), 3.0),
-                ("milan.economic_output".to_string(), -5.0),
+                ("actor:byzantium.treasury".to_string(), 80.0),
+                ("global:federation_progress".to_string(), 3.0),
+                ("actor:milan.economic_output".to_string(), -5.0),
             ]),
-            cost: HashMap::from([("milan.treasury".to_string(), -40.0)]),
+            cost: HashMap::from([("actor:milan.treasury".to_string(), -40.0)]),
         },
         PatronAction {
             id: "milan_legitimacy".to_string(),
             name: "Миланский престиж".to_string(),
             source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             effects: HashMap::from([
-                ("byzantium.legitimacy".to_string(), 8.0),
-                ("federation_progress".to_string(), 4.0),
+                ("actor:byzantium.legitimacy".to_string(), 8.0),
+                ("global:federation_progress".to_string(), 4.0),
             ]),
-            cost: HashMap::from([("milan.treasury".to_string(), -25.0), ("milan.legitimacy".to_string(), -5.0)]),
+            cost: HashMap::from([("actor:milan.treasury".to_string(), -25.0), ("actor:milan.legitimacy".to_string(), -5.0)]),
         },
         // Destructive actions (2)
         PatronAction {
@@ -774,23 +775,23 @@ fn create_patron_actions() -> Vec<PatronAction> {
             source_actor_id: None,
             available_if: crate::core::ActionCondition::Always,
             effects: HashMap::from([
-                ("federation_progress".to_string(), -15.0),
-                ("venice.cohesion".to_string(), -5.0),
-                ("genoa.cohesion".to_string(), -5.0),
+                ("global:federation_progress".to_string(), -15.0),
+                ("actor:venice.cohesion".to_string(), -5.0),
+                ("actor:genoa.cohesion".to_string(), -5.0),
             ]),
-            cost: HashMap::from([("byzantium.legitimacy".to_string(), -10.0)]),
+            cost: HashMap::from([("actor:byzantium.legitimacy".to_string(), -10.0)]),
         },
         PatronAction {
             id: "ottoman_bribe".to_string(),
             name: "Османский подкуп".to_string(),
             source_actor_id: None,
-            available_if: crate::core::ActionCondition::Metric { metric: "byzantium.treasury".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "actor:byzantium.treasury".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
             effects: HashMap::from([
-                ("ottomans.external_pressure".to_string(), -10.0),
-                ("byzantium.external_pressure".to_string(), -5.0),
-                ("federation_progress".to_string(), -10.0),
+                ("actor:ottomans.external_pressure".to_string(), -10.0),
+                ("actor:byzantium.external_pressure".to_string(), -5.0),
+                ("global:federation_progress".to_string(), -10.0),
             ]),
-            cost: HashMap::from([("byzantium.treasury".to_string(), -50.0)]),
+            cost: HashMap::from([("actor:byzantium.treasury".to_string(), -50.0)]),
         },
     ]
 }
@@ -806,7 +807,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "church_union".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "byzantium.legitimacy".to_string(),
+                    metric: "actor:byzantium.legitimacy".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 65.0,
@@ -823,7 +824,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "varna_crusade".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "hungary.military_size".to_string(),
+                    metric: "actor:hungary.military_size".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 60.0,
@@ -840,7 +841,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "mehmed_accelerates".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "federation_progress".to_string(),
+                    metric: "global:federation_progress".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 60.0,
@@ -857,7 +858,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "mehmed_rises".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "ottomans.military_size".to_string(),
+                    metric: "actor:ottomans.military_size".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 250.0,
@@ -874,7 +875,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "final_assault".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "ottomans.military_size".to_string(),
+                    metric: "actor:ottomans.military_size".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 280.0,
@@ -891,7 +892,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "constantinople_holds".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "byzantium.cohesion".to_string(),
+                    metric: "actor:byzantium.cohesion".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 70.0,
@@ -908,7 +909,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "outcome_best".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "federation_progress".to_string(),
+                    metric: "global:federation_progress".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::GreaterOrEqual,
                     value: 100.0,
@@ -941,7 +942,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "outcome_fell_federation".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "federation_progress".to_string(),
+                    metric: "global:federation_progress".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::GreaterOrEqual,
                     value: 80.0,
@@ -982,7 +983,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "anatolia".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "ottomans.military_size".to_string(),
+                    metric: "actor:ottomans.military_size".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 250.0,
@@ -997,7 +998,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "veneto".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "venice.economic_output".to_string(),
+                    metric: "actor:venice.economic_output".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 85.0,
@@ -1077,7 +1078,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
     vec![
         StatusIndicator {
             label: "Константинополь".to_string(),
-            metric: "byzantium.external_pressure".to_string(),
+            metric: "actor:byzantium.external_pressure".to_string(),
             invert: true,
             thresholds: vec![
                 (0.0, "держится".to_string()),
@@ -1087,7 +1088,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Федерация".to_string(),
-            metric: "federation_progress".to_string(),
+            metric: "global:federation_progress".to_string(),
             invert: false,
             thresholds: vec![
                 (0.0, "не сформирована".to_string()),
@@ -1098,7 +1099,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Османская угроза".to_string(),
-            metric: "ottomans.military_size".to_string(),
+            metric: "actor:ottomans.military_size".to_string(),
             invert: true,
             thresholds: vec![
                 (0.0, "сдержана".to_string()),
@@ -1121,7 +1122,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             conditions: vec![],
             effects: HashMap::from([
                 ("global:federation_progress".to_string(), -8.0),
-                ("papacy.legitimacy".to_string(), -5.0),
+                ("actor:papacy.legitimacy".to_string(), -5.0),
             ]),
             llm_context: "Смерть кардинала сорвала переговоры о федерации".to_string(),
             one_time: false,
@@ -1131,11 +1132,11 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.08,
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![
-                Condition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+                Condition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             ],
             effects: HashMap::from([
-                ("byzantium.legitimacy".to_string(), -8.0),
-                ("byzantium.treasury".to_string(), -150.0),
+                ("actor:byzantium.legitimacy".to_string(), -8.0),
+                ("actor:byzantium.treasury".to_string(), -150.0),
             ]),
             llm_context: "Османское посольство потребовало унизительной дани".to_string(),
             one_time: false,
@@ -1146,7 +1147,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("genoa".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("genoa.treasury".to_string(), 200.0),
+                ("actor:genoa.treasury".to_string(), 200.0),
                 ("global:federation_progress".to_string(), 3.0),
             ]),
             llm_context: "Генуэзские банкиры выделили займ на укрепление союза".to_string(),
@@ -1157,11 +1158,11 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![
-                Condition { metric: "byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0 },
+                Condition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0 },
             ],
             effects: HashMap::from([
-                ("byzantium.cohesion".to_string(), -8.0),
-                ("byzantium.legitimacy".to_string(), -5.0),
+                ("actor:byzantium.cohesion".to_string(), -8.0),
+                ("actor:byzantium.legitimacy".to_string(), -5.0),
                 ("global:federation_progress".to_string(), 2.0),
             ]),
             llm_context: "Греческие учёные и философы бегут на Запад, унося с собой знания".to_string(),
@@ -1173,8 +1174,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("byzantium.legitimacy".to_string(), 5.0),
-                ("ottomans.external_pressure".to_string(), -3.0),
+                ("actor:byzantium.legitimacy".to_string(), 5.0),
+                ("actor:ottomans.external_pressure".to_string(), -3.0),
                 ("global:federation_progress".to_string(), 4.0),
             ]),
             llm_context: "Пойманный османский шпион доказал угрозу — союзники насторожились".to_string(),
@@ -1185,12 +1186,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.05,
             target: EventTarget::Actor("papacy".to_string()),
             conditions: vec![
-                Condition { metric: "papacy.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+                Condition { metric: "actor:papacy.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
             ],
             effects: HashMap::from([
                 ("global:federation_progress".to_string(), 10.0),
-                ("papacy.treasury".to_string(), -200.0),
-                ("hungary.military_size".to_string(), 20.0),
+                ("actor:papacy.treasury".to_string(), -200.0),
+                ("actor:hungary.military_size".to_string(), 20.0),
             ]),
             llm_context: "Папа призвал к новому крестовому походу против турок".to_string(),
             one_time: true,
@@ -1201,8 +1202,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("venice".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("venice.military_size".to_string(), -25.0),
-                ("venice.treasury".to_string(), -100.0),
+                ("actor:venice.military_size".to_string(), -25.0),
+                ("actor:venice.treasury".to_string(), -100.0),
                 ("global:federation_progress".to_string(), -5.0),
             ]),
             llm_context: "Буря разметала венецианский флот в Эгейском море".to_string(),
@@ -1213,11 +1214,11 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.08,
             target: EventTarget::Actor("ottomans".to_string()),
             conditions: vec![
-                Condition { metric: "ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0 },
+                Condition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0 },
             ],
             effects: HashMap::from([
-                ("byzantium.external_pressure".to_string(), 10.0),
-                ("byzantium.cohesion".to_string(), -8.0),
+                ("actor:byzantium.external_pressure".to_string(), 10.0),
+                ("actor:byzantium.cohesion".to_string(), -8.0),
                 ("global:federation_progress".to_string(), 5.0),
             ]),
             llm_context: "Открытые угрозы Мехмеда в адрес Константинополя встревожили Европу".to_string(),

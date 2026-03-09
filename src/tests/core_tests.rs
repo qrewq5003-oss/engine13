@@ -3,7 +3,7 @@ use crate::scenarios::registry;
 
 #[test]
 fn test_metric_ref_parse_actor() {
-    let mr = MetricRef::parse("venice.treasury");
+    let mr = MetricRef::parse("actor:venice.treasury");
     match mr {
         MetricRef::Actor { actor_id, metric } => {
             assert_eq!(actor_id, "venice");
@@ -15,7 +15,7 @@ fn test_metric_ref_parse_actor() {
 
 #[test]
 fn test_metric_ref_parse_family() {
-    let mr = MetricRef::parse("family_influence");
+    let mr = MetricRef::parse("family:family_influence");
     match mr {
         MetricRef::Family { key } => {
             assert_eq!(key, "family_influence");
@@ -26,7 +26,7 @@ fn test_metric_ref_parse_family() {
 
 #[test]
 fn test_metric_ref_parse_global() {
-    let mr = MetricRef::parse("federation_progress");
+    let mr = MetricRef::parse("global:federation_progress");
     match mr {
         MetricRef::Global { key } => {
             assert_eq!(key, "federation_progress");
@@ -39,7 +39,7 @@ fn test_metric_ref_parse_global() {
 fn test_metric_ref_apply_actor_treasury() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
-    
+
     // Add venice actor
     for actor in &scenario.actors {
         if actor.id == "venice" {
@@ -47,11 +47,11 @@ fn test_metric_ref_apply_actor_treasury() {
             break;
         }
     }
-    
-    let before = MetricRef::parse("venice.treasury").get(&world);
-    MetricRef::parse("venice.treasury").apply(&mut world, -100.0);
-    let after = MetricRef::parse("venice.treasury").get(&world);
-    
+
+    let before = MetricRef::parse("actor:venice.treasury").get(&world);
+    MetricRef::parse("actor:venice.treasury").apply(&mut world, -100.0);
+    let after = MetricRef::parse("actor:venice.treasury").get(&world);
+
     // Treasury can go negative
     assert_eq!(after, before - 100.0);
 }
@@ -60,7 +60,7 @@ fn test_metric_ref_apply_actor_treasury() {
 fn test_metric_ref_apply_actor_treasury_negative() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
-    
+
     // Add venice actor with low treasury
     for actor in &scenario.actors {
         if actor.id == "venice" {
@@ -70,10 +70,10 @@ fn test_metric_ref_apply_actor_treasury_negative() {
             break;
         }
     }
-    
-    MetricRef::parse("venice.treasury").apply(&mut world, -100.0);
-    let after = MetricRef::parse("venice.treasury").get(&world);
-    
+
+    MetricRef::parse("actor:venice.treasury").apply(&mut world, -100.0);
+    let after = MetricRef::parse("actor:venice.treasury").get(&world);
+
     // Treasury can go negative (debts)
     assert_eq!(after, -50.0);
 }

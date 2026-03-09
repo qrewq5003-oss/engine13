@@ -33,7 +33,7 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
   // Calculate generation info - use scenario start year from worldState
   const startYear = worldState.scenario_start_year ?? currentYear;
-  const genLength = genMechanics.tick_span;
+  const genLength = genMechanics.generation_length;
   const yearsSinceStart = currentYear - startYear;
   const generationNumber = Math.floor(yearsSinceStart / genLength) + 1;
   const generationStartYear = startYear + (generationNumber - 1) * genLength;

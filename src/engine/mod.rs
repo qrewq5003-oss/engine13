@@ -1602,6 +1602,7 @@ mod tests {
             victory_condition: None,
             universal_actions: vec![],
             global_metrics_display: vec![],
+            initial_family_metrics: None,
         };
         let mut event_log = EventLog::new();
 

@@ -4,26 +4,22 @@ use crate::core::WorldState;
 /// Reference to a metric in the world state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MetricRef {
-    /// Actor-specific metric: "actor:id.metric" or backward compat "id.metric"
+    /// Actor-specific metric: "actor:id.metric"
     Actor { actor_id: String, metric: String },
-    /// Family metric: "family:key" or backward compat "family_*"
+    /// Family metric: "family:key"
     Family { key: String },
-    /// Global metric: "global:key" or backward compat plain string
+    /// Global metric: "global:key" or plain key
     Global { key: String },
 }
 
 impl MetricRef {
     /// Parse a string into a MetricRef
     ///
-    /// Explicit prefixes (new format):
+    /// Explicit prefixes only:
     /// - "family:key" → MetricRef::Family
     /// - "global:key" → MetricRef::Global
     /// - "actor:id.metric" → MetricRef::Actor
-    ///
-    /// Backward compatibility (old format):
-    /// - "family_*" → MetricRef::Family (for migration)
-    /// - "id.metric" → MetricRef::Actor
-    /// - other → MetricRef::Global
+    /// - other → MetricRef::Global (plain key)
     pub fn parse(s: &str) -> Self {
         // Check explicit prefixes first
         if let Some(key) = s.strip_prefix("family:") {
@@ -38,14 +34,6 @@ impl MetricRef {
                 // Invalid format, treat as global
                 MetricRef::Global { key: s.to_string() }
             }
-        }
-        // Backward compatibility for family_* (migration path)
-        else if s.starts_with("family_") {
-            MetricRef::Family { key: s.to_string() }
-        } else if s.contains('.') {
-            // "id.metric" format
-            let (actor_id, metric) = s.split_once('.').unwrap();
-            MetricRef::Actor { actor_id: actor_id.to_string(), metric: metric.to_string() }
         } else {
             // Plain string → Global
             MetricRef::Global { key: s.to_string() }

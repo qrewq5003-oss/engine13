@@ -92,7 +92,7 @@ export interface WorldState {
   dead_actors: DeadActor[];
   alliances: Alliance[];
   milestone_events_fired: string[];
-  /// Global scenario metrics (includes family_*, federation_progress, etc.)
+  /// Global scenario metrics (e.g. federation_progress). Family metrics are in family_state.
   global_metrics: Record<string, number>;
   /// Feature flags for UI
   features?: ScenarioFeatures;
@@ -273,6 +273,7 @@ export interface GenerationMechanics {
   tick_span: number;
   patriarch_start_age: number;
   patriarch_end_age: number;
+  generation_length: number;
   panel_label: string;
   era_texts: EraText[];
 }

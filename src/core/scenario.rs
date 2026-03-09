@@ -45,6 +45,8 @@ pub struct Scenario {
     pub universal_actions: Vec<PatronAction>,
     /// Global metrics to display in UI (for scenarios with global_metrics_panel)
     pub global_metrics_display: Vec<MetricDisplay>,
+    /// Initial family metrics for family-based scenarios (None = not a family scenario)
+    pub initial_family_metrics: Option<HashMap<String, f64>>,
 }
 
 /// Metric display configuration for UI
@@ -280,6 +282,8 @@ pub struct GenerationMechanics {
     pub tick_span: u32,
     pub patriarch_start_age: u32,
     pub patriarch_end_age: u32,
+    /// Generation length in years (separate from tick_span)
+    pub generation_length: u32,
     /// Inheritance coefficients per family metric (default 0.7 if not specified)
     pub inheritance_coefficients: HashMap<String, f64>,
     /// Panel label for FamilyPanel UI

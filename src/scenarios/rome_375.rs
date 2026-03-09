@@ -48,6 +48,12 @@ pub fn load_rome_375() -> Scenario {
         }),
         universal_actions: create_universal_actions(),
         global_metrics_display: vec![],
+        initial_family_metrics: Some(HashMap::from([
+            ("family:family_influence".to_string(), 60.0),
+            ("family:family_knowledge".to_string(), 40.0),
+            ("family:family_wealth".to_string(), 50.0),
+            ("family:family_connections".to_string(), 45.0),
+        ])),
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -87,10 +93,10 @@ fn create_actors() -> Vec<Actor> {
 
 fn create_rome() -> Actor {
     let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family_connections".to_string(), 15.0);
+    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
+    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
+    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
+    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome".to_string(),
@@ -710,10 +716,10 @@ fn create_eastern_jin() -> Actor {
 
 fn create_rome_west() -> Actor {
     let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family_connections".to_string(), 15.0);
+    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
+    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
+    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
+    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome_west".to_string(),
@@ -764,10 +770,10 @@ fn create_rome_west() -> Actor {
 
 fn create_rome_east() -> Actor {
     let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family_connections".to_string(), 15.0);
+    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
+    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
+    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
+    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome_east".to_string(),
@@ -1087,20 +1093,20 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         // Rome external pressure from barbarians
         // Pressure grows slower if Rome maintains military parity
         AutoDelta {
-            metric: "rome.external_pressure".to_string(),
+            metric: "actor:rome.external_pressure".to_string(),
             base: 2.0,
             conditions: vec![],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "rome.military_size".to_string(),
-                    metric_b: "visigoths.military_size".to_string(),
+                    metric_a: "actor:rome.military_size".to_string(),
+                    metric_b: "actor:visigoths.military_size".to_string(),
                     ratio: 0.8, // Rome should maintain parity
                     operator: ComparisonOperator::Greater,
                     delta: -1.8,
                 },
                 DeltaConditionRatio {
-                    metric_a: "rome.military_size".to_string(),
-                    metric_b: "huns.military_size".to_string(),
+                    metric_a: "actor:rome.military_size".to_string(),
+                    metric_b: "actor:huns.military_size".to_string(),
                     ratio: 0.5,
                     operator: ComparisonOperator::Greater,
                     delta: -1.0,
@@ -1111,45 +1117,45 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Family auto-deltas (passive changes per tick)
         AutoDelta {
-            metric: "family_influence".to_string(),
+            metric: "family:family_influence".to_string(),
             base: -0.5, // passive decay
             conditions: vec![
-                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 30.0, delta: 0.3 },
-                DeltaCondition { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.2 },
-                DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
-                DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
+                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 30.0, delta: 0.3 },
+                DeltaCondition { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.2 },
+                DeltaCondition { metric: "actor:rome.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
+                DeltaCondition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family_knowledge".to_string(),
+            metric: "family:family_knowledge".to_string(),
             base: 0.2, // always grows
             conditions: vec![
-                DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
+                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.05,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family_wealth".to_string(),
+            metric: "family:family_wealth".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 20.0, delta: 0.5 },
-                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
-                DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
+                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 20.0, delta: 0.5 },
+                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
+                DeltaCondition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family_connections".to_string(),
+            metric: "family:family_connections".to_string(),
             base: -0.3, // need to maintain
             conditions: vec![
-                DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
+                DeltaCondition { metric: "actor:rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
@@ -1157,31 +1163,31 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Rome → Family: when Rome struggles, family suffers
         AutoDelta {
-            metric: "family_connections".to_string(),
+            metric: "family:family_connections".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
+                DeltaCondition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family_wealth".to_string(),
+            metric: "family:family_wealth".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
-                DeltaCondition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
+                DeltaCondition { metric: "actor:rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
+                DeltaCondition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family_influence".to_string(),
+            metric: "family:family_influence".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "rome.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
+                DeltaCondition { metric: "actor:rome.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1192,7 +1198,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: "legitimacy".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family_influence".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+                DeltaCondition { metric: "family:family_influence".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1202,7 +1208,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: "cohesion".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1212,7 +1218,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: "economic_output".to_string(),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
+                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1232,84 +1238,84 @@ fn create_patron_actions() -> Vec<PatronAction> {
             source_actor_id: None,
             id: "expand_network".to_string(),
             name: "Расширить связи".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
-            effects: HashMap::from([("family_connections".to_string(), 6.0)]),
-            cost: HashMap::from([("family_wealth".to_string(), -4.0)]),
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
+            effects: HashMap::from([("family:family_connections".to_string(), 6.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -4.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "gather_information".to_string(),
             name: "Собрать информацию".to_string(),
             available_if: crate::core::ActionCondition::Always,
-            effects: HashMap::from([("family_knowledge".to_string(), 6.0)]),
-            cost: HashMap::from([("family_wealth".to_string(), -2.0)]),
+            effects: HashMap::from([("family:family_knowledge".to_string(), 6.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -2.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "invest_wealth".to_string(),
             name: "Вложить средства".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
-            effects: HashMap::from([("family_wealth".to_string(), 8.0)]),
-            cost: HashMap::from([("family_connections".to_string(), -2.0)]),
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
+            effects: HashMap::from([("family:family_wealth".to_string(), 8.0)]),
+            cost: HashMap::from([("family:family_connections".to_string(), -2.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "build_reputation".to_string(),
             name: "Укрепить репутацию".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
-            effects: HashMap::from([("family_influence".to_string(), 6.0)]),
-            cost: HashMap::from([("family_wealth".to_string(), -5.0)]),
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
+            effects: HashMap::from([("family:family_influence".to_string(), 6.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -5.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "educate_family".to_string(),
             name: "Образование семьи".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
-            effects: HashMap::from([("family_knowledge".to_string(), 10.0)]),
-            cost: HashMap::from([("family_wealth".to_string(), -6.0)]),
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
+            effects: HashMap::from([("family:family_knowledge".to_string(), 10.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -6.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "lay_low".to_string(),
             name: "Затаиться".to_string(),
             available_if: crate::core::ActionCondition::Always,
-            effects: HashMap::from([("family_wealth".to_string(), 3.0)]),
-            cost: HashMap::from([("family_influence".to_string(), -2.0)]),
+            effects: HashMap::from([("family:family_wealth".to_string(), 3.0)]),
+            cost: HashMap::from([("family:family_influence".to_string(), -2.0)]),
         },
         // City support actions
         PatronAction {
             source_actor_id: None,
             id: "support_city".to_string(),
             name: "Поддержать город".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
             effects: HashMap::from([
-                ("family_influence".to_string(), 4.0),
-                ("rome.economic_output".to_string(), 2.0),
-                ("rome.cohesion".to_string(), 1.0),
+                ("family:family_influence".to_string(), 4.0),
+                ("actor:rome.economic_output".to_string(), 2.0),
+                ("actor:rome.cohesion".to_string(), 1.0),
             ]),
-            cost: HashMap::from([("family_wealth".to_string(), -8.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -8.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "back_administration".to_string(),
             name: "Поддержать администрацию".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
             effects: HashMap::from([
-                ("family_connections".to_string(), 5.0),
-                ("rome.legitimacy".to_string(), 2.0),
+                ("family:family_connections".to_string(), 5.0),
+                ("actor:rome.legitimacy".to_string(), 2.0),
             ]),
-            cost: HashMap::from([("family_wealth".to_string(), -6.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -6.0)]),
         },
         PatronAction {
             source_actor_id: None,
             id: "fund_defense".to_string(),
             name: "Вложить в оборону".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
+            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
             effects: HashMap::from([
-                ("family_influence".to_string(), 3.0),
-                ("rome.military_quality".to_string(), 2.0),
+                ("family:family_influence".to_string(), 3.0),
+                ("actor:rome.military_quality".to_string(), 2.0),
             ]),
-            cost: HashMap::from([("family_wealth".to_string(), -10.0)]),
+            cost: HashMap::from([("family:family_wealth".to_string(), -10.0)]),
         },
     ];
 
@@ -1326,7 +1332,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "family_rises".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "family_influence".to_string(),
+                    metric: "family:family_influence".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::GreaterOrEqual,
                     value: 60.0,
@@ -1390,7 +1396,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "family_falls".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "family_influence".to_string(),
+                    metric: "family:family_influence".to_string(),
                     actor_id: None,
                     operator: ComparisonOperator::Less,
                     value: 5.0,
@@ -1477,15 +1483,16 @@ fn create_rank_conditions() -> Vec<RankCondition> {
 
 fn create_generation_mechanics() -> GenerationMechanics {
     let mut inheritance_coefficients = HashMap::new();
-    inheritance_coefficients.insert("family_influence".to_string(), 0.85);
-    inheritance_coefficients.insert("family_knowledge".to_string(), 1.0);
-    inheritance_coefficients.insert("family_wealth".to_string(), 1.0);
-    inheritance_coefficients.insert("family_connections".to_string(), 0.8);
+    inheritance_coefficients.insert("family:family_influence".to_string(), 0.85);
+    inheritance_coefficients.insert("family:family_knowledge".to_string(), 1.0);
+    inheritance_coefficients.insert("family:family_wealth".to_string(), 1.0);
+    inheritance_coefficients.insert("family:family_connections".to_string(), 0.8);
 
     GenerationMechanics {
         tick_span: 5,
         patriarch_start_age: 42,
         patriarch_end_age: 75,
+        generation_length: 33,
         inheritance_coefficients,
         panel_label: "Семья Ди Милано".to_string(),
         era_texts: vec![
@@ -1547,7 +1554,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
     vec![
         StatusIndicator {
             label: "Западная Империя".to_string(),
-            metric: "rome.external_pressure".to_string(),
+            metric: "actor:rome.external_pressure".to_string(),
             invert: true,
             thresholds: vec![
                 (0.0, "стабильна".to_string()),
@@ -1557,7 +1564,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Натиск варваров".to_string(),
-            metric: "visigoths.military_size".to_string(),
+            metric: "actor:visigoths.military_size".to_string(),
             invert: true,
             thresholds: vec![
                 (0.0, "слабый".to_string()),
@@ -1567,7 +1574,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Семья Ди Милано".to_string(),
-            metric: "family_influence".to_string(),
+            metric: "family:family_influence".to_string(),
             invert: false,
             thresholds: vec![
                 (0.0, "незначительна".to_string()),
@@ -1747,7 +1754,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             conditions: vec![],
             effects: HashMap::from([
                 ("family:influence".to_string(), -10.0),
-                ("rome.legitimacy".to_string(), -5.0),
+                ("actor:rome.legitimacy".to_string(), -5.0),
             ]),
             llm_context: "Предательство легата ослабило позиции семьи при дворе".to_string(),
             one_time: false,
@@ -1757,12 +1764,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.10,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "visigoths.military_size".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
+                Condition { metric: "actor:visigoths.military_size".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
             ],
             effects: HashMap::from([
-                ("rome.cohesion".to_string(), -10.0),
-                ("rome.economic_output".to_string(), -8.0),
-                ("rome.external_pressure".to_string(), 5.0),
+                ("actor:rome.cohesion".to_string(), -10.0),
+                ("actor:rome.economic_output".to_string(), -8.0),
+                ("actor:rome.external_pressure".to_string(), 5.0),
             ]),
             llm_context: "Варварский набег разорил приграничные провинции".to_string(),
             one_time: false,
@@ -1773,7 +1780,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("rome.legitimacy".to_string(), 8.0),
+                ("actor:rome.legitimacy".to_string(), 8.0),
                 ("family:influence".to_string(), 5.0),
             ]),
             llm_context: "Пророчество оракула укрепило авторитет власти".to_string(),
@@ -1789,7 +1796,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             effects: HashMap::from([
                 ("family:influence".to_string(), 8.0),
                 ("family:wealth".to_string(), -100.0),
-                ("rome.legitimacy".to_string(), 3.0),
+                ("actor:rome.legitimacy".to_string(), 3.0),
             ]),
             llm_context: "Подкуп сенаторов укрепил позиции семьи в Риме".to_string(),
             one_time: false,
@@ -1799,11 +1806,11 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.05,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
+                Condition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
             ],
             effects: HashMap::from([
-                ("rome.cohesion".to_string(), -12.0),
-                ("rome.legitimacy".to_string(), -8.0),
+                ("actor:rome.cohesion".to_string(), -12.0),
+                ("actor:rome.legitimacy".to_string(), -8.0),
                 ("family:influence".to_string(), -5.0),
             ]),
             llm_context: "Восстание гладиаторов обнажило слабость императорской власти".to_string(),
@@ -1814,12 +1821,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 30.0 },
+                Condition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 30.0 },
             ],
             effects: HashMap::from([
                 ("family:wealth".to_string(), 120.0),
                 ("family:connections".to_string(), 5.0),
-                ("rome.economic_output".to_string(), 3.0),
+                ("actor:rome.economic_output".to_string(), 3.0),
             ]),
             llm_context: "Богатый торговый караван с Востока принёс редкие товары и новые связи".to_string(),
             one_time: false,
@@ -1829,13 +1836,13 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "rome.military_size".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
-                Condition { metric: "rome.treasury".to_string(), operator: ComparisonOperator::Less, value: 150.0 },
+                Condition { metric: "actor:rome.military_size".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
+                Condition { metric: "actor:rome.treasury".to_string(), operator: ComparisonOperator::Less, value: 150.0 },
             ],
             effects: HashMap::from([
-                ("rome.military_size".to_string(), -30.0),
-                ("rome.legitimacy".to_string(), -12.0),
-                ("rome.cohesion".to_string(), -8.0),
+                ("actor:rome.military_size".to_string(), -30.0),
+                ("actor:rome.legitimacy".to_string(), -12.0),
+                ("actor:rome.cohesion".to_string(), -8.0),
             ]),
             llm_context: "Мятеж легионов потряс Рим — солдаты требуют жалования".to_string(),
             one_time: false,
@@ -1846,9 +1853,9 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("rome.cohesion".to_string(), 12.0),
+                ("actor:rome.cohesion".to_string(), 12.0),
                 ("family:influence".to_string(), 8.0),
-                ("rome.legitimacy".to_string(), 6.0),
+                ("actor:rome.legitimacy".to_string(), 6.0),
             ]),
             llm_context: "Знамение богов укрепило веру народа в предназначение Рима".to_string(),
             one_time: true,

@@ -124,25 +124,15 @@ pub fn load_scenario(
     }
 
     // Initialize family_state for family-based scenarios
-    if scenario.features.family_panel {
-        let mut family_metrics = HashMap::new();
-        if let Some(ref player_actor_id) = scenario.player_actor_id {
-            if let Some(player_actor) = world_state.actors.get(player_actor_id) {
-                for (key, value) in &player_actor.scenario_metrics {
-                    if key.starts_with("family_") {
-                        family_metrics.insert(key.clone(), *value);
-                    }
-                }
-            }
-        }
+    if let Some(ref initial_metrics) = scenario.initial_family_metrics {
         let patriarch_age = scenario.generation_mechanics
             .as_ref()
             .map(|g| g.patriarch_start_age)
-            .unwrap_or(40);
+            .unwrap_or(40) as u32;
 
         world_state.family_state = Some(crate::core::FamilyState {
-            metrics: family_metrics,
-            patriarch_age: patriarch_age as u32,
+            metrics: initial_metrics.clone(),
+            patriarch_age,
         });
     }
 
