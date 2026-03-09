@@ -183,7 +183,7 @@ fn test_list_saves_with_slots() {
 fn test_action_cost_deducted() {
     // Test that action cost is correctly deducted from treasury
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Get initial venice treasury
     let initial_treasury = state.world_state.as_ref().unwrap()
@@ -223,7 +223,7 @@ fn test_action_unavailable_when_insufficient_resources() {
 
     // Try to apply venice_diplomacy (requires venice.legitimacy > 60, cost: -30 treasury)
     // This should fail because treasury is too low for the cost
-    let action_input = PlayerActionInput {
+    let _action_input = PlayerActionInput {
         action_id: "venice_diplomacy".to_string(),
         target_actor_id: None,
     };
@@ -243,7 +243,7 @@ fn test_action_unavailable_when_insufficient_resources() {
 fn test_actions_per_tick_limit_enforced() {
     // Test that actions_per_tick limit is enforced
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Apply 3 actions (the limit for constantinople)
     let actions = vec!["venice_diplomacy", "genoa_financial_aid", "milan_bankers"];
@@ -269,7 +269,7 @@ fn test_actions_per_tick_limit_enforced() {
 fn test_federation_progress_grows_with_actions() {
     // Test that federation actions increase federation_progress
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Get initial federation progress
     let initial_fed = state.world_state.as_ref().unwrap()

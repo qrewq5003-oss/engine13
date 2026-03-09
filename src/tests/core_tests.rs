@@ -137,11 +137,11 @@ fn test_metric_ref_apply_military_size_min_zero() {
 #[test]
 fn test_family_state_initialized() {
     // Load rome_375 and verify family_state is initialized
-    let scenario = registry::load_by_id("rome_375").unwrap();
+    let _scenario = registry::load_by_id("rome_375").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
     
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
@@ -154,12 +154,12 @@ fn test_family_state_initialized() {
 #[test]
 fn test_family_state_none_for_constantinople() {
     // Load constantinople_1430 and verify family_state is None
-    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let _scenario = registry::load_by_id("constantinople_1430").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "constantinople_1430".to_string()).unwrap();
-    
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "constantinople_1430".to_string()).unwrap();
+
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_none(), "family_state should be None for Constantinople");
 }
@@ -318,17 +318,17 @@ fn test_generation_transfer_applies_inheritance() {
 #[test]
 fn test_initial_family_metrics_loaded() {
     // Load rome_375
-    let scenario = registry::load_by_id("rome_375").unwrap();
+    let _scenario = registry::load_by_id("rome_375").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
-    
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
+
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
-    
+
     let family_state = world_state.family_state.as_ref().unwrap();
-    
+
     // Check that initial metrics are loaded
     assert!(family_state.metrics.contains_key("family:family_influence"), "Should have family_influence");
     assert!(family_state.metrics.contains_key("family:family_knowledge"), "Should have family_knowledge");
