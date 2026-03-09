@@ -196,6 +196,34 @@ pub fn generate_narrative_prompt(
     prompt.push_str(system_prompt(season));
     prompt.push_str("\n\n");
 
+    // Section 0.5: Factual block - prevent hallucination
+    let alive_actors: Vec<&str> = world_state.actors.keys()
+        .filter(|id| !world_state.dead_actors.iter().any(|d| &d.id == *id))
+        .map(|s| s.as_str())
+        .collect();
+
+    let dead_actors: Vec<&str> = world_state.dead_actors.iter()
+        .map(|a| a.id.as_str())
+        .collect();
+
+    let factual_block = format!(
+        "=== ВАЖНЫЕ ФАКТЫ ИГРЫ (не противоречь им) ===\n\
+         Год: {}\n\
+         Живые акторы: {}\n\
+         Павшие акторы: {}\n\
+         Победа достигнута: {}\n\n\
+         Правила:\n\
+         - Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\
+         - Не называй актора павшим, уничтоженным или исчезнувшим, если его нет в списке павших.\n\
+         - Для живых акторов в упадке используй формулировки: \"под угрозой\", \"ослаблен\", \"на грани\" — но не \"пал\".\n\
+         - Не придумывай победы, смерти правителей, падения городов или коллапсы, которых нет в фактах.\n\n",
+        world_state.year,
+        if alive_actors.is_empty() { "нет".to_string() } else { alive_actors.join(", ") },
+        if dead_actors.is_empty() { "нет".to_string() } else { dead_actors.join(", ") },
+        if world_state.victory_achieved { "да" } else { "нет" },
+    );
+    prompt.push_str(&factual_block);
+
     // Section 1: Scenario context (depends on game mode)
     match world_state.game_mode {
         crate::core::GameMode::Consequences => {
