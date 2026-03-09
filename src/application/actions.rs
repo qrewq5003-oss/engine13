@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::{ComparisonOperator, Condition, MetricRef, PatronAction, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 use crate::AppState;
 
 /// Reason why an action is unavailable - runtime check result
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum UnavailableReason {
     InsufficientCost { required: f64, available: f64, resource: String },
@@ -15,6 +17,7 @@ pub enum UnavailableReason {
 }
 
 /// Action info with availability status
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionInfo {
     pub action: PatronAction,
     pub available: bool,
