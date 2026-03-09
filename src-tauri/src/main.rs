@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+use engine13::application::actions::ActionInfo;
 use engine13::commands::{self, AppState};
 use engine13::db::Db;
 use engine13::llm;
@@ -103,7 +104,7 @@ fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine
 }
 
 #[tauri::command]
-fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Vec<commands::ActionInfo>, String> {
+fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Vec<ActionInfo>, String> {
     eprintln!("[RUST] cmd_get_actions_with_availability - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
     let result = commands::get_actions_with_availability(&*s);
