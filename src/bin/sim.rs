@@ -511,6 +511,15 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
     let mut family_wealth_start = 0.0;
     let mut family_knowledge_start = 0.0;
     let mut family_connections_start = 0.0;
+    let mut rome_legitimacy_start = 0.0;
+    let mut rome_cohesion_start = 0.0;
+    let mut rome_military_start = 0.0;
+    
+    // Metric flow tracking for Rome
+    let mut influence_gained_from_actions = 0.0;
+    let mut influence_lost_from_action_costs = 0.0;
+    let mut wealth_gained_from_actions = 0.0;
+    let mut wealth_lost_from_action_costs = 0.0;
 
     // Capture initial family metrics for Rome
     if scenario_id == "rome_375" {
@@ -520,6 +529,11 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             family_wealth_start = *family.metrics.get("wealth").unwrap_or(&0.0);
             family_knowledge_start = *family.metrics.get("knowledge").unwrap_or(&0.0);
             family_connections_start = *family.metrics.get("connections").unwrap_or(&0.0);
+        }
+        if let Some(rome) = world_state.actors.get("rome") {
+            rome_legitimacy_start = rome.metrics.legitimacy;
+            rome_cohesion_start = rome.metrics.cohesion;
+            rome_military_start = rome.metrics.military_size;
         }
     }
 
@@ -541,6 +555,10 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         let mut applied_this_tick = 0u32;
         let mut rejected_this_tick = 0u32;
         let mut actions_applied = Vec::new();
+        
+        // Track metric changes from actions for Rome
+        let mut influence_delta_this_tick = 0.0;
+        let mut wealth_delta_this_tick = 0.0;
 
         for action_id in &priority_actions {
             if applied_this_tick >= scenario.actions_per_tick {
@@ -558,10 +576,51 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
                     applied_this_tick += 1;
                     actions_applied.push(*action_id);
                     *actions_by_type.entry(*action_id).or_insert(0) += 1;
+                    
+                    // Track metric flow for Rome
+                    if scenario_id == "rome_375" {
+                        // Get action details to track effects/costs
+                        if let Some(action) = state.current_scenario.as_ref().unwrap().patron_actions.iter().find(|a| a.id == *action_id) {
+                            for (metric, delta) in &action.effects {
+                                // Normalize metric key: strip "family:" and "family_" prefixes
+                                let normalized = metric.strip_prefix("family:").unwrap_or(metric).strip_prefix("family_").unwrap_or(metric);
+                                if normalized == "influence" {
+                                    influence_delta_this_tick += delta;
+                                }
+                                if normalized == "wealth" {
+                                    wealth_delta_this_tick += delta;
+                                }
+                            }
+                            for (metric, cost) in &action.cost {
+                                // Normalize metric key
+                                let normalized = metric.strip_prefix("family:").unwrap_or(metric).strip_prefix("family_").unwrap_or(metric);
+                                if normalized == "influence" {
+                                    influence_delta_this_tick += cost; // cost is negative
+                                }
+                                if normalized == "wealth" {
+                                    wealth_delta_this_tick += cost; // cost is negative
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(_) => {
                     rejected_this_tick += 1;
                 }
+            }
+        }
+        
+        // Accumulate flow tracking
+        if scenario_id == "rome_375" {
+            if influence_delta_this_tick > 0.0 {
+                influence_gained_from_actions += influence_delta_this_tick;
+            } else {
+                influence_lost_from_action_costs += influence_delta_this_tick.abs();
+            }
+            if wealth_delta_this_tick > 0.0 {
+                wealth_gained_from_actions += wealth_delta_this_tick;
+            } else {
+                wealth_lost_from_action_costs += wealth_delta_this_tick.abs();
             }
         }
 
@@ -574,31 +633,64 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         let rng = state.rng.as_mut().unwrap();
         tick(world_state, scenario_ref, &mut state.event_log, rng);
 
-        // Capture after values
-        let fed_after = state.world_state.as_ref().unwrap()
-            .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
-        let pressure_after = state.world_state.as_ref().unwrap()
-            .actors.get("byzantium")
-            .map(|a| a.metrics.external_pressure)
-            .unwrap_or(0.0);
-        let sustained_after = state.world_state.as_ref().unwrap().victory_sustained_ticks;
+        // Print tick summary - Rome-specific vs Constantinople-specific
+        if scenario_id == "rome_375" {
+            let world = state.world_state.as_ref().unwrap();
+            let inf_before = world.family_state.as_ref().and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
+            let know_before = world.family_state.as_ref().and_then(|f| f.metrics.get("knowledge")).copied().unwrap_or(0.0);
+            let wea_before = world.family_state.as_ref().and_then(|f| f.metrics.get("wealth")).copied().unwrap_or(0.0);
+            let con_before = world.family_state.as_ref().and_then(|f| f.metrics.get("connections")).copied().unwrap_or(0.0);
+            let leg_before = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
+            let coh_before = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
+            
+            let inf_after = world.family_state.as_ref().and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
+            let know_after = world.family_state.as_ref().and_then(|f| f.metrics.get("knowledge")).copied().unwrap_or(0.0);
+            let wea_after = world.family_state.as_ref().and_then(|f| f.metrics.get("wealth")).copied().unwrap_or(0.0);
+            let con_after = world.family_state.as_ref().and_then(|f| f.metrics.get("connections")).copied().unwrap_or(0.0);
+            let leg_after = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
+            let coh_after = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
+            
+            println!("tick {:2}: influence {:6.1}->{:6.1}  knowledge {:5.1}->{:5.1}  wealth {:7.1}->{:7.1}  connections {:6.1}->{:6.1}  legitimacy {:5.1}->{:5.1}  cohesion {:5.1}->{:5.1}  actions=[{}]  applied={} rejected={}",
+                tick_num, inf_before, inf_after, know_before, know_after, wea_before, wea_after, con_before, con_after, leg_before, leg_after, coh_before, coh_after,
+                actions_applied.join(", "), applied_this_tick, rejected_this_tick);
+        } else {
+            // Constantinople output
+            let _fed_before = state.world_state.as_ref().unwrap()
+                .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+            let _pressure_before = state.world_state.as_ref().unwrap()
+                .actors.get("byzantium")
+                .map(|a| a.metrics.external_pressure)
+                .unwrap_or(0.0);
+            let _sustained_before = state.world_state.as_ref().unwrap().victory_sustained_ticks;
 
-        // Track max federation
-        if fed_after > max_federation {
-            max_federation = fed_after;
+            let fed_after = state.world_state.as_ref().unwrap()
+                .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+            let pressure_after = state.world_state.as_ref().unwrap()
+                .actors.get("byzantium")
+                .map(|a| a.metrics.external_pressure)
+                .unwrap_or(0.0);
+            let sustained_after = state.world_state.as_ref().unwrap().victory_sustained_ticks;
+
+            // Track max federation
+            if fed_after > max_federation {
+                max_federation = fed_after;
+            }
+
+            println!("tick {:2}: fed {:5.1}->{:5.1}  pressure {:5.1}->{:5.1}  sustained={}  actions=[{}]  applied={} rejected={}",
+                tick_num, fed_before, fed_after, pressure_before, pressure_after, sustained_after,
+                actions_applied.join(", "), applied_this_tick, rejected_this_tick);
         }
-
-        // Print tick summary
-        println!("tick {:2}: fed {:5.1}->{:5.1}  pressure {:5.1}->{:5.1}  sustained={}  actions=[{}]  applied={} rejected={}",
-            tick_num, fed_before, fed_after, pressure_before, pressure_after, sustained_after,
-            actions_applied.join(", "), applied_this_tick, rejected_this_tick);
 
         // Stop early if victory or collapse
         let world = state.world_state.as_ref().unwrap();
-        if world.victory_achieved || world.dead_actor_ids.iter().any(|id| id.contains("byzantium")) {
-            println!("Early termination: victory={} byzantium_dead={}",
-                world.victory_achieved,
-                world.dead_actor_ids.iter().any(|id| id.contains("byzantium")));
+        if world.victory_achieved || (scenario_id != "rome_375" && world.dead_actor_ids.iter().any(|id| id.contains("byzantium"))) {
+            if scenario_id == "rome_375" {
+                println!("Early termination: victory={}", world.victory_achieved);
+            } else {
+                println!("Early termination: victory={} byzantium_dead={}",
+                    world.victory_achieved,
+                    world.dead_actor_ids.iter().any(|id| id.contains("byzantium")));
+            }
             break;
         }
     }
@@ -625,15 +717,33 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             .copied()
             .unwrap_or(0.0);
         
+        let rome_final = world.actors.get("rome");
+        let rome_legitimacy_final = rome_final.map(|a| a.metrics.legitimacy).unwrap_or(0.0);
+        let rome_cohesion_final = rome_final.map(|a| a.metrics.cohesion).unwrap_or(0.0);
+        let rome_military_final = rome_final.map(|a| a.metrics.military_size).unwrap_or(0.0);
+        
         let family_total_start = family_influence_start + family_wealth_start + family_knowledge_start + family_connections_start;
         let family_total_final = family_influence_final + family_wealth_final + family_knowledge_final + family_connections_final;
         let family_total_delta = family_total_final - family_total_start;
         
+        // Calculate auto_delta influence loss (net delta minus action contributions)
+        let influence_net_delta = family_influence_final - family_influence_start;
+        let influence_from_actions = influence_gained_from_actions - influence_lost_from_action_costs;
+        let influence_from_auto_deltas = influence_net_delta - influence_from_actions;
+        
+        let wealth_net_delta = family_wealth_final - family_wealth_start;
+        let wealth_from_actions = wealth_gained_from_actions - wealth_lost_from_action_costs;
+        let wealth_from_auto_deltas = wealth_net_delta - wealth_from_actions;
+
         println!();
         println!("=== SCRIPTED STRATEGY: {} (ROME 375) ===", strategy.name().to_uppercase());
         println!("Ticks completed:       {}", world.tick);
         println!("Total actions applied: {}", total_actions_applied);
         println!("Total actions rejected: {}", total_actions_rejected);
+        println!();
+        println!("=== ROME OUTCOME SUMMARY ===");
+        println!("Victory achieved:      {}", if world.victory_achieved { "yes" } else { "no" });
+        println!("Victory tick:          {}", if world.victory_achieved { format!("{}", world.tick) } else { "n/a".to_string() });
         println!();
         println!("Family metrics:");
         println!("  influence:   {:5.1} -> {:5.1}  (delta: {:+5.1})", family_influence_start, family_influence_final, family_influence_final - family_influence_start);
@@ -641,19 +751,32 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         println!("  wealth:      {:5.1} -> {:5.1}  (delta: {:+5.1})", family_wealth_start, family_wealth_final, family_wealth_final - family_wealth_start);
         println!("  connections: {:5.1} -> {:5.1}  (delta: {:+5.1})", family_connections_start, family_connections_final, family_connections_final - family_connections_start);
         println!();
-        println!("Family total:  {:5.1} -> {:5.1}  (delta: {:+5.1})", family_total_start, family_total_final, family_total_delta);
+        println!("Rome core metrics:");
+        println!("  legitimacy:  {:5.1} -> {:5.1}", rome_legitimacy_start, rome_legitimacy_final);
+        println!("  cohesion:    {:5.1} -> {:5.1}", rome_cohesion_start, rome_cohesion_final);
+        println!("  military:    {:5.1} -> {:5.1}", rome_military_start, rome_military_final);
         
-        // Numerical acceptance criterion
+        // Metric flow diagnostics
         println!();
-        println!("=== ACCEPTANCE CRITERION (scripted > no-player) ===");
-        println!("Note: This is a single run. Compare with batch no-player baseline.");
-        println!("Threshold: family_total_delta >= +20 for meaningful improvement");
-        if family_total_delta >= 20.0 {
-            println!("Result: PASS (delta = {:+.1} >= +20.0)", family_total_delta);
-        } else {
-            println!("Result: BELOW THRESHOLD (delta = {:+.1} < +20.0)", family_total_delta);
-        }
+        println!("=== ROME METRIC FLOW: INFLUENCE ===");
+        println!("gained from actions:        {:+.1}", influence_gained_from_actions);
+        println!("lost from action costs:     {:+.1}", -influence_lost_from_action_costs);
+        println!("lost/gained from auto_deltas: {:+.1}", influence_from_auto_deltas);
+        println!("net delta:                  {:+.1}", influence_net_delta);
         
+        println!();
+        println!("=== ROME METRIC FLOW: WEALTH ===");
+        println!("gained from actions:        {:+.1}", wealth_gained_from_actions);
+        println!("lost from action costs:     {:+.1}", -wealth_lost_from_action_costs);
+        println!("gained/lost from auto_deltas: {:+.1}", wealth_from_auto_deltas);
+        println!("net delta:                  {:+.1}", wealth_net_delta);
+        
+        // Secondary diagnostic: family_total
+        println!();
+        println!("Secondary diagnostic:");
+        println!("  family_total: {:5.1} -> {:5.1} (delta: {:+.1})", family_total_start, family_total_final, family_total_delta);
+        println!("  (family_total is a resource proxy, not the primary Rome success metric)");
+
         // Check if strategies collapse
         if total_actions_applied == 0 || (total_actions_rejected > 0 && total_actions_applied < 10) {
             println!();
@@ -663,7 +786,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             println!("  - availability gates");
             println!("  - whether enough actions are actually available");
         }
-        
+
         println!();
         println!("Actions applied by type:");
         let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
