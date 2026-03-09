@@ -9,6 +9,9 @@
 //! cargo run --bin sim constantinople_1430 25 scripted diplomacy  # diplomacy-heavy strategy
 //! cargo run --bin sim constantinople_1430 25 scripted military  # military-heavy strategy
 //! cargo run --bin sim rome_375 50 batch  # Rome batch mode
+//! cargo run --bin sim rome_375 50 scripted balanced  # Rome scripted balanced
+//! cargo run --bin sim rome_375 50 scripted influence  # Rome scripted influence-focused
+//! cargo run --bin sim rome_375 50 scripted wealth  # Rome scripted wealth-focused
 //! ```
 
 use engine13::{
@@ -57,6 +60,33 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
             world.actors.insert(actor.id.clone(), actor.clone());
         }
     }
+
+    // Initialize family_state for family-based scenarios (e.g., Rome 375)
+    if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+        let patriarch_age = scenario.generation_mechanics
+            .as_ref()
+            .map(|g| g.patriarch_start_age)
+            .unwrap_or(40) as u32;
+
+        // Normalize keys: strip "family:" prefix then "family_" prefix (MetricRef expects just "knowledge", "wealth", etc.)
+        let mut normalized_metrics = HashMap::new();
+        for (key, value) in initial_metrics {
+            // First strip "family:" prefix if present
+            let key1 = key.strip_prefix("family:").unwrap_or(key);
+            // Then strip "family_" prefix if present (MetricRef does this internally)
+            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
+            normalized_metrics.insert(normalized_key.to_string(), *value);
+        }
+
+        world.family_state = Some(engine13::core::FamilyState {
+            metrics: normalized_metrics,
+            patriarch_age,
+        });
+    }
+
+    // Set generation_mechanics from scenario
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
 
     let mut stats = SimStats::default();
     let mut event_log = EventLog::new();
@@ -110,6 +140,23 @@ fn run_batch(scenario_id: &str, ticks: u32) {
             }
         }
 
+        // Initialize family_state for family-based scenarios (e.g., Rome 375)
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario.generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40) as u32;
+
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: initial_metrics.clone(),
+                patriarch_age,
+            });
+        }
+
+        // Set generation_mechanics from scenario
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
         let mut stats = BatchStats::default();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
@@ -154,7 +201,7 @@ fn run_batch(scenario_id: &str, ticks: u32) {
                 rome_legitimacy_final.push(rome.metrics.legitimacy);
             }
             if let Some(ref family) = world.family_state {
-                family_influence_final.push(*family.metrics.get("family_influence").unwrap_or(&0.0));
+                family_influence_final.push(*family.metrics.get("influence").unwrap_or(&0.0));
             }
             generation_transitions_per_run.push(stats.generation_transitions);
             foreground_shifts_per_run.push(stats.foreground_shifts);
@@ -241,24 +288,38 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     }
 }
 
-/// Scripted strategy for Constantinople
+/// Scripted strategy for Constantinople and Rome
 enum ScriptedStrategy {
     Balanced,
     Diplomacy,
     Military,
+    RomeBalanced,
+    RomeInfluence,
+    RomeWealth,
 }
 
 impl ScriptedStrategy {
-    fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "diplomacy" | "diplomatic" => ScriptedStrategy::Diplomacy,
-            "military" | "military_heavy" => ScriptedStrategy::Military,
-            _ => ScriptedStrategy::Balanced,
+    fn from_str(s: &str, scenario_id: &str) -> Self {
+        // Rome-specific strategies
+        if scenario_id == "rome_375" {
+            match s.to_lowercase().as_str() {
+                "influence" | "influence_heavy" => ScriptedStrategy::RomeInfluence,
+                "wealth" | "wealth_heavy" => ScriptedStrategy::RomeWealth,
+                _ => ScriptedStrategy::RomeBalanced,
+            }
+        } else {
+            // Constantinople strategies
+            match s.to_lowercase().as_str() {
+                "diplomacy" | "diplomatic" => ScriptedStrategy::Diplomacy,
+                "military" | "military_heavy" => ScriptedStrategy::Military,
+                _ => ScriptedStrategy::Balanced,
+            }
         }
     }
     
     fn priority_actions(&self) -> Vec<&'static str> {
         match self {
+            // Constantinople strategies
             ScriptedStrategy::Balanced => vec![
                 "venice_diplomacy",
                 "genoa_financial_aid",
@@ -289,6 +350,42 @@ impl ScriptedStrategy {
                 "milan_bankers",
                 "venice_trade_deal",
             ],
+            // Rome strategies - using actual IDs from rome_375.rs
+            // Note: Many actions have availability gates (e.g., family_wealth > 10)
+            // Only gather_information and lay_low are available unconditionally on tick 0
+            ScriptedStrategy::RomeBalanced => vec![
+                "gather_information",  // Always available, +knowledge -wealth
+                "lay_low",             // Always available, +wealth -influence
+                "expand_network",      // wealth > 10, +connections -wealth
+                "educate_family",      // wealth > 10, +knowledge -wealth
+                "build_reputation",    // connections > 15, +influence -wealth
+                "invest_wealth",       // wealth > 20, +wealth -connections
+                "support_city",        // wealth > 15, +influence +economic_output +cohesion -wealth
+                "back_administration", // connections > 15, +connections +legitimacy -wealth
+                "fund_defense",        // wealth > 20, +influence +military_quality -wealth
+            ],
+            ScriptedStrategy::RomeInfluence => vec![
+                "build_reputation",    // Priority: influence-focused
+                "support_city",
+                "fund_defense",
+                "back_administration",
+                "expand_network",
+                "educate_family",
+                "invest_wealth",
+                "gather_information",
+                "lay_low",
+            ],
+            ScriptedStrategy::RomeWealth => vec![
+                "lay_low",             // Priority: wealth accumulation first
+                "invest_wealth",
+                "gather_information",
+                "expand_network",
+                "educate_family",
+                "support_city",
+                "back_administration",
+                "build_reputation",
+                "fund_defense",
+            ],
         }
     }
     
@@ -297,15 +394,18 @@ impl ScriptedStrategy {
             ScriptedStrategy::Balanced => "balanced",
             ScriptedStrategy::Diplomacy => "diplomacy",
             ScriptedStrategy::Military => "military",
+            ScriptedStrategy::RomeBalanced => "balanced",
+            ScriptedStrategy::RomeInfluence => "influence",
+            ScriptedStrategy::RomeWealth => "wealth",
         }
     }
 }
 
 fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
-    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+    use engine13::application::actions::{apply_player_action, PlayerActionInput, get_available_actions};
     use engine13::commands::AppState;
 
-    let strategy = ScriptedStrategy::from_str(strategy_str);
+    let strategy = ScriptedStrategy::from_str(strategy_str, scenario_id);
     
     println!("Running scripted mode with {} strategy", strategy.name());
     println!();
@@ -322,6 +422,33 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         }
     }
 
+    // Initialize family_state for family-based scenarios (e.g., Rome 375)
+    if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+        let patriarch_age = scenario.generation_mechanics
+            .as_ref()
+            .map(|g| g.patriarch_start_age)
+            .unwrap_or(40) as u32;
+
+        // Normalize keys: strip "family:" prefix then "family_" prefix (MetricRef expects just "knowledge", "wealth", etc.)
+        let mut normalized_metrics = HashMap::new();
+        for (key, value) in initial_metrics {
+            // First strip "family:" prefix if present
+            let key1 = key.strip_prefix("family:").unwrap_or(key);
+            // Then strip "family_" prefix if present (MetricRef does this internally)
+            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
+            normalized_metrics.insert(normalized_key.to_string(), *value);
+        }
+
+        world.family_state = Some(engine13::core::FamilyState {
+            metrics: normalized_metrics,
+            patriarch_age,
+        });
+    }
+
+    // Set generation_mechanics from scenario
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
+
     // Set up application state for using apply_player_action
     let mut state = AppState {
         world_state: Some(world),
@@ -330,11 +457,71 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
     };
 
+    // ========================================================================
+    // Task 0: Validate init before any scripted logic
+    // ========================================================================
+    if scenario_id == "rome_375" {
+        // Check family_state
+        let world_state = state.world_state.as_ref().unwrap();
+        let family_state_ok = world_state.family_state.is_some();
+        let generation_ok = world_state.generation_mechanics.is_some();
+        
+        eprintln!("Rome scripted init validation:");
+        eprintln!("  family_state present: {}", family_state_ok);
+        eprintln!("  generation_mechanics present: {}", generation_ok);
+        
+        if !family_state_ok {
+            eprintln!("ERROR: Rome scripted init: family_state is missing - aborting");
+            return;
+        }
+        
+        // Check available actions on tick 0
+        let available_actions = get_available_actions(&state).unwrap_or_default();
+        let available_ids: Vec<&str> = available_actions.iter().map(|a| a.id.as_str()).collect();
+        eprintln!("  tick0 available actions: {:?}", available_ids);
+        
+        if available_actions.is_empty() {
+            eprintln!("ERROR: Rome scripted init: no available actions on tick 0 - aborting");
+            return;
+        }
+        
+        // Task 2: Verify priority IDs match actual available actions
+        let priority_actions = strategy.priority_actions();
+        let matching_ids: Vec<_> = priority_actions.iter()
+            .filter(|pid| available_ids.contains(pid))
+            .collect();
+        
+        eprintln!("  priority actions matching available: {}/{}", matching_ids.len(), priority_actions.len());
+        
+        if matching_ids.is_empty() {
+            eprintln!("WARNING: No priority action IDs match available actions on tick 0");
+            eprintln!("  Strategies may collapse into identical paths under current action economy");
+        }
+    }
+    // ========================================================================
+
     // Track scripted stats
     let mut total_actions_applied = 0u32;
     let mut total_actions_rejected = 0u32;
     let mut max_federation = 0.0;
     let mut actions_by_type: HashMap<&str, u32> = HashMap::new();
+    
+    // Rome-specific tracking
+    let mut family_influence_start = 0.0;
+    let mut family_wealth_start = 0.0;
+    let mut family_knowledge_start = 0.0;
+    let mut family_connections_start = 0.0;
+
+    // Capture initial family metrics for Rome
+    if scenario_id == "rome_375" {
+        let world_state = state.world_state.as_ref().unwrap();
+        if let Some(ref family) = world_state.family_state {
+            family_influence_start = *family.metrics.get("influence").unwrap_or(&0.0);
+            family_wealth_start = *family.metrics.get("wealth").unwrap_or(&0.0);
+            family_knowledge_start = *family.metrics.get("knowledge").unwrap_or(&0.0);
+            family_connections_start = *family.metrics.get("connections").unwrap_or(&0.0);
+        }
+    }
 
     let priority_actions = strategy.priority_actions();
 
@@ -418,27 +605,96 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
 
     // Print final summary
     let world = state.world_state.as_ref().unwrap();
-    let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
-    let byz_final = world.actors.get("byzantium")
-        .map(|a| a.metrics.external_pressure)
-        .unwrap_or(0.0);
-    let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
+    
+    // Rome-specific summary
+    if scenario_id == "rome_375" {
+        let family_influence_final = world.family_state.as_ref()
+            .and_then(|f| f.metrics.get("influence"))
+            .copied()
+            .unwrap_or(0.0);
+        let family_wealth_final = world.family_state.as_ref()
+            .and_then(|f| f.metrics.get("wealth"))
+            .copied()
+            .unwrap_or(0.0);
+        let family_knowledge_final = world.family_state.as_ref()
+            .and_then(|f| f.metrics.get("knowledge"))
+            .copied()
+            .unwrap_or(0.0);
+        let family_connections_final = world.family_state.as_ref()
+            .and_then(|f| f.metrics.get("connections"))
+            .copied()
+            .unwrap_or(0.0);
+        
+        let family_total_start = family_influence_start + family_wealth_start + family_knowledge_start + family_connections_start;
+        let family_total_final = family_influence_final + family_wealth_final + family_knowledge_final + family_connections_final;
+        let family_total_delta = family_total_final - family_total_start;
+        
+        println!();
+        println!("=== SCRIPTED STRATEGY: {} (ROME 375) ===", strategy.name().to_uppercase());
+        println!("Ticks completed:       {}", world.tick);
+        println!("Total actions applied: {}", total_actions_applied);
+        println!("Total actions rejected: {}", total_actions_rejected);
+        println!();
+        println!("Family metrics:");
+        println!("  influence:   {:5.1} -> {:5.1}  (delta: {:+5.1})", family_influence_start, family_influence_final, family_influence_final - family_influence_start);
+        println!("  knowledge:   {:5.1} -> {:5.1}  (delta: {:+5.1})", family_knowledge_start, family_knowledge_final, family_knowledge_final - family_knowledge_start);
+        println!("  wealth:      {:5.1} -> {:5.1}  (delta: {:+5.1})", family_wealth_start, family_wealth_final, family_wealth_final - family_wealth_start);
+        println!("  connections: {:5.1} -> {:5.1}  (delta: {:+5.1})", family_connections_start, family_connections_final, family_connections_final - family_connections_start);
+        println!();
+        println!("Family total:  {:5.1} -> {:5.1}  (delta: {:+5.1})", family_total_start, family_total_final, family_total_delta);
+        
+        // Numerical acceptance criterion
+        println!();
+        println!("=== ACCEPTANCE CRITERION (scripted > no-player) ===");
+        println!("Note: This is a single run. Compare with batch no-player baseline.");
+        println!("Threshold: family_total_delta >= +20 for meaningful improvement");
+        if family_total_delta >= 20.0 {
+            println!("Result: PASS (delta = {:+.1} >= +20.0)", family_total_delta);
+        } else {
+            println!("Result: BELOW THRESHOLD (delta = {:+.1} < +20.0)", family_total_delta);
+        }
+        
+        // Check if strategies collapse
+        if total_actions_applied == 0 || (total_actions_rejected > 0 && total_actions_applied < 10) {
+            println!();
+            println!("WARNING: Rome scripted strategies may collapse into nearly identical paths");
+            println!("  under current action economy. Check:");
+            println!("  - actions_per_tick limit");
+            println!("  - availability gates");
+            println!("  - whether enough actions are actually available");
+        }
+        
+        println!();
+        println!("Actions applied by type:");
+        let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
+        sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
+        for (action_id, count) in sorted_actions {
+            println!("  - {}: {}", action_id, count);
+        }
+    } else {
+        // Constantinople summary
+        let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+        let byz_final = world.actors.get("byzantium")
+            .map(|a| a.metrics.external_pressure)
+            .unwrap_or(0.0);
+        let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
 
-    println!();
-    println!("=== SCRIPTED STRATEGY: {} ===", strategy.name().to_uppercase());
-    println!("Victory achieved:      {}", if world.victory_achieved { "yes" } else { "no" });
-    println!("Victory tick:          {}", if world.victory_achieved { format!("{}", world.tick) } else { "not achieved".to_string() });
-    println!("Federation progress:   {:5.1} -> {:5.1}  (max: {:5.1})", 0.0, fed_final, max_federation);
-    println!("Byzantium pressure:    {:5.1} -> {:5.1}", 0.0, byz_final);
-    println!("Byzantium collapsed:   {}", if byz_dead { "yes" } else { "no" });
-    println!("Total actions applied: {}", total_actions_applied);
-    println!("Total actions rejected: {}", total_actions_rejected);
-    println!();
-    println!("Actions applied by type:");
-    let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
-    sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
-    for (action_id, count) in sorted_actions {
-        println!("  - {}: {}", action_id, count);
+        println!();
+        println!("=== SCRIPTED STRATEGY: {} ===", strategy.name().to_uppercase());
+        println!("Victory achieved:      {}", if world.victory_achieved { "yes" } else { "no" });
+        println!("Victory tick:          {}", if world.victory_achieved { format!("{}", world.tick) } else { "not achieved".to_string() });
+        println!("Federation progress:   {:5.1} -> {:5.1}  (max: {:5.1})", 0.0, fed_final, max_federation);
+        println!("Byzantium pressure:    {:5.1} -> {:5.1}", 0.0, byz_final);
+        println!("Byzantium collapsed:   {}", if byz_dead { "yes" } else { "no" });
+        println!("Total actions applied: {}", total_actions_applied);
+        println!("Total actions rejected: {}", total_actions_rejected);
+        println!();
+        println!("Actions applied by type:");
+        let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
+        sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
+        for (action_id, count) in sorted_actions {
+            println!("  - {}: {}", action_id, count);
+        }
     }
 }
 
