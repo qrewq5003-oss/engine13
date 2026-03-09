@@ -1,5 +1,6 @@
 use crate::core::{MetricRef, WorldState};
 use crate::scenarios::registry;
+use rand::SeedableRng;
 
 #[test]
 fn test_metric_ref_parse_actor() {
@@ -215,7 +216,8 @@ fn test_scenario_victory_requires_byzantium_alive() {
     }
     
     // Run check_victory_condition via tick
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     
     // victory_achieved should be false because pressure is too high
     assert!(!world.victory_achieved, "Victory should not be achieved when pressure > 85");
@@ -226,7 +228,8 @@ fn test_scenario_victory_requires_byzantium_alive() {
     }
     
     // Run tick again
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     
     // victory_sustained_ticks should be 1, victory_achieved still false (needs 3 ticks)
     assert_eq!(world.victory_sustained_ticks, 1, "Should have 1 sustained tick");
@@ -256,8 +259,10 @@ fn test_victory_sustained_ticks_resets() {
     }
     
     // Run 2 ticks - should accumulate sustained ticks
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     
     assert_eq!(world.victory_sustained_ticks, 2, "Should have 2 sustained ticks");
     
@@ -267,7 +272,8 @@ fn test_victory_sustained_ticks_resets() {
     }
     
     // Run another tick - should reset sustained ticks
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     
     assert_eq!(world.victory_sustained_ticks, 0, "Sustained ticks should reset when condition fails");
 }
@@ -297,7 +303,8 @@ fn test_generation_transfer_applies_inheritance() {
     let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
     
     // Run tick - should trigger generation transfer
-    crate::engine::tick(&mut world, &scenario, &mut event_log);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     
     // Check patriarch_age reset to start age
     assert_eq!(world.family_state.as_ref().unwrap().patriarch_age, gen.patriarch_start_age, "Patriarch age should reset");

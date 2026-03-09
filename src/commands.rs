@@ -14,6 +14,7 @@ pub struct AppState {
     pub world_state: Option<WorldState>,
     pub event_log: EventLog,
     pub current_scenario: Option<Scenario>,
+    pub rng: Option<rand_chacha::ChaCha8Rng>,
 }
 
 impl Default for AppState {
@@ -22,6 +23,7 @@ impl Default for AppState {
             world_state: None,
             event_log: EventLog::new(),
             current_scenario: None,
+            rng: None,
         }
     }
 }
@@ -125,8 +127,9 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+    let rng = state.rng.as_mut().ok_or("No RNG initialized")?;
 
-    tick(world_state, scenario, &mut state.event_log);
+    tick(world_state, scenario, &mut state.event_log, rng);
 
     let scenario_clone = scenario.clone();
     let event_log_clone = state.event_log.clone();

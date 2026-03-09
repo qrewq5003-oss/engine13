@@ -91,6 +91,12 @@ pub fn load_game(
         world_state.family_state = family_state;
     }
 
+    // Initialize RNG from world state seed
+    // NOTE: RNG sequence restarts from seed after load, not from exact saved position.
+    // This is an accepted limitation — save/load does not guarantee identical continuation.
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));
+
     state.world_state = Some(world_state.clone());
     state.event_log = crate::engine::EventLog::new();
 
@@ -144,6 +150,10 @@ pub fn load_scenario(
 
     // Set generation_mechanics from scenario
     world_state.generation_mechanics = scenario.generation_mechanics.clone();
+
+    // Initialize RNG from world state seed
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));
 
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);

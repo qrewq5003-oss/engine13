@@ -49,9 +49,10 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
 
     let mut stats = SimStats::default();
     let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     for tick_num in 0..ticks {
-        tick(&mut world, &scenario, &mut event_log);
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
         let events: Vec<Event> = event_log.events.iter()
             .filter(|e| e.tick == tick_num)
             .cloned()
@@ -90,9 +91,10 @@ fn run_batch(scenario_id: &str, ticks: u32) {
 
         let mut stats = BatchStats::default();
         let mut event_log = EventLog::new();
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
         for tick_num in 0..ticks {
-            tick(&mut world, &scenario, &mut event_log);
+            tick(&mut world, &scenario, &mut event_log, &mut rng);
             let events: Vec<Event> = event_log.events.iter()
                 .filter(|e| e.tick == tick_num)
                 .cloned()

@@ -19,6 +19,9 @@ fn setup_rome_state() -> AppState {
     }
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
+    // Initialize RNG for tests
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
     state
 }
 
@@ -33,6 +36,9 @@ fn setup_constantinople_state() -> AppState {
     }
     state.current_scenario = Some(scenario);
     state.world_state = Some(world_state);
+    // Initialize RNG for tests
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
     state
 }
 

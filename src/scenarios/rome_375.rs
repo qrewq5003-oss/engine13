@@ -1600,6 +1600,7 @@ mod tests {
     use super::*;
     use crate::core::WorldState;
     use crate::engine::{tick, EventLog};
+    use rand::SeedableRng;
 
     #[test]
     fn test_load_rome_375_has_actors() {
@@ -1661,8 +1662,9 @@ mod tests {
 
         let initial_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;
 
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
         for _ in 0..10 {
-            tick(&mut world, &scenario, &mut event_log);
+            tick(&mut world, &scenario, &mut event_log, &mut rng);
         }
 
         let final_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;

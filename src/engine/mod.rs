@@ -172,21 +172,21 @@ impl EventLog {
 /// Canonical 8-phase pipeline:
 /// 1. Auto-deltas via MetricRef (treasury, scenario metrics)
 /// 2. Dependency graph and interactions
-/// 3. Actor tag effects
-/// 4. Clamp metrics to bounds
-/// 5. Events: thresholds, ranks, milestones, game mode, relevance
-/// 6. Actor collapses
-/// 7. Record changes and generation mechanics
-/// 8. Advance tick state
-pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
-    use rand::SeedableRng;
-    use rand_chacha::ChaCha8Rng;
-
+/// 3. Random events
+/// 4. Actor tag effects
+/// 5. Clamp metrics to bounds
+/// 6. Events: thresholds, ranks, milestones, game mode, relevance
+/// 7. Actor collapses
+/// 8. Record changes and generation mechanics
+/// 9. Advance tick state
+pub fn tick(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    event_log: &mut EventLog,
+    rng: &mut rand_chacha::ChaCha8Rng,
+) {
     let current_tick = world.tick;
     let current_year = world.year;
-
-    // Initialize RNG once at the start of the tick
-    let mut rng = ChaCha8Rng::from_seed(world.rng_state);
 
     // Store initial state for event comparison
     let initial_states: HashMap<String, ActorMetrics> = world
@@ -196,13 +196,13 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
         .collect();
 
     // Phase 1: Auto-deltas via MetricRef
-    phase_auto_deltas(world, scenario, &mut rng);
+    phase_auto_deltas(world, scenario, rng);
 
     // Phase 2: Dependency graph and interactions
-    phase_interactions(world, scenario, event_log, &mut rng);
+    phase_interactions(world, scenario, event_log, rng);
 
     // Phase 3: Random events
-    phase_random_events(world, scenario, event_log, &mut rng);
+    phase_random_events(world, scenario, event_log, rng);
 
     // Phase 4: Actor tag effects
     phase_actor_tags(world, scenario);
@@ -220,7 +220,7 @@ pub fn tick(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLo
     phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
 
     // Phase 9: Advance tick state
-    phase_advance(world, scenario, &mut rng);
+    phase_advance(world, scenario);
 }
 
 // ============================================================================
@@ -491,8 +491,7 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &Ha
 // Phase 8: Advance tick state
 // ============================================================================
 
-fn phase_advance(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
-    world.rng_state = rng.get_seed();
+fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     world.tick += 1;
     world.year += scenario.tick_span as i32;
     world.actions_this_tick = 0;
@@ -1582,6 +1581,7 @@ fn calculate_metric_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     #[test]
     fn test_tick_advances_time() {
@@ -1618,11 +1618,12 @@ mod tests {
             initial_family_metrics: None,
         };
         let mut event_log = EventLog::new();
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
 
         let initial_tick = world.tick;
         let initial_year = world.year;
 
-        tick(&mut world, &scenario, &mut event_log);
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
 
         assert_eq!(world.tick, initial_tick + 1);
         assert_eq!(world.year, initial_year + 5);
