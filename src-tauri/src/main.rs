@@ -198,12 +198,7 @@ fn cmd_get_relevant_events(
 ) -> Result<Vec<engine13::Event>, String> {
     eprintln!("[RUST] cmd_get_relevant_events - acquiring lock");
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    // For now, just get events for the first actor (relevance scoring is next step)
-    let result = if let Some(actor_id) = actor_ids.first() {
-        commands::get_relevant_events(&*db_guard, actor_id.clone())
-    } else {
-        Ok(vec![])
-    };
+    let result = commands::get_relevant_events(&*db_guard, actor_ids);
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }

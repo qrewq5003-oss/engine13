@@ -173,16 +173,23 @@ impl Actor {
     }
 
     /// Calculate derived power_projection metric
-    pub fn power_projection(&self, era_modifier: f64) -> f64 {
-        let treasury_modifier = if self.metrics.treasury > 500.0 {
-            1.2
-        } else if self.metrics.treasury > 0.0 {
-            1.0
-        } else {
-            0.7
-        };
+    /// Normalized relative to max military_size among living actors
+    pub fn power_projection(&self, era_modifier: f64, max_military_size: f64) -> f64 {
+        const TREASURY_NORM_CAP: f64 = 500.0; // treasury >= 500 counts as full contribution
 
-        (self.metrics.military_size * 0.4 + self.metrics.military_quality * 0.4 + treasury_modifier * 0.2)
-            * era_modifier
+        let military_size_norm = if max_military_size > 0.0 {
+            (self.metrics.military_size / max_military_size).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let military_quality_norm = (self.metrics.military_quality / 100.0).clamp(0.0, 1.0);
+        let treasury_norm = (self.metrics.treasury / TREASURY_NORM_CAP).clamp(0.0, 1.0);
+
+        let power_projection =
+            military_size_norm * 0.45 +
+            military_quality_norm * 0.35 +
+            treasury_norm * 0.20;
+
+        power_projection * 100.0 * era_modifier
     }
 }

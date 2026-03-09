@@ -347,9 +347,10 @@ const App: React.FC = () => {
         <div className="header-left">
           <h1 className="app-title">ENGINE13</h1>
           <span className="app-subtitle">
-            {worldState.scenario_id === 'rome_375' ? 'Rome 375 — Семья Ди Милано' :
-             worldState.scenario_id === 'constantinople_1430' ? 'Constantinople 1430 — Федерация' :
-             worldState.scenario_id}
+            {(() => {
+              const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+              return scenario?.label ?? worldState.scenario_id;
+            })()}
           </span>
         </div>
         <button
@@ -375,10 +376,14 @@ const App: React.FC = () => {
       {worldState?.victory_achieved && (
         <VictoryScreen
           worldState={worldState}
-          victoryTitle={worldState.scenario_id === 'constantinople_1430' ? 'Федерация Севера основана' :
-                      worldState.scenario_id === 'rome_375' ? 'Семья достигла величия' : 'Победа!'}
-          victoryDescription={worldState.scenario_id === 'constantinople_1430' ? 'Торговые республики объединились. Константинополь получил шанс на спасение.' :
-                              worldState.scenario_id === 'rome_375' ? 'Ди Милано стали опорой угасающей империи.' : 'Вы достигли цели сценария.'}
+          victoryTitle={(() => {
+            const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+            return scenario?.victory_title ?? 'Победа!';
+          })()}
+          victoryDescription={(() => {
+            const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+            return scenario?.victory_description ?? 'Вы достигли цели сценария.';
+          })()}
           onContinue={() => {}}
           onNewGame={() => setGameState('menu')}
         />

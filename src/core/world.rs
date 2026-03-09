@@ -77,10 +77,10 @@ pub struct WorldState {
     pub metric_history: HashMap<String, VecDeque<f64>>,
     /// Ticks since last internal upheaval for each actor - for background return check
     pub actor_upheaval_ticks: HashMap<String, u32>,
-    /// RNG seed - generated once at scenario start, preserved for reproducibility
+    /// RNG seed - generated once at scenario start, preserved for reproducibility.
+    /// NOTE: After load_game(), RNG restarts from rng_seed, not from saved position.
+    /// This is an accepted limitation — save/load does not guarantee identical continuation.
     pub rng_seed: u64,
-    /// RNG state - serialized/deserialized with WorldState for save/load
-    pub rng_state: [u8; 32],
     /// Previous tick metrics for each actor - for calculating deltas
     pub prev_metrics: HashMap<String, ActorMetrics>,
     /// Ticks since last narrative trigger - for time-based trigger
@@ -115,18 +115,11 @@ pub struct WorldState {
 
 impl WorldState {
     pub fn new(scenario_id: String, start_year: i32) -> Self {
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
-
         // Generate random seed for new game
         let rng_seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64;
-
-        // Initialize RNG and capture its state
-        let rng = ChaCha8Rng::seed_from_u64(rng_seed);
-        let rng_state = rng.get_seed();
 
         Self {
             tick: 0,
@@ -143,7 +136,6 @@ impl WorldState {
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
-            rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
@@ -163,7 +155,7 @@ impl WorldState {
     }
 
     /// Create WorldState with explicit seed (for save/load)
-    pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64, rng_state: [u8; 32]) -> Self {
+    pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64) -> Self {
         Self {
             tick: 0,
             year: start_year,
@@ -179,7 +171,6 @@ impl WorldState {
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
-            rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),

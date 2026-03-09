@@ -41,7 +41,7 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
     let scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
 
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed, [0u8; 32]);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
 
     // Initialize actors from scenario
     for actor in &scenario.actors {
@@ -97,7 +97,7 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     let mut events_per_run: Vec<u32> = vec![];
 
     for seed in 0..100u64 {
-        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed, [0u8; 32]);
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
 
         // Initialize actors from scenario
         for actor in &scenario.actors {
@@ -160,7 +160,7 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
     let scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
 
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42, [0u8; 32]);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
 
     // Initialize actors from scenario
     for actor in &scenario.actors {

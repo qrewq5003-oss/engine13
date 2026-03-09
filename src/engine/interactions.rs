@@ -240,7 +240,7 @@ fn calculate_military_interaction(
     let eff_mil_b = effective_military(actor_b, actor_b_neighbors);
 
     // Determine stronger (attacker) and weaker (defender) actor by effective military
-    let (attacker_id, defender_id, attacker_eff, defender_eff) = if eff_mil_a >= eff_mil_b {
+    let (attacker_id, defender_id, _attacker_eff, _defender_eff) = if eff_mil_a >= eff_mil_b {
         (actor_a_id.to_string(), actor_b_id.to_string(), eff_mil_a, eff_mil_b)
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string(), eff_mil_b, eff_mil_a)
@@ -282,9 +282,6 @@ fn calculate_military_interaction(
     if roll > final_prob {
         return;
     }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Military: {} vs {}", attacker_id, defender_id);
 
     // Apply losses
     let attacker_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
@@ -331,7 +328,7 @@ fn calculate_trade_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
@@ -373,9 +370,6 @@ fn calculate_trade_interaction(
     // Set cooldown
     world.interaction_cooldowns.insert(trade_key, current_tick);
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Trade: {} vs {}", actor_a_id, actor_b_id);
-
     // Record event if significant
     if should_record_event(&InteractionType::Trade, bonus) {
         let event = Event::new(
@@ -400,7 +394,7 @@ fn calculate_diplomatic_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
@@ -423,9 +417,6 @@ fn calculate_diplomatic_interaction(
     if let Some(influenced) = world.actors.get_mut(&influenced_id) {
         influenced.metrics.cohesion = (influenced.metrics.cohesion + influence).min(100.0);
     }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Diplomatic: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
     if should_record_event(&InteractionType::Diplomatic, influence) {
@@ -452,7 +443,7 @@ fn calculate_migration_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     // Condition: border Land, external_pressure > 65, cohesion < 40
     if border_type != crate::core::BorderType::Land {
@@ -509,9 +500,6 @@ fn calculate_migration_interaction(
         neighbor.metrics.population += pop_gain;
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Migration: {} vs {}", actor_a_id, actor_b_id);
-
     // Record event if significant
     if should_record_event(&InteractionType::Migration, pressure_transfer) {
         let event = Event::new(
@@ -559,9 +547,6 @@ fn calculate_cultural_interaction(
     if let Some(actor) = world.actors.get_mut(actor_b_id) {
         actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
     }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Cultural: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event rarely — only if cohesion changed > 3.0
     if should_record_event(&InteractionType::Cultural, cohesion_change.abs()) {

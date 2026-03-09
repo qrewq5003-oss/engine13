@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
-    Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
+    ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
 use serde::Serialize;
@@ -313,9 +313,6 @@ fn phase_random_events(
     let mut shuffled_events = all_events;
     shuffled_events.shuffle(rng);
 
-    #[cfg(debug_assertions)]
-    eprintln!("[RANDOM_EVENTS] tick={} checking {} events", world.tick, shuffled_events.len());
-
     // Get sea actor IDs for SeaActors target
     let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
         .filter(|a| a.tags.contains(&"maritime".to_string()) || a.tags.contains(&"trade_empire".to_string()))
@@ -345,8 +342,6 @@ fn phase_random_events(
 
         // Roll for event probability
         let roll: f64 = rng.gen();
-        #[cfg(debug_assertions)]
-        eprintln!("[RANDOM_EVENTS] event='{}' prob={:.3} roll={:.3}", event.id, event.probability, roll);
 
         if roll > event.probability {
             continue;
@@ -385,9 +380,6 @@ fn phase_random_events(
                 cond.operator.evaluate(value, cond.value)
             });
 
-            #[cfg(debug_assertions)]
-            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' conditions_met={}", event.id, target_id, conditions_met);
-
             if !conditions_met {
                 continue;
             }
@@ -409,9 +401,6 @@ fn phase_random_events(
                 event.llm_context.clone(),
             );
             event_log.add(event_record);
-
-            #[cfg(debug_assertions)]
-            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' FIRED", event.id, target_id);
 
             // Increment fired counter
             fired_this_tick += 1;
@@ -904,10 +893,6 @@ fn check_milestone_events(
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
-
-            // Log milestone firing
-            eprintln!("[MILESTONE] {} fired at year {}", milestone.id, current_year);
-
             // Apply one-time effects for specific milestones
             apply_milestone_effects(world, &milestone.id);
 
@@ -978,8 +963,7 @@ fn check_game_mode_transitions(
                 "Сценарий завершён. Симуляция продолжается в режиме последствий.".to_string(),
             );
             event_log.add(event);
-            
-            eprintln!("[GAME_MODE] Transitioned to Consequences mode at tick {}", world.tick);
+
             return; // Only one transition per tick
         }
     }
@@ -995,9 +979,14 @@ fn check_relevance_thresholds(
     let current_tick = world.tick;
     let current_year = world.year;
 
+    // Calculate max military_size for normalization
+    let max_military_size = world.actors.values()
+        .map(|a| a.metrics.military_size)
+        .fold(1.0_f64, f64::max);
+
     // Calculate average power projection for all active actors
     let avg_power_projection: f64 = world.actors.values()
-        .map(|a| a.power_projection(1.0))
+        .map(|a| a.power_projection(1.0, max_military_size))
         .sum::<f64>() / world.actors.len().max(1) as f64;
 
     // Get list of narrative actor IDs for contact check (collect as owned Strings to avoid borrow issues)
@@ -1014,22 +1003,19 @@ fn check_relevance_thresholds(
             continue; // Already foreground
         }
 
-        let power_proj = actor.power_projection(1.0);
+        let power_proj = actor.power_projection(1.0, max_military_size);
 
         // Condition 1: Power projection > 70% of average
         let condition_power = power_proj > avg_power_projection * 0.7;
 
-        // Condition 2: Contact with narrative actor (simplified - military pressure only)
-        // TODO: Full implementation should check trade, culture, migration interactions
-        // For now, use external_pressure as proxy for military pressure from narrative actors
+        // Condition 2: Contact with narrative actor via neighbor relationship
+        // Check if this actor is a neighbor (distance <= 2) of any foreground actor
         let condition_contact = narrative_actor_ids.iter()
             .filter(|narr_id| narr_id.as_str() != actor_id.as_str())
             .any(|narr_id| {
-                if let Some(_narr_actor) = world.actors.get(narr_id) {
-                    // Check if this actor has high external_pressure (proxy for military pressure)
-                    // and the narrative actor is the source
-                    // Simplified: just check if actor's external_pressure is high
-                    actor.metrics.external_pressure > 40.0 && power_proj > 50.0
+                // Check if narrative actor has this actor as a neighbor with distance <= 2
+                if let Some(narr_actor) = world.actors.get(narr_id) {
+                    narr_actor.neighbors.iter().any(|n| n.id == *actor_id && n.distance <= 2)
                 } else {
                     false
                 }
@@ -1066,8 +1052,6 @@ fn check_relevance_thresholds(
                 format!("{} вышел на передний план: {}", actor.name, reasons.join(", ")),
             );
             event_log.add(event);
-
-            eprintln!("[THRESHOLD] Actor {} gained foreground status: {}", actor_id, reasons.join(", "));
         }
     }
 
@@ -1088,7 +1072,7 @@ fn check_relevance_thresholds(
             continue; // Already background
         }
 
-        let power_proj = actor.power_projection(1.0);
+        let power_proj = actor.power_projection(1.0, max_military_size);
 
         // Condition for return to background:
         // power_projection < 40% of average
@@ -1099,13 +1083,14 @@ fn check_relevance_thresholds(
         // Check for recent upheaval
         let recent_upheaval = world.actor_upheaval_ticks.get(actor_id).copied().unwrap_or(0) < 10;
 
-        // Check for interactions with narrative actors (simplified)
+        // Check for interactions with narrative actors via neighbor relationship
         let has_narrative_contact = narrative_actor_ids.iter()
             .filter(|&narr_id| narr_id != actor_id)
             .any(|narr_id| {
                 if let Some(narr_actor) = world.actors.get(narr_id) {
-                    // Simplified: check if either actor has high external_pressure
-                    actor.metrics.external_pressure > 30.0 || narr_actor.metrics.external_pressure > 30.0
+                    // Check if either actor is a neighbor of the other with distance <= 2
+                    narr_actor.neighbors.iter().any(|n| n.id == *actor_id && n.distance <= 2)
+                        || actor.neighbors.iter().any(|n| n.id == *narr_id && n.distance <= 2)
                 } else {
                     false
                 }
@@ -1124,8 +1109,6 @@ fn check_relevance_thresholds(
                 format!("{} вернулся в фон: низкая релевантность", actor.name),
             );
             event_log.add(event);
-
-            eprintln!("[THRESHOLD] Actor {} lost foreground status: low relevance", actor_id);
         }
     }
 

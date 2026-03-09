@@ -189,10 +189,69 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<crate::applic
     crate::application::list_saves_with_slots(db, scenario_id)
 }
 
-/// Get relevant events for an actor
-pub fn get_relevant_events(db: &Db, actor_id: String) -> Result<Vec<Event>, String> {
-    db.get_events_by_actor(&actor_id)
-        .map_err(|e| format!("Failed to get events: {}", e))
+/// Get relevant events with scoring based on importance, actor relevance, temporal decay, and narrative status
+pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>) -> Result<Vec<Event>, String> {
+    // Fetch all events for the provided actor IDs
+    let mut all_events: Vec<Event> = Vec::new();
+    for actor_id in &actor_ids {
+        let events = db.get_events_by_actor(actor_id)
+            .map_err(|e| format!("Failed to get events: {}", e))?;
+        all_events.extend(events);
+    }
+
+    // Get current world state for narrative status lookup
+    // For now, we'll use a simplified approach - foreground actors get higher weight
+    let foreground_ids: Vec<String> = actor_ids;
+
+    // Score and sort events
+    let mut scored_events: Vec<(Event, f64)> = all_events
+        .into_iter()
+        .map(|event| {
+            let score = calculate_event_relevance(&event, &foreground_ids);
+            (event, score)
+        })
+        .collect();
+
+    // Sort by score descending
+    scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Return top 20 events
+    Ok(scored_events.into_iter().take(20).map(|(e, _)| e).collect())
+}
+
+/// Calculate relevance score for an event
+/// score = event_importance_weight * actor_relevance_weight * temporal_decay * narrative_status_weight
+fn calculate_event_relevance(event: &Event, foreground_ids: &[String]) -> f64 {
+    use crate::EventType;
+
+    // Temporal decay - use step function based on age
+    let current_tick = event.tick; // In real impl, would get current tick from world state
+    let age_in_ticks = current_tick.saturating_sub(event.tick);
+    let temporal_decay = match age_in_ticks {
+        0..=2 => 1.0,
+        3..=5 => 0.7,
+        6..=10 => 0.4,
+        _ => 0.2,
+    };
+
+    // Event importance weight
+    let importance_weight = match event.event_type {
+        EventType::Collapse | EventType::Milestone => 3.0,
+        EventType::PlayerAction | EventType::War => 2.0,
+        _ => 1.0,
+    };
+
+    // Narrative status weight - foreground actors get higher weight
+    let narrative_weight = if foreground_ids.contains(&event.actor_id) {
+        1.5
+    } else {
+        1.0
+    };
+
+    // Actor relevance - events for key actors are more relevant
+    let actor_relevance = 1.0; // Simplified - could check if actor is player-controlled
+
+    importance_weight * actor_relevance * temporal_decay * narrative_weight
 }
 
 /// Status indicator state for UI

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use tauri::Emitter;
 
-use crate::core::{ActorDelta, Event, Scenario, WorldState};
+use crate::core::{ActorDelta, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 
