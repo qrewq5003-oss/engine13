@@ -515,11 +515,27 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
     let mut rome_cohesion_start = 0.0;
     let mut rome_military_start = 0.0;
     
-    // Metric flow tracking for Rome
-    let mut influence_gained_from_actions = 0.0;
-    let mut influence_lost_from_action_costs = 0.0;
-    let mut wealth_gained_from_actions = 0.0;
-    let mut wealth_lost_from_action_costs = 0.0;
+    // ========================================================================
+    // DIAGNOSTIC CODE: Precise Rome metric flow accounting
+    // This is temporary diagnostic code to verify action effects vs costs vs auto-deltas.
+    // Can be simplified after accounting convergence is verified.
+    // ========================================================================
+    // Metric flow tracking for Rome - separate buckets for effects and costs
+    let mut influence_effect_gain = 0.0;
+    let mut influence_effect_loss = 0.0;
+    let mut influence_cost_gain = 0.0;
+    let mut influence_cost_loss = 0.0;
+    let mut wealth_effect_gain = 0.0;
+    let mut wealth_effect_loss = 0.0;
+    let mut wealth_cost_gain = 0.0;
+    let mut wealth_cost_loss = 0.0;
+    
+    // Per-action breakdown for key actions
+    let mut lay_low_wealth_effect = 0.0;
+    let mut lay_low_influence_cost = 0.0;
+    let mut invest_wealth_wealth_effect = 0.0;
+    let mut invest_wealth_connections_cost = 0.0;
+    // ========================================================================
 
     // Capture initial family metrics for Rome
     if scenario_id == "rome_375" {
@@ -555,10 +571,6 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         let mut applied_this_tick = 0u32;
         let mut rejected_this_tick = 0u32;
         let mut actions_applied = Vec::new();
-        
-        // Track metric changes from actions for Rome
-        let mut influence_delta_this_tick = 0.0;
-        let mut wealth_delta_this_tick = 0.0;
 
         for action_id in &priority_actions {
             if applied_this_tick >= scenario.actions_per_tick {
@@ -577,28 +589,60 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
                     actions_applied.push(*action_id);
                     *actions_by_type.entry(*action_id).or_insert(0) += 1;
                     
-                    // Track metric flow for Rome
+                    // Track metric flow for Rome - separate effects and costs
                     if scenario_id == "rome_375" {
-                        // Get action details to track effects/costs
+                        // Get action details to track effects/costs separately
                         if let Some(action) = state.current_scenario.as_ref().unwrap().patron_actions.iter().find(|a| a.id == *action_id) {
+                            // Track effects (typically positive)
                             for (metric, delta) in &action.effects {
                                 // Normalize metric key: strip "family:" and "family_" prefixes
                                 let normalized = metric.strip_prefix("family:").unwrap_or(metric).strip_prefix("family_").unwrap_or(metric);
                                 if normalized == "influence" {
-                                    influence_delta_this_tick += delta;
+                                    if *delta > 0.0 {
+                                        influence_effect_gain += delta;
+                                    } else {
+                                        influence_effect_loss += delta.abs();
+                                    }
                                 }
                                 if normalized == "wealth" {
-                                    wealth_delta_this_tick += delta;
+                                    if *delta > 0.0 {
+                                        wealth_effect_gain += delta;
+                                    } else {
+                                        wealth_effect_loss += delta.abs();
+                                    }
+                                }
+                                // Per-action breakdown for key actions
+                                if *action_id == "lay_low" && normalized == "wealth" {
+                                    lay_low_wealth_effect += delta;
+                                }
+                                if *action_id == "invest_wealth" && normalized == "wealth" {
+                                    invest_wealth_wealth_effect += delta;
                                 }
                             }
+                            // Track costs (typically negative)
                             for (metric, cost) in &action.cost {
                                 // Normalize metric key
                                 let normalized = metric.strip_prefix("family:").unwrap_or(metric).strip_prefix("family_").unwrap_or(metric);
                                 if normalized == "influence" {
-                                    influence_delta_this_tick += cost; // cost is negative
+                                    if *cost > 0.0 {
+                                        influence_cost_gain += cost;
+                                    } else {
+                                        influence_cost_loss += cost.abs();
+                                    }
                                 }
                                 if normalized == "wealth" {
-                                    wealth_delta_this_tick += cost; // cost is negative
+                                    if *cost > 0.0 {
+                                        wealth_cost_gain += cost;
+                                    } else {
+                                        wealth_cost_loss += cost.abs();
+                                    }
+                                }
+                                // Per-action breakdown for key actions
+                                if *action_id == "lay_low" && normalized == "influence" {
+                                    lay_low_influence_cost += cost.abs();
+                                }
+                                if *action_id == "invest_wealth" && normalized == "connections" {
+                                    invest_wealth_connections_cost += cost.abs();
                                 }
                             }
                         }
@@ -607,20 +651,6 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
                 Err(_) => {
                     rejected_this_tick += 1;
                 }
-            }
-        }
-        
-        // Accumulate flow tracking
-        if scenario_id == "rome_375" {
-            if influence_delta_this_tick > 0.0 {
-                influence_gained_from_actions += influence_delta_this_tick;
-            } else {
-                influence_lost_from_action_costs += influence_delta_this_tick.abs();
-            }
-            if wealth_delta_this_tick > 0.0 {
-                wealth_gained_from_actions += wealth_delta_this_tick;
-            } else {
-                wealth_lost_from_action_costs += wealth_delta_this_tick.abs();
             }
         }
 
@@ -728,12 +758,19 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         
         // Calculate auto_delta influence loss (net delta minus action contributions)
         let influence_net_delta = family_influence_final - family_influence_start;
-        let influence_from_actions = influence_gained_from_actions - influence_lost_from_action_costs;
+        let influence_from_actions = influence_effect_gain - influence_effect_loss + influence_cost_gain - influence_cost_loss;
         let influence_from_auto_deltas = influence_net_delta - influence_from_actions;
         
         let wealth_net_delta = family_wealth_final - family_wealth_start;
-        let wealth_from_actions = wealth_gained_from_actions - wealth_lost_from_action_costs;
+        let wealth_from_actions = wealth_effect_gain - wealth_effect_loss + wealth_cost_gain - wealth_cost_loss;
         let wealth_from_auto_deltas = wealth_net_delta - wealth_from_actions;
+        
+        // Convergence check
+        let influence_reconstructed = influence_effect_gain - influence_effect_loss + influence_cost_gain - influence_cost_loss + influence_from_auto_deltas;
+        let influence_diff = (influence_net_delta - influence_reconstructed).abs();
+        
+        let wealth_reconstructed = wealth_effect_gain - wealth_effect_loss + wealth_cost_gain - wealth_cost_loss + wealth_from_auto_deltas;
+        let wealth_diff = (wealth_net_delta - wealth_reconstructed).abs();
 
         println!();
         println!("=== SCRIPTED STRATEGY: {} (ROME 375) ===", strategy.name().to_uppercase());
@@ -759,17 +796,74 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         // Metric flow diagnostics
         println!();
         println!("=== ROME METRIC FLOW: INFLUENCE ===");
-        println!("gained from actions:        {:+.1}", influence_gained_from_actions);
-        println!("lost from action costs:     {:+.1}", -influence_lost_from_action_costs);
-        println!("lost/gained from auto_deltas: {:+.1}", influence_from_auto_deltas);
-        println!("net delta:                  {:+.1}", influence_net_delta);
+        println!("action effects gain:      {:+.1}", influence_effect_gain);
+        println!("action effects loss:      {:+.1}", -influence_effect_loss);
+        println!("action costs gain:        {:+.1}", influence_cost_gain);
+        println!("action costs loss:        {:+.1}", -influence_cost_loss);
+        println!("auto-deltas gain/loss:    {:+.1}", influence_from_auto_deltas);
+        println!("net delta:                {:+.1}", influence_net_delta);
+        
+        // Convergence warning
+        if influence_diff > 0.5 {
+            println!();
+            println!("WARNING: influence flow accounting mismatch (diff = {:.2})", influence_diff);
+            println!("  This may indicate a bug in engine/action pipeline, not sim.rs");
+        }
         
         println!();
         println!("=== ROME METRIC FLOW: WEALTH ===");
-        println!("gained from actions:        {:+.1}", wealth_gained_from_actions);
-        println!("lost from action costs:     {:+.1}", -wealth_lost_from_action_costs);
-        println!("gained/lost from auto_deltas: {:+.1}", wealth_from_auto_deltas);
-        println!("net delta:                  {:+.1}", wealth_net_delta);
+        println!("action effects gain:      {:+.1}", wealth_effect_gain);
+        println!("action effects loss:      {:+.1}", -wealth_effect_loss);
+        println!("action costs gain:        {:+.1}", wealth_cost_gain);
+        println!("action costs loss:        {:+.1}", -wealth_cost_loss);
+        println!("auto-deltas gain/loss:    {:+.1}", wealth_from_auto_deltas);
+        println!("net delta:                {:+.1}", wealth_net_delta);
+        
+        // Convergence warning
+        if wealth_diff > 0.5 {
+            println!();
+            println!("WARNING: wealth flow accounting mismatch (diff = {:.2})", wealth_diff);
+            println!("  This may indicate a bug in engine/action pipeline, not sim.rs");
+        }
+        
+        // Per-action breakdown for key actions
+        println!();
+        println!("=== PER-ACTION METRIC IMPACT ===");
+        println!("lay_low:");
+        println!("  wealth effect total:      {:+.1}", lay_low_wealth_effect);
+        println!("  influence cost total:     {:+.1}", -lay_low_influence_cost);
+        println!("invest_wealth:");
+        println!("  wealth effect total:      {:+.1}", invest_wealth_wealth_effect);
+        println!("  connections cost total:   {:+.1}", -invest_wealth_connections_cost);
+        
+        // lay_low diagnostic
+        println!();
+        println!("=== LAY_LOW DIAGNOSTIC ===");
+        println!("Influence loss from direct action costs: {:+.1}", -lay_low_influence_cost);
+        println!("Influence loss from auto-deltas:         {:+.1}", influence_from_auto_deltas);
+        if lay_low_influence_cost > 0.0 && influence_from_auto_deltas.abs() < lay_low_influence_cost * 0.3 {
+            println!("Conclusion: influence loss is primarily from direct action costs (transparent trade-off)");
+        } else if influence_from_auto_deltas.abs() > lay_low_influence_cost * 0.5 {
+            println!("Conclusion: influence loss has significant auto-delta component (secondary penalty chain)");
+        } else {
+            println!("Conclusion: mixed - both direct costs and auto-deltas contribute");
+        }
+        
+        // Flow diagnostic summary
+        println!();
+        println!("=== FLOW DIAGNOSTIC SUMMARY ===");
+        println!();
+        println!("Influence:");
+        println!("  action effects gain:      {:+.1}", influence_effect_gain);
+        println!("  action costs loss:        {:+.1}", -influence_cost_loss);
+        println!("  auto-deltas gain/loss:    {:+.1}", influence_from_auto_deltas);
+        println!("  net delta:                {:+.1}", influence_net_delta);
+        println!();
+        println!("Wealth:");
+        println!("  action effects gain:      {:+.1}", wealth_effect_gain);
+        println!("  action costs loss:        {:+.1}", -wealth_cost_loss);
+        println!("  auto-deltas gain/loss:    {:+.1}", wealth_from_auto_deltas);
+        println!("  net delta:                {:+.1}", wealth_net_delta);
         
         // Secondary diagnostic: family_total
         println!();
