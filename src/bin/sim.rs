@@ -19,22 +19,21 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let scenario_id = args.get(1).map(|s| s.as_str()).unwrap_or("constantinople_1430");
     let ticks: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50);
-    let batch_mode = args.get(3).map(|s| s == "batch").unwrap_or(false);
-    let scripted_mode = args.get(3).map(|s| s == "scripted").unwrap_or(false);
+    let mode = args.get(3).map(|s| s.as_str()).unwrap_or("42");
 
     println!("=== ENGINE13 HEADLESS SIMULATION ===");
     println!("Scenario: {}", scenario_id);
     println!("Ticks: {}", ticks);
 
-    if batch_mode {
-        run_batch(scenario_id, ticks);
-    } else if scripted_mode {
-        run_scripted(scenario_id, ticks);
-    } else {
-        let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(42);
-        println!("Seed: {}", seed);
-        println!();
-        run_single(scenario_id, ticks, seed);
+    match mode {
+        "batch" => run_batch(scenario_id, ticks),
+        "scripted" => run_scripted(scenario_id, ticks),
+        _ => {
+            let seed: u64 = mode.parse().unwrap_or(42);
+            println!("Seed: {}", seed);
+            println!();
+            run_single(scenario_id, ticks, seed);
+        }
     }
 }
 
@@ -152,7 +151,8 @@ fn run_batch(scenario_id: &str, ticks: u32) {
 }
 
 fn run_scripted(scenario_id: &str, ticks: u32) {
-    use engine13::core::MetricRef;
+    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+    use engine13::commands::AppState;
 
     println!("Running scripted mode with priority actions");
     println!();
@@ -169,12 +169,18 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
         }
     }
 
-    let mut event_log = EventLog::new();
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    // Set up application state for using apply_player_action
+    let mut state = AppState {
+        world_state: Some(world),
+        event_log: EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
+    };
 
     // Track scripted stats
     let mut total_actions_applied = 0u32;
     let mut total_actions_rejected = 0u32;
+    let mut max_federation = 0.0;
 
     // Priority action list for Constantinople
     let priority_actions = vec![
@@ -191,43 +197,37 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
     println!("=== SCRIPTED SIMULATION ===");
 
     for tick_num in 0..ticks {
-        // Apply scripted actions before tick
+        // Capture before values
+        let fed_before = state.world_state.as_ref().unwrap()
+            .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+        let pressure_before = state.world_state.as_ref().unwrap()
+            .actors.get("byzantium")
+            .map(|a| a.metrics.external_pressure)
+            .unwrap_or(0.0);
+        let _sustained_before = state.world_state.as_ref().unwrap().victory_sustained_ticks;
+
+        // Apply scripted actions before tick using same path as UI
         let mut applied_this_tick = 0u32;
         let mut rejected_this_tick = 0u32;
+        let mut actions_applied = Vec::new();
 
         for action_id in &priority_actions {
             if applied_this_tick >= scenario.actions_per_tick {
                 break;
             }
 
-            // Try to apply action
-            if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == *action_id) {
-                // Check if action is available
-                let is_available = match &action.available_if {
-                    engine13::core::ActionCondition::Always => true,
-                    engine13::core::ActionCondition::Metric { metric, operator, value } => {
-                        let current = MetricRef::parse(metric).get(&world);
-                        match operator {
-                            engine13::core::ComparisonOperator::Less => current < *value,
-                            engine13::core::ComparisonOperator::LessOrEqual => current <= *value,
-                            engine13::core::ComparisonOperator::Greater => current > *value,
-                            engine13::core::ComparisonOperator::GreaterOrEqual => current >= *value,
-                            engine13::core::ComparisonOperator::Equal => (current - value).abs() < 0.001,
-                        }
-                    }
-                };
+            // Try to apply action through application layer
+            let action_input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
 
-                if is_available {
-                    // Apply action effects
-                    for (metric, effect) in &action.effects {
-                        MetricRef::parse(metric).apply(&mut world, *effect);
-                    }
-                    // Apply action costs
-                    for (metric, cost) in &action.cost {
-                        MetricRef::parse(metric).apply(&mut world, *cost);
-                    }
+            match apply_player_action(&mut state, &action_input) {
+                Ok(_) => {
                     applied_this_tick += 1;
-                } else {
+                    actions_applied.push(*action_id);
+                }
+                Err(_) => {
                     rejected_this_tick += 1;
                 }
             }
@@ -237,26 +237,42 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
         total_actions_rejected += rejected_this_tick;
 
         // Run tick
-        tick(&mut world, &scenario, &mut event_log, &mut rng);
+        let world_state = state.world_state.as_mut().unwrap();
+        let scenario_ref = state.current_scenario.as_ref().unwrap();
+        let rng = state.rng.as_mut().unwrap();
+        tick(world_state, scenario_ref, &mut state.event_log, rng);
 
-        // Print tick summary
-        let fed_progress = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
-        let byz_pressure = world.actors.get("byzantium")
+        // Capture after values
+        let fed_after = state.world_state.as_ref().unwrap()
+            .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+        let pressure_after = state.world_state.as_ref().unwrap()
+            .actors.get("byzantium")
             .map(|a| a.metrics.external_pressure)
             .unwrap_or(0.0);
-        println!("tick {:2}: fed={:5.1}  byz_pressure={:5.1}  actions={}/{}", 
-            tick_num, fed_progress, byz_pressure, applied_this_tick, rejected_this_tick);
+        let sustained_after = state.world_state.as_ref().unwrap().victory_sustained_ticks;
+
+        // Track max federation
+        if fed_after > max_federation {
+            max_federation = fed_after;
+        }
+
+        // Print tick summary
+        println!("tick {:2}: fed {:5.1}->{:5.1}  pressure {:5.1}->{:5.1}  sustained={}  actions=[{}]  applied={} rejected={}",
+            tick_num, fed_before, fed_after, pressure_before, pressure_after, sustained_after,
+            actions_applied.join(", "), applied_this_tick, rejected_this_tick);
 
         // Stop early if victory or collapse
+        let world = state.world_state.as_ref().unwrap();
         if world.victory_achieved || world.dead_actor_ids.iter().any(|id| id.contains("byzantium")) {
-            println!("Early termination: victory={} byzantium_dead={}", 
-                world.victory_achieved, 
+            println!("Early termination: victory={} byzantium_dead={}",
+                world.victory_achieved,
                 world.dead_actor_ids.iter().any(|id| id.contains("byzantium")));
             break;
         }
     }
 
     // Print final summary
+    let world = state.world_state.as_ref().unwrap();
     let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
     let byz_final = world.actors.get("byzantium")
         .map(|a| a.metrics.external_pressure)
@@ -264,11 +280,12 @@ fn run_scripted(scenario_id: &str, ticks: u32) {
     let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
 
     println!();
-    println!("=== FINAL SUMMARY ===");
-    println!("Federation progress final: {:.1}", fed_final);
-    println!("Byzantium pressure final:  {:.1}", byz_final);
-    println!("Victory achieved: {}", if world.victory_achieved { "yes" } else { "no" });
-    println!("Byzantium collapsed: {}", if byz_dead { "yes" } else { "no" });
+    println!("=== SCRIPTED SIM FINAL SUMMARY ===");
+    println!("Federation progress:    {:5.1} -> {:5.1}  (max: {:5.1})", 0.0, fed_final, max_federation);
+    println!("Byzantium pressure:    {:5.1} -> {:5.1}", 0.0, byz_final);
+    println!("Victory achieved:      {}", if world.victory_achieved { "yes" } else { "no" });
+    println!("Victory sustained ticks: {}", world.victory_sustained_ticks);
+    println!("Byzantium collapsed:   {}", if byz_dead { "yes" } else { "no" });
     println!("Total actions applied: {}", total_actions_applied);
     println!("Total actions rejected: {}", total_actions_rejected);
 }
