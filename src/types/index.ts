@@ -359,12 +359,7 @@ export interface SaveSlotList {
 // Family/Di Milano Specific Types
 // ============================================================================
 
-export interface FamilyMetrics {
-  family_influence: number;
-  family_knowledge: number;
-  family_wealth: number;
-  family_connections: number;
-}
+// Note: FamilyMetrics replaced by FamilyState (metrics stored in family_state.metrics)
 
 export interface Generation {
   number: number;

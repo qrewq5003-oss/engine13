@@ -237,22 +237,9 @@ fn parse_effects_summary(metadata: &str) -> Vec<String> {
         .into_iter()
         .map(|(metric, delta)| {
             let sign = if delta > 0.0 { "+" } else { "" };
-            format!("{}: {}{:.0}", format_metric_name(&metric), sign, delta)
+            format!("{}: {}{:.0}", metric, sign, delta)
         })
         .collect()
-}
-
-fn format_metric_name(metric: &str) -> String {
-    metric
-        .replace("global:federation_progress", "Федерация")
-        .replace("venice.treasury", "Казна Венеции")
-        .replace("genoa.treasury", "Казна Генуи")
-        .replace("milan.treasury", "Казна Милана")
-        .replace(".treasury", " казна")
-        .replace(".military_size", " армия")
-        .replace(".legitimacy", " легитимность")
-        .replace("family:influence", "Влияние семьи")
-        .replace("family:wealth", "Богатство семьи")
 }
 
 /// Compute status indicators from world state and scenario

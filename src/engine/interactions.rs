@@ -283,6 +283,7 @@ fn calculate_military_interaction(
         return;
     }
 
+    #[cfg(debug_assertions)]
     eprintln!("[INTERACTION] Military: {} vs {}", attacker_id, defender_id);
 
     // Apply losses
@@ -372,6 +373,7 @@ fn calculate_trade_interaction(
     // Set cooldown
     world.interaction_cooldowns.insert(trade_key, current_tick);
 
+    #[cfg(debug_assertions)]
     eprintln!("[INTERACTION] Trade: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
@@ -422,6 +424,7 @@ fn calculate_diplomatic_interaction(
         influenced.metrics.cohesion = (influenced.metrics.cohesion + influence).min(100.0);
     }
 
+    #[cfg(debug_assertions)]
     eprintln!("[INTERACTION] Diplomatic: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
@@ -506,6 +509,7 @@ fn calculate_migration_interaction(
         neighbor.metrics.population += pop_gain;
     }
 
+    #[cfg(debug_assertions)]
     eprintln!("[INTERACTION] Migration: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
@@ -556,6 +560,7 @@ fn calculate_cultural_interaction(
         actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
     }
 
+    #[cfg(debug_assertions)]
     eprintln!("[INTERACTION] Cultural: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event rarely — only if cohesion changed > 3.0
