@@ -176,14 +176,17 @@ const App: React.FC = () => {
   }, []);
 
   // Refresh narrative (streaming - uses current world state from API)
-  const refreshNarrative = useCallback(async () => {
+  const refreshNarrative = useCallback(async (stateForNarrative?: WorldState) => {
     try {
       setNarrativeLoading(true);
       setIsGeneratingNarrative(true);
       setNarrative(''); // Reset narrative before streaming
 
+      // Use provided state or fall back to current worldState
+      const currentState = stateForNarrative ?? worldState;
+
       // Determine half-year based on tick - even ticks are FirstHalf, odd are SecondHalf
-      const halfYear: HalfYear = worldState && worldState.tick % 2 === 0 ? 'first_half' : 'second_half';
+      const halfYear: HalfYear = currentState && currentState.tick % 2 === 0 ? 'first_half' : 'second_half';
 
       await getNarrative(
         (chunk) => {
@@ -199,9 +202,9 @@ const App: React.FC = () => {
         (error) => {
           // Error handling - use placeholder
           console.error('[Narrative] Error:', error);
-          const placeholder = worldState
-            ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
-            : 'Медиолан. Семья наблюдает за судьбой Империи.';
+          const placeholder = currentState
+            ? `${currentState.year} год. Хроника продолжается.`
+            : 'Хроника продолжается.';
           setNarrative(placeholder);
           setNarrativeLoading(false);
           setIsGeneratingNarrative(false);
@@ -212,8 +215,8 @@ const App: React.FC = () => {
       console.error('[Narrative] Error:', err);
       // Don't show error - LLM may be unavailable, use placeholder
       const placeholder = worldState
-        ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
-        : 'Медиолан. Семья наблюдает за судьбой Империи.';
+        ? `${worldState.year} год. Хроника продолжается.`
+        : 'Хроника продолжается.';
       setNarrative(placeholder);
       setNarrativeLoading(false);
       setIsGeneratingNarrative(false);
@@ -238,8 +241,8 @@ const App: React.FC = () => {
       // Step 2: Refresh available actions and events to reflect new state
       await refreshState();
 
-      // Step 3: Generate narrative every tick (using new world state)
-      await refreshNarrative();
+      // Step 3: Generate narrative every tick (using fresh world state directly)
+      await refreshNarrative(response.world_state);
     } catch (err) {
       setError(`Failed to advance tick: ${err}`);
     } finally {
