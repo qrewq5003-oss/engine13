@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::actor::{Actor, ActorMetrics};
+use super::actor::Actor;
 
 /// Current save format version
 pub const SAVE_FORMAT_VERSION: u32 = 1;
@@ -85,7 +85,7 @@ pub struct WorldState {
     /// This is an accepted limitation — save/load does not guarantee identical continuation.
     pub rng_seed: u64,
     /// Previous tick metrics for each actor - for calculating deltas
-    pub prev_metrics: HashMap<String, ActorMetrics>,
+    pub prev_metrics: HashMap<String, HashMap<String, f64>>,
     /// Ticks since last narrative trigger - for time-based trigger
     pub ticks_since_last_narrative: u32,
     /// Interaction cooldowns - key: "actor_a_vs_actor_b", value: last tick

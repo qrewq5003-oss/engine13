@@ -97,22 +97,22 @@ fn test_action_applies_cost() {
     // Get venice treasury before
     let before_treasury = {
         let world = state.world_state.as_ref().unwrap();
-        world.actors.get("venice").unwrap().metrics.treasury
+        world.actors.get("venice").unwrap().get_metric("treasury")
     };
-    
+
     // Try to apply venice_naval_support (costs 50 treasury)
     let action_input = PlayerActionInput {
         action_id: "venice_naval_support".to_string(),
         target_actor_id: None,
     };
-    
+
     let result = apply_player_action(&mut state, &action_input);
-    
+
     // Action may fail if not available, but if it succeeds, treasury should decrease
     if result.is_ok() {
         let after_treasury = {
             let world = state.world_state.as_ref().unwrap();
-            world.actors.get("venice").unwrap().metrics.treasury
+            world.actors.get("venice").unwrap().get_metric("treasury")
         };
         assert!(after_treasury < before_treasury, "Treasury should decrease after action");
     }
@@ -188,7 +188,7 @@ fn test_action_cost_deducted() {
     // Get initial venice treasury
     let initial_treasury = state.world_state.as_ref().unwrap()
         .actors.get("venice")
-        .map(|a| a.metrics.treasury)
+        .map(|a| a.get_metric("treasury"))
         .unwrap_or(0.0);
 
     // Apply venice_diplomacy action (cost: venice.treasury -30)
@@ -202,7 +202,7 @@ fn test_action_cost_deducted() {
     // Check treasury was deducted
     let final_treasury = state.world_state.as_ref().unwrap()
         .actors.get("venice")
-        .map(|a| a.metrics.treasury)
+        .map(|a| a.get_metric("treasury"))
         .unwrap_or(0.0);
 
     assert!((final_treasury - (initial_treasury - 30.0)).abs() < 0.01,
@@ -217,7 +217,7 @@ fn test_action_unavailable_when_insufficient_resources() {
     // Set venice treasury very low
     if let Some(world) = state.world_state.as_mut() {
         if let Some(venice) = world.actors.get_mut("venice") {
-            venice.metrics.treasury = 5.0; // Very low treasury
+            venice.set_metric("treasury", 5.0); // Very low treasury
         }
     }
 
@@ -322,7 +322,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
     }
     let fed_no_actions = world_no_actions.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
     let pressure_no_actions = world_no_actions.actors.get("byzantium")
-        .map(|a| a.metrics.external_pressure)
+        .map(|a| a.get_metric("external_pressure"))
         .unwrap_or(0.0);
 
     // Scripted: 25 ticks with priority actions
@@ -375,7 +375,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
 
     let fed_scripted = world_scripted.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
     let pressure_scripted = world_scripted.actors.get("byzantium")
-        .map(|a| a.metrics.external_pressure)
+        .map(|a| a.get_metric("external_pressure"))
         .unwrap_or(0.0);
 
     // Assert scripted is better

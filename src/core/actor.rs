@@ -1,32 +1,34 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
-/// Base metrics for every actor (any era)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActorMetrics {
-    pub population: f64,        // thousands
-    pub military_size: f64,     // thousands of soldiers
-    pub military_quality: f64,  // 0-100
-    pub economic_output: f64,   // 0-100
-    pub cohesion: f64,          // 0-100
-    pub legitimacy: f64,        // 0-100
-    pub external_pressure: f64, // 0-100
-    pub treasury: f64,          // absolute, can be negative
+/// Default metric values for all actors
+pub fn default_metrics() -> HashMap<String, f64> {
+    [
+        ("population", 1000.0),
+        ("military_size", 50.0),
+        ("military_quality", 50.0),
+        ("economic_output", 50.0),
+        ("cohesion", 50.0),
+        ("legitimacy", 50.0),
+        ("external_pressure", 30.0),
+        ("treasury", 100.0),
+    ].iter().map(|(k, v)| (k.to_string(), *v)).collect()
 }
 
-impl Default for ActorMetrics {
-    fn default() -> Self {
-        Self {
-            population: 1000.0,
-            military_size: 50.0,
-            military_quality: 50.0,
-            economic_output: 50.0,
-            cohesion: 50.0,
-            legitimacy: 50.0,
-            external_pressure: 30.0,
-            treasury: 100.0,
-        }
+/// Ensure all default metrics exist in the HashMap
+pub fn ensure_default_metrics(metrics: &mut HashMap<String, f64>) {
+    for (k, v) in default_metrics() {
+        metrics.entry(k).or_insert(v);
     }
+}
+
+/// Convert metrics to snapshot with sorted keys for deterministic output
+pub fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
+    metrics.iter()
+        .map(|(k, v)| (k.clone(), *v))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .collect()
 }
 
 /// Neighbor relationship with distance and border type
@@ -111,7 +113,7 @@ pub struct Actor {
     pub era: Era,
     pub narrative_status: NarrativeStatus,
     pub tags: Vec<String>,
-    pub metrics: ActorMetrics,
+    pub metrics: HashMap<String, f64>,
     pub scenario_metrics: HashMap<String, f64>,
     pub neighbors: Vec<Neighbor>,
     pub on_collapse: Vec<Successor>,
@@ -127,6 +129,58 @@ pub struct Actor {
     pub minimum_survival_ticks: Option<u32>,
     /// Static leader name for narrative purposes
     pub leader: Option<String>,
+}
+
+impl Actor {
+    /// Get metric value (returns 0.0 if missing)
+    pub fn get_metric(&self, key: &str) -> f64 {
+        self.metrics.get(key).copied().unwrap_or(0.0)
+    }
+
+    /// Set metric value
+    pub fn set_metric(&mut self, key: &str, value: f64) {
+        self.metrics.insert(key.to_string(), value);
+    }
+
+    /// Add delta to metric (creates if missing)
+    pub fn add_metric(&mut self, key: &str, delta: f64) {
+        let v = self.metrics.entry(key.to_string()).or_insert(0.0);
+        *v += delta;
+    }
+
+    /// Clamp metric to range (only if key exists - doesn't create missing metrics)
+    pub fn clamp_metric(&mut self, key: &str, min: f64, max: f64) {
+        if let Some(v) = self.metrics.get_mut(key) {
+            *v = v.clamp(min, max);
+        }
+    }
+
+    /// Calculate derived stability metric
+    pub fn stability(&self) -> f64 {
+        (self.get_metric("legitimacy") * 0.4 + self.get_metric("cohesion") * 0.4)
+            - (self.get_metric("external_pressure") * 0.2)
+    }
+
+    /// Calculate derived power_projection metric
+    /// Normalized relative to max military_size among living actors
+    pub fn power_projection(&self, era_modifier: f64, max_military_size: f64) -> f64 {
+        const TREASURY_NORM_CAP: f64 = 500.0; // treasury >= 500 counts as full contribution
+
+        let military_size_norm = if max_military_size > 0.0 {
+            (self.get_metric("military_size") / max_military_size).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let military_quality_norm = (self.get_metric("military_quality") / 100.0).clamp(0.0, 1.0);
+        let treasury_norm = (self.get_metric("treasury") / TREASURY_NORM_CAP).clamp(0.0, 1.0);
+
+        let power_projection =
+            military_size_norm * 0.45 +
+            military_quality_norm * 0.35 +
+            treasury_norm * 0.20;
+
+        power_projection * 100.0 * era_modifier
+    }
 }
 
 /// Religion enum for actors
@@ -163,33 +217,4 @@ pub enum Culture {
 pub struct GeoCoordinate {
     pub lat: f64,
     pub lng: f64,
-}
-
-impl Actor {
-    /// Calculate derived stability metric
-    pub fn stability(&self) -> f64 {
-        (self.metrics.legitimacy * 0.4 + self.metrics.cohesion * 0.4)
-            - (self.metrics.external_pressure * 0.2)
-    }
-
-    /// Calculate derived power_projection metric
-    /// Normalized relative to max military_size among living actors
-    pub fn power_projection(&self, era_modifier: f64, max_military_size: f64) -> f64 {
-        const TREASURY_NORM_CAP: f64 = 500.0; // treasury >= 500 counts as full contribution
-
-        let military_size_norm = if max_military_size > 0.0 {
-            (self.metrics.military_size / max_military_size).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let military_quality_norm = (self.metrics.military_quality / 100.0).clamp(0.0, 1.0);
-        let treasury_norm = (self.metrics.treasury / TREASURY_NORM_CAP).clamp(0.0, 1.0);
-
-        let power_projection =
-            military_size_norm * 0.45 +
-            military_quality_norm * 0.35 +
-            treasury_norm * 0.20;
-
-        power_projection * 100.0 * era_modifier
-    }
 }

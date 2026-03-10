@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::{
-    Actor, ActorMetrics, AutoDelta, BorderType, ComparisonOperator, DeltaCondition,
+    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition,
     EventCondition, EventConditionType, GenerationMechanics, MilestoneEvent, Neighbor,
     PatronAction, RankCondition, RankResult, Scenario, Successor,
 };
@@ -144,16 +144,16 @@ fn create_rome() -> Actor {
             "coinage".to_string(),
             "christianity".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 8000.0,
-            military_size: 350.0,
-            military_quality: 58.0,
-            economic_output: 48.0,
-            cohesion: 42.0,
-            legitimacy: 62.0,
-            external_pressure: 38.0,
-            treasury: 1800.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 8000.0),
+            ("military_size".to_string(), 350.0),
+            ("military_quality".to_string(), 58.0),
+            ("economic_output".to_string(), 48.0),
+            ("cohesion".to_string(), 42.0),
+            ("legitimacy".to_string(), 62.0),
+            ("external_pressure".to_string(), 38.0),
+            ("treasury".to_string(), 1800.0),
+        ]),
         scenario_metrics,
         neighbors: vec![
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -196,16 +196,16 @@ fn create_huns() -> Actor {
             "raid_economy".to_string(),
             "pastoral".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 800.0,
-            military_size: 120.0,
-            military_quality: 88.0,
-            economic_output: 15.0,
-            cohesion: 72.0,
-            legitimacy: 60.0,
-            external_pressure: 5.0,
-            treasury: 80.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 800.0),
+            ("military_size".to_string(), 120.0),
+            ("military_quality".to_string(), 88.0),
+            ("economic_output".to_string(), 15.0),
+            ("cohesion".to_string(), 72.0),
+            ("legitimacy".to_string(), 60.0),
+            ("external_pressure".to_string(), 5.0),
+            ("treasury".to_string(), 80.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ostrogoths".to_string(), distance: 1, border_type: BorderType::Land },
@@ -237,16 +237,16 @@ fn create_visigoths() -> Actor {
             "christianity_arian".to_string(),
             "federati_potential".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 400.0,
-            military_size: 48.0,
-            military_quality: 62.0,
-            economic_output: 22.0,
-            cohesion: 52.0,
-            legitimacy: 55.0,
-            external_pressure: 65.0,
-            treasury: 40.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 400.0),
+            ("military_size".to_string(), 48.0),
+            ("military_quality".to_string(), 62.0),
+            ("economic_output".to_string(), 22.0),
+            ("cohesion".to_string(), 52.0),
+            ("legitimacy".to_string(), 55.0),
+            ("external_pressure".to_string(), 65.0),
+            ("treasury".to_string(), 40.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -277,16 +277,16 @@ fn create_ostrogoths() -> Actor {
             "tribal_confederation".to_string(),
             "steppe_adjacent".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 350.0,
-            military_size: 55.0,
-            military_quality: 65.0,
-            economic_output: 18.0,
-            cohesion: 60.0,
-            legitimacy: 58.0,
-            external_pressure: 78.0,
-            treasury: 30.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 350.0),
+            ("military_size".to_string(), 55.0),
+            ("military_quality".to_string(), 65.0),
+            ("economic_output".to_string(), 18.0),
+            ("cohesion".to_string(), 60.0),
+            ("legitimacy".to_string(), 58.0),
+            ("external_pressure".to_string(), 78.0),
+            ("treasury".to_string(), 30.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "huns".to_string(), distance: 1, border_type: BorderType::Land },
@@ -319,16 +319,16 @@ fn create_sassanids() -> Actor {
             "silk_road".to_string(),
             "cavalry_heavy".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 3000.0,
-            military_size: 200.0,
-            military_quality: 72.0,
-            economic_output: 62.0,
-            cohesion: 65.0,
-            legitimacy: 75.0,
-            external_pressure: 30.0,
-            treasury: 900.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 3000.0),
+            ("military_size".to_string(), 200.0),
+            ("military_quality".to_string(), 72.0),
+            ("economic_output".to_string(), 62.0),
+            ("cohesion".to_string(), 65.0),
+            ("legitimacy".to_string(), 75.0),
+            ("external_pressure".to_string(), 30.0),
+            ("treasury".to_string(), 900.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 3, border_type: BorderType::Land },
@@ -361,16 +361,16 @@ fn create_vandals() -> Actor {
             "christianity_arian".to_string(),
             "migrating".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 180.0,
-            military_size: 28.0,
-            military_quality: 60.0,
-            economic_output: 20.0,
-            cohesion: 58.0,
-            legitimacy: 52.0,
-            external_pressure: 55.0,
-            treasury: 25.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 180.0),
+            ("military_size".to_string(), 28.0),
+            ("military_quality".to_string(), 60.0),
+            ("economic_output".to_string(), 20.0),
+            ("cohesion".to_string(), 58.0),
+            ("legitimacy".to_string(), 52.0),
+            ("external_pressure".to_string(), 55.0),
+            ("treasury".to_string(), 25.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -399,16 +399,16 @@ fn create_burgundians() -> Actor {
             "tribal_confederation".to_string(),
             "rhine_border".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 120.0,
-            military_size: 18.0,
-            military_quality: 55.0,
-            economic_output: 22.0,
-            cohesion: 62.0,
-            legitimacy: 58.0,
-            external_pressure: 35.0,
-            treasury: 20.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 120.0),
+            ("military_size".to_string(), 18.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 22.0),
+            ("cohesion".to_string(), 62.0),
+            ("legitimacy".to_string(), 58.0),
+            ("external_pressure".to_string(), 35.0),
+            ("treasury".to_string(), 20.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -439,16 +439,16 @@ fn create_franks() -> Actor {
             "rhine_border".to_string(),
             "roman_contact".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 200.0,
-            military_size: 30.0,
-            military_quality: 58.0,
-            economic_output: 25.0,
-            cohesion: 55.0,
-            legitimacy: 50.0,
-            external_pressure: 25.0,
-            treasury: 30.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 200.0),
+            ("military_size".to_string(), 30.0),
+            ("military_quality".to_string(), 58.0),
+            ("economic_output".to_string(), 25.0),
+            ("cohesion".to_string(), 55.0),
+            ("legitimacy".to_string(), 50.0),
+            ("external_pressure".to_string(), 25.0),
+            ("treasury".to_string(), 30.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -478,16 +478,16 @@ fn create_saxons() -> Actor {
             "seafaring".to_string(),
             "raid_economy".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 150.0,
-            military_size: 20.0,
-            military_quality: 55.0,
-            economic_output: 18.0,
-            cohesion: 60.0,
-            legitimacy: 48.0,
-            external_pressure: 15.0,
-            treasury: 15.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 150.0),
+            ("military_size".to_string(), 20.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 18.0),
+            ("cohesion".to_string(), 60.0),
+            ("legitimacy".to_string(), 48.0),
+            ("external_pressure".to_string(), 15.0),
+            ("treasury".to_string(), 15.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 3, border_type: BorderType::Sea },
@@ -516,16 +516,16 @@ fn create_alamanni() -> Actor {
             "tribal_confederation".to_string(),
             "rhine_border".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 180.0,
-            military_size: 28.0,
-            military_quality: 60.0,
-            economic_output: 20.0,
-            cohesion: 58.0,
-            legitimacy: 52.0,
-            external_pressure: 30.0,
-            treasury: 22.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 180.0),
+            ("military_size".to_string(), 28.0),
+            ("military_quality".to_string(), 60.0),
+            ("economic_output".to_string(), 20.0),
+            ("cohesion".to_string(), 58.0),
+            ("legitimacy".to_string(), 52.0),
+            ("external_pressure".to_string(), 30.0),
+            ("treasury".to_string(), 22.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -555,16 +555,16 @@ fn create_berbers() -> Actor {
             "desert_warfare".to_string(),
             "roman_frontier".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 300.0,
-            military_size: 35.0,
-            military_quality: 55.0,
-            economic_output: 28.0,
-            cohesion: 45.0,
-            legitimacy: 42.0,
-            external_pressure: 20.0,
-            treasury: 35.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 300.0),
+            ("military_size".to_string(), 35.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 28.0),
+            ("cohesion".to_string(), 45.0),
+            ("legitimacy".to_string(), 42.0),
+            ("external_pressure".to_string(), 20.0),
+            ("treasury".to_string(), 35.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Sea },
@@ -595,16 +595,16 @@ fn create_armenia() -> Actor {
             "persian_border".to_string(),
             "roman_border".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 500.0,
-            military_size: 40.0,
-            military_quality: 58.0,
-            economic_output: 35.0,
-            cohesion: 55.0,
-            legitimacy: 60.0,
-            external_pressure: 55.0,
-            treasury: 120.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 500.0),
+            ("military_size".to_string(), 40.0),
+            ("military_quality".to_string(), 58.0),
+            ("economic_output".to_string(), 35.0),
+            ("cohesion".to_string(), 55.0),
+            ("legitimacy".to_string(), 60.0),
+            ("external_pressure".to_string(), 55.0),
+            ("treasury".to_string(), 120.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
@@ -636,16 +636,16 @@ fn create_kushans() -> Actor {
             "trade_networks".to_string(),
             "declining".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 800.0,
-            military_size: 60.0,
-            military_quality: 55.0,
-            economic_output: 45.0,
-            cohesion: 40.0,
-            legitimacy: 45.0,
-            external_pressure: 50.0,
-            treasury: 300.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 800.0),
+            ("military_size".to_string(), 60.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 45.0),
+            ("cohesion".to_string(), 40.0),
+            ("legitimacy".to_string(), 45.0),
+            ("external_pressure".to_string(), 50.0),
+            ("treasury".to_string(), 300.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "sassanids".to_string(), distance: 2, border_type: BorderType::Land },
@@ -678,16 +678,16 @@ fn create_guptas() -> Actor {
             "trade_networks".to_string(),
             "golden_age".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 4000.0,
-            military_size: 180.0,
-            military_quality: 65.0,
-            economic_output: 70.0,
-            cohesion: 72.0,
-            legitimacy: 78.0,
-            external_pressure: 15.0,
-            treasury: 1200.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 4000.0),
+            ("military_size".to_string(), 180.0),
+            ("military_quality".to_string(), 65.0),
+            ("economic_output".to_string(), 70.0),
+            ("cohesion".to_string(), 72.0),
+            ("legitimacy".to_string(), 78.0),
+            ("external_pressure".to_string(), 15.0),
+            ("treasury".to_string(), 1200.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "kushans".to_string(), distance: 2, border_type: BorderType::Land },
@@ -719,16 +719,16 @@ fn create_eastern_jin() -> Actor {
             "trade_networks".to_string(),
             "southern_exile".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 5000.0,
-            military_size: 150.0,
-            military_quality: 55.0,
-            economic_output: 58.0,
-            cohesion: 45.0,
-            legitimacy: 55.0,
-            external_pressure: 40.0,
-            treasury: 800.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 5000.0),
+            ("military_size".to_string(), 150.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 58.0),
+            ("cohesion".to_string(), 45.0),
+            ("legitimacy".to_string(), 55.0),
+            ("external_pressure".to_string(), 40.0),
+            ("treasury".to_string(), 800.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "kushans".to_string(), distance: 3, border_type: BorderType::Land },
@@ -767,16 +767,16 @@ fn create_rome_west() -> Actor {
             "coinage".to_string(),
             "christianity".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 3600.0,  // 45% of 8000
-            military_size: 157.0,  // 45% of 350
-            military_quality: 50.0,  // degraded from parent
-            economic_output: 40.0,
-            cohesion: 20.0,  // trauma from collapse
-            legitimacy: 30.0,  // new power not established
-            external_pressure: 50.0,  // enemies sense weakness
-            treasury: 810.0,  // 45% of 1800
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 3600.0),
+            ("military_size".to_string(), 157.0),
+            ("military_quality".to_string(), 50.0),
+            ("economic_output".to_string(), 40.0),
+            ("cohesion".to_string(), 20.0),
+            ("legitimacy".to_string(), 30.0),
+            ("external_pressure".to_string(), 50.0),
+            ("treasury".to_string(), 810.0)
+        ]),
         scenario_metrics,
         neighbors: vec![
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -821,16 +821,16 @@ fn create_rome_east() -> Actor {
             "coinage".to_string(),
             "christianity".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 4400.0,  // 55% of 8000
-            military_size: 192.0,  // 55% of 350
-            military_quality: 55.0,  // degraded from parent
-            economic_output: 45.0,
-            cohesion: 20.0,  // trauma from collapse
-            legitimacy: 30.0,  // new power not established
-            external_pressure: 45.0,  // enemies sense weakness
-            treasury: 990.0,  // 55% of 1800
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 4400.0),
+            ("military_size".to_string(), 192.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 45.0),
+            ("cohesion".to_string(), 20.0),
+            ("legitimacy".to_string(), 30.0),
+            ("external_pressure".to_string(), 45.0),
+            ("treasury".to_string(), 990.0)
+        ]),
         scenario_metrics,
         neighbors: vec![
             Neighbor { id: "sassanids".to_string(), distance: 3, border_type: BorderType::Land },
@@ -868,16 +868,16 @@ pub fn create_visigoth_kingdom_template() -> Actor {
             "christianity_arian".to_string(),
             "successor_state".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 1200.0,
-            military_size: 45.0,
-            military_quality: 65.0,
-            economic_output: 25.0,
-            cohesion: 55.0,
-            legitimacy: 40.0,
-            external_pressure: 30.0,
-            treasury: 60.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 1200.0),
+            ("military_size".to_string(), 45.0),
+            ("military_quality".to_string(), 65.0),
+            ("economic_output".to_string(), 25.0),
+            ("cohesion".to_string(), 55.0),
+            ("legitimacy".to_string(), 40.0),
+            ("external_pressure".to_string(), 30.0),
+            ("treasury".to_string(), 60.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
@@ -906,16 +906,16 @@ pub fn create_ostrogoth_kingdom_template() -> Actor {
             "steppe_adjacent".to_string(),
             "successor_state".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 1000.0,
-            military_size: 50.0,
-            military_quality: 62.0,
-            economic_output: 20.0,
-            cohesion: 50.0,
-            legitimacy: 35.0,
-            external_pressure: 35.0,
-            treasury: 40.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 1000.0),
+            ("military_size".to_string(), 50.0),
+            ("military_quality".to_string(), 62.0),
+            ("economic_output".to_string(), 20.0),
+            ("cohesion".to_string(), 50.0),
+            ("legitimacy".to_string(), 35.0),
+            ("external_pressure".to_string(), 35.0),
+            ("treasury".to_string(), 40.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
@@ -944,16 +944,16 @@ pub fn create_late_sassanids_template() -> Actor {
             "zoroastrianism".to_string(),
             "successor_state".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 1800.0,
-            military_size: 80.0,
-            military_quality: 55.0,
-            economic_output: 30.0,
-            cohesion: 35.0,
-            legitimacy: 40.0,
-            external_pressure: 50.0,
-            treasury: 300.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 1800.0),
+            ("military_size".to_string(), 80.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 30.0),
+            ("cohesion".to_string(), 35.0),
+            ("legitimacy".to_string(), 40.0),
+            ("external_pressure".to_string(), 50.0),
+            ("treasury".to_string(), 300.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
@@ -982,16 +982,16 @@ pub fn create_vandal_kingdom_africa_template() -> Actor {
             "christianity_arian".to_string(),
             "successor_state".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 800.0,
-            military_size: 30.0,
-            military_quality: 60.0,
-            economic_output: 28.0,
-            cohesion: 45.0,
-            legitimacy: 35.0,
-            external_pressure: 25.0,
-            treasury: 150.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 800.0),
+            ("military_size".to_string(), 30.0),
+            ("military_quality".to_string(), 60.0),
+            ("economic_output".to_string(), 28.0),
+            ("cohesion".to_string(), 45.0),
+            ("legitimacy".to_string(), 35.0),
+            ("external_pressure".to_string(), 25.0),
+            ("treasury".to_string(), 150.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
@@ -1020,16 +1020,16 @@ pub fn create_frankish_kingdom_template() -> Actor {
             "rhine_border".to_string(),
             "successor_state".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 900.0,
-            military_size: 35.0,
-            military_quality: 58.0,
-            economic_output: 22.0,
-            cohesion: 60.0,
-            legitimacy: 45.0,
-            external_pressure: 20.0,
-            treasury: 80.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 900.0),
+            ("military_size".to_string(), 35.0),
+            ("military_quality".to_string(), 58.0),
+            ("economic_output".to_string(), 22.0),
+            ("cohesion".to_string(), 60.0),
+            ("legitimacy".to_string(), 45.0),
+            ("external_pressure".to_string(), 20.0),
+            ("treasury".to_string(), 80.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
@@ -1665,9 +1665,9 @@ mod tests {
     fn test_rome_has_correct_metrics() {
         let scenario = load_rome_375();
         let rome = scenario.actors.iter().find(|a| a.id == "rome").unwrap();
-        assert_eq!(rome.metrics.population, 8000.0);
-        assert_eq!(rome.metrics.military_size, 350.0);
-        assert_eq!(rome.metrics.treasury, 1800.0);
+        assert_eq!(rome.get_metric("population"), 8000.0);
+        assert_eq!(rome.get_metric("military_size"), 350.0);
+        assert_eq!(rome.get_metric("treasury"), 1800.0);
     }
 
     #[test]
@@ -1697,14 +1697,14 @@ mod tests {
         
         let mut event_log = EventLog::new();
 
-        let initial_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;
+        let initial_economic_output = world.actors.get("rome").unwrap().get_metric("economic_output");
 
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
         for _ in 0..10 {
             tick(&mut world, &scenario, &mut event_log, &mut rng);
         }
 
-        let final_economic_output = world.actors.get("rome").unwrap().metrics.economic_output;
+        let final_economic_output = world.actors.get("rome").unwrap().get_metric("economic_output");
         
         // With the reduced coefficient, economic output growth should be limited
         // Growth should be less than 60 points over 10 ticks (was much higher before)

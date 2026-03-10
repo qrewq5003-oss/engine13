@@ -257,7 +257,8 @@ pub fn build_snapshot(
             // Actor metric: "actor:id.metric"
             if let Some((actor_id, metric)) = metric_key.strip_prefix("actor:").and_then(|s| s.split_once('.')) {
                 world.actors.get(actor_id)
-                    .map(|a| get_actor_metric(&a.metrics, metric))
+                    .and_then(|a| a.metrics.get(metric))
+                    .copied()
                     .unwrap_or(0.0)
             } else {
                 0.0
@@ -290,21 +291,6 @@ pub fn build_snapshot(
         narrative_axes,
         tone_tags,
         game_mode: world.game_mode,
-    }
-}
-
-/// Helper to get actor metric by name
-fn get_actor_metric(metrics: &crate::core::ActorMetrics, name: &str) -> f64 {
-    match name {
-        "population" => metrics.population,
-        "military_size" => metrics.military_size,
-        "military_quality" => metrics.military_quality,
-        "economic_output" => metrics.economic_output,
-        "cohesion" => metrics.cohesion,
-        "legitimacy" => metrics.legitimacy,
-        "external_pressure" => metrics.external_pressure,
-        "treasury" => metrics.treasury,
-        _ => 0.0,
     }
 }
 

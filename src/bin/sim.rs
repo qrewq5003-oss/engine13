@@ -440,7 +440,7 @@ fn run_narrative_pack(scenario_id: &str) {
 
         // Case 2: rome.cohesion < 30 AND rome.external_pressure > 70
         if let Some(rome) = world.actors.get("rome") {
-            if rome.metrics.cohesion < 30.0 && rome.metrics.external_pressure > 70.0 && !case_conditions_met[1] {
+            if rome.get_metric("cohesion") < 30.0 && rome.get_metric("external_pressure") > 70.0 && !case_conditions_met[1] {
                 case_conditions_met[1] = true;
                 cases_found.push((2, tick_num, "[Narrative would appear here]".to_string()));
             }
@@ -515,12 +515,12 @@ fn run_narrative_pack(scenario_id: &str) {
         markdown.push_str("| Metric | Value |\n");
         markdown.push_str("|--------|-------|\n");
 
-        let rome_legitimacy = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
-        let rome_cohesion = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
-        let rome_pressure = world.actors.get("rome").map(|a| a.metrics.external_pressure).unwrap_or(0.0);
+        let rome_legitimacy = world.actors.get("rome").map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
+        let rome_cohesion = world.actors.get("rome").map(|a| a.get_metric("cohesion")).unwrap_or(0.0);
+        let rome_pressure = world.actors.get("rome").map(|a| a.get_metric("external_pressure")).unwrap_or(0.0);
         let family_influence = world.family_state.as_ref()
             .and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
-        let treasury = world.actors.get("rome").map(|a| a.metrics.treasury).unwrap_or(0.0);
+        let treasury = world.actors.get("rome").map(|a| a.get_metric("treasury")).unwrap_or(0.0);
         let collapse_warnings: Vec<&String> = world.collapse_warning_ticks.keys().collect();
 
         markdown.push_str(&format!("| rome.legitimacy | {:.1} |\n", rome_legitimacy));
@@ -658,9 +658,9 @@ fn run_batch(scenario_id: &str, ticks: u32) {
         // Rome-specific stats
         if scenario_id == "rome_375" {
             if let Some(rome) = world.actors.get("rome") {
-                rome_military_final.push(rome.metrics.military_size);
-                rome_cohesion_final.push(rome.metrics.cohesion);
-                rome_legitimacy_final.push(rome.metrics.legitimacy);
+                rome_military_final.push(rome.get_metric("military_size"));
+                rome_cohesion_final.push(rome.get_metric("cohesion"));
+                rome_legitimacy_final.push(rome.get_metric("legitimacy"));
             }
             if let Some(ref family) = world.family_state {
                 family_influence_final.push(*family.metrics.get("influence").unwrap_or(&0.0));
@@ -990,9 +990,9 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             family_connections_start = *family.metrics.get("connections").unwrap_or(&0.0);
         }
         if let Some(rome) = world_state.actors.get("rome") {
-            rome_legitimacy_start = rome.metrics.legitimacy;
-            rome_cohesion_start = rome.metrics.cohesion;
-            rome_military_start = rome.metrics.military_size;
+            rome_legitimacy_start = rome.get_metric("legitimacy");
+            rome_cohesion_start = rome.get_metric("cohesion");
+            rome_military_start = rome.get_metric("military_size");
         }
     }
 
@@ -1006,7 +1006,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
         let pressure_before = state.world_state.as_ref().unwrap()
             .actors.get("byzantium")
-            .map(|a| a.metrics.external_pressure)
+            .map(|a| a.get_metric("external_pressure"))
             .unwrap_or(0.0);
         let _sustained_before = state.world_state.as_ref().unwrap().victory_sustained_ticks;
 
@@ -1054,16 +1054,16 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             let know_before = world.family_state.as_ref().and_then(|f| f.metrics.get("knowledge")).copied().unwrap_or(0.0);
             let wea_before = world.family_state.as_ref().and_then(|f| f.metrics.get("wealth")).copied().unwrap_or(0.0);
             let con_before = world.family_state.as_ref().and_then(|f| f.metrics.get("connections")).copied().unwrap_or(0.0);
-            let leg_before = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
-            let coh_before = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
-            
+            let leg_before = world.actors.get("rome").map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
+            let coh_before = world.actors.get("rome").map(|a| a.get_metric("cohesion")).unwrap_or(0.0);
+
             let inf_after = world.family_state.as_ref().and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
             let know_after = world.family_state.as_ref().and_then(|f| f.metrics.get("knowledge")).copied().unwrap_or(0.0);
             let wea_after = world.family_state.as_ref().and_then(|f| f.metrics.get("wealth")).copied().unwrap_or(0.0);
             let con_after = world.family_state.as_ref().and_then(|f| f.metrics.get("connections")).copied().unwrap_or(0.0);
-            let leg_after = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
-            let coh_after = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
-            
+            let leg_after = world.actors.get("rome").map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
+            let coh_after = world.actors.get("rome").map(|a| a.get_metric("cohesion")).unwrap_or(0.0);
+
             println!("tick {:2}: influence {:6.1}->{:6.1}  knowledge {:5.1}->{:5.1}  wealth {:7.1}->{:7.1}  connections {:6.1}->{:6.1}  legitimacy {:5.1}->{:5.1}  cohesion {:5.1}->{:5.1}  actions=[{}]  applied={} rejected={}",
                 tick_num, inf_before, inf_after, know_before, know_after, wea_before, wea_after, con_before, con_after, leg_before, leg_after, coh_before, coh_after,
                 actions_applied.join(", "), applied_this_tick, rejected_this_tick);
@@ -1073,7 +1073,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
                 .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
             let _pressure_before = state.world_state.as_ref().unwrap()
                 .actors.get("byzantium")
-                .map(|a| a.metrics.external_pressure)
+                .map(|a| a.get_metric("external_pressure"))
                 .unwrap_or(0.0);
             let _sustained_before = state.world_state.as_ref().unwrap().victory_sustained_ticks;
 
@@ -1081,7 +1081,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
                 .global_metrics.get("federation_progress").copied().unwrap_or(0.0);
             let pressure_after = state.world_state.as_ref().unwrap()
                 .actors.get("byzantium")
-                .map(|a| a.metrics.external_pressure)
+                .map(|a| a.get_metric("external_pressure"))
                 .unwrap_or(0.0);
             let sustained_after = state.world_state.as_ref().unwrap().victory_sustained_ticks;
 
@@ -1132,9 +1132,9 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
             .unwrap_or(0.0);
         
         let rome_final = world.actors.get("rome");
-        let rome_legitimacy_final = rome_final.map(|a| a.metrics.legitimacy).unwrap_or(0.0);
-        let rome_cohesion_final = rome_final.map(|a| a.metrics.cohesion).unwrap_or(0.0);
-        let rome_military_final = rome_final.map(|a| a.metrics.military_size).unwrap_or(0.0);
+        let rome_legitimacy_final = rome_final.map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
+        let rome_cohesion_final = rome_final.map(|a| a.get_metric("cohesion")).unwrap_or(0.0);
+        let rome_military_final = rome_final.map(|a| a.get_metric("military_size")).unwrap_or(0.0);
         
         let family_total_start = family_influence_start + family_wealth_start + family_knowledge_start + family_connections_start;
         let family_total_final = family_influence_final + family_wealth_final + family_knowledge_final + family_connections_final;
@@ -1174,7 +1174,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         // Constantinople summary
         let fed_final = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
         let byz_final = world.actors.get("byzantium")
-            .map(|a| a.metrics.external_pressure)
+            .map(|a| a.get_metric("external_pressure"))
             .unwrap_or(0.0);
         let byz_dead = world.dead_actor_ids.iter().any(|id| id.contains("byzantium"));
 
@@ -1228,16 +1228,16 @@ impl SimStats {
 
         // Track Byzantium status
         if let Some(byz) = world.actors.get("byzantium") {
-            self.byzantium_pressure.push(byz.metrics.external_pressure);
+            self.byzantium_pressure.push(byz.get_metric("external_pressure"));
             self.byzantium_alive.push(!world.dead_actor_ids.contains("byzantium"));
         }
-        
+
         // Rome-specific tracking
         if scenario.id == "rome_375" {
             if let Some(rome) = world.actors.get("rome") {
-                self.rome_military_timeline.push(rome.metrics.military_size);
-                self.rome_cohesion_timeline.push(rome.metrics.cohesion);
-                self.rome_legitimacy_timeline.push(rome.metrics.legitimacy);
+                self.rome_military_timeline.push(rome.get_metric("military_size"));
+                self.rome_cohesion_timeline.push(rome.get_metric("cohesion"));
+                self.rome_legitimacy_timeline.push(rome.get_metric("legitimacy"));
             }
             
             if let Some(ref family) = world.family_state {

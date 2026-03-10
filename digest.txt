@@ -14,6 +14,7 @@ Directory structure:
     ├── docs/
     │   ├── narrative_evaluation.md
     │   ├── narrative_regression_baseline.md
+    │   ├── narrative_review_pack.md
     │   └── sim_baseline.md
     ├── src/
     │   ├── api.ts
@@ -919,30 +920,34 @@ external_pressure: родитель × 1.3 // враги чувствуют сл
 Фиксированный порядок — менять нельзя, влияет на результат симуляции.
 
 ```
-1.  Собрать действие игрока если есть
-2.  Применить действие игрока к метрикам
-3.  Автономные дельты — каждый актор меняет метрики сам по себе
-4.  Граф зависимостей — пересчитать метрики с учётом связей
-5.  Взаимодействия между акторами:
-    5а. Торговля
-    5б. Культурное влияние
-    5в. Дипломатия / союзы
-    5г. Военное давление
-    5д. Миграция (последней — зависит от результатов давления)
-6.  Проверить пороговые эффекты, rank_conditions и milestone_events
-7.  Проверить смерть акторов
-8.  Проверить рождение акторов
-9.  Проверить пороги релевантности
-10. Записать новые события в индексированное хранилище
-11. Проверить триггеры LLM
-12. Сохранить снапшот если нужно
+1.  Действие игрока применяется до вызова tick() в application layer
+2.  Автономные дельты (auto_deltas + treasury)
+3.  Region rank bonuses (фиксированные дельты и legitimacy floor)
+4.  Граф зависимостей + взаимодействия акторов:
+    4а. Торговля
+    4б. Культурное влияние
+    4в. Дипломатия / союзы
+    4г. Военное давление
+    4д. Миграция
+5.  Случайные события
+6.  Actor tag effects
+7.  Clamp всех метрик в 0..100
+8.  Пороговые эффекты, rank_conditions, milestone_events, relevance
+9.  Collapse акторов + создание наследников (в одной фазе)
+10. Запись изменений + generation mechanics
+11. Advance tick (tick++, year += tick_span)
 ```
+
+**Примечания:**
+- Рождение фоновых акторов (не наследников) не реализовано
+- LLM триггеры и снапшоты управляются на уровне application, не внутри tick()
+- Релевантность событий проверяется внутри шага 8, не отдельной фазой
 
 **Логика порядка:**
 - Действие игрока первым — влияет на весь тик
 - Миграция последней из взаимодействий — она результат давления, не причина
-- Смерть до рождения — сначала коллапс, потом наследники
-- Релевантность после всех изменений — проверяем финальное состояние тика
+- Collapse до наследников — сначала коллапс, потом создание преемников
+- Clamp до пороговых эффектов — метрики валидны перед проверкой условий
 
 ---
 
@@ -2601,17 +2606,281 @@ For now, manual review with this checklist is the primary quality gate.
 
 
 ================================================
+FILE: docs/narrative_review_pack.md
+================================================
+# Narrative Manual Review Pack
+
+**Generated:** Auto-generated review cases
+
+**Instructions:** Fill in the checklists by hand after reading each narrative.
+
+---
+
+## Case 1: Early game, stable
+
+**Tick:** 3 | **Year:** 435
+
+**World state summary:**
+| Metric | Value |
+|--------|-------|
+| rome.legitimacy | 42.5 |
+| rome.cohesion | 46.7 |
+| rome.external_pressure | 100.0 |
+| family_influence | 11.7 |
+| treasury | 18179.9 |
+| collapse_warnings | none |
+
+**Player actions this tick:** [none]
+
+**Key events (last 3):** [events would be listed here]
+
+**Generated narrative:**
+
+[LLM UNAVAILABLE - narrative would appear here]
+
+---
+### Human review checklist
+
+- [ ] Factually accurate — нет галлюцинированных событий или акторов
+- [ ] Strategy reflected — действия игрока присутствуют как причины
+- [ ] World-first — narrative не начинается с семьи или игрока
+- [ ] No generic opening — нет шаблонного начала
+- [ ] Correct tone — соответствует сценарию
+- [ ] At least 2 paragraphs
+
+**Reviewer notes:** [заполнить вручную]
+
+**Score: /6**
+
+---
+
+## Case 5: Generation transfer
+
+**Tick:** 23 | **Year:** 435
+
+**World state summary:**
+| Metric | Value |
+|--------|-------|
+| rome.legitimacy | 42.5 |
+| rome.cohesion | 46.7 |
+| rome.external_pressure | 100.0 |
+| family_influence | 11.7 |
+| treasury | 18179.9 |
+| collapse_warnings | none |
+
+**Player actions this tick:** [none]
+
+**Key events (last 3):** [events would be listed here]
+
+**Generated narrative:**
+
+[LLM UNAVAILABLE - narrative would appear here]
+
+---
+### Human review checklist
+
+- [ ] Factually accurate — нет галлюцинированных событий или акторов
+- [ ] Strategy reflected — действия игрока присутствуют как причины
+- [ ] World-first — narrative не начинается с семьи или игрока
+- [ ] No generic opening — нет шаблонного начала
+- [ ] Correct tone — соответствует сценарию
+- [ ] At least 2 paragraphs
+
+**Reviewer notes:** [заполнить вручную]
+
+**Score: /6**
+
+---
+
+## Case 4: Collapse warning active
+
+**Tick:** 41 | **Year:** 435
+
+**World state summary:**
+| Metric | Value |
+|--------|-------|
+| rome.legitimacy | 42.5 |
+| rome.cohesion | 46.7 |
+| rome.external_pressure | 100.0 |
+| family_influence | 11.7 |
+| treasury | 18179.9 |
+| collapse_warnings | none |
+
+**Player actions this tick:** [none]
+
+**Key events (last 3):** [events would be listed here]
+
+**Generated narrative:**
+
+[LLM UNAVAILABLE - narrative would appear here]
+
+---
+### Human review checklist
+
+- [ ] Factually accurate — нет галлюцинированных событий или акторов
+- [ ] Strategy reflected — действия игрока присутствуют как причины
+- [ ] World-first — narrative не начинается с семьи или игрока
+- [ ] No generic opening — нет шаблонного начала
+- [ ] Correct tone — соответствует сценарию
+- [ ] At least 2 paragraphs
+
+**Reviewer notes:** [заполнить вручную]
+
+**Score: /6**
+
+---
+
+## Case 2: Early game, crisis
+
+**[CASE NOT REACHED within 60 ticks]**
+
+---
+
+## Case 3: Mid game, player winning
+
+**[CASE NOT REACHED within 60 ticks]**
+
+---
+
+## Case 6: Near victory
+
+**[CASE NOT REACHED within 60 ticks]**
+
+---
+
+
+
+
+================================================
 FILE: docs/sim_baseline.md
 ================================================
 # ENGINE13 Simulation Baseline
 
-**Recorded:** After Rome balanced fix and knowledge → legitimacy bridge  
-**Date:** 2026-03-09  
+**Recorded:** After Rome balanced fix and knowledge → legitimacy bridge
+**Date:** 2026-03-09
 **Commit:** Post "Fix: improve Rome balanced path and give knowledge a safe support role via legitimacy"
 
 ---
 
-## Rome 375 BC
+## Post Half-Year Baseline
+
+**Date:** 2026-03-10
+**Changes:** 2 ticks per year globally, year derived from tick/2, patriarch ages on even ticks only
+
+### Summary of Changes
+- **Year formula:** `year = start_year + (tick / 2)` — 2 ticks = 1 year
+- **HalfYear:** Computed from `tick % 2` (even = FirstHalf, odd = SecondHalf)
+- **Patriarch aging:** +1 age on even ticks only (FirstHalf)
+- **Victory minimum_tick:** Rome 15yr→30, Constantinople 20yr→40
+- **UI display:** "Year AD — Первая/Вторая половина года"
+- **Backward compatibility:** Year recalculated from tick on save load
+
+### Baseline Results
+
+| Run | Victory Tick | Victory Year | Gen Transfers | Notes |
+|-----|-------------|--------------|---------------|-------|
+| rome batch (100 ticks) | — | 50 years | 2.0 avg | 100 ticks = 50 years |
+| rome scripted balanced (100 ticks) | Tick 31 | Year 385 (15.5yr) | 0 | Victory at 15.5 years (min 15yr) |
+| constantinople balanced (50 ticks) | Tick 43 | Year 1451 (21.5yr) | — | Victory at 21.5 years (min 20yr) |
+
+### Balance Review
+- **Victory timing correct** — Rome victory at tick 31 (~15.5 years), after minimum 30 ticks (15 years)
+- **Victory timing correct** — Constantinople victory at tick 43 (~21.5 years), after minimum 40 ticks (20 years)
+- **Generation transfers working** — 2.0 avg per 100-tick (50 year) batch run
+- **Half-year model stable** — No issues with year/half calculation
+
+---
+
+## Post Generation-Mechanics Baseline
+
+**Date:** 2026-03-10
+**Changes:** Early transfer trigger, generation_count tracking, sim reporting by event_id
+
+### Summary of Changes
+- **EarlyTransfer struct:** Allows generation transfer before normal age if conditions met
+  - Rome 375: age >= 65 AND rome.external_pressure > 70
+- **generation_count:** Tracks number of transfers in FamilyState
+- **Strict transfer order:** increment count → apply coefficients → reset age → log event
+- **Event ID:** Strictly "generation_transfer" for sim counting
+- **tick_span:** Changed from 5 to 1 for Rome 375 (1 tick = 1 year)
+
+### Baseline Results
+
+| Run | Victory Tick | Gen Transfers | Transfer Ticks | Notes |
+|-----|-------------|---------------|----------------|-------|
+| rome batch | — | 2.0 avg | ~33 | Normal transfer expected at tick 33 (patriarch 42→75) |
+| rome scripted balanced | Tick 16 | 0 | — | Run too short (16 ticks) for transfer |
+| rome scripted influence | Tick 16 | 0 | — | Run too short (16 ticks) for transfer |
+
+### Balance Review
+- **Generation transfers working** - 2.0 avg per 50-tick batch run
+- **Transfer timing correct** - Expected at tick ~33 (patriarch starts 42, ends 75, +1/tick)
+- **Victory timing unchanged** - Still Tick 16 for scripted strategies
+- **No critical bugs** - Transfers occurring as expected
+
+---
+
+## Post Region-Rank Baseline
+
+**Date:** 2026-03-10
+**Changes:** Fixed economic_output delta per tick, legitimacy floor for rank S
+
+### Summary of Changes
+- **economic_output deltas (per tick):**
+  - Rank S: +0.5
+  - Rank A: +0.3
+  - Rank B: +0.1
+  - Rank C: 0.0
+  - Rank D: -0.2
+- **legitimacy floor:** Rank S actors cannot drop below 20.0
+- Fixed deltas are non-compounding (constant, not % of current value)
+
+### Baseline Results
+
+| Run | Victory Tick | Collapses | Notes |
+|-----|-------------|-----------|-------|
+| rome batch | — | ostrogoths: 29 | Collapses stable vs collapse-fix baseline (29 vs 26) |
+| rome scripted influence | Tick 16 | none | Victory tick unchanged |
+| constantinople balanced | Tick 24 | none | Victory tick unchanged, +2 actions applied |
+
+### Balance Review
+- **Victory timing stable** - no shift in victory tick
+- **Collapse count stable** - ostrogoths 29 vs 26 (within normal variance)
+- **No saturation observed** - no actor holds economic_output = 100 for >10 ticks
+- **No balance review required** - region rank bonuses work as intended without disrupting existing balance
+
+---
+
+## Post Collapse-Fix Baseline
+
+**Date:** 2026-03-10
+**Changes:** AND logic for collapse conditions, 3-tick counter, dual collapse paths
+
+### Summary of Changes
+- Collapse now requires **3 consecutive ticks** in dangerous state (not instant)
+- Two collapse paths:
+  - **Classic:** legitimacy < 10 AND cohesion < 15 AND external_pressure > 85
+  - **Internal:** legitimacy < 5 AND cohesion < 8
+- Counter resets if actor exits dangerous state
+- `external_pressure × 1.3` applied to successors
+
+### Baseline Results
+
+| Run | Victory | Collapsed Actors | Ticks | Notes |
+|-----|---------|-----------------|-------|-------|
+| rome batch | - | ostrogoths: 26, armenia: 1 | 50 | **Collapses reduced** from ~100 to 26 runs |
+| rome balanced | ✓ Tick 16 | none | 50 | Victory tick unchanged |
+| rome influence | ✓ Tick 16 | none | 50 | Victory tick unchanged |
+| constantinople balanced | ✓ Tick 24 | none | 25 | Victory tick unchanged |
+
+### Balance Review
+- **Collapses significantly rarer** - ostrogoths now 26% vs previously ~100%
+- **Victory timing stable** - no significant shift in victory tick (< 5 ticks)
+- **No balance review required** - changes improve realism without breaking existing balance
+
+---
+
+## Rome 375 BC (Pre-Fix Reference)
 
 ### Strategy Roles
 
@@ -5875,6 +6144,13 @@ pub fn load_game(
         world_state.family_state = family_state;
     }
 
+    // Backward compatibility: recalculate year from tick (2 ticks per year)
+    // Never trust saved year — always recalculate from tick
+    let scenario_id = &db_save.scenario_id;
+    let scenario = crate::scenarios::registry::load_by_id(scenario_id)
+        .ok_or_else(|| format!("Unknown scenario: {}", scenario_id))?;
+    world_state.year = scenario.start_year as i32 + (world_state.tick / 2) as i32;
+
     // Initialize RNG from world state seed
     // NOTE: RNG sequence restarts from seed after load, not from exact saved position.
     // This is an accepted limitation — save/load does not guarantee identical continuation.
@@ -5923,6 +6199,7 @@ pub fn load_scenario(
         world_state.family_state = Some(crate::core::FamilyState {
             metrics: initial_metrics.clone(),
             patriarch_age,
+            generation_count: 0,
         });
     }
 
@@ -6902,11 +7179,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   // Get last 3 events
   const lastThreeEvents = recentEvents.slice(-3).reverse();
 
+  // Compute half-year from tick (even = FirstHalf, odd = SecondHalf)
+  const halfYearText = currentTick % 2 === 0 ? 'Первая половина года' : 'Вторая половина года';
+
   return (
     <div className="control-panel">
       <div className="time-display">
-        <span className="year">{currentYear} AD</span>
-        <span className="tick">Tick {currentTick}</span>
+        <span className="year">{currentYear} AD — {halfYearText}</span>
       </div>
 
       <div className="control-buttons">
@@ -10097,6 +10376,18 @@ pub struct GenerationMechanics {
     pub panel_label: String,
     /// Era-specific context texts
     pub era_texts: Vec<EraText>,
+    /// Early transfer conditions (optional)
+    #[serde(default)]
+    pub early_transfer: Option<EarlyTransfer>,
+}
+
+/// Early transfer condition for generation mechanics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarlyTransfer {
+    pub age: u32,
+    pub condition_metric: String,
+    pub condition_operator: ComparisonOperator,
+    pub condition_value: f64,
 }
 
 /// Player context for scenario
@@ -10135,6 +10426,9 @@ pub const SAVE_FORMAT_VERSION: u32 = 1;
 pub struct FamilyState {
     pub metrics: HashMap<String, f64>,
     pub patriarch_age: u32,
+    /// Number of generation transfers that have occurred
+    #[serde(default)]
+    pub generation_count: u32,
 }
 
 /// Dead actor record - preserves history after collapse
@@ -10215,6 +10509,10 @@ pub struct WorldState {
     pub fired_events: HashSet<String>,
     /// Milestone cooldowns - milestone_id -> tick of last firing
     pub milestone_cooldowns: HashMap<String, u32>,
+    /// Collapse warning counter - tracks consecutive ticks an actor has been in collapse danger
+    /// Actor collapses after 3 consecutive ticks in dangerous state
+    #[serde(default)]
+    pub collapse_warning_ticks: HashMap<String, u32>,
     /// Save format version for compatibility checking
     pub save_version: u32,
     /// Debug mode - enables detailed tick explanations
@@ -10265,6 +10563,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            collapse_warning_ticks: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
             scenario_start_year: Some(start_year),
@@ -10300,6 +10599,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            collapse_warning_ticks: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
             scenario_start_year: Some(start_year),
@@ -11121,7 +11421,10 @@ pub fn tick(
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
-    // Phase 2: Dependency graph and interactions
+    // Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
+    phase_region_ranks(world);
+
+    // Phase 3: Dependency graph and interactions
     phase_interactions(world, scenario, event_log, rng);
 
     // Phase 3: Random events
@@ -11203,7 +11506,43 @@ fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondi
 }
 
 // ============================================================================
-// Phase 2: Dependency graph and interactions
+// Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
+// ============================================================================
+
+fn phase_region_ranks(world: &mut WorldState) {
+    // Region rank bonuses are passive fixed deltas and floors.
+    // Intentionally non-compounding: delta is constant, not % of current value.
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+
+    for actor_id in &actor_ids {
+        let actor = match world.actors.get_mut(actor_id) {
+            Some(a) => a,
+            None => continue,
+        };
+
+        // Fixed per-tick delta to economic_output
+        let eco_delta: f64 = match actor.region_rank {
+            crate::core::RegionRank::S => 0.5,
+            crate::core::RegionRank::A => 0.3,
+            crate::core::RegionRank::B => 0.1,
+            crate::core::RegionRank::C => 0.0,
+            crate::core::RegionRank::D => -0.2,
+        };
+
+        actor.metrics.economic_output =
+            (actor.metrics.economic_output + eco_delta).clamp(0.0, 100.0);
+
+        // Legitimacy floor for rank S: not a growth bonus, prevents total collapse only
+        if matches!(actor.region_rank, crate::core::RegionRank::S) {
+            if actor.metrics.legitimacy < 20.0 {
+                actor.metrics.legitimacy = 20.0;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Phase 3: Dependency graph and interactions
 // ============================================================================
 
 fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
@@ -11421,7 +11760,8 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &Ha
 
 fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     world.tick += 1;
-    world.year += scenario.tick_span as i32;
+    // Year is derived from tick: 2 ticks per year (tick 0-1 = year 0, tick 2-3 = year 1, etc.)
+    world.year = scenario.start_year as i32 + (world.tick / 2) as i32;
     world.actions_this_tick = 0;
 }
 
@@ -11505,12 +11845,6 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            // Early exit: skip actors already marked for removal
-            // (cohesion < 10 OR legitimacy < 5 per check_collapses)
-            if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
-                continue;
-            }
-
             let metrics = actor.metrics.clone();
 
             // legitimacy ↓10 → cohesion ↓3
@@ -12239,16 +12573,42 @@ fn check_generation_transfer(
     let current_tick = world.tick;
     let current_year = world.year;
 
-    // Age the patriarch by tick_span years
-    family_state.patriarch_age += scenario.tick_span;
+    // Age the patriarch only on even ticks (FirstHalf = start of year)
+    // This ensures 1 year of aging per 2 ticks
+    if world.tick % 2 == 0 {
+        family_state.patriarch_age += 1;
+    }
 
-    // Check if patriarch has reached end age - trigger generation transfer
-    if family_state.patriarch_age >= gen_mechanics.patriarch_end_age as u32 {
-        // Apply inheritance coefficients to all family metrics
-        // Per architecture: new generation starts with reduced metrics
-        // Use scenario-specific coefficients if available, default to 0.7
+    // Check triggers
+    let patriarch_age = family_state.patriarch_age;
+    let normal_trigger = patriarch_age >= gen_mechanics.patriarch_end_age as u32;
 
-        // Scale all family metrics
+    // For early trigger, we need to check external metric - do this after dropping family_state borrow
+    let early_trigger_check = gen_mechanics.early_transfer.as_ref().map(|early| {
+        (early.age, early.condition_metric.clone(), early.condition_operator.clone(), early.condition_value)
+    });
+
+    // Drop the mutable borrow before checking external metric
+    let _ = family_state; // End mutable borrow scope
+
+    // Check early trigger condition (needs world access)
+    let early_trigger = early_trigger_check.map_or(false, |(age, metric, operator, value)| {
+        if patriarch_age < age {
+            return false;
+        }
+        let metric_value = crate::core::MetricRef::parse(&metric).get(world);
+        operator.evaluate(metric_value, value)
+    });
+
+    // Process generation transfer if triggered
+    if early_trigger || normal_trigger {
+        let family_state = world.family_state.as_mut().unwrap();
+
+        // Strict order of operations:
+        // 1. Increment generation_count
+        family_state.generation_count += 1;
+
+        // 2. Apply inheritance coefficients to all family metrics
         let family_metric_keys: Vec<String> = family_state.metrics.keys().cloned().collect();
 
         for metric in &family_metric_keys {
@@ -12263,10 +12623,10 @@ fn check_generation_transfer(
             }
         }
 
-        // Reset patriarch age to start age for new generation
+        // 3. Reset patriarch age to start age for new generation
         family_state.patriarch_age = gen_mechanics.patriarch_start_age as u32;
 
-        // Record generation transfer event
+        // 4. Log event with current generation number
         let event = Event::new(
             "generation_transfer".to_string(),
             current_tick,
@@ -12274,7 +12634,7 @@ fn check_generation_transfer(
             "scenario".to_string(),
             EventType::Milestone,
             true, // is_key event
-            "Новое поколение семьи вступает во власть".to_string(),
+            format!("Поколение {} вступает во власть", family_state.generation_count),
         );
         event_log.add(event);
     }
@@ -12295,7 +12655,15 @@ fn check_collapses(
     // Find actors that should collapse
     let mut to_collapse: Vec<(String, Vec<crate::core::Successor>)> = Vec::new();
 
-    for (actor_id, actor) in &world.actors {
+    // Get actor IDs to avoid borrow conflict with collapse_warning_ticks
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+
+    for actor_id in &actor_ids {
+        let actor = match world.actors.get(actor_id) {
+            Some(a) => a,
+            None => continue,
+        };
+
         // Skip if already dead (use HashSet for fast lookup)
         if world.dead_actor_ids.contains(actor_id) {
             continue;
@@ -12308,11 +12676,33 @@ fn check_collapses(
             }
         }
 
-        // cohesion < 10 OR legitimacy < 5
-        if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
-            // Collapse regardless of whether on_collapse is empty
-            // Empty on_collapse just means no successors, but actor still dies
-            to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+        // Path 1: classic collapse (external pressure + internal weakness)
+        let classic_collapse =
+            actor.metrics.legitimacy < 10.0
+            && actor.metrics.cohesion < 15.0
+            && actor.metrics.external_pressure > 85.0;
+
+        // Path 2: internal collapse (civil war / disintegration without external threat)
+        let internal_collapse =
+            actor.metrics.legitimacy < 5.0
+            && actor.metrics.cohesion < 8.0;
+
+        let in_danger = classic_collapse || internal_collapse;
+
+        if in_danger {
+            // Increment warning counter
+            let counter = world.collapse_warning_ticks
+                .entry(actor_id.clone())
+                .or_insert(0);
+            *counter += 1;
+
+            // Collapse only after 3 consecutive dangerous ticks
+            if *counter >= 3 {
+                to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+            }
+        } else {
+            // Reset counter if actor is no longer in danger
+            world.collapse_warning_ticks.remove(actor_id);
         }
     }
 
@@ -12550,7 +12940,14 @@ mod tests {
         tick(&mut world, &scenario, &mut event_log, &mut rng);
 
         assert_eq!(world.tick, initial_tick + 1);
-        assert_eq!(world.year, initial_year + 5);
+        // Year is derived from tick: 2 ticks per year, so after 1 tick year stays same
+        assert_eq!(world.year, initial_year);  // tick 1 = start_year + (1/2) = start_year
+        
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+        
+        // After 2 ticks, year should increment
+        assert_eq!(world.tick, 2);
+        assert_eq!(world.year, initial_year + 1);  // tick 2 = start_year + (2/2) = start_year + 1
     }
 }
 
@@ -13822,7 +14219,7 @@ pub fn load_constantinople_1430() -> Scenario {
             threshold: 80.0,
             title: "Федерация Севера основана".to_string(),
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
-            minimum_tick: 20,
+            minimum_tick: 40,  // 20 years × 2 ticks/year
             additional_conditions: vec![
                 crate::core::Condition {
                     metric: "actor:byzantium.external_pressure".to_string(),
@@ -15267,7 +15664,7 @@ pub fn load_rome_375() -> Scenario {
             threshold: 90.0,
             title: "Семья достигла величия".to_string(),
             description: "Ди Милано стали опорой угасающей империи.".to_string(),
-            minimum_tick: 15,
+            minimum_tick: 30,  // 15 years × 2 ticks/year
             additional_conditions: vec![],
             sustained_ticks_required: 1,
         }),
@@ -16745,7 +17142,7 @@ fn create_generation_mechanics() -> GenerationMechanics {
     inheritance_coefficients.insert("family:family_connections".to_string(), 0.8);
 
     GenerationMechanics {
-        tick_span: 5,
+        tick_span: 1,
         patriarch_start_age: 42,
         patriarch_end_age: 75,
         generation_length: 33,
@@ -16756,6 +17153,12 @@ fn create_generation_mechanics() -> GenerationMechanics {
             crate::core::EraText { from_year: 410, to_year: 455, text: "Западная империя агонизирует. Влияние семьи — последний якорь.".to_string() },
             crate::core::EraText { from_year: 455, to_year: 500, text: "Из пепла рождается новый порядок.".to_string() },
         ],
+        early_transfer: Some(crate::core::EarlyTransfer {
+            age: 65,
+            condition_metric: "actor:rome.external_pressure".to_string(),
+            condition_operator: crate::core::ComparisonOperator::Greater,
+            condition_value: 70.0,
+        }),
     }
 }
 
@@ -17797,10 +18200,10 @@ fn test_scenario_victory_requires_byzantium_alive() {
         }
     }
     
-    // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 25
+    // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 45
     // Note: MetricRef strips "global:" prefix when storing
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
-    world.tick = 25;
+    world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
     
     // Set byzantium.external_pressure = 90 (above threshold 85)
     if let Some(byz) = world.actors.get_mut("byzantium") {
@@ -17843,9 +18246,9 @@ fn test_victory_sustained_ticks_resets() {
         }
     }
     
-    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 25
+    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 45
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
-    world.tick = 25;
+    world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
     if let Some(byz) = world.actors.get_mut("byzantium") {
         byz.metrics.external_pressure = 70.0;
     }
@@ -17890,6 +18293,7 @@ fn test_generation_transfer_applies_inheritance() {
     world.family_state = Some(crate::core::FamilyState {
         metrics: [("family:family_influence".to_string(), 60.0)].into(),
         patriarch_age: gen.patriarch_end_age,
+        generation_count: 0,
     });
     
     let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);

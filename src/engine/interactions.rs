@@ -95,10 +95,10 @@ pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::cor
     let avg_affinity: f64 = neighbors.iter()
         .map(|n| affinity(actor, n))
         .sum::<f64>() / active_neighbors as f64;
-    
+
     // More foreign neighbors = more military stretched
     let divisor = (active_neighbors as f64 * avg_affinity).max(1.0);
-    actor.metrics.military_size / divisor
+    actor.get_metric("military_size") / divisor
 }
 
 /// Type of interaction between actors
@@ -263,9 +263,9 @@ fn calculate_military_interaction(
     // Calculate modifiers
     let attacker = world.actors.get(&attacker_id).unwrap();
     let defender = world.actors.get(&defender_id).unwrap();
-    
-    let pressure_mod = (attacker.metrics.external_pressure / 100.0) * 0.2;
-    let military_mod = if attacker.metrics.military_size > defender.metrics.military_size * 1.5 {
+
+    let pressure_mod = (attacker.get_metric("external_pressure") / 100.0) * 0.2;
+    let military_mod = if attacker.get_metric("military_size") > defender.get_metric("military_size") * 1.5 {
         0.15
     } else {
         0.0
@@ -290,13 +290,16 @@ fn calculate_military_interaction(
     let pressure_gain = 15.0 + rng.gen::<f64>() * 10.0;  // 15-25
 
     if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
-        attacker_actor.metrics.military_size *= 1.0 - attacker_loss;
+        let mil = attacker_actor.get_metric("military_size");
+        attacker_actor.set_metric("military_size", mil * (1.0 - attacker_loss));
     }
 
     if let Some(defender_actor) = world.actors.get_mut(&defender_id) {
-        defender_actor.metrics.military_size *= 1.0 - defender_loss;
-        defender_actor.metrics.cohesion = (defender_actor.metrics.cohesion - cohesion_loss).max(0.0);
-        defender_actor.metrics.external_pressure += pressure_gain;
+        let mil = defender_actor.get_metric("military_size");
+        defender_actor.set_metric("military_size", mil * (1.0 - defender_loss));
+        let coh = defender_actor.get_metric("cohesion");
+        defender_actor.set_metric("cohesion", (coh - cohesion_loss).max(0.0));
+        defender_actor.add_metric("external_pressure", pressure_gain);
     }
 
     // Set cooldown
@@ -334,11 +337,11 @@ fn calculate_trade_interaction(
     let actor_b = world.actors.get(actor_b_id).unwrap();
 
     // Condition: external_pressure_avg < 60, economic_output_both > 20
-    let external_pressure_avg = (actor_a.metrics.external_pressure + actor_b.metrics.external_pressure) / 2.0;
+    let external_pressure_avg = (actor_a.get_metric("external_pressure") + actor_b.get_metric("external_pressure")) / 2.0;
     if external_pressure_avg >= 60.0 {
         return;
     }
-    if actor_a.metrics.economic_output < 20.0 || actor_b.metrics.economic_output < 20.0 {
+    if actor_a.get_metric("economic_output") < 20.0 || actor_b.get_metric("economic_output") < 20.0 {
         return;
     }
 
@@ -357,14 +360,14 @@ fn calculate_trade_interaction(
         _ => 0.4,
     };
     let sea_bonus = if border_type == crate::core::BorderType::Sea { 1.5 } else { 1.0 };
-    let bonus = (actor_a.metrics.economic_output + actor_b.metrics.economic_output) * 0.002 * distance_modifier * sea_bonus;
+    let bonus = (actor_a.get_metric("economic_output") + actor_b.get_metric("economic_output")) * 0.002 * distance_modifier * sea_bonus;
 
     // Apply treasury gain
     if let Some(actor) = world.actors.get_mut(actor_a_id) {
-        actor.metrics.treasury += bonus;
+        actor.add_metric("treasury", bonus);
     }
     if let Some(actor) = world.actors.get_mut(actor_b_id) {
-        actor.metrics.treasury += bonus;
+        actor.add_metric("treasury", bonus);
     }
 
     // Set cooldown
@@ -400,13 +403,13 @@ fn calculate_diplomatic_interaction(
     let actor_b = world.actors.get(actor_b_id).unwrap();
 
     // Condition: legitimacy_diff > 15
-    let legitimacy_diff = (actor_a.metrics.legitimacy - actor_b.metrics.legitimacy).abs();
+    let legitimacy_diff = (actor_a.get_metric("legitimacy") - actor_b.get_metric("legitimacy")).abs();
     if legitimacy_diff <= 15.0 {
         return;
     }
 
     // Stronger actor influences weaker
-    let (influencer_id, influenced_id) = if actor_a.metrics.legitimacy > actor_b.metrics.legitimacy {
+    let (influencer_id, influenced_id) = if actor_a.get_metric("legitimacy") > actor_b.get_metric("legitimacy") {
         (actor_a_id.to_string(), actor_b_id.to_string())
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string())
@@ -415,7 +418,8 @@ fn calculate_diplomatic_interaction(
     let influence = (legitimacy_diff * 0.1) / distance as f64;
 
     if let Some(influenced) = world.actors.get_mut(&influenced_id) {
-        influenced.metrics.cohesion = (influenced.metrics.cohesion + influence).min(100.0);
+        let coh = influenced.get_metric("cohesion");
+        influenced.set_metric("cohesion", (coh + influence).min(100.0));
     }
 
     // Record event if significant
@@ -455,9 +459,9 @@ fn calculate_migration_interaction(
         let actor_a = world.actors.get(actor_a_id).unwrap();
         let actor_b = world.actors.get(actor_b_id).unwrap();
 
-        if actor_a.metrics.external_pressure > 65.0 && actor_a.metrics.cohesion < 40.0 {
+        if actor_a.get_metric("external_pressure") > 65.0 && actor_a.get_metric("cohesion") < 40.0 {
             Some(actor_a_id.to_string())
-        } else if actor_b.metrics.external_pressure > 65.0 && actor_b.metrics.cohesion < 40.0 {
+        } else if actor_b.get_metric("external_pressure") > 65.0 && actor_b.get_metric("cohesion") < 40.0 {
             Some(actor_b_id.to_string())
         } else {
             None
@@ -478,12 +482,12 @@ fn calculate_migration_interaction(
     // Apply migration effects
     let pressuring_pop = {
         let pressuring = world.actors.get(&pressuring_id).unwrap();
-        pressuring.metrics.population
+        pressuring.get_metric("population")
     };
 
     let pressuring_pressure = {
         let pressuring = world.actors.get(&pressuring_id).unwrap();
-        pressuring.metrics.external_pressure
+        pressuring.get_metric("external_pressure")
     };
 
     let pressure_transfer = (pressuring_pressure - 65.0) * 0.2 / distance as f64;
@@ -491,13 +495,14 @@ fn calculate_migration_interaction(
     let pop_gain_ratio = 0.005;
 
     if let Some(pressuring) = world.actors.get_mut(&pressuring_id) {
-        pressuring.metrics.population *= 1.0 - pop_loss_ratio;
+        let pop = pressuring.get_metric("population");
+        pressuring.set_metric("population", pop * (1.0 - pop_loss_ratio));
     }
 
     if let Some(neighbor) = world.actors.get_mut(&neighbor_id) {
-        neighbor.metrics.external_pressure += pressure_transfer;
+        neighbor.add_metric("external_pressure", pressure_transfer);
         let pop_gain = pressuring_pop * pop_gain_ratio;
-        neighbor.metrics.population += pop_gain;
+        neighbor.add_metric("population", pop_gain);
     }
 
     // Record event if significant
@@ -542,10 +547,12 @@ fn calculate_cultural_interaction(
     let cohesion_change = bonus - malus;
 
     if let Some(actor) = world.actors.get_mut(actor_a_id) {
-        actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
+        let coh = actor.get_metric("cohesion");
+        actor.set_metric("cohesion", (coh + cohesion_change).clamp(0.0, 100.0));
     }
     if let Some(actor) = world.actors.get_mut(actor_b_id) {
-        actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
+        let coh = actor.get_metric("cohesion");
+        actor.set_metric("cohesion", (coh + cohesion_change).clamp(0.0, 100.0));
     }
 
     // Record event rarely — only if cohesion changed > 3.0

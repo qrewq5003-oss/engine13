@@ -66,7 +66,7 @@ fn test_metric_ref_apply_actor_treasury_negative() {
     for actor in &scenario.actors {
         if actor.id == "venice" {
             let mut venice = actor.clone();
-            venice.metrics.treasury = 50.0;
+            venice.set_metric("treasury", 50.0);
             world.actors.insert(actor.id.clone(), venice);
             break;
         }
@@ -121,7 +121,7 @@ fn test_metric_ref_apply_military_size_min_zero() {
     for actor in &scenario.actors {
         if actor.id == "venice" {
             let mut venice = actor.clone();
-            venice.metrics.military_size = 10.0;
+            venice.set_metric("military_size", 10.0);
             world.actors.insert(actor.id.clone(), venice);
             break;
         }
@@ -212,19 +212,19 @@ fn test_scenario_victory_requires_byzantium_alive() {
     
     // Set byzantium.external_pressure = 90 (above threshold 85)
     if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.metrics.external_pressure = 90.0;
+        byz.set_metric("external_pressure", 90.0);
     }
-    
+
     // Run check_victory_condition via tick
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    
+
     // victory_achieved should be false because pressure is too high
     assert!(!world.victory_achieved, "Victory should not be achieved when pressure > 85");
-    
+
     // Lower pressure to 70
     if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.metrics.external_pressure = 70.0;
+        byz.set_metric("external_pressure", 70.0);
     }
     
     // Run tick again
@@ -255,20 +255,20 @@ fn test_victory_sustained_ticks_resets() {
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
     world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
     if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.metrics.external_pressure = 70.0;
+        byz.set_metric("external_pressure", 70.0);
     }
-    
+
     // Run 2 ticks - should accumulate sustained ticks
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    
+
     assert_eq!(world.victory_sustained_ticks, 2, "Should have 2 sustained ticks");
-    
+
     // Raise pressure above threshold
     if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.metrics.external_pressure = 90.0;
+        byz.set_metric("external_pressure", 90.0);
     }
     
     // Run another tick - should reset sustained ticks

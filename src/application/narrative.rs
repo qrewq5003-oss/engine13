@@ -204,20 +204,20 @@ fn generate_llm_prompt_with_trigger(
             ));
             prompt.push_str(&format!(
                 "  population: {:.0}k, military: {:.0}k, quality: {:.0}\n",
-                actor.metrics.population / 1000.0,
-                actor.metrics.military_size / 1000.0,
-                actor.metrics.military_quality
+                actor.get_metric("population") / 1000.0,
+                actor.get_metric("military_size") / 1000.0,
+                actor.get_metric("military_quality")
             ));
             prompt.push_str(&format!(
                 "  economy: {:.0}, cohesion: {:.0}, legitimacy: {:.0}, pressure: {:.0}\n",
-                actor.metrics.economic_output,
-                actor.metrics.cohesion,
-                actor.metrics.legitimacy,
-                actor.metrics.external_pressure
+                actor.get_metric("economic_output"),
+                actor.get_metric("cohesion"),
+                actor.get_metric("legitimacy"),
+                actor.get_metric("external_pressure")
             ));
             prompt.push_str(&format!(
                 "  treasury: {:.0}\n",
-                actor.metrics.treasury
+                actor.get_metric("treasury")
             ));
             prompt.push('\n');
         }

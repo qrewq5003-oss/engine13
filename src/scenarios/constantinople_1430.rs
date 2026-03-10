@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::{
-    Actor, ActorMetrics, AutoDelta, BorderType, ComparisonOperator, DeltaCondition,
+    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition,
     EventCondition, EventConditionType, MilestoneEvent, Neighbor,
     PatronAction, RankCondition, RankResult, Scenario, Successor,
 };
@@ -149,16 +149,16 @@ fn create_byzantium() -> Actor {
             "greek_culture".to_string(),
             "siege_defense".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 50.0,      // ~50k in city
-            military_size: 8.0,    // ~8k defenders
-            military_quality: 55.0,
-            economic_output: 25.0,
-            cohesion: 45.0,
-            legitimacy: 50.0,
-            external_pressure: 60.0, // ottoman siege pressure
-            treasury: 80.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 50.0),
+            ("military_size".to_string(), 8.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 25.0),
+            ("cohesion".to_string(), 45.0),
+            ("legitimacy".to_string(), 50.0),
+            ("external_pressure".to_string(), 60.0),
+            ("treasury".to_string(), 80.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 1, border_type: BorderType::Land },
@@ -195,16 +195,16 @@ fn create_ottomans() -> Actor {
             "siege_warfare".to_string(),
             "janissaries".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 4000.0,
-            military_size: 180.0,
-            military_quality: 72.0,
-            economic_output: 65.0,
-            cohesion: 68.0,
-            legitimacy: 75.0,
-            external_pressure: 20.0,
-            treasury: 400.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 4000.0),
+            ("military_size".to_string(), 180.0),
+            ("military_quality".to_string(), 72.0),
+            ("economic_output".to_string(), 65.0),
+            ("cohesion".to_string(), 68.0),
+            ("legitimacy".to_string(), 75.0),
+            ("external_pressure".to_string(), 20.0),
+            ("treasury".to_string(), 400.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 1, border_type: BorderType::Land },
@@ -238,16 +238,16 @@ fn create_venice() -> Actor {
             "trade_empire".to_string(),
             "catholic".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 180.0,
-            military_size: 25.0,
-            military_quality: 65.0,
-            economic_output: 75.0,
-            cohesion: 58.0,
-            legitimacy: 70.0,
-            external_pressure: 35.0,
-            treasury: 600.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 180.0),
+            ("military_size".to_string(), 25.0),
+            ("military_quality".to_string(), 65.0),
+            ("economic_output".to_string(), 75.0),
+            ("cohesion".to_string(), 58.0),
+            ("legitimacy".to_string(), 70.0),
+            ("external_pressure".to_string(), 35.0),
+            ("treasury".to_string(), 600.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "genoa".to_string(), distance: 2, border_type: BorderType::Sea },
@@ -282,16 +282,16 @@ fn create_genoa() -> Actor {
             "catholic".to_string(),
             "galaata".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 120.0,
-            military_size: 18.0,
-            military_quality: 62.0,
-            economic_output: 65.0,
-            cohesion: 52.0,
-            legitimacy: 62.0,
-            external_pressure: 40.0,
-            treasury: 450.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 120.0),
+            ("military_size".to_string(), 18.0),
+            ("military_quality".to_string(), 62.0),
+            ("economic_output".to_string(), 65.0),
+            ("cohesion".to_string(), 52.0),
+            ("legitimacy".to_string(), 62.0),
+            ("external_pressure".to_string(), 40.0),
+            ("treasury".to_string(), 450.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Sea },
@@ -324,16 +324,16 @@ fn create_milan() -> Actor {
             "catholic".to_string(),
             "banking".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 250.0,
-            military_size: 35.0,
-            military_quality: 68.0,
-            economic_output: 70.0,
-            cohesion: 55.0,
-            legitimacy: 65.0,
-            external_pressure: 30.0,
-            treasury: 500.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 250.0),
+            ("military_size".to_string(), 35.0),
+            ("military_quality".to_string(), 68.0),
+            ("economic_output".to_string(), 70.0),
+            ("cohesion".to_string(), 55.0),
+            ("legitimacy".to_string(), 65.0),
+            ("external_pressure".to_string(), 30.0),
+            ("treasury".to_string(), 500.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Land },
@@ -365,16 +365,16 @@ fn create_papacy() -> Actor {
             "religious_authority".to_string(),
             "crusade_caller".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 80.0,
-            military_size: 12.0,
-            military_quality: 55.0,
-            economic_output: 50.0,
-            cohesion: 60.0,
-            legitimacy: 85.0,
-            external_pressure: 25.0,
-            treasury: 300.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 80.0),
+            ("military_size".to_string(), 12.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 50.0),
+            ("cohesion".to_string(), 60.0),
+            ("legitimacy".to_string(), 85.0),
+            ("external_pressure".to_string(), 25.0),
+            ("treasury".to_string(), 300.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Land },
@@ -407,16 +407,16 @@ fn create_hungary() -> Actor {
             "kingdom".to_string(),
             "ottoman_frontier".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 800.0,
-            military_size: 45.0,
-            military_quality: 58.0,
-            economic_output: 45.0,
-            cohesion: 50.0,
-            legitimacy: 62.0,
-            external_pressure: 55.0,
-            treasury: 200.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 800.0),
+            ("military_size".to_string(), 45.0),
+            ("military_quality".to_string(), 58.0),
+            ("economic_output".to_string(), 45.0),
+            ("cohesion".to_string(), 50.0),
+            ("legitimacy".to_string(), 62.0),
+            ("external_pressure".to_string(), 55.0),
+            ("treasury".to_string(), 200.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 3, border_type: BorderType::Land },
@@ -449,16 +449,16 @@ fn create_serbia() -> Actor {
             "vassal".to_string(),
             "ottoman_frontier".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 300.0,
-            military_size: 22.0,
-            military_quality: 55.0,
-            economic_output: 30.0,
-            cohesion: 45.0,
-            legitimacy: 52.0,
-            external_pressure: 65.0,
-            treasury: 100.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 300.0),
+            ("military_size".to_string(), 22.0),
+            ("military_quality".to_string(), 55.0),
+            ("economic_output".to_string(), 30.0),
+            ("cohesion".to_string(), 45.0),
+            ("legitimacy".to_string(), 52.0),
+            ("external_pressure".to_string(), 65.0),
+            ("treasury".to_string(), 100.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 2, border_type: BorderType::Land },
@@ -492,16 +492,16 @@ fn create_trebizond() -> Actor {
             "greek_culture".to_string(),
             "trade".to_string(),
         ],
-        metrics: ActorMetrics {
-            population: 100.0,
-            military_size: 10.0,
-            military_quality: 50.0,
-            economic_output: 35.0,
-            cohesion: 48.0,
-            legitimacy: 55.0,
-            external_pressure: 50.0,
-            treasury: 120.0,
-        },
+        metrics: HashMap::from([
+            ("population".to_string(), 100.0),
+            ("military_size".to_string(), 10.0),
+            ("military_quality".to_string(), 50.0),
+            ("economic_output".to_string(), 35.0),
+            ("cohesion".to_string(), 48.0),
+            ("legitimacy".to_string(), 55.0),
+            ("external_pressure".to_string(), 50.0),
+            ("treasury".to_string(), 120.0)
+        ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 2, border_type: BorderType::Land },

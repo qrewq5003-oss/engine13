@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
-    ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
+    ActorDelta, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
 use serde::Serialize;
@@ -189,7 +189,7 @@ pub fn tick(
     let current_year = world.year;
 
     // Store initial state for event comparison
-    let initial_states: HashMap<String, ActorMetrics> = world
+    let initial_states: HashMap<String, HashMap<String, f64>> = world
         .actors
         .iter()
         .map(|(id, actor)| (id.clone(), actor.metrics.clone()))
@@ -306,13 +306,13 @@ fn phase_region_ranks(world: &mut WorldState) {
             crate::core::RegionRank::D => -0.2,
         };
 
-        actor.metrics.economic_output =
-            (actor.metrics.economic_output + eco_delta).clamp(0.0, 100.0);
+        let eco = actor.get_metric("economic_output");
+        actor.set_metric("economic_output", (eco + eco_delta).clamp(0.0, 100.0));
 
         // Legitimacy floor for rank S: not a growth bonus, prevents total collapse only
         if matches!(actor.region_rank, crate::core::RegionRank::S) {
-            if actor.metrics.legitimacy < 20.0 {
-                actor.metrics.legitimacy = 20.0;
+            if actor.get_metric("legitimacy") < 20.0 {
+                actor.set_metric("legitimacy", 20.0);
             }
         }
     }
@@ -523,7 +523,7 @@ fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut 
 // Phase 7: Record changes and generation mechanics
 // ============================================================================
 
-fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &HashMap<String, ActorMetrics>, current_tick: u32, current_year: i32, event_log: &mut EventLog) {
+fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &HashMap<String, HashMap<String, f64>>, current_tick: u32, current_year: i32, event_log: &mut EventLog) {
     record_metric_changes(world, initial_states, current_tick, current_year, event_log);
     check_generation_transfer(world, scenario, event_log);
     update_metric_history(world);
@@ -547,39 +547,10 @@ fn apply_treasury(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            let incomes = actor.metrics.economic_output * actor.metrics.population * 0.001;
-            let expenses = actor.metrics.military_size * 0.8;
-            actor.metrics.treasury += incomes - expenses;
+            let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * 0.001;
+            let expenses = actor.get_metric("military_size") * 0.8;
+            actor.add_metric("treasury", incomes - expenses);
         }
-    }
-}
-
-// Helper functions for metric operations
-fn get_metric_value(metrics: &ActorMetrics, name: &str) -> f64 {
-    match name {
-        "population" => metrics.population,
-        "military_size" => metrics.military_size,
-        "military_quality" => metrics.military_quality,
-        "economic_output" => metrics.economic_output,
-        "cohesion" => metrics.cohesion,
-        "legitimacy" => metrics.legitimacy,
-        "external_pressure" => metrics.external_pressure,
-        "treasury" => metrics.treasury,
-        _ => 0.0,
-    }
-}
-
-fn apply_metric_delta(metrics: &mut ActorMetrics, metric: &str, delta: f64) {
-    match metric {
-        "population" => metrics.population += delta,
-        "military_size" => metrics.military_size += delta,
-        "military_quality" => metrics.military_quality += delta,
-        "economic_output" => metrics.economic_output += delta,
-        "cohesion" => metrics.cohesion += delta,
-        "legitimacy" => metrics.legitimacy += delta,
-        "external_pressure" => metrics.external_pressure += delta,
-        "treasury" => metrics.treasury += delta,
-        _ => {}
     }
 }
 
@@ -622,96 +593,97 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            let metrics = actor.metrics.clone();
-
             // legitimacy ↓10 → cohesion ↓3
-            if metrics.legitimacy < THRESH.legitimacy_low {
-                let deficit = THRESH.legitimacy_low - metrics.legitimacy;
-                actor.metrics.cohesion -= deficit * COEF.legitimacy_to_cohesion;
+            let legitimacy = actor.get_metric("legitimacy");
+            if legitimacy < THRESH.legitimacy_low {
+                let deficit = THRESH.legitimacy_low - legitimacy;
+                actor.add_metric("cohesion", -deficit * COEF.legitimacy_to_cohesion);
             }
 
             // cohesion ↓10 → legitimacy ↓2
-            if metrics.cohesion < THRESH.cohesion_low {
-                let deficit = THRESH.cohesion_low - metrics.cohesion;
-                actor.metrics.legitimacy -= deficit * COEF.cohesion_to_legitimacy;
+            let cohesion = actor.get_metric("cohesion");
+            if cohesion < THRESH.cohesion_low {
+                let deficit = THRESH.cohesion_low - cohesion;
+                actor.add_metric("legitimacy", -deficit * COEF.cohesion_to_legitimacy);
             }
 
             // legitimacy ↓10 → military_quality ↓2
-            if metrics.legitimacy < THRESH.legitimacy_low {
-                let deficit = THRESH.legitimacy_low - metrics.legitimacy;
-                actor.metrics.military_quality -= deficit * COEF.legitimacy_to_military_quality;
+            if legitimacy < THRESH.legitimacy_low {
+                let deficit = THRESH.legitimacy_low - legitimacy;
+                actor.add_metric("military_quality", -deficit * COEF.legitimacy_to_military_quality);
             }
 
             // cohesion ↓10 → economic_output ↓3
-            if metrics.cohesion < THRESH.cohesion_low {
-                let deficit = THRESH.cohesion_low - metrics.cohesion;
-                actor.metrics.economic_output -= deficit * COEF.cohesion_to_economic_output;
+            if cohesion < THRESH.cohesion_low {
+                let deficit = THRESH.cohesion_low - cohesion;
+                actor.add_metric("economic_output", -deficit * COEF.cohesion_to_economic_output);
             }
 
             // external_pressure ↑10 → cohesion ↓2
-            if metrics.external_pressure > THRESH.external_pressure_high {
-                let excess = metrics.external_pressure - THRESH.external_pressure_high;
-                actor.metrics.cohesion -= excess * COEF.external_pressure_to_cohesion;
+            let external_pressure = actor.get_metric("external_pressure");
+            if external_pressure > THRESH.external_pressure_high {
+                let excess = external_pressure - THRESH.external_pressure_high;
+                actor.add_metric("cohesion", -excess * COEF.external_pressure_to_cohesion);
             }
 
             // external_pressure ↑10 → legitimacy ↓1
-            if metrics.external_pressure > THRESH.external_pressure_high {
-                let excess = metrics.external_pressure - THRESH.external_pressure_high;
-                actor.metrics.legitimacy -= excess * COEF.external_pressure_to_legitimacy;
+            if external_pressure > THRESH.external_pressure_high {
+                let excess = external_pressure - THRESH.external_pressure_high;
+                actor.add_metric("legitimacy", -excess * COEF.external_pressure_to_legitimacy);
             }
 
             // external_pressure ↑10 → military_quality ↓2
-            if metrics.external_pressure > THRESH.external_pressure_high {
-                let excess = metrics.external_pressure - THRESH.external_pressure_high;
-                actor.metrics.military_quality -= excess * COEF.external_pressure_to_military_quality;
+            if external_pressure > THRESH.external_pressure_high {
+                let excess = external_pressure - THRESH.external_pressure_high;
+                actor.add_metric("military_quality", -excess * COEF.external_pressure_to_military_quality);
             }
 
             // external_pressure ↑10 → military_size ↓1
-            if metrics.external_pressure > THRESH.external_pressure_high {
-                let excess = metrics.external_pressure - THRESH.external_pressure_high;
-                actor.metrics.military_size -= excess * COEF.external_pressure_to_military_size;
+            if external_pressure > THRESH.external_pressure_high {
+                let excess = external_pressure - THRESH.external_pressure_high;
+                actor.add_metric("military_size", -excess * COEF.external_pressure_to_military_size);
             }
 
             // economic_output ↓10 → treasury ↓15
-            if metrics.economic_output < THRESH.economic_output_low {
-                let deficit = THRESH.economic_output_low - metrics.economic_output;
-                actor.metrics.treasury -= deficit * COEF.economic_output_to_treasury;
+            let economic_output = actor.get_metric("economic_output");
+            if economic_output < THRESH.economic_output_low {
+                let deficit = THRESH.economic_output_low - economic_output;
+                actor.add_metric("treasury", -deficit * COEF.economic_output_to_treasury);
             }
 
             // military_size ↓10 → economic_output ↓1
-            if metrics.military_size < THRESH.military_size_low {
-                let deficit = THRESH.military_size_low - metrics.military_size;
-                actor.metrics.economic_output -= deficit * COEF.military_size_to_economic_output;
+            let military_size = actor.get_metric("military_size");
+            if military_size < THRESH.military_size_low {
+                let deficit = THRESH.military_size_low - military_size;
+                actor.add_metric("economic_output", -deficit * COEF.military_size_to_economic_output);
             }
 
             // population ↑5000 → economic_output ↑0.5 (Rome-scale populations)
-            if metrics.population > THRESH.population_high {
-                actor.metrics.economic_output +=
-                    (metrics.population - THRESH.population_high) * COEF.population_to_economic_output;
+            let population = actor.get_metric("population");
+            if population > THRESH.population_high {
+                actor.add_metric("economic_output", (population - THRESH.population_high) * COEF.population_to_economic_output);
             }
 
             // economic_output ↓10 → population ↓200
-            if metrics.economic_output < THRESH.economic_output_low {
-                let deficit = THRESH.economic_output_low - metrics.economic_output;
-                actor.metrics.population -= deficit * COEF.economic_output_to_population;
+            if economic_output < THRESH.economic_output_low {
+                let deficit = THRESH.economic_output_low - economic_output;
+                actor.add_metric("population", -deficit * COEF.economic_output_to_population);
             }
 
             // Cohesion bonus effect (external_pressure > 65 AND legitimacy > 60)
-            if metrics.external_pressure > THRESH.external_pressure_critical
-                && metrics.legitimacy > 60.0
-            {
-                actor.metrics.cohesion += COEF.cohesion_bonus_value;
+            if external_pressure > THRESH.external_pressure_critical && legitimacy > 60.0 {
+                actor.add_metric("cohesion", COEF.cohesion_bonus_value);
             }
 
             // Threshold effects
             // legitimacy < 20 → military_quality falls -0.5/tick
-            if metrics.legitimacy < THRESH.legitimacy_critical {
-                actor.metrics.military_quality -= COEF.low_legitimacy_military_quality_decay;
+            if legitimacy < THRESH.legitimacy_critical {
+                actor.add_metric("military_quality", -COEF.low_legitimacy_military_quality_decay);
             }
 
             // economic_output < 15 → population falls -100/tick
-            if metrics.economic_output < THRESH.economic_output_critical {
-                actor.metrics.population -= COEF.low_economic_output_population_decay;
+            if economic_output < THRESH.economic_output_critical {
+                actor.add_metric("population", -COEF.low_economic_output_population_decay);
             }
         }
     }
@@ -730,7 +702,8 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
             for (_tag_id, actor_tag) in &actor.actor_tags {
                 for (metric, modifier) in &actor_tag.metrics_modifier {
-                    apply_metric_delta(&mut actor.metrics, metric, *modifier as f64);
+                    let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
+                    actor.metrics.insert(metric.clone(), current + *modifier as f64);
                 }
             }
             // Note: No clamping here - clamp_metrics is called on step 5
@@ -743,15 +716,20 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
 // ============================================================================
 
 fn clamp_metrics(world: &mut WorldState) {
+    // Only clamp known metrics - treasury can be negative
+    let clamp_0_100 = [
+        "legitimacy", "cohesion", "military_quality",
+        "economic_output", "external_pressure"
+    ];
+    let clamp_min_0 = ["military_size", "population"];
+
     for actor in world.actors.values_mut() {
-        actor.metrics.population = actor.metrics.population.max(0.0);
-        actor.metrics.military_size = actor.metrics.military_size.max(0.0);
-        actor.metrics.military_quality = actor.metrics.military_quality.max(0.0).min(100.0);
-        actor.metrics.economic_output = actor.metrics.economic_output.max(0.0).min(100.0);
-        actor.metrics.cohesion = actor.metrics.cohesion.max(0.0).min(100.0);
-        actor.metrics.legitimacy = actor.metrics.legitimacy.max(0.0).min(100.0);
-        actor.metrics.external_pressure = actor.metrics.external_pressure.max(0.0).min(100.0);
-        // Treasury can be negative
+        for key in &clamp_0_100 {
+            actor.clamp_metric(key, 0.0, 100.0);
+        }
+        for key in &clamp_min_0 {
+            actor.clamp_metric(key, 0.0, f64::MAX);
+        }
     }
 }
 
@@ -769,10 +747,10 @@ fn check_threshold_effects(
 
     for actor in world.actors.values() {
         // cohesion < 25 → any legitimacy fall is doubled
-        if actor.metrics.cohesion < 25.0 {
+        if actor.get_metric("cohesion") < 25.0 {
             // This is handled in the dependency graph step
             // Here we just log if critical
-            if actor.metrics.legitimacy < 30.0 {
+            if actor.get_metric("legitimacy") < 30.0 {
                 let event = Event::new(
                     format!("threshold_{}_low_cohesion", actor.id),
                     current_tick,
@@ -782,7 +760,7 @@ fn check_threshold_effects(
                     false,
                     format!(
                         "{}: критически низкая сплочённость ({:.1}) угрожает стабильности",
-                        actor.name_short, actor.metrics.cohesion
+                        actor.name_short, actor.get_metric("cohesion")
                     ),
                 );
                 event_log.add(event);
@@ -790,10 +768,10 @@ fn check_threshold_effects(
         }
 
         // external_pressure > 80 → trigger migration for neighbors
-        if actor.metrics.external_pressure > 80.0 {
+        if actor.get_metric("external_pressure") > 80.0 {
             for neighbor in &actor.neighbors {
                 if let Some(neighbor_actor) = world.actors.get(&neighbor.id) {
-                    if neighbor_actor.metrics.external_pressure < 50.0 {
+                    if neighbor_actor.get_metric("external_pressure") < 50.0 {
                         // Neighbor will receive migration pressure
                     }
                 }
@@ -820,7 +798,7 @@ fn check_rank_conditions(
             } => {
                 if let Some(aid) = actor_id {
                     if let Some(actor) = world.actors.get(aid) {
-                        let actor_value = get_metric_value(&actor.metrics, metric);
+                        let actor_value = actor.metrics.get(metric).copied().unwrap_or(0.0);
                         compare(actor_value, operator, value)
                     } else {
                         false
@@ -957,9 +935,11 @@ fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
             // Ottoman response: all-in acceleration
             // military_quality -15, treasury -200, cohesion -10
             if let Some(ottomans) = world.actors.get_mut("ottomans") {
-                ottomans.metrics.military_quality = (ottomans.metrics.military_quality - 15.0).max(0.0);
-                ottomans.metrics.treasury -= 200.0;
-                ottomans.metrics.cohesion = (ottomans.metrics.cohesion - 10.0).max(0.0);
+                let mil_q = ottomans.get_metric("military_quality");
+                ottomans.set_metric("military_quality", (mil_q - 15.0).max(0.0));
+                ottomans.add_metric("treasury", -200.0);
+                let coh = ottomans.get_metric("cohesion");
+                ottomans.set_metric("cohesion", (coh - 10.0).max(0.0));
             }
         }
         _ => {}
@@ -1015,7 +995,7 @@ fn check_relevance_thresholds(
 
     // Calculate max military_size for normalization
     let max_military_size = world.actors.values()
-        .map(|a| a.metrics.military_size)
+        .map(|a| a.get_metric("military_size"))
         .fold(1.0_f64, f64::max);
 
     // Calculate average power projection for all active actors
@@ -1058,8 +1038,8 @@ fn check_relevance_thresholds(
         // Condition 3: Internal upheaval
         // Check if any metric changed by >30 in last 5 ticks
         let condition_upheaval = check_actor_upheaval(world, actor_id)
-            || actor.metrics.cohesion < 25.0
-            || actor.metrics.legitimacy < 20.0;
+            || actor.get_metric("cohesion") < 25.0
+            || actor.get_metric("legitimacy") < 20.0;
 
         if condition_power || condition_contact || condition_upheaval {
             let mut reasons = Vec::new();
@@ -1185,14 +1165,14 @@ fn update_metric_history(world: &mut WorldState) {
     for (actor_id, actor) in &world.actors {
         // Update history for each metric
         let metrics = [
-            ("population", actor.metrics.population),
-            ("military_size", actor.metrics.military_size),
-            ("military_quality", actor.metrics.military_quality),
-            ("economic_output", actor.metrics.economic_output),
-            ("cohesion", actor.metrics.cohesion),
-            ("legitimacy", actor.metrics.legitimacy),
-            ("external_pressure", actor.metrics.external_pressure),
-            ("treasury", actor.metrics.treasury),
+            ("population", actor.get_metric("population")),
+            ("military_size", actor.get_metric("military_size")),
+            ("military_quality", actor.get_metric("military_quality")),
+            ("economic_output", actor.get_metric("economic_output")),
+            ("cohesion", actor.get_metric("cohesion")),
+            ("legitimacy", actor.get_metric("legitimacy")),
+            ("external_pressure", actor.get_metric("external_pressure")),
+            ("treasury", actor.get_metric("treasury")),
         ];
 
         for (metric_name, value) in &metrics {
@@ -1238,42 +1218,42 @@ pub fn calculate_actor_deltas(world: &WorldState) -> Vec<ActorDelta> {
             let mut metric_changes = HashMap::new();
 
             // Calculate delta for each metric
-            let pop_delta = actor.metrics.population - prev.population;
+            let pop_delta = actor.get_metric("population") - prev.get("population").copied().unwrap_or(0.0);
             if pop_delta.abs() > 0.01 {
                 metric_changes.insert("population".to_string(), pop_delta);
             }
 
-            let mil_delta = actor.metrics.military_size - prev.military_size;
+            let mil_delta = actor.get_metric("military_size") - prev.get("military_size").copied().unwrap_or(0.0);
             if mil_delta.abs() > 0.01 {
                 metric_changes.insert("military_size".to_string(), mil_delta);
             }
 
-            let qual_delta = actor.metrics.military_quality - prev.military_quality;
+            let qual_delta = actor.get_metric("military_quality") - prev.get("military_quality").copied().unwrap_or(0.0);
             if qual_delta.abs() > 0.01 {
                 metric_changes.insert("military_quality".to_string(), qual_delta);
             }
 
-            let econ_delta = actor.metrics.economic_output - prev.economic_output;
+            let econ_delta = actor.get_metric("economic_output") - prev.get("economic_output").copied().unwrap_or(0.0);
             if econ_delta.abs() > 0.01 {
                 metric_changes.insert("economic_output".to_string(), econ_delta);
             }
 
-            let coh_delta = actor.metrics.cohesion - prev.cohesion;
+            let coh_delta = actor.get_metric("cohesion") - prev.get("cohesion").copied().unwrap_or(0.0);
             if coh_delta.abs() > 0.01 {
                 metric_changes.insert("cohesion".to_string(), coh_delta);
             }
 
-            let leg_delta = actor.metrics.legitimacy - prev.legitimacy;
+            let leg_delta = actor.get_metric("legitimacy") - prev.get("legitimacy").copied().unwrap_or(0.0);
             if leg_delta.abs() > 0.01 {
                 metric_changes.insert("legitimacy".to_string(), leg_delta);
             }
 
-            let pres_delta = actor.metrics.external_pressure - prev.external_pressure;
+            let pres_delta = actor.get_metric("external_pressure") - prev.get("external_pressure").copied().unwrap_or(0.0);
             if pres_delta.abs() > 0.01 {
                 metric_changes.insert("external_pressure".to_string(), pres_delta);
             }
 
-            let treas_delta = actor.metrics.treasury - prev.treasury;
+            let treas_delta = actor.get_metric("treasury") - prev.get("treasury").copied().unwrap_or(0.0);
             if treas_delta.abs() > 0.01 {
                 metric_changes.insert("treasury".to_string(), treas_delta);
             }
@@ -1301,7 +1281,7 @@ fn check_event_condition(world: &WorldState, condition: &EventCondition) -> bool
         } => {
             if let Some(aid) = actor_id {
                 if let Some(actor) = world.actors.get(aid) {
-                    let actor_value = get_metric_value(&actor.metrics, metric);
+                    let actor_value = actor.metrics.get(metric).copied().unwrap_or(0.0);
                     compare(actor_value, operator, value)
                 } else {
                     false
@@ -1455,14 +1435,14 @@ fn check_collapses(
 
         // Path 1: classic collapse (external pressure + internal weakness)
         let classic_collapse =
-            actor.metrics.legitimacy < 10.0
-            && actor.metrics.cohesion < 15.0
-            && actor.metrics.external_pressure > 85.0;
+            actor.get_metric("legitimacy") < 10.0
+            && actor.get_metric("cohesion") < 15.0
+            && actor.get_metric("external_pressure") > 85.0;
 
         // Path 2: internal collapse (civil war / disintegration without external threat)
         let internal_collapse =
-            actor.metrics.legitimacy < 5.0
-            && actor.metrics.cohesion < 8.0;
+            actor.get_metric("legitimacy") < 5.0
+            && actor.get_metric("cohesion") < 8.0;
 
         let in_danger = classic_collapse || internal_collapse;
 
@@ -1543,36 +1523,32 @@ fn check_collapses(
     }
 }
 
-fn metrics_to_snapshot(metrics: &ActorMetrics) -> HashMap<String, f64> {
-    let mut snapshot = HashMap::new();
-    snapshot.insert("population".to_string(), metrics.population);
-    snapshot.insert("military_size".to_string(), metrics.military_size);
-    snapshot.insert("military_quality".to_string(), metrics.military_quality);
-    snapshot.insert("economic_output".to_string(), metrics.economic_output);
-    snapshot.insert("cohesion".to_string(), metrics.cohesion);
-    snapshot.insert("legitimacy".to_string(), metrics.legitimacy);
-    snapshot.insert("external_pressure".to_string(), metrics.external_pressure);
-    snapshot.insert("treasury".to_string(), metrics.treasury);
-    snapshot
+fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
+    crate::core::actor::metrics_to_snapshot(metrics)
 }
 
 fn split_metrics_for_successor(
-    parent: &ActorMetrics,
+    parent: &HashMap<String, f64>,
     weight: f64,
     _total_successors: usize,
-) -> ActorMetrics {
-    let share = weight;
-
-    ActorMetrics {
-        population: parent.population * share,
-        military_size: parent.military_size * share * 0.7, // losses during split
-        military_quality: parent.military_quality * 0.8,   // degradation
-        economic_output: parent.economic_output * 0.7,
-        cohesion: 20.0,  // trauma from split
-        legitimacy: 30.0, // new power not established
-        external_pressure: parent.external_pressure * 1.3, // enemies sense weakness
-        treasury: parent.treasury * share * 0.5, // plundering
-    }
+) -> HashMap<String, f64> {
+    let mut m = parent.clone();
+    let ms = m.get("military_size").copied().unwrap_or(0.0);
+    m.insert("military_size".to_string(), ms * weight * 0.7);
+    let mil_q = m.get("military_quality").copied().unwrap_or(0.0);
+    m.insert("military_quality".to_string(), mil_q * 0.8);
+    let eco = m.get("economic_output").copied().unwrap_or(0.0);
+    m.insert("economic_output".to_string(), eco * 0.7);
+    let pop = m.get("population").copied().unwrap_or(0.0);
+    m.insert("population".to_string(), pop * weight);
+    let tr = m.get("treasury").copied().unwrap_or(0.0);
+    m.insert("treasury".to_string(), tr * weight * 0.5);
+    let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+    m.insert("external_pressure".to_string(), (ep * 1.3).min(100.0));
+    m.insert("cohesion".to_string(), 20.0);
+    m.insert("legitimacy".to_string(), 30.0);
+    crate::core::actor::ensure_default_metrics(&mut m);
+    m
 }
 
 // ============================================================================
@@ -1581,7 +1557,7 @@ fn split_metrics_for_successor(
 
 fn record_metric_changes(
     world: &WorldState,
-    initial_states: &HashMap<String, ActorMetrics>,
+    initial_states: &HashMap<String, HashMap<String, f64>>,
     tick: u32,
     year: i32,
     event_log: &mut EventLog,
@@ -1615,47 +1591,47 @@ fn record_metric_changes(
 }
 
 fn calculate_metric_changes(
-    current: &ActorMetrics,
-    initial: &ActorMetrics,
+    current: &HashMap<String, f64>,
+    initial: &HashMap<String, f64>,
 ) -> Vec<(String, f64)> {
     let mut changes = Vec::new();
 
-    let pop_change = current.population - initial.population;
+    let pop_change = current.get("population").copied().unwrap_or(0.0) - initial.get("population").copied().unwrap_or(0.0);
     if pop_change.abs() > 10.0 {
         changes.push(("population".to_string(), pop_change));
     }
 
-    let mil_change = current.military_size - initial.military_size;
+    let mil_change = current.get("military_size").copied().unwrap_or(0.0) - initial.get("military_size").copied().unwrap_or(0.0);
     if mil_change.abs() > 1.0 {
         changes.push(("military_size".to_string(), mil_change));
     }
 
-    let qual_change = current.military_quality - initial.military_quality;
+    let qual_change = current.get("military_quality").copied().unwrap_or(0.0) - initial.get("military_quality").copied().unwrap_or(0.0);
     if qual_change.abs() > 1.0 {
         changes.push(("military_quality".to_string(), qual_change));
     }
 
-    let econ_change = current.economic_output - initial.economic_output;
+    let econ_change = current.get("economic_output").copied().unwrap_or(0.0) - initial.get("economic_output").copied().unwrap_or(0.0);
     if econ_change.abs() > 1.0 {
         changes.push(("economic_output".to_string(), econ_change));
     }
 
-    let coh_change = current.cohesion - initial.cohesion;
+    let coh_change = current.get("cohesion").copied().unwrap_or(0.0) - initial.get("cohesion").copied().unwrap_or(0.0);
     if coh_change.abs() > 2.0 {
         changes.push(("cohesion".to_string(), coh_change));
     }
 
-    let leg_change = current.legitimacy - initial.legitimacy;
+    let leg_change = current.get("legitimacy").copied().unwrap_or(0.0) - initial.get("legitimacy").copied().unwrap_or(0.0);
     if leg_change.abs() > 2.0 {
         changes.push(("legitimacy".to_string(), leg_change));
     }
 
-    let press_change = current.external_pressure - initial.external_pressure;
+    let press_change = current.get("external_pressure").copied().unwrap_or(0.0) - initial.get("external_pressure").copied().unwrap_or(0.0);
     if press_change.abs() > 3.0 {
         changes.push(("external_pressure".to_string(), press_change));
     }
 
-    let treas_change = current.treasury - initial.treasury;
+    let treas_change = current.get("treasury").copied().unwrap_or(0.0) - initial.get("treasury").copied().unwrap_or(0.0);
     if treas_change.abs() > 10.0 {
         changes.push(("treasury".to_string(), treas_change));
     }

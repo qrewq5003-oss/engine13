@@ -45,7 +45,8 @@ impl MetricRef {
         match self {
             MetricRef::Actor { actor_id, metric } => {
                 world_state.actors.get(actor_id)
-                    .map(|a| Self::get_actor_metric(&a.metrics, metric))
+                    .and_then(|a| a.metrics.get(metric))
+                    .copied()
                     .unwrap_or(0.0)
             }
             MetricRef::Family { key } => {
@@ -71,13 +72,13 @@ impl MetricRef {
             MetricRef::Actor { actor_id, metric } => {
                 if let Some(actor) = world_state.actors.get_mut(actor_id) {
                     let metric_name = metric.as_str();
-                    let current = Self::get_actor_metric(&actor.metrics, metric_name);
+                    let current = actor.metrics.get(metric_name).copied().unwrap_or(0.0);
                     let new_value = match metric_name {
                         "treasury" => current + delta, // can go negative (debts)
                         "economic_output" | "military_size" | "population" => (current + delta).max(0.0),
                         _ => (current + delta).clamp(0.0, 100.0), // cohesion, legitimacy, etc.
                     };
-                    Self::set_actor_metric(&mut actor.metrics, metric_name, new_value);
+                    actor.metrics.insert(metric_name.to_string(), new_value);
                 }
             }
             MetricRef::Family { key } => {
@@ -93,36 +94,6 @@ impl MetricRef {
                 let val = world_state.global_metrics.entry(key.clone()).or_insert(0.0);
                 *val = (*val + delta).clamp(0.0, 100.0);
             }
-        }
-    }
-
-    /// Get actor metric value by name
-    fn get_actor_metric(metrics: &crate::core::ActorMetrics, name: &str) -> f64 {
-        match name {
-            "population" => metrics.population,
-            "military_size" => metrics.military_size,
-            "military_quality" => metrics.military_quality,
-            "economic_output" => metrics.economic_output,
-            "cohesion" => metrics.cohesion,
-            "legitimacy" => metrics.legitimacy,
-            "external_pressure" => metrics.external_pressure,
-            "treasury" => metrics.treasury,
-            _ => 0.0,
-        }
-    }
-
-    /// Set actor metric value by name
-    fn set_actor_metric(metrics: &mut crate::core::ActorMetrics, name: &str, value: f64) {
-        match name {
-            "population" => metrics.population = value,
-            "military_size" => metrics.military_size = value,
-            "military_quality" => metrics.military_quality = value,
-            "economic_output" => metrics.economic_output = value,
-            "cohesion" => metrics.cohesion = value,
-            "legitimacy" => metrics.legitimacy = value,
-            "external_pressure" => metrics.external_pressure = value,
-            "treasury" => metrics.treasury = value,
-            _ => {}
         }
     }
 }
