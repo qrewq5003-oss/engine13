@@ -1,12 +1,41 @@
 # ENGINE13 Simulation Baseline
 
-**Recorded:** After Rome balanced fix and knowledge → legitimacy bridge  
-**Date:** 2026-03-09  
+**Recorded:** After Rome balanced fix and knowledge → legitimacy bridge
+**Date:** 2026-03-09
 **Commit:** Post "Fix: improve Rome balanced path and give knowledge a safe support role via legitimacy"
 
 ---
 
-## Rome 375 BC
+## Post Collapse-Fix Baseline
+
+**Date:** 2026-03-10
+**Changes:** AND logic for collapse conditions, 3-tick counter, dual collapse paths
+
+### Summary of Changes
+- Collapse now requires **3 consecutive ticks** in dangerous state (not instant)
+- Two collapse paths:
+  - **Classic:** legitimacy < 10 AND cohesion < 15 AND external_pressure > 85
+  - **Internal:** legitimacy < 5 AND cohesion < 8
+- Counter resets if actor exits dangerous state
+- `external_pressure × 1.3` applied to successors
+
+### Baseline Results
+
+| Run | Victory | Collapsed Actors | Ticks | Notes |
+|-----|---------|-----------------|-------|-------|
+| rome batch | - | ostrogoths: 26, armenia: 1 | 50 | **Collapses reduced** from ~100 to 26 runs |
+| rome balanced | ✓ Tick 16 | none | 50 | Victory tick unchanged |
+| rome influence | ✓ Tick 16 | none | 50 | Victory tick unchanged |
+| constantinople balanced | ✓ Tick 24 | none | 25 | Victory tick unchanged |
+
+### Balance Review
+- **Collapses significantly rarer** - ostrogoths now 26% vs previously ~100%
+- **Victory timing stable** - no significant shift in victory tick (< 5 ticks)
+- **No balance review required** - changes improve realism without breaking existing balance
+
+---
+
+## Rome 375 BC (Pre-Fix Reference)
 
 ### Strategy Roles
 

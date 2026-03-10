@@ -582,12 +582,6 @@ fn apply_dependency_graph(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            // Early exit: skip actors already marked for removal
-            // (cohesion < 10 OR legitimacy < 5 per check_collapses)
-            if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
-                continue;
-            }
-
             let metrics = actor.metrics.clone();
 
             // legitimacy ↓10 → cohesion ↓3
@@ -1372,7 +1366,15 @@ fn check_collapses(
     // Find actors that should collapse
     let mut to_collapse: Vec<(String, Vec<crate::core::Successor>)> = Vec::new();
 
-    for (actor_id, actor) in &world.actors {
+    // Get actor IDs to avoid borrow conflict with collapse_warning_ticks
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+
+    for actor_id in &actor_ids {
+        let actor = match world.actors.get(actor_id) {
+            Some(a) => a,
+            None => continue,
+        };
+
         // Skip if already dead (use HashSet for fast lookup)
         if world.dead_actor_ids.contains(actor_id) {
             continue;
@@ -1385,11 +1387,33 @@ fn check_collapses(
             }
         }
 
-        // cohesion < 10 OR legitimacy < 5
-        if actor.metrics.cohesion < 10.0 || actor.metrics.legitimacy < 5.0 {
-            // Collapse regardless of whether on_collapse is empty
-            // Empty on_collapse just means no successors, but actor still dies
-            to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+        // Path 1: classic collapse (external pressure + internal weakness)
+        let classic_collapse =
+            actor.metrics.legitimacy < 10.0
+            && actor.metrics.cohesion < 15.0
+            && actor.metrics.external_pressure > 85.0;
+
+        // Path 2: internal collapse (civil war / disintegration without external threat)
+        let internal_collapse =
+            actor.metrics.legitimacy < 5.0
+            && actor.metrics.cohesion < 8.0;
+
+        let in_danger = classic_collapse || internal_collapse;
+
+        if in_danger {
+            // Increment warning counter
+            let counter = world.collapse_warning_ticks
+                .entry(actor_id.clone())
+                .or_insert(0);
+            *counter += 1;
+
+            // Collapse only after 3 consecutive dangerous ticks
+            if *counter >= 3 {
+                to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+            }
+        } else {
+            // Reset counter if actor is no longer in danger
+            world.collapse_warning_ticks.remove(actor_id);
         }
     }
 

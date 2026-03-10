@@ -91,6 +91,10 @@ pub struct WorldState {
     pub fired_events: HashSet<String>,
     /// Milestone cooldowns - milestone_id -> tick of last firing
     pub milestone_cooldowns: HashMap<String, u32>,
+    /// Collapse warning counter - tracks consecutive ticks an actor has been in collapse danger
+    /// Actor collapses after 3 consecutive ticks in dangerous state
+    #[serde(default)]
+    pub collapse_warning_ticks: HashMap<String, u32>,
     /// Save format version for compatibility checking
     pub save_version: u32,
     /// Debug mode - enables detailed tick explanations
@@ -141,6 +145,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            collapse_warning_ticks: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
             scenario_start_year: Some(start_year),
@@ -176,6 +181,7 @@ impl WorldState {
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
+            collapse_warning_ticks: HashMap::new(),
             save_version: SAVE_FORMAT_VERSION,
             debug_mode: false,
             scenario_start_year: Some(start_year),
