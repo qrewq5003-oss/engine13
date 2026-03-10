@@ -126,7 +126,7 @@ fn cmd_submit_action(
     eprintln!("[RUST] cmd_submit_action - result: {:?}", result.is_ok());
     
     // If successful, write events to database
-    if let Ok(ref response) = result {
+    if let Ok(ref _response) = result {
         let mut db_guard = db.lock().map_err(|e| e.to_string())?;
         // Get events from the event_log (submit_action doesn't return events directly)
         let events = s.event_log.events.clone();
@@ -255,7 +255,7 @@ async fn cmd_get_narrative(
     state: State<'_, Mutex<AppState>>,
     db: State<'_, Mutex<Db>>,
     app: tauri::AppHandle,
-    half_year: engine13::llm::HalfYear,
+    _half_year: engine13::llm::HalfYear,  // Kept for API compatibility, now derived from snapshot
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
 
@@ -265,21 +265,26 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        let prompt = llm::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard, half_year);
-        let placeholder = format!("{} {} года. Хроника продолжается.", half_year.display_name(), world_state.year);
-        let config = llm::get_llm_config();
-        let year = world_state.year;
+        
+        // Build snapshot from state (includes half_year)
+        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
+        
+        // Generate prompt using snapshot and narrative memory
+        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);
+        let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
+        let config = engine13::llm::get_llm_config();
+        let year = snapshot.year;
         (prompt, placeholder, config, year)
     }; // All locks released here
 
     // Now do the async HTTP requests without holding any locks
-    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, half_year);
+    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, _half_year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
     let result = if config.provider == "anthropic" {
-        llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
+        engine13::llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
     } else {
-        llm::stream_narrative_openai(prompt, placeholder, config, app).await
+        engine13::llm::stream_narrative_openai(prompt, placeholder, config, app).await
     };
 
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
@@ -292,15 +297,15 @@ fn cmd_set_game_mode(
     mode: String,
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_set_game_mode - acquiring lock, mode: {}", mode);
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    
+    let s = state.lock().map_err(|e| e.to_string())?;
+
     let new_mode = match mode.as_str() {
         "free" => engine13::GameMode::Free,
         "scenario" => engine13::GameMode::Scenario,
         "consequences" => engine13::GameMode::Consequences,
         _ => return Err(format!("Unknown game mode: {}", mode)),
     };
-    
+
     let result = commands::set_game_mode(&mut *s, new_mode);
     eprintln!("[RUST] cmd_set_game_mode - result: {:?}", result);
     result
