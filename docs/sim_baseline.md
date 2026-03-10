@@ -6,6 +6,37 @@
 
 ---
 
+## Post Region-Rank Baseline
+
+**Date:** 2026-03-10
+**Changes:** Fixed economic_output delta per tick, legitimacy floor for rank S
+
+### Summary of Changes
+- **economic_output deltas (per tick):**
+  - Rank S: +0.5
+  - Rank A: +0.3
+  - Rank B: +0.1
+  - Rank C: 0.0
+  - Rank D: -0.2
+- **legitimacy floor:** Rank S actors cannot drop below 20.0
+- Fixed deltas are non-compounding (constant, not % of current value)
+
+### Baseline Results
+
+| Run | Victory Tick | Collapses | Notes |
+|-----|-------------|-----------|-------|
+| rome batch | — | ostrogoths: 29 | Collapses stable vs collapse-fix baseline (29 vs 26) |
+| rome scripted influence | Tick 16 | none | Victory tick unchanged |
+| constantinople balanced | Tick 24 | none | Victory tick unchanged, +2 actions applied |
+
+### Balance Review
+- **Victory timing stable** - no shift in victory tick
+- **Collapse count stable** - ostrogoths 29 vs 26 (within normal variance)
+- **No saturation observed** - no actor holds economic_output = 100 for >10 ticks
+- **No balance review required** - region rank bonuses work as intended without disrupting existing balance
+
+---
+
 ## Post Collapse-Fix Baseline
 
 **Date:** 2026-03-10

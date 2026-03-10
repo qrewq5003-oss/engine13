@@ -198,7 +198,10 @@ pub fn tick(
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
-    // Phase 2: Dependency graph and interactions
+    // Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
+    phase_region_ranks(world);
+
+    // Phase 3: Dependency graph and interactions
     phase_interactions(world, scenario, event_log, rng);
 
     // Phase 3: Random events
@@ -280,7 +283,43 @@ fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondi
 }
 
 // ============================================================================
-// Phase 2: Dependency graph and interactions
+// Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
+// ============================================================================
+
+fn phase_region_ranks(world: &mut WorldState) {
+    // Region rank bonuses are passive fixed deltas and floors.
+    // Intentionally non-compounding: delta is constant, not % of current value.
+    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+
+    for actor_id in &actor_ids {
+        let actor = match world.actors.get_mut(actor_id) {
+            Some(a) => a,
+            None => continue,
+        };
+
+        // Fixed per-tick delta to economic_output
+        let eco_delta: f64 = match actor.region_rank {
+            crate::core::RegionRank::S => 0.5,
+            crate::core::RegionRank::A => 0.3,
+            crate::core::RegionRank::B => 0.1,
+            crate::core::RegionRank::C => 0.0,
+            crate::core::RegionRank::D => -0.2,
+        };
+
+        actor.metrics.economic_output =
+            (actor.metrics.economic_output + eco_delta).clamp(0.0, 100.0);
+
+        // Legitimacy floor for rank S: not a growth bonus, prevents total collapse only
+        if matches!(actor.region_rank, crate::core::RegionRank::S) {
+            if actor.metrics.legitimacy < 20.0 {
+                actor.metrics.legitimacy = 20.0;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Phase 3: Dependency graph and interactions
 // ============================================================================
 
 fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
