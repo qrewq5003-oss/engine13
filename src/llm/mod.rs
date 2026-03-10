@@ -49,7 +49,7 @@ pub struct PlayerActionSummary {
 }
 
 /// Complete narrative world snapshot for prompt generation
-/// 
+///
 /// This is the single source of truth for narrative generation.
 /// The prompt builder should only read from this snapshot, not from WorldState directly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +67,115 @@ pub struct NarrativeWorldSnapshot {
     pub narrative_axes: Vec<String>,
     pub tone_tags: Vec<String>,
     pub game_mode: crate::core::GameMode,
+}
+
+/// Minimal narrative memory for anti-repetition across turns
+///
+/// This stores just enough information to avoid repeating the same narrative patterns
+/// when the world state hasn't changed significantly.
+///
+/// Memory is NOT used for simulation logic - only for prompt generation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NarrativeMemory {
+    /// Gist of last narrative: last sentence of first paragraph, or first 150 chars
+    pub last_narrative_gist: Option<String>,
+    /// World focus label (e.g., "byzantium under siege", "rome consolidating")
+    pub last_world_focus: Option<String>,
+    /// Actors that were central in last narrative
+    pub last_actor_focus: Vec<String>,
+    /// Tone/framing markers that were used
+    pub last_tone_markers: Vec<String>,
+}
+
+/// Extract gist from narrative text using deterministic rule
+///
+/// Rule: last sentence of first paragraph
+/// Fallback: first 150 characters if paragraphs not clearly delimited
+pub fn extract_narrative_gist(narrative: &str) -> String {
+    // Try to find first paragraph (separated by double newline)
+    let first_paragraph = narrative.split("\n\n").next().unwrap_or(narrative);
+    
+    // Try to find last sentence (ends with . ! ?)
+    let sentences: Vec<&str> = first_paragraph.split(|c| c == '.' || c == '!' || c == '?').collect();
+    
+    if sentences.len() > 1 {
+        // Get the last non-empty sentence
+        let last_sentence = sentences.iter()
+            .rev()
+            .find(|s| !s.trim().is_empty())
+            .unwrap_or(&"");
+        
+        if !last_sentence.trim().is_empty() {
+            return last_sentence.trim().to_string();
+        }
+    }
+    
+    // Fallback: first 150 characters
+    if narrative.len() > 150 {
+        format!("{}...", &narrative[..150])
+    } else {
+        narrative.trim().to_string()
+    }
+}
+
+/// Extract actor focus from narrative by matching against known actor names
+pub fn extract_actor_focus(narrative: &str, known_actors: &[String]) -> Vec<String> {
+    let mut focused_actors = Vec::new();
+    
+    for actor in known_actors {
+        // Check if actor name appears in narrative (case-insensitive)
+        if narrative.to_lowercase().contains(&actor.to_lowercase()) {
+            focused_actors.push(actor.clone());
+        }
+    }
+    
+    // Limit to top 3 most prominent (by mention count or just first 3)
+    focused_actors.truncate(3);
+    focused_actors
+}
+
+/// Build memory update from narrative and snapshot
+pub fn update_memory(
+    narrative: &str,
+    snapshot: &NarrativeWorldSnapshot,
+    _previous_memory: &NarrativeMemory,
+) -> NarrativeMemory {
+    NarrativeMemory {
+        last_narrative_gist: Some(extract_narrative_gist(narrative)),
+        last_world_focus: Some(determine_world_focus(snapshot)),
+        last_actor_focus: extract_actor_focus(narrative, &snapshot.foreground_actors),
+        last_tone_markers: snapshot.tone_tags.iter().take(3).cloned().collect(),
+    }
+}
+
+/// Determine world focus label from snapshot
+fn determine_world_focus(snapshot: &NarrativeWorldSnapshot) -> String {
+    // Simple heuristic based on key metrics and game state
+    // This can be expanded later with more sophisticated logic
+    
+    if snapshot.victory_achieved {
+        return "victory achieved".to_string();
+    }
+    
+    // Check for high pressure situations
+    for (key, value) in &snapshot.key_metrics {
+        if key.contains("pressure") && *value > 80.0 {
+            return "high external pressure".to_string();
+        }
+        if key.contains("cohesion") && *value < 30.0 {
+            return "internal fragility".to_string();
+        }
+        if key.contains("legitimacy") && *value < 30.0 {
+            return "legitimacy crisis".to_string();
+        }
+    }
+    
+    // Default: use first foreground actor as focus
+    if let Some(first_actor) = snapshot.foreground_actors.first() {
+        format!("{} centered", first_actor)
+    } else {
+        "general chronicle".to_string()
+    }
 }
 
 /// Build narrative world snapshot from game state
@@ -355,17 +464,19 @@ fn system_prompt(_half_year: HalfYear) -> &'static str {
 /// Prompt structure (optimized for model performance):
 /// 1. Identity / role of narrative voice
 /// 2. Hard factual rules (anti-hallucination)
-/// 3. Scenario framing from tone_tags / narrative_axes (as instructions)
-/// 4. Current world snapshot
-/// 5. Key metrics
-/// 6. Key milestones
-/// 7. Recent important events (top 5, as evidence)
-/// 8. Recent player actions (as narrative causes)
-/// 9. Output instructions (2-4 paragraphs, world-first)
+/// 3. Previous narrative memory (soft anti-repetition guard)
+/// 4. Scenario framing from tone_tags / narrative_axes (as instructions)
+/// 5. Current world snapshot
+/// 6. Key metrics
+/// 7. Key milestones
+/// 8. Recent important events (top 5, as evidence)
+/// 9. Recent player actions (as narrative causes)
+/// 10. Output instructions (2-4 paragraphs, world-first)
 pub fn generate_narrative_prompt(
     snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
     _db: &Db,
+    memory: &NarrativeMemory,
 ) -> String {
     let mut prompt = String::new();
 
@@ -403,6 +514,32 @@ pub fn generate_narrative_prompt(
         if snapshot.victory_achieved { "да" } else { "нет" },
     );
     prompt.push_str(&factual_rules);
+
+    // ========================================================================
+    // Section 3: Previous Narrative Memory — Soft Anti-Repetition Guard
+    // ========================================================================
+    if memory.last_narrative_gist.is_some() || !memory.last_actor_focus.is_empty() {
+        prompt.push_str("=== ПАМЯТЬ ПРЕДЫДУЩЕГО НАРРАТИВА (мягкое ограничение) ===\n");
+        
+        if let Some(ref gist) = memory.last_narrative_gist {
+            prompt.push_str(&format!("Последняя хроника: \"{}\"\n", gist));
+        }
+        
+        if !memory.last_actor_focus.is_empty() {
+            prompt.push_str(&format!("В центре внимания были: {}\n", memory.last_actor_focus.join(", ")));
+        }
+        
+        if let Some(ref focus) = memory.last_world_focus {
+            prompt.push_str(&format!("Мирофокус: {}\n", focus));
+        }
+        
+        prompt.push_str("\n");
+        prompt.push_str("Используй эту память чтобы избегать повторения тех же паттернов:\n");
+        prompt.push_str("- Не ставь того же актора в центр без новой причины.\n");
+        prompt.push_str("- Не используй ту же риторическую рамку, если состояние мира не требует этого.\n");
+        prompt.push_str("- Если состояние мира значительно изменилось — похожий фокус допустим.\n");
+        prompt.push_str("- Избегай повторения тех же формулировок и драматических каркасов.\n\n");
+    }
 
     // ========================================================================
     // Section 3: Scenario Framing — tone_tags and narrative_axes as Instructions

@@ -456,6 +456,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
+        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     // ========================================================================

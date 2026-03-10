@@ -304,12 +304,13 @@ pub async fn cmd_get_narrative(
 ) -> Result<(), String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-    
+
     // Build snapshot from state
     let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log);
-    
+
     let config = llm::get_llm_config();
-    let prompt = llm::generate_narrative_prompt(&snapshot, scenario, db);
+    // Pass narrative memory for anti-repetition
+    let prompt = llm::generate_narrative_prompt(&snapshot, scenario, db, &state.narrative_memory);
 
     // Generate placeholder narrative for when LLM is unavailable
     let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
