@@ -348,9 +348,20 @@ fn system_prompt(_half_year: HalfYear) -> &'static str {
 }
 
 /// Generate narrative prompt from world snapshot
-/// 
+///
 /// This function reads ONLY from the NarrativeWorldSnapshot.
 /// It does NOT read WorldState or Scenario directly.
+///
+/// Prompt structure (optimized for model performance):
+/// 1. Identity / role of narrative voice
+/// 2. Hard factual rules (anti-hallucination)
+/// 3. Scenario framing from tone_tags / narrative_axes (as instructions)
+/// 4. Current world snapshot
+/// 5. Key metrics
+/// 6. Key milestones
+/// 7. Recent important events (top 5, as evidence)
+/// 8. Recent player actions (as narrative causes)
+/// 9. Output instructions (2-4 paragraphs, world-first)
 pub fn generate_narrative_prompt(
     snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
@@ -358,85 +369,135 @@ pub fn generate_narrative_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    // Section 0: System prompt - chronicler persona
+    // ========================================================================
+    // Section 1: Identity / Role — Chronicler Persona
+    // ========================================================================
     prompt.push_str(system_prompt(snapshot.half_year));
     prompt.push_str("\n\n");
 
-    // Section 0.5: Factual block - prevent hallucination (from snapshot)
-    let factual_block = format!(
-        "=== ВАЖНЫЕ ФАКТЫ ИГРЫ (не противоречь им) ===\n\
+    // ========================================================================
+    // Section 2: Hard Factual Rules — Anti-Hallucination Discipline
+    // ========================================================================
+    let factual_rules = format!(
+        "=== ЖЁСТКИЕ ФАКТУАЛЬНЫЕ ПРАВИЛА (не нарушать) ===\n\
          Год: {}\n\
          Половина года: {}\n\
          Живые акторы: {}\n\
          Павшие акторы: {}\n\
-         Передний план (foreground): {}\n\
-         Ключевые вехи: {}\n\
-         Недавние события: {}\n\
          Победа достигнута: {}\n\n\
-         Правила:\n\
-         - Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\
-         - Не называй актора павшим, уничтоженным или исчезнувшим, если его нет в списке павших.\n\
-         - Для живых акторов в упадке используй формулировки: \"под угрозой\", \"ослаблен\", \"на грани\" — но не \"пал\".\n\
-         - Не придумывай победы, смерти правителей, падения городов или коллапсы, которых нет в фактах.\n\n",
+         ЗАПРЕЩЕНО:\n\
+         - Писать, что актор пал, уничтожен или исчез, если его нет в списке павших.\n\
+         - Писать о победе, если victory_achieved == false.\n\
+         - Писать о коллапсе, смерти правителя, падении города, капитуляции, regime change — если этого нет в фактах.\n\
+         - Превращать \"высокое давление\" в уже случившийся крах.\n\
+         - Придумывать события, которых нет в snapshot или recent events.\n\n\
+         РАЗРЕШЕНО (и правильно):\n\
+         - \"под угрозой\", \"ослаблен\", \"теряет опору\", \"вынужден маневрировать\"\n\
+         - \"позиции укрепляются\", \"баланс смещается\", \"напряжение растёт\"\n\
+         - Описывать состояние как \"хрупкое\", \"нестабильное\", \"на грани\" — для живых акторов в упадке.\n\n\
+         Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\n",
         snapshot.year,
         snapshot.half_year.display_name(),
         if snapshot.alive_actors.is_empty() { "нет".to_string() } else { snapshot.alive_actors.join(", ") },
         if snapshot.dead_actors.is_empty() { "нет".to_string() } else { snapshot.dead_actors.join(", ") },
-        if snapshot.foreground_actors.is_empty() { "нет".to_string() } else { snapshot.foreground_actors.join(", ") },
-        if snapshot.key_milestones_fired.is_empty() { "нет".to_string() } else { snapshot.key_milestones_fired.join(", ") },
-        if snapshot.recent_important_events.is_empty() { "нет".to_string() } else { 
-            snapshot.recent_important_events.iter().map(|e| e.description.as_str()).collect::<Vec<_>>().join(", ")
-        },
         if snapshot.victory_achieved { "да" } else { "нет" },
     );
-    prompt.push_str(&factual_block);
+    prompt.push_str(&factual_rules);
 
-    // Section 1: Scenario context (depends on game mode from snapshot)
+    // ========================================================================
+    // Section 3: Scenario Framing — tone_tags and narrative_axes as Instructions
+    // ========================================================================
+    // Convert tone_tags into actual instructional framing (not just labels)
+    if !snapshot.tone_tags.is_empty() || !snapshot.narrative_axes.is_empty() {
+        prompt.push_str("=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===\n");
+        
+        // Build instructional text from tone_tags
+        let mut instructions: Vec<String> = Vec::new();
+        
+        for tag in &snapshot.tone_tags {
+            match tag.as_str() {
+                "political_decay" => instructions.push(
+                    "Focus on signs of institutional erosion, weakening legitimacy, and the shrinking reliability of public order.".to_string()
+                ),
+                "family_chronicle" => instructions.push(
+                    "Keep the narrative grounded in the experience of a family navigating wider political currents.".to_string()
+                ),
+                "coalition_fragility" => instructions.push(
+                    "Focus on the fragility of alliances, diplomatic maneuvering under pressure, and the unstable balance between hope and collapse.".to_string()
+                ),
+                "siege_diplomacy" => instructions.push(
+                    "Treat political coordination and strategic hesitation as central to the world's condition.".to_string()
+                ),
+                "imperial_decline" => instructions.push(
+                    "Emphasize the slow unraveling of central authority, the rise of regional powers, and the sense of an era ending.".to_string()
+                ),
+                "barbarian_pressure" => instructions.push(
+                    "Convey the mounting external threat, the strain on borders, and the inevitability of confrontation.".to_string()
+                ),
+                "trade_competition" => instructions.push(
+                    "Frame events through the lens of commercial rivalry, economic leverage, and maritime dominance.".to_string()
+                ),
+                "religious_tension" => instructions.push(
+                    "Highlight the role of faith, doctrinal conflict, and spiritual authority in shaping political choices.".to_string()
+                ),
+                _ => instructions.push(format!("Consider the theme: {}", tag)),
+            }
+        }
+        
+        // Build instructional text from narrative_axes
+        for axis in &snapshot.narrative_axes {
+            match axis.as_str() {
+                "stability vs ambition" => instructions.push(
+                    "Frame choices as tensions between maintaining order and pursuing opportunity.".to_string()
+                ),
+                "tradition vs adaptation" => instructions.push(
+                    "Show how actors navigate inherited structures versus new realities.".to_string()
+                ),
+                "family honor vs political necessity" => instructions.push(
+                    "Present decisions as conflicts between dynastic reputation and pragmatic survival.".to_string()
+                ),
+                "survival vs surrender" => instructions.push(
+                    "Emphasize the precariousness of existence and the cost of each compromise.".to_string()
+                ),
+                "unity vs fragmentation" => instructions.push(
+                    "Show the strain between collective action and divergent interests.".to_string()
+                ),
+                "faith vs pragmatism" => instructions.push(
+                    "Frame decisions as tensions between spiritual conviction and practical necessity.".to_string()
+                ),
+                _ => instructions.push(format!("Consider the axis: {}", axis)),
+            }
+        }
+        
+        for instruction in instructions {
+            prompt.push_str(&format!("{}\n", instruction));
+        }
+        prompt.push('\n');
+    }
+
+    // ========================================================================
+    // Section 4: Scenario Context (game mode dependent)
+    // ========================================================================
     match snapshot.game_mode {
         crate::core::GameMode::Consequences => {
-            // Consequences mode: use consequence_context
             prompt.push_str(&scenario.consequence_context);
             prompt.push_str("\n\n");
         }
         crate::core::GameMode::Free => {
-            // Free mode: no scenario context at all, just world state
-            // Don't add any scenario context
+            // Free mode: no scenario context
         }
         _ => {
-            // Scenario mode (default): use llm_context
             prompt.push_str(&scenario.llm_context);
             prompt.push_str("\n\n");
         }
     }
 
-    // Section 1.5: Year and half-year anchoring instruction (from snapshot)
-    prompt.push_str(&format!(
-        "=== ИНСТРУКЦИЯ ===\n\
-         ТЕКУЩИЙ ГОД: {}, ПОЛОВИНА: {}. \n\
-         Пиши ТОЛЬКО про события этого года.\n\
-         Не упоминай будущие годы.\n\
-         Не экстраполируй за пределы {}.\n\n",
-        snapshot.year, snapshot.half_year.display_name(), snapshot.year
-    ));
-
-    // Section 1.6: Strict narrative rules — no raw numbers
-    prompt.push_str(
-        "=== СТРОГИЕ ПРАВИЛА НАРРАТИВА ===\n\
-         - НИКОГДА не упоминать числа, проценты, метрики, единицы\n\
-         - НИКОГДА не писать \"+13.6\", \"legitimacy: 70\", \"military_size +15\"\n\
-         - НИКОГДА не перечислять статистику акторов в тексте\n\
-         - Описывать только события, решения, настроения, последствия\n\
-         - \"Венеция переживала подъём\" — не \"economic_output вырос на 8\"\n\
-         - \"Армия Византии окрепла\" — не \"military_size +15\"\n\
-         - \"Казна Генуи истощилась\" — не \"treasury: -40\"\n\
-         - Хроника — это литература, не таблица данных\n\n"
-    );
-
-    // Section 2: World state - foreground actors only (from snapshot key_metrics)
+    // ========================================================================
+    // Section 5: World Snapshot — Key Metrics
+    // ========================================================================
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
     prompt.push_str(&format!("Год: {}\n\n", snapshot.year));
 
-    // Key metrics from snapshot
     if !snapshot.key_metrics.is_empty() {
         prompt.push_str("Ключевые метрики:\n");
         for (key, value) in &snapshot.key_metrics {
@@ -445,17 +506,40 @@ pub fn generate_narrative_prompt(
         prompt.push('\n');
     }
 
-    // Section 3: Recent events from snapshot
-    prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
-    
-    for event in &snapshot.recent_important_events {
-        prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
+    // ========================================================================
+    // Section 6: Key Milestones Fired
+    // ========================================================================
+    if !snapshot.key_milestones_fired.is_empty() {
+        prompt.push_str("Ключевые вехи:\n");
+        for milestone in &snapshot.key_milestones_fired {
+            prompt.push_str(&format!("  - {}\n", milestone));
+        }
+        prompt.push('\n');
     }
-    prompt.push('\n');
 
-    // Section 4: Recent player actions from snapshot
+    // ========================================================================
+    // Section 7: Recent Important Events (Top 5 as Evidence)
+    // ========================================================================
+    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (используй как доказательства, не как чек-лист) ===\n");
+    
+    // Limit to top 5 events
+    let events_to_show: Vec<_> = snapshot.recent_important_events.iter().take(5).collect();
+    
+    if events_to_show.is_empty() {
+        prompt.push_str("Нет недавних событий.\n");
+    } else {
+        for event in events_to_show {
+            prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
+        }
+    }
+    prompt.push_str("\nИспользуй эти события как доказательства, а не как обязательный список для пересказа.\n");
+    prompt.push_str("Не описывай их по одному, если одно событие явно доминирует в этой половине года.\n\n");
+
+    // ========================================================================
+    // Section 8: Recent Player Actions (as Narrative Causes)
+    // ========================================================================
     if !snapshot.recent_player_actions.is_empty() {
-        prompt.push_str("=== ДЕЙСТВИЯ ИГРОКА ===\n");
+        prompt.push_str("=== ДЕЙСТВИЯ ИГРОКА (как причины изменений) ===\n");
         for action in &snapshot.recent_player_actions {
             prompt.push_str(&format!("- {}\n", action.name));
             if !action.key_effects.is_empty() {
@@ -464,25 +548,32 @@ pub fn generate_narrative_prompt(
                 }
             }
         }
-        prompt.push('\n');
+        prompt.push_str("\nИспользуй действия игрока как сигналы направления политики, причины изменений, сознательные ходы.\n");
+        prompt.push_str("Не превращай их в UI-log или список транзакций.\n\n");
     }
 
-    // Section 5: Narrative guidance from config
-    if !snapshot.narrative_axes.is_empty() {
-        prompt.push_str("=== ТЕМАТИЧЕСКИЕ ОСИ ===\n");
-        for axis in &snapshot.narrative_axes {
-            prompt.push_str(&format!("- {}\n", axis));
-        }
-        prompt.push('\n');
-    }
-
-    if !snapshot.tone_tags.is_empty() {
-        prompt.push_str("=== СТИЛЬ ПОВЕСТВОВАНИЯ ===\n");
-        for tag in &snapshot.tone_tags {
-            prompt.push_str(&format!("- {}\n", tag));
-        }
-        prompt.push('\n');
-    }
+    // ========================================================================
+    // Section 9: Output Instructions — World-First, 2-4 Paragraphs
+    // ========================================================================
+    prompt.push_str("=== ИНСТРУКЦИИ ПО ВЫВОДУ ===\n");
+    prompt.push_str("Напиши хронику этой половины года в формате 2–4 содержательных абзацев.\n\n");
+    prompt.push_str("Предпочтительная структура:\n");
+    prompt.push_str("1. Первый абзац — что изменилось в общей картине мира за эту половину года.\n");
+    prompt.push_str("2. Второй абзац — что это значит политически / социально / военным образом.\n");
+    prompt.push_str("3. Третий абзац (если нужно) — какое направление, риск или возможность формируются дальше.\n\n");
+    prompt.push_str("ВАЖНО:\n");
+    prompt.push_str("- Описывай сначала состояние мира, потом как это проявляется через ключевых акторов.\n");
+    prompt.push_str("- НЕ превращай narrative в список обновлений по акторам (actor-by-actor checklist).\n");
+    prompt.push_str("- Используй акторов только в той мере, в какой они формируют общую картину.\n");
+    prompt.push_str("- Будь ярким, но конкретным. Не заполняй объём абстрактной \"исторической\" водой.\n");
+    prompt.push_str("- Каждый абзац должен добавлять новый смысл, основанный на snapshot.\n");
+    prompt.push_str("- НЕ повторяй одни и те же эмоции или формулировки.\n\n");
+    prompt.push_str("ЗАПРЕЩЕНО:\n");
+    prompt.push_str("- Один короткий абзац.\n");
+    prompt.push_str("- Слепленный моноблок без структуры.\n");
+    prompt.push_str("- Несколько абзацев, которые повторяют одно и то же.\n");
+    prompt.push_str("- Перечисление акторов по очереди: \"Венеция сделала X. Генуя сделала Y. Милан сделал Z.\"\n\n");
+    prompt.push_str("Помни: хроника — это литература, а не таблица данных или UI-log.\n");
 
     prompt
 }
