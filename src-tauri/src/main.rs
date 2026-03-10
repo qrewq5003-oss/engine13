@@ -14,7 +14,7 @@ use tauri::State;
 #[tauri::command]
 fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13::WorldState>, String> {
     eprintln!("[RUST] cmd_get_world_state - acquiring lock");
-    let mut s = state.lock().map_err(|e| {
+    let s = state.lock().map_err(|e| {
         eprintln!("[RUST] cmd_get_world_state - lock error: {}", e);
         e.to_string()
     })?;
@@ -297,7 +297,7 @@ fn cmd_set_game_mode(
     mode: String,
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_set_game_mode - acquiring lock, mode: {}", mode);
-    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
 
     let new_mode = match mode.as_str() {
         "free" => engine13::GameMode::Free,
