@@ -9,7 +9,7 @@ use crate::engine::EventLog;
 
 /// Half-year narrative unit for chronicle generation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum HalfYear {
     FirstHalf,   // January-June, first chronicle of the year
     SecondHalf,  // July-December, second chronicle of the year
@@ -733,13 +733,30 @@ pub async fn stream_narrative_anthropic(
     );
     headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
 
+    // Split prompt into system and user content
+    // System: chronicler persona + factual rules (first two sections before === НАРРАТИВНЫЕ ИНСТРУКЦИИ ===)
+    // User: everything else (snapshot, events, instructions)
+    let system_end = prompt.find("=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===").unwrap_or(0);
+    let system_content = if system_end > 0 {
+        prompt[..system_end].trim().to_string()
+    } else {
+        // Fallback: use first 500 chars as system
+        prompt.chars().take(500).collect()
+    };
+    let user_content = if system_end > 0 {
+        prompt[system_end..].trim().to_string()
+    } else {
+        prompt
+    };
+
     let body = serde_json::json!({
         "model": config.model,
-        "max_tokens": 3000,
+        "max_tokens": 4000,
+        "system": system_content,
         "messages": [
             {
                 "role": "user",
-                "content": prompt
+                "content": user_content
             }
         ],
         "stream": true
@@ -789,8 +806,11 @@ pub async fn stream_narrative_anthropic(
                         break;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                        if let Some(content) = json["content"][0]["text"].as_str() {
-                            let _ = app.emit("narrative_chunk", content.to_string());
+                        // Anthropic streaming: content_block_delta with delta.text
+                        if json["type"] == "content_block_delta" {
+                            if let Some(content) = json["delta"]["text"].as_str() {
+                                let _ = app.emit("narrative_chunk", content.to_string());
+                            }
                         }
                     }
                 }
@@ -830,7 +850,7 @@ pub async fn stream_narrative_openai(
                 "content": prompt
             }
         ],
-        "max_tokens": 3000,
+        "max_tokens": 4000,
         "stream": true
     });
 

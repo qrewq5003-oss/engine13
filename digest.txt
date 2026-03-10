@@ -11,6 +11,10 @@ Directory structure:
     ├── tsconfig.json
     ├── tsconfig.node.json
     ├── vite.config.ts
+    ├── docs/
+    │   ├── narrative_evaluation.md
+    │   ├── narrative_regression_baseline.md
+    │   └── sim_baseline.md
     ├── src/
     │   ├── api.ts
     │   ├── App.css
@@ -2234,6 +2238,547 @@ export default defineConfig({
 
 
 ================================================
+FILE: docs/narrative_evaluation.md
+================================================
+# Narrative Manual Evaluation Procedure
+
+**Purpose:** This document defines the manual evaluation process for narrative quality assessment.
+
+**Note:** This is a procedure document only. The actual review is conducted separately.
+
+---
+
+## Evaluation Checklist
+
+For each narrative output, evaluate the following criteria:
+
+| Criterion | Pass (1) | Fail (0) |
+|-----------|----------|----------|
+| **Factual accuracy**: no hallucinated events | | |
+| **No hallucination**: no invented collapse/death/victory | | |
+| **World-first focus**: describes world state before actors | | |
+| **Scenario voice**: tone feels appropriate to scenario | | |
+| **Strategy reflection**: player strategy is felt in text | | |
+| **Repetition low vs previous output**: fresh framing | | |
+| **Paragraph quality**: 2-4 substantial paragraphs | | |
+
+### Scoring Scale
+
+- **7/7** — excellent
+- **6/7** — good
+- **5/7** — acceptable
+- **<5/7** — needs fixing
+
+---
+
+## Two Levels of Evaluation
+
+### A. Single-Output Quality
+
+Evaluate each narrative individually:
+
+1. **Factual accuracy** — no invented events
+2. **No hallucination** — no false collapse/victory/death
+3. **World-first focus** — world state described before actors
+4. **Scenario voice** — tone matches scenario context
+5. **Paragraph quality** — 2-4 substantial paragraphs
+
+### B. Across-Turn Quality
+
+Evaluate pairs of adjacent half-year outputs:
+
+1. **Repetition low** — not repeating same rhetorical frame
+2. **No same actor focus without reason** — actor centering justified by state change
+3. **Same rhetoric not reused** — fresh dramatic framing
+4. **Half-year change visible** — narrative reflects state evolution
+
+---
+
+## Review Procedure
+
+### Six Cases to Evaluate
+
+#### Rome 375 BC
+1. Scripted balanced
+2. Scripted influence
+3. Scripted wealth
+
+#### Constantinople 1430
+4. Scripted balanced
+5. Scripted diplomacy
+6. Scripted military
+
+### For Each Case
+
+1. Capture **2 adjacent half-year outputs** (e.g., First Half 375 + Second Half 375)
+2. Evaluate each output using the checklist above
+3. Evaluate across-turn quality between the two outputs
+4. Record context snapshot for future reference
+5. Note any regressions or quality issues
+
+---
+
+## Signs of Good Output
+
+A good narrative output:
+
+- ✓ Describes world change first, then connects to key actors
+- ✓ Does not invent events (collapse, victory, death)
+- ✓ Reflects actual player strategy
+- ✓ Does not devolve into journal replay or UI-log
+- ✓ Delivers 2-4 substantial paragraphs
+- ✓ Shifts emphasis between adjacent half-years when state has genuinely changed
+- ✓ Uses tone_tags and narrative_axes as felt framing, not just labels
+
+---
+
+## Signs of Bad Output
+
+A bad narrative output:
+
+- ✗ Actor-by-actor checklist ("Venice did X. Genoa did Y. Milan did Z.")
+- ✗ Invented collapse / victory / death not in facts
+- ✗ Same text on adjacent half-years without justification
+- ✗ Same dramatization reused without new events
+- ✗ Player strategy not felt in text
+- ✗ Empty or repetitive paragraphs
+- ✗ Long text without new meaning (filler inflation)
+
+---
+
+## Scenario Voice: What It Means
+
+### Rome 375 BC
+
+**Good Rome voice:**
+
+> The narrative should feel like a chronicle of a world where family advancement occurs within broader political and institutional instability. The world is aging, institutions are weakening, and the family seeks windows of influence within this cracking structure.
+
+**Example direction:**
+> "Мир дряхлеет, институты слабеют, а семья ищет окно влияния внутри этой трещащей конструкции."
+
+**Key markers:**
+- Political erosion
+- Institutional decay
+- Family strategy within crumbling order
+- Barbarian pressure as background force
+- The sense of an era ending
+
+---
+
+### Constantinople 1430
+
+**Good Constantinople voice:**
+
+> The narrative should feel like a chronicle of a world under external pressure, where alliances, hesitations, and political-military coordination determine the city's fate. The world is shrinking under pressure, and the city's survival depends on fragile alliance coordination and the cost of delay.
+
+**Example direction:**
+> "Мир сужается под давлением, а судьба города зависит от хрупкой координации союзников и цены промедления."
+
+**Key markers:**
+- Fragile coalition
+- External pressure mounting
+- Diplomacy under threat
+- Balance between salvation and collapse
+- The price of hesitation
+
+---
+
+## Evaluation Template
+
+Use this template for each case:
+
+```markdown
+### Case: [scenario] — [strategy]
+
+#### Context Snapshot
+- **Year:**
+- **Half-year:**
+- **Victory status:**
+- **Foreground actors:**
+- **Key world condition:**
+- **Key player actions:**
+
+#### Output A (First Half)
+[Paste narrative text]
+
+#### Output B (Second Half)
+[Paste narrative text]
+
+#### Checklist A
+- Factual accuracy: [0/1]
+- No hallucination: [0/1]
+- World-first focus: [0/1]
+- Scenario voice: [0/1]
+- Strategy reflection: [0/1]
+- Paragraph quality: [0/1]
+
+**Subtotal A: _/6**
+
+#### Checklist B
+- Factual accuracy: [0/1]
+- No hallucination: [0/1]
+- World-first focus: [0/1]
+- Scenario voice: [0/1]
+- Strategy reflection: [0/1]
+- Paragraph quality: [0/1]
+
+**Subtotal B: _/6**
+
+#### Across-Turn Check
+- Repetition low: [0/1]
+- Same actor focus without reason: [0/1] (0 = bad, 1 = good)
+- Same rhetoric reused: [0/1] (0 = bad, 1 = good)
+- Half-year change visible: [0/1]
+
+**Across-turn subtotal: _/4**
+
+#### Final Score
+**Total: _/16**
+
+Rating:
+- 15-16/16 — excellent
+- 13-14/16 — good
+- 11-12/16 — acceptable
+- <11/16 — needs fixing
+
+#### Notes
+[Any additional observations, regression flags, or quality comments]
+```
+
+---
+
+## What This Review Does NOT Do
+
+- Does NOT use LLM-as-judge
+- Does NOT automate scoring
+- Does NOT change prompt architecture
+- Does NOT modify simulation logic
+- Does NOT create new scenarios or UI
+
+This is a **manual human review** to establish quality baseline and catch regressions.
+
+---
+
+## Next Steps After Review
+
+1. Compile scores across all 6 cases
+2. Identify patterns of regression
+3. Flag any critical factuality breaches
+4. Note which scenarios/strategies have weakest voice
+5. Use findings to guide future prompt tuning
+
+
+
+================================================
+FILE: docs/narrative_regression_baseline.md
+================================================
+# Narrative Regression Baseline
+
+**Purpose:** This document establishes baseline expectations for narrative quality and defines what counts as regression.
+
+**Note:** The example narratives here are reference examples, not rigid golden texts. The goal is to capture quality characteristics, not to demand identical wording forever.
+
+---
+
+## What Counts as Narrative Regression
+
+Regression is indicated by ANY of the following:
+
+### Critical Regressions (must fix)
+1. **Factuality breach**: Narrative claims collapse/death/victory that isn't in facts
+2. **Actor-by-actor checklist**: Returns to listing actors one by one instead of world-first narrative
+3. **Single paragraph collapse**: Output shrinks to one short block instead of 2-4 paragraphs
+4. **Strategy reflection lost**: Different scripted strategies produce indistinguishable narratives
+
+### Quality Regressions (should fix)
+5. **Repetition across turns**: Adjacent half-year outputs use nearly identical framing/focus without state change justification
+6. **Scenario voice lost**: tone_tags and narrative_axes stop being felt in the output
+7. **Filler inflation**: Abstract "historical" padding replaces concrete meaning
+
+---
+
+## Automated Safety Rails
+
+The following minimal checks are automated:
+
+1. **Output not empty**
+2. **Output has ≥2 paragraphs** (at least one `\n\n`)
+
+These are necessary but not sufficient conditions.
+
+---
+
+## Evaluation Checklist
+
+For each narrative output, evaluate:
+
+| Criterion | Pass (1) | Fail (0) |
+|-----------|----------|----------|
+| Factual accuracy: no hallucinated events | | |
+| No hallucination: no invented collapse/death/victory | | |
+| World-first focus: describes world state before actors | | |
+| Scenario voice: tone_tags/narrative_axes felt in text | | |
+| Strategy reflection: different strategies feel different | | |
+| Repetition low vs previous output | | |
+| Paragraph quality: 2-4 substantial paragraphs | | |
+
+**Scoring:**
+- 7/7 — excellent
+- 6/7 — good
+- 5/7 — acceptable
+- <5/7 — needs fixing
+
+---
+
+## Reference Examples by Scenario
+
+### Rome 375 BC
+
+**Snapshot context:**
+- Year: 375-380
+- Half-year: First/Second
+- Key metrics: family_influence ~60-90, rome.legitimacy ~60-70
+- Foreground actors: rome, visigoths, huns, ostrogoths
+
+**Strategy: Balanced**
+- Expected: Moderate influence growth, balanced resource use
+- Narrative should feel: pragmatic, family-centered, navigating imperial decay
+
+**Strategy: Influence**
+- Expected: Aggressive influence spending, faster victory approach
+- Narrative should feel: ambitious, politically active, risk-taking
+
+**Strategy: Wealth**
+- Expected: Wealth accumulation, no direct victory path
+- Narrative should feel: economically focused, politically cautious, long-term positioning
+
+---
+
+### Constantinople 1430
+
+**Snapshot context:**
+- Year: 1430-1453
+- Half-year: First/Second
+- Key metrics: federation_progress ~0-100, byzantium.external_pressure ~60-100
+- Foreground actors: byzantium, ottomans, venice, genoa, milan
+
+**Strategy: Balanced**
+- Expected: Mixed diplomacy/military support
+- Narrative should feel: coalition-building, pragmatic alliance management
+
+**Strategy: Diplomacy**
+- Expected: Diplomacy-first approach, slower but steadier
+- Narrative should feel: diplomatic maneuvering, economic leverage, maritime focus
+
+**Strategy: Military**
+- Expected: Military-first approach, faster pressure reduction
+- Narrative should feel: martial urgency, direct confrontation, defensive consolidation
+
+---
+
+## Manual Evaluation Procedure
+
+1. **Run 6 scripted scenarios** (Rome ×3, Constantinople ×3)
+2. **Capture 2 adjacent half-year outputs** per scenario
+3. **Evaluate each output** using the checklist above
+4. **Compare adjacent outputs** for repetition
+5. **Flag any regression** per the criteria above
+
+---
+
+## Notes for Future Improvement
+
+This baseline is intentionally minimal. Future improvements may include:
+
+- LLM-assisted repetition detection
+- Semantic similarity scoring across turns
+- More sophisticated actor-focus tracking
+- Automated strategy differentiation scoring
+
+For now, manual review with this checklist is the primary quality gate.
+
+
+
+================================================
+FILE: docs/sim_baseline.md
+================================================
+# ENGINE13 Simulation Baseline
+
+**Recorded:** After Rome balanced fix and knowledge → legitimacy bridge  
+**Date:** 2026-03-09  
+**Commit:** Post "Fix: improve Rome balanced path and give knowledge a safe support role via legitimacy"
+
+---
+
+## Rome 375 BC
+
+### Strategy Roles
+
+| Strategy  | Role                              | Victory Path |
+|-----------|-----------------------------------|--------------|
+| Balanced  | Moderate influence path           | ✓ Tick 16    |
+| Influence | Aggressive influence path         | ✓ Tick 16    |
+| Wealth    | Tempo-resource path, no victory   | ✗            |
+
+### Scripted Strategy Summary Table
+
+| Strategy  | Victory     | Influence Δ | Wealth Δ   | Connections Δ | Key Actions |
+|-----------|-------------|-------------|------------|---------------|-------------|
+| Balanced  | ✓ Tick 16   | +84.7       | -161.0     | +80.0         | build_reputation:16, back_admin:11, expand:5 |
+| Influence | ✓ Tick 16   | +96.5       | -175.0     | +60.2         | build_reputation:16, back_admin:13, support:3 |
+| Wealth    | ✗           | -92.7       | +327.6     | -142.8        | invest_wealth:50, lay_low:50 |
+
+### Batch Report (100 runs, 50 ticks each, no-player)
+
+```
+=== BALANCE REPORT: ROME 375 (100 runs, 50 ticks each, no-player) ===
+This report reflects autonomous world behavior without player actions.
+
+Rome core metrics (final avg):
+  military_size:   338.0
+  cohesion:        87.1
+  legitimacy:      47.8
+
+Family metrics (final avg):
+  family_influence: -28.8
+
+Dynamics (avg per run):
+  generation transitions: 0.0
+  foreground shifts:      14.7
+
+Most common collapsed actors:
+  - ostrogoth_kingdom: 100 runs
+  - ostrogoths: 100 runs
+  - armenia: 72 runs
+```
+
+### Important: Rome Batch Interpretation
+
+> **Rome batch = no-player run**
+>
+> Without player actions, family influence shows slow decline:
+> - **~ -28.8 influence over 50 ticks** (from 60.0 starting)
+> - This is the baseline "drift" without player intervention
+> - Used to compare against scripted strategies
+
+### Design Status
+
+- **Primary win path:** `family:influence >= 90` (unchanged)
+- **Wealth role:** tempo-resource (not victory path)
+- **Knowledge role:** support-resource via legitimacy bridge (+0.1 legitimacy/tick at knowledge > 40)
+- **Balanced:** no longer a trap path — now wins at tick 16
+- **Rome batch:** interpreted as no-player baseline for comparison
+
+---
+
+## Constantinople 1430
+
+### Strategy Roles
+
+| Strategy  | Role                        | Victory Path |
+|-----------|-----------------------------|--------------|
+| Balanced  | Mixed diplomacy/military    | ✓ Tick 24    |
+| Diplomacy | Diplomacy-first approach    | ✓ Tick 25    |
+| Military  | Military-first approach     | ✓ Tick 23    |
+
+### Scripted Strategy Summary Table
+
+| Strategy  | Victory     | Federation Δ | Pressure Δ | Actions Applied | Key Actions |
+|-----------|-------------|--------------|------------|-----------------|-------------|
+| Balanced  | ✓ Tick 24   | 0 → 98.8     | 0 → 79.6   | 62              | venice_diplomacy:24, genoa_mercenaries:19 |
+| Diplomacy | ✓ Tick 25   | 0 → 99.0     | 0 → 80.0   | 62              | venice_diplomacy:25, genoa_mercenaries:18 |
+| Military  | ✓ Tick 23   | 0 → 99.1     | 0 → 74.9   | 60              | genoa_mercenaries:23, venice_diplomacy:17 |
+
+### Batch Report (100 runs, 50 ticks each)
+
+```
+=== SIMULATION REPORT (100 runs, 50 ticks each) ===
+Ticks completed: 50
+Random events fired (avg): 41.1
+
+Collapses: 73 runs (73%)
+  median collapse tick: 35
+  collapses before tick 10: 0
+  collapses before tick 20: 3
+```
+
+### Design Status
+
+- **Primary win path:** `federation_progress >= 100` sustained for 3 ticks
+- **All three scripted strategies are valid** and achieve victory
+- **Military strategy** achieves fastest victory (tick 23) but requires more rejections
+- **Diplomacy strategy** is slightly slower (tick 25) but more efficient early
+- **Balanced strategy** is middle ground (tick 24)
+
+---
+
+## Notes
+
+### Rome Victory Condition (Unchanged)
+
+```rust
+victory_condition: VictoryCondition {
+    metric: "family:influence".to_string(),
+    threshold: 90.0,
+    minimum_tick: 15,
+    sustained_ticks_required: 1,
+}
+```
+
+### Rome Knowledge → Legitimacy Bridge
+
+Added soft support role for knowledge (not a second victory path):
+
+```rust
+AutoDelta {
+    metric: "legitimacy".to_string(),
+    base: -0.1,
+    conditions: vec![
+        // ... other conditions ...
+        DeltaCondition {
+            metric: "family:family_knowledge".to_string(),
+            operator: ComparisonOperator::Greater,
+            value: 40.0,
+            delta: 0.1,  // +0.1 legitimacy/tick when knowledge > 40
+        },
+    ],
+}
+```
+
+### Rome Balanced Policy Fix
+
+Changed priority from resource-loop trap to outcome-focused:
+
+```rust
+// BEFORE (trap):
+vec!["gather_information", "lay_low", "expand_network", ...]
+
+// AFTER (wins):
+vec!["expand_network", "build_reputation", "support_city", ...]
+```
+
+---
+
+## Baseline Verification Commands
+
+```bash
+# Rome
+cargo run --bin sim rome_375 50 batch 2>/dev/null
+cargo run --bin sim rome_375 50 scripted balanced 2>/dev/null
+cargo run --bin sim rome_375 50 scripted influence 2>/dev/null
+cargo run --bin sim rome_375 50 scripted wealth 2>/dev/null
+
+# Constantinople
+cargo run --bin sim constantinople_1430 50 batch 2>/dev/null
+cargo run --bin sim constantinople_1430 25 scripted balanced 2>/dev/null
+cargo run --bin sim constantinople_1430 25 scripted diplomacy 2>/dev/null
+cargo run --bin sim constantinople_1430 25 scripted military 2>/dev/null
+```
+
+
+
+================================================
 FILE: src/api.ts
 ================================================
 // Tauri command invocations (Tauri v2)
@@ -2251,7 +2796,7 @@ import type {
   SubmitActionResponse,
   SaveResponse,
   StatusIndicatorState,
-  NarrativeSeason,
+  HalfYear,
   ActionInfo,
 } from './types/index';
 
@@ -2280,9 +2825,9 @@ export async function getNarrative(
   onChunk: (text: string) => void,
   onDone: () => void,
   onError?: (error: string) => void,
-  season?: NarrativeSeason
+  halfYear?: HalfYear
 ): Promise<() => void> {
-  console.log('[API] Starting streaming narrative', season ? `season=${season}` : '');
+  console.log('[API] Starting streaming narrative', halfYear ? `halfYear=${halfYear}` : '');
 
   // Listen for chunks
   const unlistenChunk = await listen<string>('narrative_chunk', (event) => {
@@ -2298,9 +2843,9 @@ export async function getNarrative(
     onDone();
   });
 
-  // Invoke the command with season parameter
+  // Invoke the command with halfYear parameter
   try {
-    await invoke('cmd_get_narrative', { season });
+    await invoke('cmd_get_narrative', { halfYear });
   } catch (err) {
     console.error('[API] cmd_get_narrative error:', err);
     unlistenChunk();
@@ -2680,7 +3225,7 @@ import {
   saveGame,
   getStatusIndicators,
 } from './api';
-import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, NarrativeSeason, ActionInfo } from './types';
+import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, HalfYear, ActionInfo } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -2831,14 +3376,17 @@ const App: React.FC = () => {
   }, []);
 
   // Refresh narrative (streaming - uses current world state from API)
-  const refreshNarrative = useCallback(async () => {
+  const refreshNarrative = useCallback(async (stateForNarrative?: WorldState) => {
     try {
       setNarrativeLoading(true);
       setIsGeneratingNarrative(true);
       setNarrative(''); // Reset narrative before streaming
 
-      // Determine season based on tick - even ticks are Spring, odd are Autumn
-      const season: NarrativeSeason = worldState && worldState.tick % 2 === 0 ? 'spring' : 'autumn';
+      // Use provided state or fall back to current worldState
+      const currentState = stateForNarrative ?? worldState;
+
+      // Determine half-year based on tick - even ticks are FirstHalf, odd are SecondHalf
+      const halfYear: HalfYear = currentState && currentState.tick % 2 === 0 ? 'first_half' : 'second_half';
 
       await getNarrative(
         (chunk) => {
@@ -2854,21 +3402,21 @@ const App: React.FC = () => {
         (error) => {
           // Error handling - use placeholder
           console.error('[Narrative] Error:', error);
-          const placeholder = worldState
-            ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
-            : 'Медиолан. Семья наблюдает за судьбой Империи.';
+          const placeholder = currentState
+            ? `${currentState.year} год. Хроника продолжается.`
+            : 'Хроника продолжается.';
           setNarrative(placeholder);
           setNarrativeLoading(false);
           setIsGeneratingNarrative(false);
         },
-        season
+        halfYear
       );
     } catch (err) {
       console.error('[Narrative] Error:', err);
       // Don't show error - LLM may be unavailable, use placeholder
       const placeholder = worldState
-        ? `Медиолан, ${worldState.year} год. Семья наблюдает за судьбой Империи.`
-        : 'Медиолан. Семья наблюдает за судьбой Империи.';
+        ? `${worldState.year} год. Хроника продолжается.`
+        : 'Хроника продолжается.';
       setNarrative(placeholder);
       setNarrativeLoading(false);
       setIsGeneratingNarrative(false);
@@ -2893,8 +3441,8 @@ const App: React.FC = () => {
       // Step 2: Refresh available actions and events to reflect new state
       await refreshState();
 
-      // Step 3: Generate narrative every tick (using new world state)
-      await refreshNarrative();
+      // Step 3: Generate narrative every tick (using fresh world state directly)
+      await refreshNarrative(response.world_state);
     } catch (err) {
       setError(`Failed to advance tick: ${err}`);
     } finally {
@@ -3002,9 +3550,10 @@ const App: React.FC = () => {
         <div className="header-left">
           <h1 className="app-title">ENGINE13</h1>
           <span className="app-subtitle">
-            {worldState.scenario_id === 'rome_375' ? 'Rome 375 — Семья Ди Милано' :
-             worldState.scenario_id === 'constantinople_1430' ? 'Constantinople 1430 — Федерация' :
-             worldState.scenario_id}
+            {(() => {
+              const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+              return scenario?.label ?? worldState.scenario_id;
+            })()}
           </span>
         </div>
         <button
@@ -3030,10 +3579,14 @@ const App: React.FC = () => {
       {worldState?.victory_achieved && (
         <VictoryScreen
           worldState={worldState}
-          victoryTitle={worldState.scenario_id === 'constantinople_1430' ? 'Федерация Севера основана' :
-                      worldState.scenario_id === 'rome_375' ? 'Семья достигла величия' : 'Победа!'}
-          victoryDescription={worldState.scenario_id === 'constantinople_1430' ? 'Торговые республики объединились. Константинополь получил шанс на спасение.' :
-                              worldState.scenario_id === 'rome_375' ? 'Ди Милано стали опорой угасающей империи.' : 'Вы достигли цели сценария.'}
+          victoryTitle={(() => {
+            const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+            return scenario?.victory_title ?? 'Победа!';
+          })()}
+          victoryDescription={(() => {
+            const scenario = scenarios.find(s => s.id === worldState.scenario_id);
+            return scenario?.victory_description ?? 'Вы достигли цели сценария.';
+          })()}
           onContinue={() => {}}
           onNewGame={() => setGameState('menu')}
         />
@@ -3128,6 +3681,9 @@ pub struct AppState {
     pub event_log: EventLog,
     pub current_scenario: Option<Scenario>,
     pub rng: Option<rand_chacha::ChaCha8Rng>,
+    /// Narrative memory for anti-repetition across turns
+    /// This does NOT affect simulation logic - only used for prompt generation
+    pub narrative_memory: crate::llm::NarrativeMemory,
 }
 
 impl Default for AppState {
@@ -3137,6 +3693,7 @@ impl Default for AppState {
             event_log: EventLog::new(),
             current_scenario: None,
             rng: None,
+            narrative_memory: crate::llm::NarrativeMemory::default(),
         }
     }
 }
@@ -3302,10 +3859,69 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<crate::applic
     crate::application::list_saves_with_slots(db, scenario_id)
 }
 
-/// Get relevant events for an actor
-pub fn get_relevant_events(db: &Db, actor_id: String) -> Result<Vec<Event>, String> {
-    db.get_events_by_actor(&actor_id)
-        .map_err(|e| format!("Failed to get events: {}", e))
+/// Get relevant events with scoring based on importance, actor relevance, temporal decay, and narrative status
+pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>) -> Result<Vec<Event>, String> {
+    // Fetch all events for the provided actor IDs
+    let mut all_events: Vec<Event> = Vec::new();
+    for actor_id in &actor_ids {
+        let events = db.get_events_by_actor(actor_id)
+            .map_err(|e| format!("Failed to get events: {}", e))?;
+        all_events.extend(events);
+    }
+
+    // Get current world state for narrative status lookup
+    // For now, we'll use a simplified approach - foreground actors get higher weight
+    let foreground_ids: Vec<String> = actor_ids;
+
+    // Score and sort events
+    let mut scored_events: Vec<(Event, f64)> = all_events
+        .into_iter()
+        .map(|event| {
+            let score = calculate_event_relevance(&event, &foreground_ids);
+            (event, score)
+        })
+        .collect();
+
+    // Sort by score descending
+    scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Return top 20 events
+    Ok(scored_events.into_iter().take(20).map(|(e, _)| e).collect())
+}
+
+/// Calculate relevance score for an event
+/// score = event_importance_weight * actor_relevance_weight * temporal_decay * narrative_status_weight
+fn calculate_event_relevance(event: &Event, foreground_ids: &[String]) -> f64 {
+    use crate::EventType;
+
+    // Temporal decay - use step function based on age
+    let current_tick = event.tick; // In real impl, would get current tick from world state
+    let age_in_ticks = current_tick.saturating_sub(event.tick);
+    let temporal_decay = match age_in_ticks {
+        0..=2 => 1.0,
+        3..=5 => 0.7,
+        6..=10 => 0.4,
+        _ => 0.2,
+    };
+
+    // Event importance weight
+    let importance_weight = match event.event_type {
+        EventType::Collapse | EventType::Milestone => 3.0,
+        EventType::PlayerAction | EventType::War => 2.0,
+        _ => 1.0,
+    };
+
+    // Narrative status weight - foreground actors get higher weight
+    let narrative_weight = if foreground_ids.contains(&event.actor_id) {
+        1.5
+    } else {
+        1.0
+    };
+
+    // Actor relevance - events for key actors are more relevant
+    let actor_relevance = 1.0; // Simplified - could check if actor is player-controlled
+
+    importance_weight * actor_relevance * temporal_decay * narrative_weight
 }
 
 /// Status indicator state for UI
@@ -3427,9 +4043,9 @@ pub async fn cmd_get_narrative(
     state: &AppState,
     db: &Db,
     app: tauri::AppHandle,
-    season: crate::llm::NarrativeSeason,
+    half_year: crate::llm::HalfYear,
 ) -> Result<(), String> {
-    crate::application::cmd_get_narrative(state, db, app, season).await
+    crate::application::cmd_get_narrative(state, db, app, half_year).await
 }
 
 /// Get available models from LLM provider - delegates to llm module
@@ -4470,7 +5086,7 @@ pub use core::*;
 pub use engine::{EventLog, TickExplanation, generate_tick_explanation};
 pub use commands::{AppState, SaveData, AdvanceTickResponse, SubmitActionResponse, SaveResponse, LoadResponse, ScenarioMeta};
 pub use db::{Db, DbSave, DbDeadActor};
-pub use llm::{LlmConfig, LlmTrigger, LlmContext, TriggerType, get_llm_config, save_llm_config, generate_narrative_prompt, stream_narrative_anthropic, stream_narrative_openai, get_available_models};
+pub use llm::{LlmConfig, LlmTrigger, LlmContext, TriggerType, HalfYear, NarrativeWorldSnapshot, PlayerActionSummary, NarrativeMemory, build_snapshot, extract_narrative_gist, update_memory, get_llm_config, save_llm_config, generate_narrative_prompt, stream_narrative_anthropic, stream_narrative_openai, get_available_models};
 pub use application::{list_saves, list_saves_with_slots, load_game, load_scenario, save_game, set_game_mode, get_available_actions, submit_action, cmd_get_narrative, SaveSlotData, SaveSlotList};
 pub use scenarios::{get_scenario_list, get_scenario_meta};
 
@@ -4500,8 +5116,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{ComparisonOperator, Condition, MetricRef, PatronAction, Scenario, WorldState};
-use crate::db::Db;
-use crate::engine::EventLog;
 use crate::AppState;
 
 /// Reason why an action is unavailable - runtime check result
@@ -5136,21 +5750,22 @@ pub async fn cmd_get_narrative(
     state: &AppState,
     db: &Db,
     app: tauri::AppHandle,
-    season: crate::llm::NarrativeSeason,
+    _half_year: crate::llm::HalfYear,  // Kept for API compatibility, now derived from snapshot
 ) -> Result<(), String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+
+    // Build snapshot from state
+    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log);
+
     let config = llm::get_llm_config();
-    let prompt = llm::generate_narrative_prompt(world_state, scenario, &state.event_log, db, season);
+    // Pass narrative memory for anti-repetition
+    let prompt = llm::generate_narrative_prompt(&snapshot, scenario, db, &state.narrative_memory);
 
     // Generate placeholder narrative for when LLM is unavailable
-    let season_name = match season {
-        crate::llm::NarrativeSeason::Spring => "Весна",
-        crate::llm::NarrativeSeason::Autumn => "Осень",
-    };
-    let placeholder = format!("{} {} года. Хроника продолжается.", season_name, world_state.year);
+    let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
 
-    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", world_state.year, season);
+    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", snapshot.year, snapshot.half_year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
     if config.provider == "anthropic" {
@@ -7956,7 +8571,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
           setMessage({ type: 'error', text: `Test failed: ${err}` });
           setIsTesting(false);
         },
-        'spring' // Default season for test
+        'first_half' // Default half-year for test
       );
     } catch (err) {
       setMessage({ type: 'error', text: `Test failed: ${err}` });
@@ -8817,17 +9432,24 @@ impl Actor {
     }
 
     /// Calculate derived power_projection metric
-    pub fn power_projection(&self, era_modifier: f64) -> f64 {
-        let treasury_modifier = if self.metrics.treasury > 500.0 {
-            1.2
-        } else if self.metrics.treasury > 0.0 {
-            1.0
-        } else {
-            0.7
-        };
+    /// Normalized relative to max military_size among living actors
+    pub fn power_projection(&self, era_modifier: f64, max_military_size: f64) -> f64 {
+        const TREASURY_NORM_CAP: f64 = 500.0; // treasury >= 500 counts as full contribution
 
-        (self.metrics.military_size * 0.4 + self.metrics.military_quality * 0.4 + treasury_modifier * 0.2)
-            * era_modifier
+        let military_size_norm = if max_military_size > 0.0 {
+            (self.metrics.military_size / max_military_size).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let military_quality_norm = (self.metrics.military_quality / 100.0).clamp(0.0, 1.0);
+        let treasury_norm = (self.metrics.treasury / TREASURY_NORM_CAP).clamp(0.0, 1.0);
+
+        let power_projection =
+            military_size_norm * 0.45 +
+            military_quality_norm * 0.35 +
+            treasury_norm * 0.20;
+
+        power_projection * 100.0 * era_modifier
     }
 }
 
@@ -9165,6 +9787,23 @@ use std::collections::HashMap;
 
 use super::actor::{Actor, Era};
 
+/// Narrative configuration for data-driven chronicle generation
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NarrativeConfig {
+    /// Key metrics to include in factual block
+    pub key_metrics: Vec<String>,
+    /// Narrative axes for framing (e.g., "stability vs ambition", "tradition vs innovation")
+    pub narrative_axes: Vec<String>,
+    /// Tone tags for chronicler style (e.g., "formal", "epic", "intimate")
+    pub tone_tags: Vec<String>,
+    /// Claims the chronicler should NOT make (anti-hallucination guards)
+    pub forbidden_claims: Vec<String>,
+    /// Target paragraph count for generation
+    pub paragraph_target: u32,
+    /// Output length hint for model (e.g., "long-form chronicle", "detailed account")
+    pub output_length_hint: String,
+}
+
 /// Main Scenario configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scenario {
@@ -9211,6 +9850,8 @@ pub struct Scenario {
     pub initial_family_metrics: Option<HashMap<String, f64>>,
     /// Maximum random events per tick (0 = unlimited)
     pub max_random_events_per_tick: u32,
+    /// Narrative configuration for data-driven chronicle generation
+    pub narrative_config: NarrativeConfig,
 }
 
 /// Metric display configuration for UI
@@ -9560,10 +10201,10 @@ pub struct WorldState {
     pub metric_history: HashMap<String, VecDeque<f64>>,
     /// Ticks since last internal upheaval for each actor - for background return check
     pub actor_upheaval_ticks: HashMap<String, u32>,
-    /// RNG seed - generated once at scenario start, preserved for reproducibility
+    /// RNG seed - generated once at scenario start, preserved for reproducibility.
+    /// NOTE: After load_game(), RNG restarts from rng_seed, not from saved position.
+    /// This is an accepted limitation — save/load does not guarantee identical continuation.
     pub rng_seed: u64,
-    /// RNG state - serialized/deserialized with WorldState for save/load
-    pub rng_state: [u8; 32],
     /// Previous tick metrics for each actor - for calculating deltas
     pub prev_metrics: HashMap<String, ActorMetrics>,
     /// Ticks since last narrative trigger - for time-based trigger
@@ -9598,18 +10239,11 @@ pub struct WorldState {
 
 impl WorldState {
     pub fn new(scenario_id: String, start_year: i32) -> Self {
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
-
         // Generate random seed for new game
         let rng_seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64;
-
-        // Initialize RNG and capture its state
-        let rng = ChaCha8Rng::seed_from_u64(rng_seed);
-        let rng_state = rng.get_seed();
 
         Self {
             tick: 0,
@@ -9626,7 +10260,6 @@ impl WorldState {
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
-            rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
@@ -9646,7 +10279,7 @@ impl WorldState {
     }
 
     /// Create WorldState with explicit seed (for save/load)
-    pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64, rng_state: [u8; 32]) -> Self {
+    pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64) -> Self {
         Self {
             tick: 0,
             year: start_year,
@@ -9662,7 +10295,6 @@ impl WorldState {
             metric_history: HashMap::new(),
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
-            rng_state,
             prev_metrics: HashMap::new(),
             ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
@@ -9949,7 +10581,7 @@ fn calculate_military_interaction(
     let eff_mil_b = effective_military(actor_b, actor_b_neighbors);
 
     // Determine stronger (attacker) and weaker (defender) actor by effective military
-    let (attacker_id, defender_id, attacker_eff, defender_eff) = if eff_mil_a >= eff_mil_b {
+    let (attacker_id, defender_id, _attacker_eff, _defender_eff) = if eff_mil_a >= eff_mil_b {
         (actor_a_id.to_string(), actor_b_id.to_string(), eff_mil_a, eff_mil_b)
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string(), eff_mil_b, eff_mil_a)
@@ -9991,9 +10623,6 @@ fn calculate_military_interaction(
     if roll > final_prob {
         return;
     }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Military: {} vs {}", attacker_id, defender_id);
 
     // Apply losses
     let attacker_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
@@ -10040,7 +10669,7 @@ fn calculate_trade_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
@@ -10082,9 +10711,6 @@ fn calculate_trade_interaction(
     // Set cooldown
     world.interaction_cooldowns.insert(trade_key, current_tick);
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Trade: {} vs {}", actor_a_id, actor_b_id);
-
     // Record event if significant
     if should_record_event(&InteractionType::Trade, bonus) {
         let event = Event::new(
@@ -10109,7 +10735,7 @@ fn calculate_diplomatic_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     let actor_a = world.actors.get(actor_a_id).unwrap();
     let actor_b = world.actors.get(actor_b_id).unwrap();
@@ -10132,9 +10758,6 @@ fn calculate_diplomatic_interaction(
     if let Some(influenced) = world.actors.get_mut(&influenced_id) {
         influenced.metrics.cohesion = (influenced.metrics.cohesion + influence).min(100.0);
     }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Diplomatic: {} vs {}", actor_a_id, actor_b_id);
 
     // Record event if significant
     if should_record_event(&InteractionType::Diplomatic, influence) {
@@ -10161,7 +10784,7 @@ fn calculate_migration_interaction(
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     // Condition: border Land, external_pressure > 65, cohesion < 40
     if border_type != crate::core::BorderType::Land {
@@ -10218,9 +10841,6 @@ fn calculate_migration_interaction(
         neighbor.metrics.population += pop_gain;
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Migration: {} vs {}", actor_a_id, actor_b_id);
-
     // Record event if significant
     if should_record_event(&InteractionType::Migration, pressure_transfer) {
         let event = Event::new(
@@ -10269,9 +10889,6 @@ fn calculate_cultural_interaction(
         actor.metrics.cohesion = (actor.metrics.cohesion + cohesion_change).clamp(0.0, 100.0);
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INTERACTION] Cultural: {} vs {}", actor_a_id, actor_b_id);
-
     // Record event rarely — only if cohesion changed > 3.0
     if should_record_event(&InteractionType::Cultural, cohesion_change.abs()) {
         let event = Event::new(
@@ -10309,7 +10926,7 @@ use std::collections::{HashMap, VecDeque};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
-    Actor, ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
+    ActorDelta, ActorMetrics, ComparisonOperator, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
 use serde::Serialize;
@@ -10619,9 +11236,6 @@ fn phase_random_events(
     let mut shuffled_events = all_events;
     shuffled_events.shuffle(rng);
 
-    #[cfg(debug_assertions)]
-    eprintln!("[RANDOM_EVENTS] tick={} checking {} events", world.tick, shuffled_events.len());
-
     // Get sea actor IDs for SeaActors target
     let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
         .filter(|a| a.tags.contains(&"maritime".to_string()) || a.tags.contains(&"trade_empire".to_string()))
@@ -10651,8 +11265,6 @@ fn phase_random_events(
 
         // Roll for event probability
         let roll: f64 = rng.gen();
-        #[cfg(debug_assertions)]
-        eprintln!("[RANDOM_EVENTS] event='{}' prob={:.3} roll={:.3}", event.id, event.probability, roll);
 
         if roll > event.probability {
             continue;
@@ -10691,9 +11303,6 @@ fn phase_random_events(
                 cond.operator.evaluate(value, cond.value)
             });
 
-            #[cfg(debug_assertions)]
-            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' conditions_met={}", event.id, target_id, conditions_met);
-
             if !conditions_met {
                 continue;
             }
@@ -10715,9 +11324,6 @@ fn phase_random_events(
                 event.llm_context.clone(),
             );
             event_log.add(event_record);
-
-            #[cfg(debug_assertions)]
-            eprintln!("[RANDOM_EVENTS] event='{}' target='{}' FIRED", event.id, target_id);
 
             // Increment fired counter
             fired_this_tick += 1;
@@ -11210,10 +11816,6 @@ fn check_milestone_events(
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
-
-            // Log milestone firing
-            eprintln!("[MILESTONE] {} fired at year {}", milestone.id, current_year);
-
             // Apply one-time effects for specific milestones
             apply_milestone_effects(world, &milestone.id);
 
@@ -11284,8 +11886,7 @@ fn check_game_mode_transitions(
                 "Сценарий завершён. Симуляция продолжается в режиме последствий.".to_string(),
             );
             event_log.add(event);
-            
-            eprintln!("[GAME_MODE] Transitioned to Consequences mode at tick {}", world.tick);
+
             return; // Only one transition per tick
         }
     }
@@ -11301,9 +11902,14 @@ fn check_relevance_thresholds(
     let current_tick = world.tick;
     let current_year = world.year;
 
+    // Calculate max military_size for normalization
+    let max_military_size = world.actors.values()
+        .map(|a| a.metrics.military_size)
+        .fold(1.0_f64, f64::max);
+
     // Calculate average power projection for all active actors
     let avg_power_projection: f64 = world.actors.values()
-        .map(|a| a.power_projection(1.0))
+        .map(|a| a.power_projection(1.0, max_military_size))
         .sum::<f64>() / world.actors.len().max(1) as f64;
 
     // Get list of narrative actor IDs for contact check (collect as owned Strings to avoid borrow issues)
@@ -11320,22 +11926,19 @@ fn check_relevance_thresholds(
             continue; // Already foreground
         }
 
-        let power_proj = actor.power_projection(1.0);
+        let power_proj = actor.power_projection(1.0, max_military_size);
 
         // Condition 1: Power projection > 70% of average
         let condition_power = power_proj > avg_power_projection * 0.7;
 
-        // Condition 2: Contact with narrative actor (simplified - military pressure only)
-        // TODO: Full implementation should check trade, culture, migration interactions
-        // For now, use external_pressure as proxy for military pressure from narrative actors
+        // Condition 2: Contact with narrative actor via neighbor relationship
+        // Check if this actor is a neighbor (distance <= 2) of any foreground actor
         let condition_contact = narrative_actor_ids.iter()
             .filter(|narr_id| narr_id.as_str() != actor_id.as_str())
             .any(|narr_id| {
-                if let Some(_narr_actor) = world.actors.get(narr_id) {
-                    // Check if this actor has high external_pressure (proxy for military pressure)
-                    // and the narrative actor is the source
-                    // Simplified: just check if actor's external_pressure is high
-                    actor.metrics.external_pressure > 40.0 && power_proj > 50.0
+                // Check if narrative actor has this actor as a neighbor with distance <= 2
+                if let Some(narr_actor) = world.actors.get(narr_id) {
+                    narr_actor.neighbors.iter().any(|n| n.id == *actor_id && n.distance <= 2)
                 } else {
                     false
                 }
@@ -11372,8 +11975,6 @@ fn check_relevance_thresholds(
                 format!("{} вышел на передний план: {}", actor.name, reasons.join(", ")),
             );
             event_log.add(event);
-
-            eprintln!("[THRESHOLD] Actor {} gained foreground status: {}", actor_id, reasons.join(", "));
         }
     }
 
@@ -11394,7 +11995,7 @@ fn check_relevance_thresholds(
             continue; // Already background
         }
 
-        let power_proj = actor.power_projection(1.0);
+        let power_proj = actor.power_projection(1.0, max_military_size);
 
         // Condition for return to background:
         // power_projection < 40% of average
@@ -11405,13 +12006,14 @@ fn check_relevance_thresholds(
         // Check for recent upheaval
         let recent_upheaval = world.actor_upheaval_ticks.get(actor_id).copied().unwrap_or(0) < 10;
 
-        // Check for interactions with narrative actors (simplified)
+        // Check for interactions with narrative actors via neighbor relationship
         let has_narrative_contact = narrative_actor_ids.iter()
             .filter(|&narr_id| narr_id != actor_id)
             .any(|narr_id| {
                 if let Some(narr_actor) = world.actors.get(narr_id) {
-                    // Simplified: check if either actor has high external_pressure
-                    actor.metrics.external_pressure > 30.0 || narr_actor.metrics.external_pressure > 30.0
+                    // Check if either actor is a neighbor of the other with distance <= 2
+                    narr_actor.neighbors.iter().any(|n| n.id == *actor_id && n.distance <= 2)
+                        || actor.neighbors.iter().any(|n| n.id == *narr_id && n.distance <= 2)
                 } else {
                     false
                 }
@@ -11430,8 +12032,6 @@ fn check_relevance_thresholds(
                 format!("{} вернулся в фон: низкая релевантность", actor.name),
             );
             event_log.add(event);
-
-            eprintln!("[THRESHOLD] Actor {} lost foreground status: low relevance", actor_id);
         }
     }
 
@@ -11939,6 +12539,7 @@ mod tests {
             global_metrics_display: vec![],
             initial_family_metrics: None,
             max_random_events_per_tick: 0,
+            narrative_config: crate::core::NarrativeConfig::default(),
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
@@ -12196,16 +12797,309 @@ use std::collections::HashMap;
 use std::fs;
 use tauri::Emitter;
 
-use crate::core::{ActorDelta, Event, Scenario, WorldState};
+use crate::core::{ActorDelta, Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 
-/// Narrative season for dual-phase chronicle
+/// Half-year narrative unit for chronicle generation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum NarrativeSeason {
-    Spring,  // Beginning of year, overview, anticipations
-    Autumn,  // End of year, outcomes, consequences
+pub enum HalfYear {
+    FirstHalf,   // January-June, first chronicle of the year
+    SecondHalf,  // July-December, second chronicle of the year
+}
+
+impl HalfYear {
+    pub fn from_tick(tick: u32) -> Self {
+        // Even ticks = FirstHalf, Odd ticks = SecondHalf
+        if tick % 2 == 0 {
+            HalfYear::FirstHalf
+        } else {
+            HalfYear::SecondHalf
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            HalfYear::FirstHalf => "первая половина",
+            HalfYear::SecondHalf => "вторая половина",
+        }
+    }
+
+    pub fn display_name_en(&self) -> &'static str {
+        match self {
+            HalfYear::FirstHalf => "first half",
+            HalfYear::SecondHalf => "second half",
+        }
+    }
+}
+
+/// Summary of a player action for narrative generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerActionSummary {
+    pub id: String,
+    pub name: String,
+    pub key_effects: Vec<String>,
+}
+
+/// Complete narrative world snapshot for prompt generation
+///
+/// This is the single source of truth for narrative generation.
+/// The prompt builder should only read from this snapshot, not from WorldState directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NarrativeWorldSnapshot {
+    pub year: i32,
+    pub half_year: HalfYear,
+    pub alive_actors: Vec<String>,
+    pub dead_actors: Vec<String>,
+    pub victory_achieved: bool,
+    pub foreground_actors: Vec<String>,
+    pub key_milestones_fired: Vec<String>,
+    pub recent_important_events: Vec<crate::core::Event>,
+    pub recent_player_actions: Vec<PlayerActionSummary>,
+    pub key_metrics: HashMap<String, f64>,
+    pub narrative_axes: Vec<String>,
+    pub tone_tags: Vec<String>,
+    pub game_mode: crate::core::GameMode,
+}
+
+/// Minimal narrative memory for anti-repetition across turns
+///
+/// This stores just enough information to avoid repeating the same narrative patterns
+/// when the world state hasn't changed significantly.
+///
+/// Memory is NOT used for simulation logic - only for prompt generation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NarrativeMemory {
+    /// Gist of last narrative: last sentence of first paragraph, or first 150 chars
+    pub last_narrative_gist: Option<String>,
+    /// World focus label (e.g., "byzantium under siege", "rome consolidating")
+    pub last_world_focus: Option<String>,
+    /// Actors that were central in last narrative
+    pub last_actor_focus: Vec<String>,
+    /// Tone/framing markers that were used
+    pub last_tone_markers: Vec<String>,
+}
+
+/// Extract gist from narrative text using deterministic rule
+///
+/// Rule: last sentence of first paragraph
+/// Fallback: first 150 characters if paragraphs not clearly delimited
+pub fn extract_narrative_gist(narrative: &str) -> String {
+    // Try to find first paragraph (separated by double newline)
+    let first_paragraph = narrative.split("\n\n").next().unwrap_or(narrative);
+    
+    // Try to find last sentence (ends with . ! ?)
+    let sentences: Vec<&str> = first_paragraph.split(|c| c == '.' || c == '!' || c == '?').collect();
+    
+    if sentences.len() > 1 {
+        // Get the last non-empty sentence
+        let last_sentence = sentences.iter()
+            .rev()
+            .find(|s| !s.trim().is_empty())
+            .unwrap_or(&"");
+        
+        if !last_sentence.trim().is_empty() {
+            return last_sentence.trim().to_string();
+        }
+    }
+    
+    // Fallback: first 150 characters
+    if narrative.len() > 150 {
+        format!("{}...", &narrative[..150])
+    } else {
+        narrative.trim().to_string()
+    }
+}
+
+/// Extract actor focus from narrative by matching against known actor names
+pub fn extract_actor_focus(narrative: &str, known_actors: &[String]) -> Vec<String> {
+    let mut focused_actors = Vec::new();
+    
+    for actor in known_actors {
+        // Check if actor name appears in narrative (case-insensitive)
+        if narrative.to_lowercase().contains(&actor.to_lowercase()) {
+            focused_actors.push(actor.clone());
+        }
+    }
+    
+    // Limit to top 3 most prominent (by mention count or just first 3)
+    focused_actors.truncate(3);
+    focused_actors
+}
+
+/// Build memory update from narrative and snapshot
+pub fn update_memory(
+    narrative: &str,
+    snapshot: &NarrativeWorldSnapshot,
+    _previous_memory: &NarrativeMemory,
+) -> NarrativeMemory {
+    NarrativeMemory {
+        last_narrative_gist: Some(extract_narrative_gist(narrative)),
+        last_world_focus: Some(determine_world_focus(snapshot)),
+        last_actor_focus: extract_actor_focus(narrative, &snapshot.foreground_actors),
+        last_tone_markers: snapshot.tone_tags.iter().take(3).cloned().collect(),
+    }
+}
+
+/// Determine world focus label from snapshot
+fn determine_world_focus(snapshot: &NarrativeWorldSnapshot) -> String {
+    // Simple heuristic based on key metrics and game state
+    // This can be expanded later with more sophisticated logic
+    
+    if snapshot.victory_achieved {
+        return "victory achieved".to_string();
+    }
+    
+    // Check for high pressure situations
+    for (key, value) in &snapshot.key_metrics {
+        if key.contains("pressure") && *value > 80.0 {
+            return "high external pressure".to_string();
+        }
+        if key.contains("cohesion") && *value < 30.0 {
+            return "internal fragility".to_string();
+        }
+        if key.contains("legitimacy") && *value < 30.0 {
+            return "legitimacy crisis".to_string();
+        }
+    }
+    
+    // Default: use first foreground actor as focus
+    if let Some(first_actor) = snapshot.foreground_actors.first() {
+        format!("{} centered", first_actor)
+    } else {
+        "general chronicle".to_string()
+    }
+}
+
+/// Build narrative world snapshot from game state
+/// 
+/// This is a pure function: it reads state but has no side effects.
+/// It does NOT call LLM, modify state, or write to DB.
+pub fn build_snapshot(
+    world: &WorldState,
+    scenario: &Scenario,
+    event_log: &EventLog,
+) -> NarrativeWorldSnapshot {
+    // Half-year from tick
+    let half_year = HalfYear::from_tick(world.tick);
+    
+    // Alive actors (not in dead_actors list)
+    let alive_actors: Vec<String> = world.actors.keys()
+        .filter(|id| !world.dead_actors.iter().any(|d| &d.id == *id))
+        .cloned()
+        .collect();
+    
+    // Dead actors
+    let dead_actors: Vec<String> = world.dead_actors.iter()
+        .map(|a| a.id.clone())
+        .collect();
+    
+    // Foreground actors
+    let foreground_actors: Vec<String> = world.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.clone())
+        .collect();
+    
+    // Key milestones fired
+    let key_milestones_fired: Vec<String> = scenario.milestone_events.iter()
+        .filter(|m| world.milestone_events_fired.contains(&m.id))
+        .map(|m| m.id.clone())
+        .collect();
+    
+    // Recent important events (last 10, keyed events first)
+    let mut recent_important_events: Vec<crate::core::Event> = event_log.events.iter()
+        .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
+        .cloned()
+        .collect();
+    recent_important_events.truncate(10);
+    
+    // Recent player actions (last 5)
+    let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
+        .filter(|e| matches!(e.event_type, crate::core::EventType::PlayerAction))
+        .rev()
+        .take(5)
+        .map(|e| PlayerActionSummary {
+            id: e.id.clone(),
+            name: e.description.clone(),
+            key_effects: {
+                // Parse effects from metadata if available
+                if !e.metadata.is_empty() {
+                    serde_json::from_str::<HashMap<String, f64>>(&e.metadata)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(metric, delta)| format!("{}: {:+.1}", metric, delta))
+                        .collect()
+                } else {
+                    vec![]
+                }
+            },
+        })
+        .collect();
+    
+    // Key metrics from narrative config
+    let mut key_metrics: HashMap<String, f64> = HashMap::new();
+    for metric_key in &scenario.narrative_config.key_metrics {
+        // Try to get the metric value using existing patterns
+        let value = if metric_key.starts_with("family:") {
+            // Family metric
+            world.family_state.as_ref()
+                .and_then(|fs| fs.metrics.get(metric_key))
+                .copied()
+                .unwrap_or(0.0)
+        } else if metric_key.starts_with("actor:") {
+            // Actor metric: "actor:id.metric"
+            if let Some((actor_id, metric)) = metric_key.strip_prefix("actor:").and_then(|s| s.split_once('.')) {
+                world.actors.get(actor_id)
+                    .map(|a| get_actor_metric(&a.metrics, metric))
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        } else if metric_key.starts_with("global:") {
+            // Global metric
+            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
+        } else {
+            // Try as global metric without prefix
+            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
+        };
+        key_metrics.insert(metric_key.clone(), value);
+    }
+    
+    // Narrative axes and tone tags from config
+    let narrative_axes = scenario.narrative_config.narrative_axes.clone();
+    let tone_tags = scenario.narrative_config.tone_tags.clone();
+    
+    NarrativeWorldSnapshot {
+        year: world.year,
+        half_year,
+        alive_actors,
+        dead_actors,
+        victory_achieved: world.victory_achieved,
+        foreground_actors,
+        key_milestones_fired,
+        recent_important_events,
+        recent_player_actions,
+        key_metrics,
+        narrative_axes,
+        tone_tags,
+        game_mode: world.game_mode,
+    }
+}
+
+/// Helper to get actor metric by name
+fn get_actor_metric(metrics: &crate::core::ActorMetrics, name: &str) -> f64 {
+    match name {
+        "population" => metrics.population,
+        "military_size" => metrics.military_size,
+        "military_quality" => metrics.military_quality,
+        "economic_output" => metrics.economic_output,
+        "cohesion" => metrics.cohesion,
+        "legitimacy" => metrics.legitimacy,
+        "external_pressure" => metrics.external_pressure,
+        "treasury" => metrics.treasury,
+        _ => 0.0,
+    }
 }
 
 /// LLM configuration
@@ -12341,13 +13235,11 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
 }
 
 /// System prompt for chronicler persona
-fn system_prompt(season: NarrativeSeason) -> &'static str {
-    match season {
-        NarrativeSeason::Spring => {
-            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
+fn system_prompt(_half_year: HalfYear) -> &'static str {
+    // Generic chronicler persona - half-year specific framing done in prompt body
+    "Ты летописец XIV-XV века. Пишешь подробную хронику событий.
 
 ОБЯЗАТЕЛЬНО:
-- Первое предложение содержит год и сезон: 'Весной 1436 года...'
 - Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
 - Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
 - Упоминай правителей по имени когда это драматично
@@ -12356,222 +13248,263 @@ fn system_prompt(season: NarrativeSeason) -> &'static str {
 - НИКОГДА не пиши 'актор X имеет Y единиц'
 - Пиши как будто читатель уже знает кто эти люди
 - Фокус на предчувствиях, расстановке сил, напряжении"
-        }
-        NarrativeSeason::Autumn => {
-            "Ты летописец XIV-XV века. Пишешь хронику одним абзацем — 4-6 предложений.
-
-ОБЯЗАТЕЛЬНО:
-- Первое предложение содержит год и сезон: 'Осенью 1435 года...'
-- Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
-- Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
-- Упоминай правителей по имени когда это драматично
-- НИКОГДА не перечисляй акторов по очереди
-- НИКОГДА не называй числа и проценты
-- НИКОГДА не пиши 'актор X имеет Y единиц'
-- Пиши как будто читатель уже знает кто эти люди
-- Фокус на том что произошло за год, последствиях, итогах"
-        }
-    }
 }
 
-/// Generate narrative prompt from world state and scenario
+/// Generate narrative prompt from world snapshot
+///
+/// This function reads ONLY from the NarrativeWorldSnapshot.
+/// It does NOT read WorldState or Scenario directly.
+///
+/// Prompt structure (optimized for model performance):
+/// 1. Identity / role of narrative voice
+/// 2. Hard factual rules (anti-hallucination)
+/// 3. Previous narrative memory (soft anti-repetition guard)
+/// 4. Scenario framing from tone_tags / narrative_axes (as instructions)
+/// 5. Current world snapshot
+/// 6. Key metrics
+/// 7. Key milestones
+/// 8. Recent important events (top 5, as evidence)
+/// 9. Recent player actions (as narrative causes)
+/// 10. Output instructions (2-4 paragraphs, world-first)
 pub fn generate_narrative_prompt(
-    world_state: &WorldState,
+    snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
-    event_log: &EventLog,
-    db: &Db,
-    season: NarrativeSeason,
+    _db: &Db,
+    memory: &NarrativeMemory,
 ) -> String {
     let mut prompt = String::new();
-    let current_year = world_state.year;
 
-    // Section 0: System prompt - chronicler persona
-    prompt.push_str(system_prompt(season));
+    // ========================================================================
+    // Section 1: Identity / Role — Chronicler Persona
+    // ========================================================================
+    prompt.push_str(system_prompt(snapshot.half_year));
     prompt.push_str("\n\n");
 
-    // Section 0.5: Factual block - prevent hallucination
-    let alive_actors: Vec<&str> = world_state.actors.keys()
-        .filter(|id| !world_state.dead_actors.iter().any(|d| &d.id == *id))
-        .map(|s| s.as_str())
-        .collect();
-
-    let dead_actors: Vec<&str> = world_state.dead_actors.iter()
-        .map(|a| a.id.as_str())
-        .collect();
-
-    let factual_block = format!(
-        "=== ВАЖНЫЕ ФАКТЫ ИГРЫ (не противоречь им) ===\n\
+    // ========================================================================
+    // Section 2: Hard Factual Rules — Anti-Hallucination Discipline
+    // ========================================================================
+    let factual_rules = format!(
+        "=== ЖЁСТКИЕ ФАКТУАЛЬНЫЕ ПРАВИЛА (не нарушать) ===\n\
          Год: {}\n\
+         Половина года: {}\n\
          Живые акторы: {}\n\
          Павшие акторы: {}\n\
          Победа достигнута: {}\n\n\
-         Правила:\n\
-         - Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\
-         - Не называй актора павшим, уничтоженным или исчезнувшим, если его нет в списке павших.\n\
-         - Для живых акторов в упадке используй формулировки: \"под угрозой\", \"ослаблен\", \"на грани\" — но не \"пал\".\n\
-         - Не придумывай победы, смерти правителей, падения городов или коллапсы, которых нет в фактах.\n\n",
-        world_state.year,
-        if alive_actors.is_empty() { "нет".to_string() } else { alive_actors.join(", ") },
-        if dead_actors.is_empty() { "нет".to_string() } else { dead_actors.join(", ") },
-        if world_state.victory_achieved { "да" } else { "нет" },
+         ЗАПРЕЩЕНО:\n\
+         - Писать, что актор пал, уничтожен или исчез, если его нет в списке павших.\n\
+         - Писать о победе, если victory_achieved == false.\n\
+         - Писать о коллапсе, смерти правителя, падении города, капитуляции, regime change — если этого нет в фактах.\n\
+         - Превращать \"высокое давление\" в уже случившийся крах.\n\
+         - Придумывать события, которых нет в snapshot или recent events.\n\n\
+         РАЗРЕШЕНО (и правильно):\n\
+         - \"под угрозой\", \"ослаблен\", \"теряет опору\", \"вынужден маневрировать\"\n\
+         - \"позиции укрепляются\", \"баланс смещается\", \"напряжение растёт\"\n\
+         - Описывать состояние как \"хрупкое\", \"нестабильное\", \"на грани\" — для живых акторов в упадке.\n\n\
+         Пиши только о событиях, подтверждённых состоянием игры и списком событий.\n\n",
+        snapshot.year,
+        snapshot.half_year.display_name(),
+        if snapshot.alive_actors.is_empty() { "нет".to_string() } else { snapshot.alive_actors.join(", ") },
+        if snapshot.dead_actors.is_empty() { "нет".to_string() } else { snapshot.dead_actors.join(", ") },
+        if snapshot.victory_achieved { "да" } else { "нет" },
     );
-    prompt.push_str(&factual_block);
+    prompt.push_str(&factual_rules);
 
-    // Section 1: Scenario context (depends on game mode)
-    match world_state.game_mode {
+    // ========================================================================
+    // Section 3: Previous Narrative Memory — Soft Anti-Repetition Guard
+    // ========================================================================
+    if memory.last_narrative_gist.is_some() || !memory.last_actor_focus.is_empty() {
+        prompt.push_str("=== ПАМЯТЬ ПРЕДЫДУЩЕГО НАРРАТИВА (мягкое ограничение) ===\n");
+        
+        if let Some(ref gist) = memory.last_narrative_gist {
+            prompt.push_str(&format!("Последняя хроника: \"{}\"\n", gist));
+        }
+        
+        if !memory.last_actor_focus.is_empty() {
+            prompt.push_str(&format!("В центре внимания были: {}\n", memory.last_actor_focus.join(", ")));
+        }
+        
+        if let Some(ref focus) = memory.last_world_focus {
+            prompt.push_str(&format!("Мирофокус: {}\n", focus));
+        }
+        
+        prompt.push_str("\n");
+        prompt.push_str("Используй эту память чтобы избегать повторения тех же паттернов:\n");
+        prompt.push_str("- Не ставь того же актора в центр без новой причины.\n");
+        prompt.push_str("- Не используй ту же риторическую рамку, если состояние мира не требует этого.\n");
+        prompt.push_str("- Если состояние мира значительно изменилось — похожий фокус допустим.\n");
+        prompt.push_str("- Избегай повторения тех же формулировок и драматических каркасов.\n\n");
+    }
+
+    // ========================================================================
+    // Section 3: Scenario Framing — tone_tags and narrative_axes as Instructions
+    // ========================================================================
+    // Convert tone_tags into actual instructional framing (not just labels)
+    if !snapshot.tone_tags.is_empty() || !snapshot.narrative_axes.is_empty() {
+        prompt.push_str("=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===\n");
+        
+        // Build instructional text from tone_tags
+        let mut instructions: Vec<String> = Vec::new();
+        
+        for tag in &snapshot.tone_tags {
+            match tag.as_str() {
+                "political_decay" => instructions.push(
+                    "Focus on signs of institutional erosion, weakening legitimacy, and the shrinking reliability of public order.".to_string()
+                ),
+                "family_chronicle" => instructions.push(
+                    "Keep the narrative grounded in the experience of a family navigating wider political currents.".to_string()
+                ),
+                "coalition_fragility" => instructions.push(
+                    "Focus on the fragility of alliances, diplomatic maneuvering under pressure, and the unstable balance between hope and collapse.".to_string()
+                ),
+                "siege_diplomacy" => instructions.push(
+                    "Treat political coordination and strategic hesitation as central to the world's condition.".to_string()
+                ),
+                "imperial_decline" => instructions.push(
+                    "Emphasize the slow unraveling of central authority, the rise of regional powers, and the sense of an era ending.".to_string()
+                ),
+                "barbarian_pressure" => instructions.push(
+                    "Convey the mounting external threat, the strain on borders, and the inevitability of confrontation.".to_string()
+                ),
+                "trade_competition" => instructions.push(
+                    "Frame events through the lens of commercial rivalry, economic leverage, and maritime dominance.".to_string()
+                ),
+                "religious_tension" => instructions.push(
+                    "Highlight the role of faith, doctrinal conflict, and spiritual authority in shaping political choices.".to_string()
+                ),
+                _ => instructions.push(format!("Consider the theme: {}", tag)),
+            }
+        }
+        
+        // Build instructional text from narrative_axes
+        for axis in &snapshot.narrative_axes {
+            match axis.as_str() {
+                "stability vs ambition" => instructions.push(
+                    "Frame choices as tensions between maintaining order and pursuing opportunity.".to_string()
+                ),
+                "tradition vs adaptation" => instructions.push(
+                    "Show how actors navigate inherited structures versus new realities.".to_string()
+                ),
+                "family honor vs political necessity" => instructions.push(
+                    "Present decisions as conflicts between dynastic reputation and pragmatic survival.".to_string()
+                ),
+                "survival vs surrender" => instructions.push(
+                    "Emphasize the precariousness of existence and the cost of each compromise.".to_string()
+                ),
+                "unity vs fragmentation" => instructions.push(
+                    "Show the strain between collective action and divergent interests.".to_string()
+                ),
+                "faith vs pragmatism" => instructions.push(
+                    "Frame decisions as tensions between spiritual conviction and practical necessity.".to_string()
+                ),
+                _ => instructions.push(format!("Consider the axis: {}", axis)),
+            }
+        }
+        
+        for instruction in instructions {
+            prompt.push_str(&format!("{}\n", instruction));
+        }
+        prompt.push('\n');
+    }
+
+    // ========================================================================
+    // Section 4: Scenario Context (game mode dependent)
+    // ========================================================================
+    match snapshot.game_mode {
         crate::core::GameMode::Consequences => {
-            // Consequences mode: use consequence_context
             prompt.push_str(&scenario.consequence_context);
             prompt.push_str("\n\n");
         }
         crate::core::GameMode::Free => {
-            // Free mode: no scenario context at all, just world state
-            // Don't add any scenario context
+            // Free mode: no scenario context
         }
         _ => {
-            // Scenario mode (default): use llm_context
             prompt.push_str(&scenario.llm_context);
             prompt.push_str("\n\n");
         }
     }
 
-    // Section 1.5: Year and season anchoring instruction
-    let season_name = match season {
-        NarrativeSeason::Spring => "весна",
-        NarrativeSeason::Autumn => "осень",
-    };
-    prompt.push_str(&format!(
-        "=== ИНСТРУКЦИЯ ===\n\
-         ТЕКУЩИЙ ГОД: {}, СЕЗОН: {}. \n\
-         Пиши ТОЛЬКО про события этого года.\n\
-         Не упоминай будущие годы.\n\
-         Не экстраполируй за пределы {}.\n\n",
-        current_year, season_name, current_year
-    ));
-
-    // Section 1.6: Strict narrative rules — no raw numbers
-    prompt.push_str(
-        "=== СТРОГИЕ ПРАВИЛА НАРРАТИВА ===\n\
-         - НИКОГДА не упоминать числа, проценты, метрики, единицы\n\
-         - НИКОГДА не писать \"+13.6\", \"legitimacy: 70\", \"military_size +15\"\n\
-         - НИКОГДА не перечислять статистику акторов в тексте\n\
-         - Описывать только события, решения, настроения, последствия\n\
-         - \"Венеция переживала подъём\" — не \"economic_output вырос на 8\"\n\
-         - \"Армия Византии окрепла\" — не \"military_size +15\"\n\
-         - \"Казна Генуи истощилась\" — не \"treasury: -40\"\n\
-         - Хроника — это литература, не таблица данных\n\n"
-    );
-
-    // Section 2: World state - foreground actors only
+    // ========================================================================
+    // Section 5: World Snapshot — Key Metrics
+    // ========================================================================
     prompt.push_str("=== СОСТОЯНИЕ МИРА ===\n");
-    prompt.push_str(&format!("Год: {} (тик {})\n\n", world_state.year, world_state.tick));
+    prompt.push_str(&format!("Год: {}\n\n", snapshot.year));
 
-    let foreground_actors: Vec<_> = world_state
-        .actors
-        .values()
-        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
-        .collect();
-
-    for actor in &foreground_actors {
-        // Format actor name with leader if present
-        let actor_header = if let Some(ref leader) = actor.leader {
-            format!("{} ({}):\n", actor.name, leader)
-        } else {
-            format!("{} ({}):\n", actor.name, actor.name_short)
-        };
-        prompt.push_str(&actor_header);
-        prompt.push_str(&format!(
-            "  population: {:.0}, military: {:.0}, quality: {:.0}\n",
-            actor.metrics.population,
-            actor.metrics.military_size,
-            actor.metrics.military_quality
-        ));
-        prompt.push_str(&format!(
-            "  economy: {:.0}, cohesion: {:.0}, legitimacy: {:.0}, pressure: {:.0}\n",
-            actor.metrics.economic_output,
-            actor.metrics.cohesion,
-            actor.metrics.legitimacy,
-            actor.metrics.external_pressure
-        ));
-        prompt.push_str(&format!(
-            "  treasury: {:.0}\n",
-            actor.metrics.treasury
-        ));
-        if !actor.tags.is_empty() {
-            prompt.push_str(&format!("  tags: {}\n", actor.tags.join(", ")));
+    if !snapshot.key_metrics.is_empty() {
+        prompt.push_str("Ключевые метрики:\n");
+        for (key, value) in &snapshot.key_metrics {
+            prompt.push_str(&format!("  {}: {:.1}\n", key, value));
         }
         prompt.push('\n');
     }
 
-    // Section 3: Recent events with relevance scoring
-    prompt.push_str("=== ПОСЛЕДНИЕ СОБЫТИЯ ===\n");
-
-    // Build query tags from current context
-    let mut query_tags: Vec<String> = Vec::new();
-
-    // Add narrative actor names (short) and regions
-    for actor in &foreground_actors {
-        query_tags.push(actor.name_short.clone());
-        query_tags.push(actor.region.clone());
+    // ========================================================================
+    // Section 6: Key Milestones Fired
+    // ========================================================================
+    if !snapshot.key_milestones_fired.is_empty() {
+        prompt.push_str("Ключевые вехи:\n");
+        for milestone in &snapshot.key_milestones_fired {
+            prompt.push_str(&format!("  - {}\n", milestone));
+        }
+        prompt.push('\n');
     }
 
-    // Add interaction types from recent events
-    let recent_event_types: std::collections::HashSet<String> = event_log.events.iter()
-        .filter(|e| e.is_key || foreground_actors.iter().any(|a| a.id == e.actor_id))
-        .flat_map(|e| {
-            match e.event_type {
-                crate::core::EventType::War => Some("war".to_string()),
-                crate::core::EventType::Migration => Some("migration".to_string()),
-                crate::core::EventType::Trade => Some("trade".to_string()),
-                _ => None,
-            }
-        })
-        .collect();
-    query_tags.extend(recent_event_types);
-
-    // Get scored relevant events from database
-    let narrative_actor_ids: Vec<String> = foreground_actors.iter().map(|a| a.id.clone()).collect();
-
-    let relevant_events = db.get_relevant_events_scored(
-        world_state.tick,
-        &query_tags,
-        &narrative_actor_ids,
-    );
-
-    let events_to_show: Vec<crate::core::Event> = match relevant_events {
-        Ok(events) => {
-            eprintln!("[NARRATIVE] Got {} relevant events from DB", events.len());
-            // Filter out events from the future
-            events.into_iter().filter(|e| e.year <= current_year).collect()
-        }
-        Err(e) => {
-            eprintln!("[NARRATIVE] Failed to get relevant events from DB: {}", e);
-            // Fallback to simple event_log query
-            event_log.events.iter()
-                .filter(|e| {
-                    (e.is_key || narrative_actor_ids.contains(&e.actor_id)) && e.year <= current_year
-                })
-                .cloned()
-                .collect()
-        }
-    };
-
+    // ========================================================================
+    // Section 7: Recent Important Events (Top 5 as Evidence)
+    // ========================================================================
+    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (используй как доказательства, не как чек-лист) ===\n");
+    
+    // Limit to top 5 events
+    let events_to_show: Vec<_> = snapshot.recent_important_events.iter().take(5).collect();
+    
     if events_to_show.is_empty() {
         prompt.push_str("Нет недавних событий.\n");
     } else {
-        for event in &events_to_show {
-            // Calculate score for logging
-            let ticks_ago = world_state.tick.saturating_sub(event.tick);
-            let temporal_coeff = Db::temporal_coefficient(ticks_ago, event.is_key);
-            let thematic_sim = Db::thematic_similarity(&event.tags, &query_tags);
-            let score = temporal_coeff * thematic_sim;
-
-            prompt.push_str(&format!(
-                "{} (тик {}): {} [score: {:.2}]\n",
-                event.year, event.tick, event.description, score
-            ));
+        for event in events_to_show {
+            prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
         }
     }
+    prompt.push_str("\nИспользуй эти события как доказательства, а не как обязательный список для пересказа.\n");
+    prompt.push_str("Не описывай их по одному, если одно событие явно доминирует в этой половине года.\n\n");
+
+    // ========================================================================
+    // Section 8: Recent Player Actions (as Narrative Causes)
+    // ========================================================================
+    if !snapshot.recent_player_actions.is_empty() {
+        prompt.push_str("=== ДЕЙСТВИЯ ИГРОКА (как причины изменений) ===\n");
+        for action in &snapshot.recent_player_actions {
+            prompt.push_str(&format!("- {}\n", action.name));
+            if !action.key_effects.is_empty() {
+                for effect in &action.key_effects {
+                    prompt.push_str(&format!("  → {}\n", effect));
+                }
+            }
+        }
+        prompt.push_str("\nИспользуй действия игрока как сигналы направления политики, причины изменений, сознательные ходы.\n");
+        prompt.push_str("Не превращай их в UI-log или список транзакций.\n\n");
+    }
+
+    // ========================================================================
+    // Section 9: Output Instructions — World-First, 2-4 Paragraphs
+    // ========================================================================
+    prompt.push_str("=== ИНСТРУКЦИИ ПО ВЫВОДУ ===\n");
+    prompt.push_str("Напиши хронику этой половины года в формате 2–4 содержательных абзацев.\n\n");
+    prompt.push_str("Предпочтительная структура:\n");
+    prompt.push_str("1. Первый абзац — что изменилось в общей картине мира за эту половину года.\n");
+    prompt.push_str("2. Второй абзац — что это значит политически / социально / военным образом.\n");
+    prompt.push_str("3. Третий абзац (если нужно) — какое направление, риск или возможность формируются дальше.\n\n");
+    prompt.push_str("ВАЖНО:\n");
+    prompt.push_str("- Описывай сначала состояние мира, потом как это проявляется через ключевых акторов.\n");
+    prompt.push_str("- НЕ превращай narrative в список обновлений по акторам (actor-by-actor checklist).\n");
+    prompt.push_str("- Используй акторов только в той мере, в какой они формируют общую картину.\n");
+    prompt.push_str("- Будь ярким, но конкретным. Не заполняй объём абстрактной \"исторической\" водой.\n");
+    prompt.push_str("- Каждый абзац должен добавлять новый смысл, основанный на snapshot.\n");
+    prompt.push_str("- НЕ повторяй одни и те же эмоции или формулировки.\n\n");
+    prompt.push_str("ЗАПРЕЩЕНО:\n");
+    prompt.push_str("- Один короткий абзац.\n");
+    prompt.push_str("- Слепленный моноблок без структуры.\n");
+    prompt.push_str("- Несколько абзацев, которые повторяют одно и то же.\n");
+    prompt.push_str("- Перечисление акторов по очереди: \"Венеция сделала X. Генуя сделала Y. Милан сделал Z.\"\n\n");
+    prompt.push_str("Помни: хроника — это литература, а не таблица данных или UI-log.\n");
 
     prompt
 }
@@ -12904,6 +13837,33 @@ pub fn load_constantinople_1430() -> Scenario {
         ],
         initial_family_metrics: None,
         max_random_events_per_tick: 3,
+        narrative_config: crate::core::NarrativeConfig {
+            key_metrics: vec![
+                "federation_progress".to_string(),
+                "byzantium.external_pressure".to_string(),
+                "byzantium.legitimacy".to_string(),
+                "byzantium.cohesion".to_string(),
+                "ottomans.military_size".to_string(),
+            ],
+            narrative_axes: vec![
+                "survival vs surrender".to_string(),
+                "unity vs fragmentation".to_string(),
+                "faith vs pragmatism".to_string(),
+            ],
+            tone_tags: vec![
+                "formal chronicle".to_string(),
+                "epic scope".to_string(),
+                "tragic grandeur".to_string(),
+            ],
+            forbidden_claims: vec![
+                "Do not claim Byzantium has fallen unless byzantium is in dead_actors".to_string(),
+                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
+                "Do not mention specific numbers, percentages, or game metrics".to_string(),
+                "Do not claim the Ottomans have won unless the scenario explicitly states so".to_string(),
+            ],
+            paragraph_target: 6,
+            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+        },
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -14300,6 +15260,34 @@ pub fn load_rome_375() -> Scenario {
             ("family:family_connections".to_string(), 45.0),
         ])),
         max_random_events_per_tick: 2,
+        narrative_config: crate::core::NarrativeConfig {
+            key_metrics: vec![
+                "family:family_influence".to_string(),
+                "family:family_knowledge".to_string(),
+                "family:family_wealth".to_string(),
+                "family:family_connections".to_string(),
+                "rome.legitimacy".to_string(),
+                "rome.cohesion".to_string(),
+            ],
+            narrative_axes: vec![
+                "stability vs ambition".to_string(),
+                "tradition vs adaptation".to_string(),
+                "family honor vs political necessity".to_string(),
+            ],
+            tone_tags: vec![
+                "formal chronicle".to_string(),
+                "epic scope".to_string(),
+                "intimate family drama".to_string(),
+            ],
+            forbidden_claims: vec![
+                "Do not claim any actor has died unless they are in dead_actors list".to_string(),
+                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
+                "Do not mention specific numbers, percentages, or game metrics".to_string(),
+                "Do not claim Rome has fallen unless rome is in dead_actors".to_string(),
+            ],
+            paragraph_target: 6,
+            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+        },
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -15331,6 +16319,8 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
                 DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
                 DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
+                // Knowledge → legitimacy bridge (soft support role, not victory path)
+                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
@@ -15501,8 +16491,8 @@ fn create_patron_actions() -> Vec<PatronAction> {
             id: "invest_wealth".to_string(),
             name: "Вложить средства".to_string(),
             available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
-            effects: HashMap::from([("family:family_wealth".to_string(), 8.0)]),
-            cost: HashMap::from([("family:family_connections".to_string(), -2.0)]),
+            effects: HashMap::from([("family:family_wealth".to_string(), 5.0)]),
+            cost: HashMap::from([("family:family_connections".to_string(), -3.0)]),
         },
         PatronAction {
             source_actor_id: None,
@@ -16301,7 +17291,7 @@ fn test_list_saves_with_slots() {
 fn test_action_cost_deducted() {
     // Test that action cost is correctly deducted from treasury
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Get initial venice treasury
     let initial_treasury = state.world_state.as_ref().unwrap()
@@ -16341,7 +17331,7 @@ fn test_action_unavailable_when_insufficient_resources() {
 
     // Try to apply venice_diplomacy (requires venice.legitimacy > 60, cost: -30 treasury)
     // This should fail because treasury is too low for the cost
-    let action_input = PlayerActionInput {
+    let _action_input = PlayerActionInput {
         action_id: "venice_diplomacy".to_string(),
         target_actor_id: None,
     };
@@ -16361,7 +17351,7 @@ fn test_action_unavailable_when_insufficient_resources() {
 fn test_actions_per_tick_limit_enforced() {
     // Test that actions_per_tick limit is enforced
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Apply 3 actions (the limit for constantinople)
     let actions = vec!["venice_diplomacy", "genoa_financial_aid", "milan_bankers"];
@@ -16387,7 +17377,7 @@ fn test_actions_per_tick_limit_enforced() {
 fn test_federation_progress_grows_with_actions() {
     // Test that federation actions increase federation_progress
     let mut state = setup_constantinople_state();
-    let db = setup_test_db();
+    let _db = setup_test_db();
 
     // Get initial federation progress
     let initial_fed = state.world_state.as_ref().unwrap()
@@ -16426,7 +17416,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
     // Baseline: 25 ticks with no actions
     let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
     let mut world_no_actions = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
@@ -16445,7 +17435,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
 
     // Scripted: 25 ticks with priority actions
     let mut world_scripted = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
@@ -16516,7 +17506,7 @@ fn test_scripted_victory_achievable() {
 
     let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load scenario");
     let mut world = crate::core::WorldState::with_seed(
-        scenario.id.clone(), scenario.start_year, 42, [0u8; 32]
+        scenario.id.clone(), scenario.start_year, 42
     );
     for actor in &scenario.actors {
         if !actor.is_successor_template {
@@ -16719,11 +17709,11 @@ fn test_metric_ref_apply_military_size_min_zero() {
 #[test]
 fn test_family_state_initialized() {
     // Load rome_375 and verify family_state is initialized
-    let scenario = registry::load_by_id("rome_375").unwrap();
+    let _scenario = registry::load_by_id("rome_375").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
     
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
@@ -16736,12 +17726,12 @@ fn test_family_state_initialized() {
 #[test]
 fn test_family_state_none_for_constantinople() {
     // Load constantinople_1430 and verify family_state is None
-    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let _scenario = registry::load_by_id("constantinople_1430").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "constantinople_1430".to_string()).unwrap();
-    
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "constantinople_1430".to_string()).unwrap();
+
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_none(), "family_state should be None for Constantinople");
 }
@@ -16900,17 +17890,17 @@ fn test_generation_transfer_applies_inheritance() {
 #[test]
 fn test_initial_family_metrics_loaded() {
     // Load rome_375
-    let scenario = registry::load_by_id("rome_375").unwrap();
+    let _scenario = registry::load_by_id("rome_375").unwrap();
     let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    
-    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
-    
+    let _db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
+
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
-    
+
     let family_state = world_state.family_state.as_ref().unwrap();
-    
+
     // Check that initial metrics are loaded
     assert!(family_state.metrics.contains_key("family:family_influence"), "Should have family_influence");
     assert!(family_state.metrics.contains_key("family:family_knowledge"), "Should have family_knowledge");
@@ -17180,8 +18170,8 @@ export interface Condition {
 
 export type ComparisonOperator = 'less' | 'less_or_equal' | 'greater' | 'greater_or_equal' | 'equal';
 
-/// Narrative season for dual-phase chronicle
-export type NarrativeSeason = 'spring' | 'autumn';
+/// Half-year narrative unit for chronicle generation
+export type HalfYear = 'first_half' | 'second_half';
 
 export interface PatronAction {
   id: string;
@@ -17481,7 +18471,7 @@ use tauri::State;
 #[tauri::command]
 fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13::WorldState>, String> {
     eprintln!("[RUST] cmd_get_world_state - acquiring lock");
-    let mut s = state.lock().map_err(|e| {
+    let s = state.lock().map_err(|e| {
         eprintln!("[RUST] cmd_get_world_state - lock error: {}", e);
         e.to_string()
     })?;
@@ -17593,7 +18583,7 @@ fn cmd_submit_action(
     eprintln!("[RUST] cmd_submit_action - result: {:?}", result.is_ok());
     
     // If successful, write events to database
-    if let Ok(ref response) = result {
+    if let Ok(ref _response) = result {
         let mut db_guard = db.lock().map_err(|e| e.to_string())?;
         // Get events from the event_log (submit_action doesn't return events directly)
         let events = s.event_log.events.clone();
@@ -17665,12 +18655,7 @@ fn cmd_get_relevant_events(
 ) -> Result<Vec<engine13::Event>, String> {
     eprintln!("[RUST] cmd_get_relevant_events - acquiring lock");
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    // For now, just get events for the first actor (relevance scoring is next step)
-    let result = if let Some(actor_id) = actor_ids.first() {
-        commands::get_relevant_events(&*db_guard, actor_id.clone())
-    } else {
-        Ok(vec![])
-    };
+    let result = commands::get_relevant_events(&*db_guard, actor_ids);
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }
@@ -17727,7 +18712,7 @@ async fn cmd_get_narrative(
     state: State<'_, Mutex<AppState>>,
     db: State<'_, Mutex<Db>>,
     app: tauri::AppHandle,
-    season: engine13::llm::NarrativeSeason,
+    _half_year: engine13::llm::HalfYear,  // Kept for API compatibility, now derived from snapshot
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
 
@@ -17737,27 +18722,28 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        let prompt = llm::generate_narrative_prompt(world_state, scenario, &s.event_log, &*db_guard, season);
-        let season_name = match season {
-            engine13::llm::NarrativeSeason::Spring => "Весна",
-            engine13::llm::NarrativeSeason::Autumn => "Осень",
-        };
-        let placeholder = format!("{} {} года. Хроника продолжается.", season_name, world_state.year);
-        let config = llm::get_llm_config();
-        let year = world_state.year;
+        
+        // Build snapshot from state (includes half_year)
+        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
+        
+        // Generate prompt using snapshot and narrative memory
+        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);
+        let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
+        let config = engine13::llm::get_llm_config();
+        let year = snapshot.year;
         (prompt, placeholder, config, year)
     }; // All locks released here
 
     // Now do the async HTTP requests without holding any locks
-    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, season);
+    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, _half_year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
     let result = if config.provider == "anthropic" {
-        llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
+        engine13::llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
     } else {
-        llm::stream_narrative_openai(prompt, placeholder, config, app).await
+        engine13::llm::stream_narrative_openai(prompt, placeholder, config, app).await
     };
-    
+
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
     result
 }
@@ -17769,14 +18755,14 @@ fn cmd_set_game_mode(
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_set_game_mode - acquiring lock, mode: {}", mode);
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    
+
     let new_mode = match mode.as_str() {
         "free" => engine13::GameMode::Free,
         "scenario" => engine13::GameMode::Scenario,
         "consequences" => engine13::GameMode::Consequences,
         _ => return Err(format!("Unknown game mode: {}", mode)),
     };
-    
+
     let result = commands::set_game_mode(&mut *s, new_mode);
     eprintln!("[RUST] cmd_set_game_mode - result: {:?}", result);
     result
