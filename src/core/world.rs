@@ -11,6 +11,9 @@ pub const SAVE_FORMAT_VERSION: u32 = 1;
 pub struct FamilyState {
     pub metrics: HashMap<String, f64>,
     pub patriarch_age: u32,
+    /// Number of generation transfers that have occurred
+    #[serde(default)]
+    pub generation_count: u32,
 }
 
 /// Dead actor record - preserves history after collapse

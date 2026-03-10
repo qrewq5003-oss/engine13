@@ -6,6 +6,35 @@
 
 ---
 
+## Post Generation-Mechanics Baseline
+
+**Date:** 2026-03-10
+**Changes:** Early transfer trigger, generation_count tracking, sim reporting by event_id
+
+### Summary of Changes
+- **EarlyTransfer struct:** Allows generation transfer before normal age if conditions met
+  - Rome 375: age >= 65 AND rome.external_pressure > 70
+- **generation_count:** Tracks number of transfers in FamilyState
+- **Strict transfer order:** increment count → apply coefficients → reset age → log event
+- **Event ID:** Strictly "generation_transfer" for sim counting
+- **tick_span:** Changed from 5 to 1 for Rome 375 (1 tick = 1 year)
+
+### Baseline Results
+
+| Run | Victory Tick | Gen Transfers | Transfer Ticks | Notes |
+|-----|-------------|---------------|----------------|-------|
+| rome batch | — | 2.0 avg | ~33 | Normal transfer expected at tick 33 (patriarch 42→75) |
+| rome scripted balanced | Tick 16 | 0 | — | Run too short (16 ticks) for transfer |
+| rome scripted influence | Tick 16 | 0 | — | Run too short (16 ticks) for transfer |
+
+### Balance Review
+- **Generation transfers working** - 2.0 avg per 50-tick batch run
+- **Transfer timing correct** - Expected at tick ~33 (patriarch starts 42, ends 75, +1/tick)
+- **Victory timing unchanged** - Still Tick 16 for scripted strategies
+- **No critical bugs** - Transfers occurring as expected
+
+---
+
 ## Post Region-Rank Baseline
 
 **Date:** 2026-03-10

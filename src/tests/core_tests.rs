@@ -298,6 +298,7 @@ fn test_generation_transfer_applies_inheritance() {
     world.family_state = Some(crate::core::FamilyState {
         metrics: [("family:family_influence".to_string(), 60.0)].into(),
         patriarch_age: gen.patriarch_end_age,
+        generation_count: 0,
     });
     
     let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);

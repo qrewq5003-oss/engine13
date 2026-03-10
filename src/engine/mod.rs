@@ -1352,13 +1352,36 @@ fn check_generation_transfer(
     // Age the patriarch by tick_span years
     family_state.patriarch_age += scenario.tick_span;
 
-    // Check if patriarch has reached end age - trigger generation transfer
-    if family_state.patriarch_age >= gen_mechanics.patriarch_end_age as u32 {
-        // Apply inheritance coefficients to all family metrics
-        // Per architecture: new generation starts with reduced metrics
-        // Use scenario-specific coefficients if available, default to 0.7
+    // Check triggers
+    let patriarch_age = family_state.patriarch_age;
+    let normal_trigger = patriarch_age >= gen_mechanics.patriarch_end_age as u32;
 
-        // Scale all family metrics
+    // For early trigger, we need to check external metric - do this after dropping family_state borrow
+    let early_trigger_check = gen_mechanics.early_transfer.as_ref().map(|early| {
+        (early.age, early.condition_metric.clone(), early.condition_operator.clone(), early.condition_value)
+    });
+
+    // Drop the mutable borrow before checking external metric
+    let _ = family_state; // End mutable borrow scope
+
+    // Check early trigger condition (needs world access)
+    let early_trigger = early_trigger_check.map_or(false, |(age, metric, operator, value)| {
+        if patriarch_age < age {
+            return false;
+        }
+        let metric_value = crate::core::MetricRef::parse(&metric).get(world);
+        operator.evaluate(metric_value, value)
+    });
+
+    // Process generation transfer if triggered
+    if early_trigger || normal_trigger {
+        let family_state = world.family_state.as_mut().unwrap();
+
+        // Strict order of operations:
+        // 1. Increment generation_count
+        family_state.generation_count += 1;
+
+        // 2. Apply inheritance coefficients to all family metrics
         let family_metric_keys: Vec<String> = family_state.metrics.keys().cloned().collect();
 
         for metric in &family_metric_keys {
@@ -1373,10 +1396,10 @@ fn check_generation_transfer(
             }
         }
 
-        // Reset patriarch age to start age for new generation
+        // 3. Reset patriarch age to start age for new generation
         family_state.patriarch_age = gen_mechanics.patriarch_start_age as u32;
 
-        // Record generation transfer event
+        // 4. Log event with current generation number
         let event = Event::new(
             "generation_transfer".to_string(),
             current_tick,
@@ -1384,7 +1407,7 @@ fn check_generation_transfer(
             "scenario".to_string(),
             EventType::Milestone,
             true, // is_key event
-            "Новое поколение семьи вступает во власть".to_string(),
+            format!("Поколение {} вступает во власть", family_state.generation_count),
         );
         event_log.add(event);
     }

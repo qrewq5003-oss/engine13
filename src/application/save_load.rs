@@ -139,6 +139,7 @@ pub fn load_scenario(
         world_state.family_state = Some(crate::core::FamilyState {
             metrics: initial_metrics.clone(),
             patriarch_age,
+            generation_count: 0,
         });
     }
 

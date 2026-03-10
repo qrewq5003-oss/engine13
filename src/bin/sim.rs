@@ -81,6 +81,7 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
         world.family_state = Some(engine13::core::FamilyState {
             metrics: normalized_metrics,
             patriarch_age,
+            generation_count: 0,
         });
     }
 
@@ -150,6 +151,7 @@ fn run_batch(scenario_id: &str, ticks: u32) {
             world.family_state = Some(engine13::core::FamilyState {
                 metrics: initial_metrics.clone(),
                 patriarch_age,
+                generation_count: 0,
             });
         }
 
@@ -443,6 +445,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         world.family_state = Some(engine13::core::FamilyState {
             metrics: normalized_metrics,
             patriarch_age,
+            generation_count: 0,
         });
     }
 
@@ -803,8 +806,8 @@ impl SimStats {
                 _ => {}
             }
             
-            // Count generation transitions
-            if event.id.contains("generation") && event.event_type == EventType::Threshold {
+            // Count generation transitions by exact event_id
+            if event.id == "generation_transfer" {
                 self.generation_transitions += 1;
             }
         }
@@ -911,9 +914,9 @@ impl BatchStats {
             })
             .count() as u32;
         
-        // Count generation transitions
+        // Count generation transitions by exact event_id
         for event in events {
-            if event.id.contains("generation") && event.event_type == EventType::Threshold {
+            if event.id == "generation_transfer" {
                 self.generation_transitions += 1;
             }
         }

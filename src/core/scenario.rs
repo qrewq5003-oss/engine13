@@ -313,6 +313,18 @@ pub struct GenerationMechanics {
     pub panel_label: String,
     /// Era-specific context texts
     pub era_texts: Vec<EraText>,
+    /// Early transfer conditions (optional)
+    #[serde(default)]
+    pub early_transfer: Option<EarlyTransfer>,
+}
+
+/// Early transfer condition for generation mechanics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarlyTransfer {
+    pub age: u32,
+    pub condition_metric: String,
+    pub condition_operator: ComparisonOperator,
+    pub condition_value: f64,
 }
 
 /// Player context for scenario

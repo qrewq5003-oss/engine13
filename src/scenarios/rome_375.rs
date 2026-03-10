@@ -1522,7 +1522,7 @@ fn create_generation_mechanics() -> GenerationMechanics {
     inheritance_coefficients.insert("family:family_connections".to_string(), 0.8);
 
     GenerationMechanics {
-        tick_span: 5,
+        tick_span: 1,
         patriarch_start_age: 42,
         patriarch_end_age: 75,
         generation_length: 33,
@@ -1533,6 +1533,12 @@ fn create_generation_mechanics() -> GenerationMechanics {
             crate::core::EraText { from_year: 410, to_year: 455, text: "Западная империя агонизирует. Влияние семьи — последний якорь.".to_string() },
             crate::core::EraText { from_year: 455, to_year: 500, text: "Из пепла рождается новый порядок.".to_string() },
         ],
+        early_transfer: Some(crate::core::EarlyTransfer {
+            age: 65,
+            condition_metric: "actor:rome.external_pressure".to_string(),
+            condition_operator: crate::core::ComparisonOperator::Greater,
+            condition_value: 70.0,
+        }),
     }
 }
 
