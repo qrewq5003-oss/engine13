@@ -44,7 +44,7 @@ pub fn load_rome_375() -> Scenario {
             threshold: 90.0,
             title: "Семья достигла величия".to_string(),
             description: "Ди Милано стали опорой угасающей империи.".to_string(),
-            minimum_tick: 15,
+            minimum_tick: 30,  // 15 years × 2 ticks/year
             additional_conditions: vec![],
             sustained_ticks_required: 1,
         }),

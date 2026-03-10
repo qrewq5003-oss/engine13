@@ -50,7 +50,7 @@ pub fn load_constantinople_1430() -> Scenario {
             threshold: 80.0,
             title: "Федерация Севера основана".to_string(),
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
-            minimum_tick: 20,
+            minimum_tick: 40,  // 20 years × 2 ticks/year
             additional_conditions: vec![
                 crate::core::Condition {
                     metric: "actor:byzantium.external_pressure".to_string(),

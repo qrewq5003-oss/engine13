@@ -91,6 +91,13 @@ pub fn load_game(
         world_state.family_state = family_state;
     }
 
+    // Backward compatibility: recalculate year from tick (2 ticks per year)
+    // Never trust saved year — always recalculate from tick
+    let scenario_id = &db_save.scenario_id;
+    let scenario = crate::scenarios::registry::load_by_id(scenario_id)
+        .ok_or_else(|| format!("Unknown scenario: {}", scenario_id))?;
+    world_state.year = scenario.start_year as i32 + (world_state.tick / 2) as i32;
+
     // Initialize RNG from world state seed
     // NOTE: RNG sequence restarts from seed after load, not from exact saved position.
     // This is an accepted limitation — save/load does not guarantee identical continuation.

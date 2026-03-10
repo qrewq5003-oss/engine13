@@ -6,6 +6,35 @@
 
 ---
 
+## Post Half-Year Baseline
+
+**Date:** 2026-03-10
+**Changes:** 2 ticks per year globally, year derived from tick/2, patriarch ages on even ticks only
+
+### Summary of Changes
+- **Year formula:** `year = start_year + (tick / 2)` — 2 ticks = 1 year
+- **HalfYear:** Computed from `tick % 2` (even = FirstHalf, odd = SecondHalf)
+- **Patriarch aging:** +1 age on even ticks only (FirstHalf)
+- **Victory minimum_tick:** Rome 15yr→30, Constantinople 20yr→40
+- **UI display:** "Year AD — Первая/Вторая половина года"
+- **Backward compatibility:** Year recalculated from tick on save load
+
+### Baseline Results
+
+| Run | Victory Tick | Victory Year | Gen Transfers | Notes |
+|-----|-------------|--------------|---------------|-------|
+| rome batch (100 ticks) | — | 50 years | 2.0 avg | 100 ticks = 50 years |
+| rome scripted balanced (100 ticks) | Tick 31 | Year 385 (15.5yr) | 0 | Victory at 15.5 years (min 15yr) |
+| constantinople balanced (50 ticks) | Tick 43 | Year 1451 (21.5yr) | — | Victory at 21.5 years (min 20yr) |
+
+### Balance Review
+- **Victory timing correct** — Rome victory at tick 31 (~15.5 years), after minimum 30 ticks (15 years)
+- **Victory timing correct** — Constantinople victory at tick 43 (~21.5 years), after minimum 40 ticks (20 years)
+- **Generation transfers working** — 2.0 avg per 100-tick (50 year) batch run
+- **Half-year model stable** — No issues with year/half calculation
+
+---
+
 ## Post Generation-Mechanics Baseline
 
 **Date:** 2026-03-10

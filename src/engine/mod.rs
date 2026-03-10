@@ -537,7 +537,8 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &Ha
 
 fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     world.tick += 1;
-    world.year += scenario.tick_span as i32;
+    // Year is derived from tick: 2 ticks per year (tick 0-1 = year 0, tick 2-3 = year 1, etc.)
+    world.year = scenario.start_year as i32 + (world.tick / 2) as i32;
     world.actions_this_tick = 0;
 }
 
@@ -1349,8 +1350,11 @@ fn check_generation_transfer(
     let current_tick = world.tick;
     let current_year = world.year;
 
-    // Age the patriarch by tick_span years
-    family_state.patriarch_age += scenario.tick_span;
+    // Age the patriarch only on even ticks (FirstHalf = start of year)
+    // This ensures 1 year of aging per 2 ticks
+    if world.tick % 2 == 0 {
+        family_state.patriarch_age += 1;
+    }
 
     // Check triggers
     let patriarch_age = family_state.patriarch_age;
@@ -1713,7 +1717,14 @@ mod tests {
         tick(&mut world, &scenario, &mut event_log, &mut rng);
 
         assert_eq!(world.tick, initial_tick + 1);
-        assert_eq!(world.year, initial_year + 5);
+        // Year is derived from tick: 2 ticks per year, so after 1 tick year stays same
+        assert_eq!(world.year, initial_year);  // tick 1 = start_year + (1/2) = start_year
+        
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+        
+        // After 2 ticks, year should increment
+        assert_eq!(world.tick, 2);
+        assert_eq!(world.year, initial_year + 1);  // tick 2 = start_year + (2/2) = start_year + 1
     }
 }
 

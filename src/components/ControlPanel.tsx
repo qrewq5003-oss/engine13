@@ -58,11 +58,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   // Get last 3 events
   const lastThreeEvents = recentEvents.slice(-3).reverse();
 
+  // Compute half-year from tick (even = FirstHalf, odd = SecondHalf)
+  const halfYearText = currentTick % 2 === 0 ? 'Первая половина года' : 'Вторая половина года';
+
   return (
     <div className="control-panel">
       <div className="time-display">
-        <span className="year">{currentYear} AD</span>
-        <span className="tick">Tick {currentTick}</span>
+        <span className="year">{currentYear} AD — {halfYearText}</span>
       </div>
 
       <div className="control-buttons">

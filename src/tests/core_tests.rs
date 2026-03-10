@@ -205,10 +205,10 @@ fn test_scenario_victory_requires_byzantium_alive() {
         }
     }
     
-    // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 25
+    // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 45
     // Note: MetricRef strips "global:" prefix when storing
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
-    world.tick = 25;
+    world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
     
     // Set byzantium.external_pressure = 90 (above threshold 85)
     if let Some(byz) = world.actors.get_mut("byzantium") {
@@ -251,9 +251,9 @@ fn test_victory_sustained_ticks_resets() {
         }
     }
     
-    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 25
+    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 45
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
-    world.tick = 25;
+    world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
     if let Some(byz) = world.actors.get_mut("byzantium") {
         byz.metrics.external_pressure = 70.0;
     }
