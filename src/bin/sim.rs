@@ -12,6 +12,8 @@
 //! cargo run --bin sim rome_375 50 scripted balanced  # Rome scripted balanced
 //! cargo run --bin sim rome_375 50 scripted influence  # Rome scripted influence-focused
 //! cargo run --bin sim rome_375 50 scripted wealth  # Rome scripted wealth-focused
+//! cargo run --bin sim rome_375 20 narrative_eval  # narrative evaluation mode
+//! cargo run --bin sim rome_375 narrative_pack  # generate manual review pack
 //! ```
 
 use engine13::{
@@ -21,6 +23,34 @@ use engine13::{
 };
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
+
+// ============================================================================
+// Narrative Evaluation Heuristics (PR 3A)
+// ============================================================================
+
+/// Action type keywords for strategy reflection check
+const ACTION_KEYWORDS: &[(&str, &[&str])] = &[
+    ("build_reputation", &["репутация", "влияние", "известность", "имя"]),
+    ("back_administration", &["управление", "администрация", "порядок", "чиновник"]),
+    ("invest_wealth", &["казна", "богатство", "вложение", "деньги"]),
+    ("support_city", &["город", "поддержка", "снабжение", "гарнизон"]),
+    ("gather_information", &["сведения", "разведка", "слухи", "информация"]),
+    ("expand_network", &["связи", "контакты", "сеть", "союзник"]),
+    ("lay_low", &["тень", "осторожность", "выжидание", "тихо"]),
+    ("fund_defense", &["оборона", "войска", "укрепление", "защита"]),
+];
+
+/// Consequence markers for causality check
+const CONSEQUENCE_MARKERS: &[&str] = &[
+    "поэтому", "в результате", "это привело", "тем временем",
+    "после этого", "вслед за", "что повлекло", "следствием",
+];
+
+/// Generic opening phrases to avoid
+const GENERIC_OPENINGS: &[&str] = &[
+    "В это время", "Мир менялся", "Годы шли", "Империя стояла",
+    "Время шло", "История продолжалась",
+];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -39,6 +69,8 @@ fn main() {
             let strategy = submode.unwrap_or("balanced");
             run_scripted(scenario_id, ticks, strategy);
         },
+        "narrative_eval" => run_narrative_eval(scenario_id, ticks),
+        "narrative_pack" => run_narrative_pack(scenario_id),
         _ => {
             let seed: u64 = mode.parse().unwrap_or(42);
             println!("Seed: {}", seed);
@@ -108,6 +140,434 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
     }
 
     stats.print_report(&scenario);
+}
+
+// ============================================================================
+// Narrative Evaluation Mode (PR 3A)
+// ============================================================================
+
+fn run_narrative_eval(scenario_id: &str, ticks: u32) {
+    println!("Running narrative evaluation mode");
+    println!();
+
+    let scenario = registry::load_by_id(scenario_id)
+        .expect("Unknown scenario");
+
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+
+    // Initialize actors from scenario
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+
+    // Initialize family_state for family-based scenarios
+    if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+        let patriarch_age = scenario.generation_mechanics
+            .as_ref()
+            .map(|g| g.patriarch_start_age)
+            .unwrap_or(40) as u32;
+
+        let mut normalized_metrics = HashMap::new();
+        for (key, value) in initial_metrics {
+            let key1 = key.strip_prefix("family:").unwrap_or(key);
+            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
+            normalized_metrics.insert(normalized_key.to_string(), *value);
+        }
+
+        world.family_state = Some(engine13::core::FamilyState {
+            metrics: normalized_metrics,
+            patriarch_age,
+            generation_count: 0,
+        });
+    }
+
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
+
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    let mut total_scores: Vec<u32> = Vec::new();
+    let mut low_score_ticks: Vec<u32> = Vec::new();
+
+    for tick_num in 0..ticks {
+        // Get actions that would be available this tick
+        let available_actions = engine13::application::get_available_actions(
+            &engine13::commands::AppState {
+                world_state: Some(world.clone()),
+                event_log: event_log.clone(),
+                current_scenario: Some(scenario.clone()),
+                rng: Some(rng.clone()),
+                narrative_memory: engine13::llm::NarrativeMemory::default(),
+            }
+        ).unwrap_or_default();
+
+        // Simulate applying first 2 available actions (like balanced strategy)
+        let mut actions_applied_this_tick: Vec<String> = Vec::new();
+
+        // For narrative eval, we just track what WOULD be applied
+        for action in available_actions.iter().take(2) {
+            actions_applied_this_tick.push(action.id.clone());
+        }
+
+        // Run tick
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+
+        // Get narrative (would be generated by LLM)
+        // For now, we simulate - in real usage this would come from LLM
+        let narrative_text = format!("[Narrative for tick {} would appear here]", tick_num);
+
+        // Evaluate this tick's narrative against actions
+        if !actions_applied_this_tick.is_empty() {
+            let tick_result = evaluate_narrative_tick(
+                &narrative_text,
+                &actions_applied_this_tick,
+                &world,
+                tick_num,
+            );
+
+            total_scores.push(tick_result.best_score);
+            if tick_result.best_score < 3 {
+                low_score_ticks.push(tick_num);
+            }
+
+            if tick_result.best_score < 3 || tick_num < 3 {
+                println!("{}", tick_result.output);
+            }
+        }
+    }
+
+    // Print summary
+    println!();
+    println!("=== SUMMARY ===");
+    println!("Ticks evaluated: {}", total_scores.len());
+    if !total_scores.is_empty() {
+        let avg_score = total_scores.iter().sum::<u32>() as f64 / total_scores.len() as f64;
+        println!("Avg best-action score: {:.1}/4", avg_score);
+        println!("Ticks with score < 3: {} (ticks: {:?})", low_score_ticks.len(), low_score_ticks);
+    }
+}
+
+struct NarrativeEvalResult {
+    best_score: u32,
+    output: String,
+}
+
+fn evaluate_narrative_tick(
+    narrative: &str,
+    actions: &[String],
+    world: &WorldState,
+    tick_num: u32,
+) -> NarrativeEvalResult {
+    let mut output = String::new();
+    output.push_str(&format!("=== NARRATIVE EVAL: tick {} ===\n", tick_num));
+    output.push_str(&format!("Actions this tick: {}\n\n", actions.join(", ")));
+
+    let mut best_score = 0u32;
+
+    for action_id in actions {
+        let mut score = 0u32;
+        let mut action_output = String::new();
+        action_output.push_str(&format!("  Action: {}\n", action_id));
+
+        // Criterion 1: action_type_reflected
+        let (c1_pass, c1_match) = check_action_type_reflected(narrative, action_id);
+        if c1_pass { score += 1; }
+        action_output.push_str(&format!(
+            "    action_type_reflected:      {}  [matched: \"{}\"]\n",
+            if c1_pass { "PASS" } else { "FAIL" },
+            c1_match.unwrap_or_else(|| "none".to_string())
+        ));
+
+        // Criterion 2: consequence_marker_present
+        let (c2_pass, c2_match) = check_consequence_marker(narrative);
+        if c2_pass { score += 1; }
+        action_output.push_str(&format!(
+            "    consequence_marker_present: {}  [matched: \"{}\"]\n",
+            if c2_pass { "PASS" } else { "FAIL" },
+            c2_match.unwrap_or_else(|| "none".to_string())
+        ));
+
+        // Criterion 3: not_generic
+        let c3_pass = check_not_generic(narrative);
+        if c3_pass { score += 1; }
+        action_output.push_str(&format!(
+            "    not_generic:                {}\n",
+            if c3_pass { "PASS" } else { "FAIL" }
+        ));
+
+        // Criterion 4: actor_mentioned
+        let (c4_pass, c4_match) = check_actor_mentioned(narrative, world);
+        if c4_pass { score += 1; }
+        action_output.push_str(&format!(
+            "    actor_mentioned:            {}  [matched: \"{}\"]\n",
+            if c4_pass { "PASS" } else { "FAIL" },
+            c4_match.unwrap_or_else(|| "none".to_string())
+        ));
+
+        action_output.push_str(&format!("    Score: {}/4\n\n", score));
+
+        if score > best_score {
+            best_score = score;
+        }
+
+        output.push_str(&action_output);
+    }
+
+    output.push_str(&format!("Tick result: {} (best action score: {}/4)\n",
+        if best_score >= 3 { "PASS" } else { "FAIL" },
+        best_score
+    ));
+
+    NarrativeEvalResult {
+        best_score,
+        output,
+    }
+}
+
+fn check_action_type_reflected(narrative: &str, action_id: &str) -> (bool, Option<String>) {
+    let narrative_lower = narrative.to_lowercase();
+
+    for (action, keywords) in ACTION_KEYWORDS {
+        if *action == action_id {
+            for keyword in keywords.iter() {
+                if narrative_lower.contains(keyword) {
+                    return (true, Some(keyword.to_string()));
+                }
+            }
+            return (false, None);
+        }
+    }
+    (false, None)
+}
+
+fn check_consequence_marker(narrative: &str) -> (bool, Option<String>) {
+    for marker in CONSEQUENCE_MARKERS.iter() {
+        if narrative.contains(marker) {
+            return (true, Some(marker.to_string()));
+        }
+    }
+    (false, None)
+}
+
+fn check_not_generic(narrative: &str) -> bool {
+    let words: Vec<&str> = narrative.split_whitespace().take(15).collect();
+    let opening = words.join(" ");
+
+    for generic in GENERIC_OPENINGS.iter() {
+        if opening.contains(generic) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_actor_mentioned(narrative: &str, world: &WorldState) -> (bool, Option<String>) {
+    for (_, actor) in world.actors.iter() {
+        if narrative.contains(&actor.name) {
+            return (true, Some(actor.name.clone()));
+        }
+    }
+    (false, None)
+}
+
+// ============================================================================
+// Narrative Review Pack Generator (PR 3B)
+// ============================================================================
+
+fn run_narrative_pack(scenario_id: &str) {
+    println!("Generating narrative review pack");
+    println!();
+
+    let scenario = registry::load_by_id(scenario_id)
+        .expect("Unknown scenario");
+
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+
+    // Initialize actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+
+    // Initialize family_state
+    if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+        let patriarch_age = scenario.generation_mechanics
+            .as_ref()
+            .map(|g| g.patriarch_start_age)
+            .unwrap_or(40) as u32;
+
+        let mut normalized_metrics = HashMap::new();
+        for (key, value) in initial_metrics {
+            let key1 = key.strip_prefix("family:").unwrap_or(key);
+            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
+            normalized_metrics.insert(normalized_key.to_string(), *value);
+        }
+
+        world.family_state = Some(engine13::core::FamilyState {
+            metrics: normalized_metrics,
+            patriarch_age,
+            generation_count: 0,
+        });
+    }
+
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
+
+    let mut event_log = EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    // Track cases
+    let mut cases_found: Vec<(usize, u32, String)> = Vec::new(); // (case_num, tick, narrative)
+    let mut case_conditions_met: [bool; 6] = [false; 6];
+    let mut generation_transfer_tick: Option<u32> = None;
+
+    const MAX_TICKS: u32 = 60;
+
+    for tick_num in 0..MAX_TICKS {
+        // Run tick
+        tick(&mut world, &scenario, &mut event_log, &mut rng);
+
+        // Check case conditions
+        // Case 1: tick == 3
+        if tick_num == 3 && !case_conditions_met[0] {
+            case_conditions_met[0] = true;
+            cases_found.push((1, tick_num, "[Narrative would appear here]".to_string()));
+        }
+
+        // Case 2: rome.cohesion < 30 AND rome.external_pressure > 70
+        if let Some(rome) = world.actors.get("rome") {
+            if rome.metrics.cohesion < 30.0 && rome.metrics.external_pressure > 70.0 && !case_conditions_met[1] {
+                case_conditions_met[1] = true;
+                cases_found.push((2, tick_num, "[Narrative would appear here]".to_string()));
+            }
+        }
+
+        // Case 3: family_influence > 70
+        if let Some(ref family) = world.family_state {
+            if family.metrics.get("influence").copied().unwrap_or(0.0) > 70.0 && !case_conditions_met[2] {
+                case_conditions_met[2] = true;
+                cases_found.push((3, tick_num, "[Narrative would appear here]".to_string()));
+            }
+        }
+
+        // Case 4: collapse_warning_ticks not empty
+        if !world.collapse_warning_ticks.is_empty() && !case_conditions_met[3] {
+            case_conditions_met[3] = true;
+            cases_found.push((4, tick_num, "[Narrative would appear here]".to_string()));
+        }
+
+        // Case 5: after generation_transfer event
+        if generation_transfer_tick.is_none() {
+            for event in &event_log.events {
+                if event.id == "generation_transfer" && event.tick == tick_num {
+                    generation_transfer_tick = Some(tick_num);
+                }
+            }
+        }
+        if let Some(gt_tick) = generation_transfer_tick {
+            if tick_num == gt_tick + 1 && !case_conditions_met[4] {
+                case_conditions_met[4] = true;
+                cases_found.push((5, tick_num, "[Narrative would appear here]".to_string()));
+            }
+        }
+
+        // Case 6: family_influence >= 85 AND tick >= 14
+        if let Some(ref family) = world.family_state {
+            if family.metrics.get("influence").copied().unwrap_or(0.0) >= 85.0 && tick_num >= 14 && !case_conditions_met[5] {
+                case_conditions_met[5] = true;
+                cases_found.push((6, tick_num, "[Narrative would appear here]".to_string()));
+            }
+        }
+
+        // Stop if all cases found
+        if case_conditions_met.iter().all(|&x| x) {
+            break;
+        }
+    }
+
+    // Generate markdown file
+    let mut markdown = String::new();
+    markdown.push_str("# Narrative Manual Review Pack\n\n");
+    markdown.push_str("**Generated:** Auto-generated review cases\n\n");
+    markdown.push_str("**Instructions:** Fill in the checklists by hand after reading each narrative.\n\n");
+    markdown.push_str("---\n\n");
+
+    let case_names = [
+        "Early game, stable",
+        "Early game, crisis",
+        "Mid game, player winning",
+        "Collapse warning active",
+        "Generation transfer",
+        "Near victory",
+    ];
+
+    for (case_num, tick, _narrative) in &cases_found {
+        let case_idx = case_num - 1;
+        markdown.push_str(&format!("## Case {}: {}\n\n", case_num, case_names[case_idx as usize]));
+        markdown.push_str(&format!("**Tick:** {} | **Year:** {}\n\n", tick, world.year));
+
+        // World state summary
+        markdown.push_str("**World state summary:**\n");
+        markdown.push_str("| Metric | Value |\n");
+        markdown.push_str("|--------|-------|\n");
+
+        let rome_legitimacy = world.actors.get("rome").map(|a| a.metrics.legitimacy).unwrap_or(0.0);
+        let rome_cohesion = world.actors.get("rome").map(|a| a.metrics.cohesion).unwrap_or(0.0);
+        let rome_pressure = world.actors.get("rome").map(|a| a.metrics.external_pressure).unwrap_or(0.0);
+        let family_influence = world.family_state.as_ref()
+            .and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
+        let treasury = world.actors.get("rome").map(|a| a.metrics.treasury).unwrap_or(0.0);
+        let collapse_warnings: Vec<&String> = world.collapse_warning_ticks.keys().collect();
+
+        markdown.push_str(&format!("| rome.legitimacy | {:.1} |\n", rome_legitimacy));
+        markdown.push_str(&format!("| rome.cohesion | {:.1} |\n", rome_cohesion));
+        markdown.push_str(&format!("| rome.external_pressure | {:.1} |\n", rome_pressure));
+        markdown.push_str(&format!("| family_influence | {:.1} |\n", family_influence));
+        markdown.push_str(&format!("| treasury | {:.1} |\n", treasury));
+        markdown.push_str(&format!("| collapse_warnings | {} |\n",
+            if collapse_warnings.is_empty() { "none".to_string() } else { collapse_warnings.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ") }
+        ));
+        markdown.push_str("\n");
+
+        markdown.push_str("**Player actions this tick:** [none]\n\n");
+        markdown.push_str("**Key events (last 3):** [events would be listed here]\n\n");
+        markdown.push_str("**Generated narrative:**\n\n");
+        markdown.push_str("[LLM UNAVAILABLE - narrative would appear here]\n\n");
+        markdown.push_str("---\n");
+        markdown.push_str("### Human review checklist\n\n");
+        markdown.push_str("- [ ] Factually accurate — нет галлюцинированных событий или акторов\n");
+        markdown.push_str("- [ ] Strategy reflected — действия игрока присутствуют как причины\n");
+        markdown.push_str("- [ ] World-first — narrative не начинается с семьи или игрока\n");
+        markdown.push_str("- [ ] No generic opening — нет шаблонного начала\n");
+        markdown.push_str("- [ ] Correct tone — соответствует сценарию\n");
+        markdown.push_str("- [ ] At least 2 paragraphs\n\n");
+        markdown.push_str("**Reviewer notes:** [заполнить вручную]\n\n");
+        markdown.push_str("**Score: /6**\n\n");
+        markdown.push_str("---\n\n");
+    }
+
+    // Add cases not reached
+    for i in 0..6 {
+        if !case_conditions_met[i] {
+            markdown.push_str(&format!("## Case {}: {}\n\n", i + 1, case_names[i]));
+            markdown.push_str("**[CASE NOT REACHED within 60 ticks]**\n\n");
+            markdown.push_str("---\n\n");
+        }
+    }
+
+    // Write to file
+    std::fs::write("docs/narrative_review_pack.md", &markdown)
+        .expect("Failed to write narrative_review_pack.md");
+
+    println!("Generated docs/narrative_review_pack.md");
+    println!("Cases found: {}/6", cases_found.len());
+    for (case_num, tick, _) in &cases_found {
+        println!("  Case {}: tick {}", case_num, tick);
+    }
 }
 
 fn run_batch(scenario_id: &str, ticks: u32) {
