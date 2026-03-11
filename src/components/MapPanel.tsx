@@ -4,6 +4,9 @@ import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMapConfig, getWorldState } from '../api';
 import type { MapConfig, WorldState } from '../types/index';
+import type { HeatmapMetric } from '../utils/heatmapColor';
+import { HEATMAP_LABELS } from '../utils/heatmapColor';
+import { computePathStyle } from '../utils/mapStyle';
 
 interface MapPanelProps {
   selectedActorId: string | null;
@@ -21,17 +24,21 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [geoJsonData, setGeoJsonData] = useState<Record<string, any>>({});
   const mapRef = useRef<LeafletMap | null>(null);
-  
+
   // Fading out actors (for collapse animation)
   const [fadingOut, setFadingOut] = useState<Set<string>>(new Set());
-  
+
   // Hover state
   const [hoveredActorId, setHoveredActorId] = useState<string | null>(null);
-  
+
+  // Heatmap state
+  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('cohesion');
+
   // Per-polygon GeoJSON refs for fade-out styling
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const geoJsonRefs = useRef<Record<string, L.GeoJSON | null>>({});
-  
+
   // Track previous actor IDs to detect collapses
   const prevActorIds = useRef<Set<string>>(new Set());
 
@@ -85,7 +92,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   // Track actor ID changes for fade-out effect
   useEffect(() => {
     if (!worldState) return;
-    
+
     const currentIds = new Set(Object.keys(worldState.actors));
 
     prevActorIds.current.forEach(id => {
@@ -96,13 +103,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           next.add(id);
           return next;
         });
-        
+
         // Apply fade-out style immediately via ref
         const ref = geoJsonRefs.current[id];
         if (ref) {
           ref.setStyle({ fillOpacity: 0, opacity: 0 });
         }
-        
+
         // Remove from fading set after animation
         setTimeout(() => {
           setFadingOut(prev => {
@@ -124,6 +131,25 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     }
   }, [worldState?.actors, selectedActorId, onSelectActor]);
 
+  // Update all polygon styles when heatmap mode or metric changes
+  useEffect(() => {
+    if (!mapConfig || !worldState) return;
+    mapConfig.polygons.forEach(polygon => {
+      const ref = geoJsonRefs.current[polygon.actor_id];
+      if (!ref) return;
+      const actor = worldState.actors[polygon.actor_id];
+      ref.setStyle(computePathStyle({
+        polygon,
+        actor,
+        isFading: fadingOut.has(polygon.actor_id),
+        isSelected: selectedActorId === polygon.actor_id,
+        isHovered: hoveredActorId === polygon.actor_id,
+        heatmapEnabled,
+        heatmapMetric,
+      }));
+    });
+  }, [heatmapEnabled, heatmapMetric, worldState?.actors, fadingOut, selectedActorId, hoveredActorId, mapConfig]);
+
   if (!mapConfig) return null;
 
   // Build actor map for quick lookup
@@ -141,6 +167,42 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   return (
     <div className="map-panel">
+      {/* Controls overlay */}
+      <div className="map-controls">
+        <button
+          className={`map-heatmap-toggle ${heatmapEnabled ? 'active' : ''}`}
+          onClick={() => setHeatmapEnabled(v => !v)}
+        >
+          Тепловая карта
+        </button>
+
+        {heatmapEnabled && (
+          <div className="map-metric-buttons">
+            {(Object.keys(HEATMAP_LABELS) as HeatmapMetric[]).map(metric => (
+              <button
+                key={metric}
+                className={`map-metric-btn ${heatmapMetric === metric ? 'active' : ''}`}
+                onClick={() => setHeatmapMetric(metric)}
+              >
+                {HEATMAP_LABELS[metric]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Legend overlay */}
+      {heatmapEnabled && (
+        <div className="map-legend">
+          <div className="map-legend-title">{HEATMAP_LABELS[heatmapMetric]}</div>
+          <div className="map-legend-scale">
+            <span className="map-legend-label">0</span>
+            <div className="map-legend-gradient" />
+            <span className="map-legend-label">100</span>
+          </div>
+        </div>
+      )}
+
       <MapContainer
         center={[mapConfig.center_lat, mapConfig.center_lon]}
         zoom={mapConfig.default_zoom}
@@ -154,27 +216,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {visiblePolygons.map((polygon) => {
           const data = geoJsonData[polygon.actor_id];
           if (!data) return null;
-          
+
           const isFading = fadingOut.has(polygon.actor_id);
-          const isSelected = selectedActorId === polygon.actor_id;
-          const isHovered = hoveredActorId === polygon.actor_id;
-          
-          // Priority: fading > selected > hovered > normal
-          // Fading: no hover, no tooltip, opacity 0
-          // Selected: opacity +0.2, weight 2, white border
-          // Hovered: opacity +0.1, weight 1.5, white border
-          // Normal: base opacity, weight 1
-          const fillOpacity = isFading
-            ? 0
-            : isSelected
-            ? Math.min(polygon.opacity + 0.2, 1.0)
-            : isHovered
-            ? Math.min(polygon.opacity + 0.1, 1.0)
-            : polygon.opacity;
-
-          const weight = isFading ? 0 : isSelected ? 2 : isHovered ? 1.5 : 1;
-          const borderColor = isFading ? polygon.color : (isSelected || isHovered) ? '#ffffff' : polygon.color;
-
           const actor = actorMap[polygon.actor_id];
 
           return (
@@ -183,12 +226,15 @@ export const MapPanel: React.FC<MapPanelProps> = ({
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               data={data as any}
               ref={el => { geoJsonRefs.current[polygon.actor_id] = el; }}
-              style={{
-                color: borderColor,
-                fillColor: polygon.color,
-                fillOpacity,
-                weight,
-              }}
+              style={computePathStyle({
+                polygon,
+                actor,
+                isFading,
+                isSelected: selectedActorId === polygon.actor_id,
+                isHovered: hoveredActorId === polygon.actor_id,
+                heatmapEnabled,
+                heatmapMetric,
+              })}
               eventHandlers={{
                 click: () => {
                   if (!isFading) {
