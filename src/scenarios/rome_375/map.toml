@@ -95,3 +95,45 @@ actor_id = "eastern_jin"
 geojson_file = "eastern_jin.geojson"
 color = "#7C4A7C"
 opacity = 0.5
+
+[[map.polygons]]
+actor_id = "rome_west"
+geojson_file = "rome_west.geojson"
+color = "#A00000"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "rome_east"
+geojson_file = "rome_east.geojson"
+color = "#C0392B"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "visigoth_kingdom"
+geojson_file = "visigoth_kingdom.geojson"
+color = "#4A7C59"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "ostrogoth_kingdom"
+geojson_file = "ostrogoth_kingdom.geojson"
+color = "#5C4A1E"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "vandal_kingdom_africa"
+geojson_file = "vandal_kingdom_africa.geojson"
+color = "#4A4A8B"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "frankish_kingdom"
+geojson_file = "frankish_kingdom.geojson"
+color = "#2D5A8B"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "late_sassanids"
+geojson_file = "late_sassanids.geojson"
+color = "#7B3F00"
+opacity = 0.5

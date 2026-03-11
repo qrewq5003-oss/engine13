@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[8.0, 44.0], [11.0, 44.0], [11.0, 46.0], [8.0, 46.0], [8.0, 44.0]]]
+  },
+  "properties": { "actor_id": "milan" }
+}

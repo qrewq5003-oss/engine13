@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[2.0, 52.0], [6.0, 52.0], [10.0, 51.0], [9.0, 49.0], [7.0, 47.0], [4.0, 46.0], [2.0, 47.0], [2.0, 50.0], [2.0, 52.0]]]}, "properties": {"actor_id": "frankish_kingdom"}}]}

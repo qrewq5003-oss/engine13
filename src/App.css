@@ -250,3 +250,28 @@ body {
     opacity: 1;
   }
 }
+
+/* Map tooltip styles */
+.map-tooltip {
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 140px;
+}
+
+.map-tooltip strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(0,0,0,0.15);
+  padding-bottom: 2px;
+}
+
+.map-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-tooltip-key {
+  color: rgba(0,0,0,0.6);
+}

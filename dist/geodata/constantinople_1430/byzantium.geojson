@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[26.0, 38.0], [30.0, 38.0], [30.0, 42.0], [26.0, 42.0], [26.0, 38.0]]]
+  },
+  "properties": { "actor_id": "byzantium" }
+}
