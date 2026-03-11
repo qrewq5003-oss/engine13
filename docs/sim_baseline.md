@@ -6,6 +6,42 @@
 
 ---
 
+## Post PR-C Baseline
+
+**Date:** 2026-03-11
+**Changes:** Interaction rules infrastructure added (no existing interactions migrated)
+
+### Summary of Changes
+- **InteractionRule struct:** Added to `scenario.rs` with fields: id, max_distance, border_type, cooldown_ticks, conditions, effects, event_type, event_threshold
+- **InteractionCondition struct:** actor (Source/Target), metric, operator, value
+- **InteractionEffect struct:** actor (Source/Target), metric, delta (flat constant)
+- **ConditionActor enum:** Source, Target — which actor a condition/effect applies to
+- **Scenario.interaction_rules:** Vec<InteractionRule> loaded per scenario (empty for Rome/Constantinople)
+- **validate_interaction_rules:** Validates at load time — unique IDs, max_distance >= 1, valid border_type, event consistency, non-empty effects, known metrics
+- **apply_interaction_rule:** Order: distance → border → cooldown → conditions → effects; unknown border_type = panic
+- **Pipeline integration:** Data-driven rules called between migration and cultural interactions
+- **ComparisonOperator serde:** Uses snake_case ("less", "less_or_equal", "greater", "greater_or_equal", "equal")
+
+### What PR-C Does NOT Do
+- Does NOT migrate Trade interaction (dynamic formula: `(eco_a + eco_b) * 0.002 * modifier`)
+- Does NOT migrate Diplomatic interaction (asymmetric stronger/weaker logic)
+- Does NOT migrate Migration interaction (dynamic: `(pressure - 65.0) * 0.2 / distance`)
+- All three require formula-based effects; will be addressed in PR H for third scenario
+
+### Baseline Results
+
+| Run | Victory Tick | Victory Year | Notes |
+|-----|-------------|--------------|-------|
+| rome scripted balanced (100 ticks) | Tick 31 | Year 385 (15.5yr) | ✓ Matches PR-B baseline |
+| constantinople balanced (50 ticks) | Tick 43 | Year 1451 (21.5yr) | ✓ Matches PR-B baseline |
+
+### Verification
+- All 37 tests pass
+- `cargo check` — no errors
+- Hardcoded interactions (Military, Trade, Diplomatic, Migration, Cultural) unchanged
+
+---
+
 ## Post PR-B Baseline
 
 **Date:** 2026-03-11

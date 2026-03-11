@@ -34,6 +34,65 @@ pub struct DependencyRule {
     pub mode: DependencyMode,
 }
 
+/// Which actor a condition or effect applies to
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionActor {
+    /// The source actor in the interaction
+    Source,
+    /// The target actor in the interaction
+    Target,
+}
+
+/// Condition for interaction rule applicability
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionCondition {
+    /// Which actor to check
+    pub actor: ConditionActor,
+    /// Metric to check
+    pub metric: String,
+    /// Comparison operator (snake_case: "less", "less_or_equal", "greater", "greater_or_equal", "equal")
+    pub operator: ComparisonOperator,
+    /// Threshold value
+    pub value: f64,
+}
+
+/// Effect applied by an interaction rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionEffect {
+    /// Which actor receives the effect
+    pub actor: ConditionActor,
+    /// Metric to modify
+    pub metric: String,
+    /// Flat delta to apply
+    pub delta: f64,
+}
+
+/// Data-driven interaction rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionRule {
+    /// Unique identifier (used in cooldown key)
+    pub id: String,
+    /// Maximum distance for this interaction (>= 1)
+    pub max_distance: u32,
+    /// Border type filter: "land" | "sea" | None = any
+    #[serde(default)]
+    pub border_type: Option<String>,
+    /// Cooldown in ticks (0 = no cooldown)
+    pub cooldown_ticks: u32,
+    /// Conditions that must all pass for rule to apply
+    #[serde(default)]
+    pub conditions: Vec<InteractionCondition>,
+    /// Effects to apply (must not be empty)
+    pub effects: Vec<InteractionEffect>,
+    /// Optional event type for logging
+    #[serde(default)]
+    pub event_type: Option<String>,
+    /// Minimum total abs delta to trigger event
+    #[serde(default)]
+    pub event_threshold: f64,
+}
+
 /// Narrative configuration for data-driven chronicle generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
@@ -102,6 +161,9 @@ pub struct Scenario {
     /// Dependency rules loaded from dependencies.toml
     #[serde(default)]
     pub dependencies: Vec<DependencyRule>,
+    /// Interaction rules loaded from interaction_rules.toml
+    #[serde(default)]
+    pub interaction_rules: Vec<InteractionRule>,
 }
 
 /// Metric display configuration for UI
@@ -377,4 +439,65 @@ pub struct ScenarioMetric {
     pub default_value: f64,
     pub min: Option<f64>,
     pub max: Option<f64>,
+}
+
+/// Validate interaction rules against known metrics
+pub fn validate_interaction_rules(rules: &[InteractionRule], known_metrics: &[&str]) {
+    use std::collections::HashSet;
+    
+    let mut seen_ids = HashSet::new();
+
+    for rule in rules {
+        // Unique id (affects cooldown key)
+        assert!(
+            seen_ids.insert(rule.id.clone()),
+            "InteractionRule: duplicate id '{}'", rule.id
+        );
+
+        // max_distance >= 1
+        assert!(
+            rule.max_distance >= 1,
+            "InteractionRule '{}': max_distance must be >= 1", rule.id
+        );
+
+        // border_type only valid values
+        if let Some(ref bt) = rule.border_type {
+            assert!(
+                bt == "land" || bt == "sea",
+                "InteractionRule '{}': invalid border_type '{}' (must be 'land' or 'sea')",
+                rule.id, bt
+            );
+        }
+
+        // event_type + event_threshold consistency
+        if rule.event_type.is_some() {
+            assert!(
+                rule.event_threshold > 0.0,
+                "InteractionRule '{}': event_threshold must be > 0 when event_type is set",
+                rule.id
+            );
+        }
+
+        // effects not empty
+        assert!(
+            !rule.effects.is_empty(),
+            "InteractionRule '{}': effects must not be empty", rule.id
+        );
+
+        // known metrics in conditions
+        for cond in &rule.conditions {
+            assert!(
+                known_metrics.contains(&cond.metric.as_str()),
+                "InteractionRule '{}': unknown condition metric '{}'", rule.id, cond.metric
+            );
+        }
+
+        // known metrics in effects
+        for effect in &rule.effects {
+            assert!(
+                known_metrics.contains(&effect.metric.as_str()),
+                "InteractionRule '{}': unknown effect metric '{}'", rule.id, effect.metric
+            );
+        }
+    }
 }

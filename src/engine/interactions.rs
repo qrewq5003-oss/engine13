@@ -1,7 +1,7 @@
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::core::{Event, EventType, WorldState, Scenario, Religion, Culture};
+use crate::core::{BorderType, ConditionActor, Event, EventType, InteractionRule, WorldState, Scenario, Religion, Culture};
 use crate::engine::EventLog;
 
 /// Cultural affinity between two cultures (0.0 = hostile, 1.0 = identical)
@@ -120,6 +120,96 @@ pub struct Interaction {
     pub intensity: f64,
 }
 
+/// Apply a data-driven interaction rule to an actor pair
+/// Order: distance → border → cooldown → conditions → effects
+pub fn apply_interaction_rule(
+    world: &mut WorldState,
+    source_id: &str,
+    target_id: &str,
+    distance: u32,
+    border_type: &BorderType,
+    rule: &InteractionRule,
+    current_tick: u32,
+    _current_year: i32,
+    _event_log: &mut EventLog,
+) {
+    // 1. Distance check
+    if distance > rule.max_distance {
+        return;
+    }
+
+    // 2. Border type — unknown value = panic (not silent pass-through)
+    if let Some(ref bt) = rule.border_type {
+        let matches = match bt.as_str() {
+            "land" => *border_type == BorderType::Land,
+            "sea"  => *border_type == BorderType::Sea,
+            other  => panic!("InteractionRule '{}': invalid border_type '{}'", rule.id, other),
+        };
+        if !matches {
+            return;
+        }
+    }
+
+    // 3. Cooldown — symmetric key
+    let cooldown_key = {
+        let (a, b) = if source_id < target_id {
+            (source_id, target_id)
+        } else {
+            (target_id, source_id)
+        };
+        format!("rule_{}_{}_{}", rule.id, a, b)
+    };
+    if rule.cooldown_ticks > 0 {
+        if let Some(&last_tick) = world.interaction_cooldowns.get(&cooldown_key) {
+            if current_tick.saturating_sub(last_tick) < rule.cooldown_ticks {
+                return;
+            }
+        }
+    }
+
+    // 4. Conditions — sequential check, order from file
+    for cond in &rule.conditions {
+        let actor_id = match cond.actor {
+            ConditionActor::Source => source_id,
+            ConditionActor::Target => target_id,
+        };
+        let actor = match world.actors.get(actor_id) {
+            Some(a) => a,
+            None => return,
+        };
+        let val = actor.get_metric(&cond.metric);
+        let passes = cond.operator.evaluate(val, cond.value);
+        if !passes {
+            return;
+        }
+    }
+
+    // 5. Effects — flat delta, sequential apply
+    let mut total_abs_delta: f64 = 0.0;
+    for effect in &rule.effects {
+        let actor_id = match effect.actor {
+            ConditionActor::Source => source_id.to_string(),
+            ConditionActor::Target => target_id.to_string(),
+        };
+        if let Some(actor) = world.actors.get_mut(&actor_id) {
+            actor.add_metric(&effect.metric, effect.delta);
+            total_abs_delta += effect.delta.abs();
+        }
+    }
+
+    // 6. Cooldown set
+    if rule.cooldown_ticks > 0 {
+        world.interaction_cooldowns.insert(cooldown_key, current_tick);
+    }
+
+    // 7. Event logging
+    if let Some(ref _event_type_str) = rule.event_type {
+        if total_abs_delta >= rule.event_threshold {
+            // TODO: map event_type_str → EventType in PR H when real rules exist
+        }
+    }
+}
+
 /// Calculate all interactions between neighboring actors
 pub fn calculate_interactions(
     world: &mut WorldState,
@@ -162,6 +252,15 @@ pub fn calculate_interactions(
             world, &actor_a_id, &actor_b_id, distance, bt.clone(),
             current_tick, current_year, event_log, rng,
         );
+
+        // Data-driven rules (empty for Rome/Constantinople by default)
+        // Order in TOML = order of application = part of simulation logic
+        for rule in &scenario.interaction_rules {
+            apply_interaction_rule(
+                world, &actor_a_id, &actor_b_id, distance, &bt,
+                rule, current_tick, current_year, event_log,
+            );
+        }
 
         calculate_cultural_interaction(
             world, &actor_a_id, &actor_b_id, distance,

@@ -123,6 +123,7 @@ pub fn load_rome_375() -> Scenario {
             output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
         },
         dependencies,
+        interaction_rules: vec![],
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario

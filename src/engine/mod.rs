@@ -1531,6 +1531,7 @@ mod tests {
             max_random_events_per_tick: 0,
             narrative_config: crate::core::NarrativeConfig::default(),
             dependencies: vec![],
+            interaction_rules: vec![],
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

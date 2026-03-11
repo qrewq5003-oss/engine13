@@ -147,6 +147,7 @@ pub fn load_constantinople_1430() -> Scenario {
             output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
         },
         dependencies,
+        interaction_rules: vec![],
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
