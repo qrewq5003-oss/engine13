@@ -15,6 +15,7 @@ import type {
   StatusIndicatorState,
   HalfYear,
   ActionInfo,
+  MapConfig,
 } from './types/index';
 
 // ============================================================================
@@ -160,4 +161,12 @@ export async function getScenarioList(): Promise<ScenarioMeta[]> {
 
 export async function getStatusIndicators(): Promise<StatusIndicatorState[]> {
   return invoke<StatusIndicatorState[]>('cmd_get_status_indicators');
+}
+
+// ============================================================================
+// Map Commands
+// ============================================================================
+
+export async function getMapConfig(): Promise<MapConfig | null> {
+  return invoke<MapConfig | null>('cmd_get_map_config');
 }

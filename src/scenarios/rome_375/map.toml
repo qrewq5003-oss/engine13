@@ -1,0 +1,97 @@
+[map]
+tile_url = "https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png"
+tile_attribution = "CC BY 4.0 <a href='https://dh.gu.se/dare/'>DARE</a>"
+center_lat = 41.9
+center_lon = 12.5
+default_zoom = 4
+geojson_base_path = "rome_375"
+
+[[map.polygons]]
+actor_id = "rome"
+geojson_file = "rome.geojson"
+color = "#8B0000"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "huns"
+geojson_file = "huns.geojson"
+color = "#8B6914"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "visigoths"
+geojson_file = "visigoths.geojson"
+color = "#4A7C59"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "ostrogoths"
+geojson_file = "ostrogoths.geojson"
+color = "#5C4A7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "sassanids"
+geojson_file = "sassanids.geojson"
+color = "#7C4A4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "vandals"
+geojson_file = "vandals.geojson"
+color = "#4A7C7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "burgundians"
+geojson_file = "burgundians.geojson"
+color = "#7C7C4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "franks"
+geojson_file = "franks.geojson"
+color = "#4A5C7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "saxons"
+geojson_file = "saxons.geojson"
+color = "#7C4A5C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "alamanni"
+geojson_file = "alamanni.geojson"
+color = "#5C7C4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "berbers"
+geojson_file = "berbers.geojson"
+color = "#7C5C4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "armenia"
+geojson_file = "armenia.geojson"
+color = "#4A7C5C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "kushans"
+geojson_file = "kushans.geojson"
+color = "#5C4A4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "guptas"
+geojson_file = "guptas.geojson"
+color = "#4A4A7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "eastern_jin"
+geojson_file = "eastern_jin.geojson"
+color = "#7C4A7C"
+opacity = 0.5

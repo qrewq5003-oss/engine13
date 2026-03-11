@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[15.0, 45.0], [30.0, 45.0], [30.0, 52.0], [15.0, 52.0], [15.0, 45.0]]]
+  },
+  "properties": { "actor_id": "ostrogoths" }
+}

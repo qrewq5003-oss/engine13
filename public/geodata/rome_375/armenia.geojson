@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[40.0, 38.0], [48.0, 38.0], [48.0, 43.0], [40.0, 43.0], [40.0, 38.0]]]
+  },
+  "properties": { "actor_id": "armenia" }
+}

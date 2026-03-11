@@ -190,6 +190,9 @@ pub struct Scenario {
     /// Rank bonus rules loaded from rank_bonuses.toml
     #[serde(default)]
     pub rank_bonuses: Vec<RankBonusRule>,
+    /// Map configuration loaded from map.toml
+    #[serde(default)]
+    pub map: Option<MapConfig>,
 }
 
 /// Metric display configuration for UI
@@ -546,5 +549,69 @@ pub fn validate_patron_actions(actions: &[PatronAction], _known_metrics: &[&str]
         );
         // Note: effects/costs metrics can be family:, actor:, global: prefixes
         // Full validation would require MetricRef parsing; skip for now
+    }
+}
+
+/// Map polygon configuration for a specific actor
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapPolygon {
+    /// Actor ID this polygon represents
+    pub actor_id: String,
+    /// GeoJSON file name (e.g., "rome.geojson")
+    pub geojson_file: String,
+    /// Hex color code (e.g., "#8B0000")
+    pub color: String,
+    /// Opacity 0.0..=1.0
+    pub opacity: f64,
+}
+
+/// Map configuration for scenario
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapConfig {
+    /// Tile layer URL template
+    pub tile_url: String,
+    /// Tile attribution (HTML-aware, rendered by Leaflet)
+    pub tile_attribution: String,
+    /// Center latitude
+    pub center_lat: f64,
+    /// Center longitude
+    pub center_lon: f64,
+    /// Default zoom level
+    pub default_zoom: u32,
+    /// Base path for GeoJSON files (e.g., "rome_375")
+    pub geojson_base_path: String,
+    /// Polygons to render
+    pub polygons: Vec<MapPolygon>,
+}
+
+/// Validate map configuration
+pub fn validate_map_config(config: &MapConfig, known_actor_ids: &[&str]) {
+    use std::collections::HashSet;
+    
+    assert!(config.default_zoom > 0, "MapConfig: default_zoom must be > 0");
+    assert!(!config.geojson_base_path.is_empty(), "MapConfig: geojson_base_path must not be empty");
+
+    let mut seen_actor_ids = HashSet::new();
+    for polygon in &config.polygons {
+        assert!(
+            (0.0..=1.0).contains(&polygon.opacity),
+            "MapPolygon '{}': opacity must be 0.0..=1.0", polygon.actor_id
+        );
+        assert!(
+            polygon.color.starts_with('#') && polygon.color.len() == 7,
+            "MapPolygon '{}': color must be hex '#RRGGBB'", polygon.actor_id
+        );
+        assert!(
+            !polygon.geojson_file.is_empty(),
+            "MapPolygon '{}': geojson_file must not be empty", polygon.actor_id
+        );
+        assert!(
+            known_actor_ids.contains(&polygon.actor_id.as_str()),
+            "MapPolygon: unknown actor_id '{}'", polygon.actor_id
+        );
+        assert!(
+            seen_actor_ids.insert(polygon.actor_id.clone()),
+            "MapPolygon: duplicate actor_id '{}'", polygon.actor_id
+        );
     }
 }

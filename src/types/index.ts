@@ -407,3 +407,24 @@ export interface StatusIndicatorState {
   progress: number; // 0.0-1.0
   invert: boolean;
 }
+
+// ============================================================================
+// Map Types
+// ============================================================================
+
+export interface MapPolygon {
+  actor_id: string;
+  geojson_file: string;
+  color: string;
+  opacity: number;
+}
+
+export interface MapConfig {
+  tile_url: string;
+  tile_attribution: string;
+  center_lat: number;
+  center_lon: number;
+  default_zoom: number;
+  geojson_base_path: string;
+  polygons: MapPolygon[];
+}

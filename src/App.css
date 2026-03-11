@@ -149,12 +149,22 @@ body {
   min-height: 0;
 }
 
+.map-panel {
+  height: 300px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  margin-bottom: 8px;
+}
+
 .left-column {
   min-width: 280px;
 }
 
 .middle-column {
   min-width: 240px;
+  overflow-y: auto;
 }
 
 .right-column {

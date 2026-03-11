@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[70.0, 20.0], [88.0, 20.0], [88.0, 32.0], [70.0, 32.0], [70.0, 20.0]]]
+  },
+  "properties": { "actor_id": "guptas" }
+}

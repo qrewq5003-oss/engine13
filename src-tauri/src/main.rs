@@ -374,6 +374,7 @@ fn main() {
             cmd_set_game_mode,
             cmd_get_available_models,
             cmd_save_llm_config,
+            commands::cmd_get_map_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

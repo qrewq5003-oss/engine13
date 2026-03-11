@@ -1,0 +1,61 @@
+[map]
+tile_url = "https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png"
+tile_attribution = "CC BY 4.0 <a href='https://dh.gu.se/dare/'>DARE</a>"
+center_lat = 41.0
+center_lon = 29.0
+default_zoom = 6
+geojson_base_path = "constantinople_1430"
+
+[[map.polygons]]
+actor_id = "byzantium"
+geojson_file = "byzantium.geojson"
+color = "#1a237e"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "ottomans"
+geojson_file = "ottomans.geojson"
+color = "#1b5e20"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "venice"
+geojson_file = "venice.geojson"
+color = "#0d47a1"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "genoa"
+geojson_file = "genoa.geojson"
+color = "#1565c0"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "milan"
+geojson_file = "milan.geojson"
+color = "#1976d2"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "papacy"
+geojson_file = "papacy.geojson"
+color = "#424242"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "hungary"
+geojson_file = "hungary.geojson"
+color = "#c62828"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "serbia"
+geojson_file = "serbia.geojson"
+color = "#6a1b9a"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "trebizond"
+geojson_file = "trebizond.geojson"
+color = "#2e7d32"
+opacity = 0.5

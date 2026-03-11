@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[2.0, 48.0], [10.0, 48.0], [10.0, 53.0], [2.0, 53.0], [2.0, 48.0]]]
+  },
+  "properties": { "actor_id": "franks" }
+}

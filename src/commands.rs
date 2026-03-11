@@ -403,3 +403,12 @@ pub fn get_tick_explanation(state: &AppState) -> Result<crate::engine::TickExpla
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     Ok(crate::engine::generate_tick_explanation(world_state, &state.event_log))
 }
+
+/// Get map configuration for current scenario
+#[tauri::command]
+pub async fn cmd_get_map_config(
+    state: tauri::State<'_, tokio::sync::Mutex<AppState>>,
+) -> Result<Option<crate::core::MapConfig>, String> {
+    let state = state.lock().await;
+    Ok(state.current_scenario.as_ref().and_then(|s| s.map.clone()))
+}

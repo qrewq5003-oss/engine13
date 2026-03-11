@@ -1523,6 +1523,7 @@ mod tests {
             dependencies: vec![],
             interaction_rules: vec![],
             rank_bonuses: vec![],
+            map: None,
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

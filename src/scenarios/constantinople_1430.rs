@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::core::{
     Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
-    EventCondition, EventConditionType, MilestoneEvent, Neighbor,
+    EventCondition, EventConditionType, MapConfig, MilestoneEvent, Neighbor,
     PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
 };
 
@@ -28,6 +28,12 @@ struct RankBonusesFile {
     rank_bonuses: Vec<RankBonusRule>,
 }
 
+/// Map config file structure for TOML deserialization
+#[derive(Deserialize)]
+struct MapFile {
+    map: MapConfig,
+}
+
 /// Known metrics for validation
 const KNOWN_METRICS: &[&str] = &[
     "population",
@@ -39,6 +45,12 @@ const KNOWN_METRICS: &[&str] = &[
     "external_pressure",
     "treasury",
     "global:federation_progress",
+];
+
+/// Known actor IDs for map validation
+const KNOWN_ACTOR_IDS: &[&str] = &[
+    "byzantium", "ottomans", "venice", "genoa", "milan",
+    "papacy", "hungary", "serbia", "trebizond",
 ];
 
 /// Load dependencies from TOML file
@@ -72,12 +84,24 @@ fn load_rank_bonuses() -> Vec<RankBonusRule> {
     rank_file.rank_bonuses
 }
 
+/// Load map config from TOML file
+fn load_map_config() -> Option<MapConfig> {
+    let map_file: MapFile = toml::from_str(
+        include_str!("constantinople_1430/map.toml")
+    ).expect("constantinople_1430/map.toml parse error");
+
+    crate::core::validate_map_config(&map_file.map, KNOWN_ACTOR_IDS);
+
+    Some(map_file.map)
+}
+
 /// Load the Constantinople 1430 scenario
 pub fn load_constantinople_1430() -> Scenario {
     eprintln!("[SCENARIO] load_constantinople_1430 - starting");
     let dependencies = load_dependencies();
     let (patron_actions, universal_actions) = load_actions();
     let rank_bonuses = load_rank_bonuses();
+    let map = load_map_config();
 
     let scenario = Scenario {
         id: "constantinople_1430".to_string(),
@@ -176,6 +200,7 @@ pub fn load_constantinople_1430() -> Scenario {
         universal_actions,
         interaction_rules: vec![],
         rank_bonuses,
+        map,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

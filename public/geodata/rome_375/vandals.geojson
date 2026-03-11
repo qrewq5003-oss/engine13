@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[-5.0, 32.0], [10.0, 32.0], [10.0, 40.0], [-5.0, 40.0], [-5.0, 32.0]]]
+  },
+  "properties": { "actor_id": "vandals" }
+}

@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[3.0, 46.0], [10.0, 46.0], [10.0, 50.0], [3.0, 50.0], [3.0, 46.0]]]
+  },
+  "properties": { "actor_id": "burgundians" }
+}

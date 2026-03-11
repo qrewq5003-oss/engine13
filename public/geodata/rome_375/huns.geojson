@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[40.0, 47.0], [70.0, 47.0], [70.0, 58.0], [40.0, 58.0], [40.0, 47.0]]]
+  },
+  "properties": { "actor_id": "huns" }
+}

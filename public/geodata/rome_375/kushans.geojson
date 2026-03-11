@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[65.0, 32.0], [78.0, 32.0], [78.0, 40.0], [65.0, 40.0], [65.0, 32.0]]]
+  },
+  "properties": { "actor_id": "kushans" }
+}

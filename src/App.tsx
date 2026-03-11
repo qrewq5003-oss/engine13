@@ -9,6 +9,7 @@ import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
 import { SaveSlotModal } from './components/SaveSlotModal';
+import { MapPanel } from './components/MapPanel';
 import VictoryScreen from './components/VictoryScreen';
 import {
   loadScenario,
@@ -402,6 +403,11 @@ const App: React.FC = () => {
         </div>
 
         <div className="panel-column middle-column">
+          <MapPanel
+            selectedActorId={selectedActorId}
+            onSelectActor={setSelectedActorId}
+            scenarioId={worldState?.scenario_id || ''}
+          />
           <NarrativePanel
             narrative={narrative}
             isLoading={narrativeLoading}
