@@ -1,0 +1,215 @@
+# Patron actions for Constantinople 1430 scenario
+
+# Venice actions (3)
+[[patron_actions]]
+id = "venice_naval_support"
+name = "Венецианский флот"
+source_actor_id = "venice"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:venice.treasury"
+operator = "greater"
+value = 100.0
+
+[patron_actions.effects]
+"actor:byzantium.military_size" = 5.0
+"actor:byzantium.cohesion" = 3.0
+"actor:venice.treasury" = -50.0
+
+[patron_actions.cost]
+
+[[patron_actions]]
+id = "venice_trade_deal"
+name = "Торговая сделка"
+source_actor_id = "venice"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:venice.economic_output"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"actor:byzantium.economic_output" = 8.0
+"global:federation_progress" = 3.0
+"actor:venice.economic_output" = -3.0
+
+[patron_actions.cost]
+"actor:venice.treasury" = -20.0
+
+[[patron_actions]]
+id = "venice_diplomacy"
+name = "Венецианская дипломатия"
+source_actor_id = "venice"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:venice.legitimacy"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"global:federation_progress" = 5.0
+"actor:genoa.cohesion" = 2.0
+
+[patron_actions.cost]
+"actor:venice.treasury" = -30.0
+
+# Genoa actions (3)
+[[patron_actions]]
+id = "genoa_galata_garrison"
+name = "Гарнизон Галаты"
+source_actor_id = "genoa"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:genoa.military_size"
+operator = "greater"
+value = 15.0
+
+[patron_actions.effects]
+"actor:byzantium.military_size" = 4.0
+"actor:byzantium.military_quality" = 5.0
+"actor:genoa.military_size" = -3.0
+
+[patron_actions.cost]
+"actor:genoa.treasury" = -30.0
+
+[[patron_actions]]
+id = "genoa_financial_aid"
+name = "Финансовая помощь"
+source_actor_id = "genoa"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:genoa.treasury"
+operator = "greater"
+value = 80.0
+
+[patron_actions.effects]
+"actor:byzantium.treasury" = 60.0
+"global:federation_progress" = 4.0
+"actor:genoa.treasury" = -70.0
+
+[patron_actions.cost]
+
+[[patron_actions]]
+id = "genoa_mercenaries"
+name = "Генуэзские наёмники"
+source_actor_id = "genoa"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:genoa.cohesion"
+operator = "greater"
+value = 50.0
+
+[patron_actions.effects]
+"actor:byzantium.military_size" = 6.0
+"global:federation_progress" = 2.0
+
+[patron_actions.cost]
+"actor:genoa.treasury" = -40.0
+
+# Milan actions (3)
+[[patron_actions]]
+id = "milan_condottieri"
+name = "Кондотьеры Милана"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 100.0
+
+[patron_actions.effects]
+"actor:byzantium.military_quality" = 10.0
+"actor:milan.treasury" = -80.0
+
+[patron_actions.cost]
+
+[[patron_actions]]
+id = "milan_bankers"
+name = "Миланские банкиры"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.economic_output"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"actor:byzantium.treasury" = 80.0
+"global:federation_progress" = 3.0
+"actor:milan.economic_output" = -5.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -40.0
+
+[[patron_actions]]
+id = "milan_legitimacy"
+name = "Миланский престиж"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.legitimacy"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"actor:byzantium.legitimacy" = 8.0
+"global:federation_progress" = 4.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -25.0
+"actor:milan.legitimacy" = -5.0
+
+# Destructive actions (2)
+[[patron_actions]]
+id = "sabotage_federation"
+name = "Саботаж федерации"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"global:federation_progress" = -15.0
+"actor:venice.cohesion" = -5.0
+"actor:genoa.cohesion" = -5.0
+
+[patron_actions.cost]
+"actor:byzantium.legitimacy" = -10.0
+
+[[patron_actions]]
+id = "ottoman_bribe"
+name = "Османский подкуп"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:byzantium.treasury"
+operator = "greater"
+value = 50.0
+
+[patron_actions.effects]
+"actor:ottomans.external_pressure" = -10.0
+"actor:byzantium.external_pressure" = -5.0
+"global:federation_progress" = -10.0
+
+[patron_actions.cost]
+"actor:byzantium.treasury" = -50.0
+
+# Universal actions
+[[universal_actions]]
+id = "observe"
+name = "Наблюдать"
+
+[universal_actions.available_if]
+type = "always"
+
+[universal_actions.effects]
+
+[universal_actions.cost]

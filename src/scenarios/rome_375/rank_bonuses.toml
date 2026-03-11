@@ -1,0 +1,37 @@
+# Rank bonus rules for Rome 375 scenario
+# Order does not matter - rules are matched by rank
+
+[[rank_bonuses]]
+rank = "S"
+
+[[rank_bonuses.effects]]
+metric = "economic_output"
+delta = 0.5
+
+[[rank_bonuses.effects]]
+metric = "legitimacy"
+floor = 20.0
+
+[[rank_bonuses]]
+rank = "A"
+
+[[rank_bonuses.effects]]
+metric = "economic_output"
+delta = 0.3
+
+[[rank_bonuses]]
+rank = "B"
+
+[[rank_bonuses.effects]]
+metric = "economic_output"
+delta = 0.1
+
+# Rank C has no effects (delta = 0.0)
+# Can be omitted or left empty
+
+[[rank_bonuses]]
+rank = "D"
+
+[[rank_bonuses.effects]]
+metric = "economic_output"
+delta = -0.2

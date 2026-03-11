@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::actor::{Actor, Era};
+use super::actor::{Actor, Era, RegionRank};
 
 /// Dependency rule mode - determines how the dependency affects the target metric
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +93,29 @@ pub struct InteractionRule {
     pub event_threshold: f64,
 }
 
+/// Rank bonus effect — either a flat delta or a floor
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RankBonusEffect {
+    /// Metric to modify
+    pub metric: String,
+    /// Flat delta to apply (ignored if floor is set)
+    #[serde(default)]
+    pub delta: f64,
+    /// Minimum value (floor) — if set, applies as min(), not delta
+    #[serde(default)]
+    pub floor: Option<f64>,
+}
+
+/// Rank bonus rule for a specific region rank
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RankBonusRule {
+    /// Region rank this rule applies to
+    pub rank: RegionRank,
+    /// Effects to apply for this rank
+    #[serde(default)]
+    pub effects: Vec<RankBonusEffect>,
+}
+
 /// Narrative configuration for data-driven chronicle generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
@@ -164,6 +187,9 @@ pub struct Scenario {
     /// Interaction rules loaded from interaction_rules.toml
     #[serde(default)]
     pub interaction_rules: Vec<InteractionRule>,
+    /// Rank bonus rules loaded from rank_bonuses.toml
+    #[serde(default)]
+    pub rank_bonuses: Vec<RankBonusRule>,
 }
 
 /// Metric display configuration for UI
@@ -307,7 +333,7 @@ pub struct PatronAction {
 
 /// Condition for action availability
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionCondition {
     Always,
     Metric { metric: String, operator: ComparisonOperator, value: f64 },
@@ -499,5 +525,26 @@ pub fn validate_interaction_rules(rules: &[InteractionRule], known_metrics: &[&s
                 "InteractionRule '{}': unknown effect metric '{}'", rule.id, effect.metric
             );
         }
+    }
+}
+
+/// Validate patron actions
+pub fn validate_patron_actions(actions: &[PatronAction], _known_metrics: &[&str]) {
+    use std::collections::HashSet;
+    
+    let mut seen_ids = HashSet::new();
+    for action in actions {
+        // Unique id
+        assert!(
+            seen_ids.insert(action.id.clone()),
+            "PatronAction: duplicate id '{}'", action.id
+        );
+        // effects not empty
+        assert!(
+            !action.effects.is_empty(),
+            "PatronAction '{}': effects must not be empty", action.id
+        );
+        // Note: effects/costs metrics can be family:, actor:, global: prefixes
+        // Full validation would require MetricRef parsing; skip for now
     }
 }

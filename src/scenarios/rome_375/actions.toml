@@ -1,0 +1,203 @@
+# Patron actions for Rome 375 scenario
+
+[[patron_actions]]
+id = "expand_network"
+name = "Расширить связи"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 10.0
+
+[patron_actions.effects]
+"family:family_connections" = 6.0
+
+[patron_actions.cost]
+"family:family_wealth" = -4.0
+
+[[patron_actions]]
+id = "gather_information"
+name = "Собрать информацию"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"family:family_knowledge" = 6.0
+
+[patron_actions.cost]
+"family:family_wealth" = -2.0
+
+[[patron_actions]]
+id = "invest_wealth"
+name = "Вложить средства"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 20.0
+
+[patron_actions.effects]
+"family:family_wealth" = 5.0
+
+[patron_actions.cost]
+"family:family_connections" = -3.0
+
+[[patron_actions]]
+id = "build_reputation"
+name = "Укрепить репутацию"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_connections"
+operator = "greater"
+value = 15.0
+
+[patron_actions.effects]
+"family:family_influence" = 6.0
+
+[patron_actions.cost]
+"family:family_wealth" = -5.0
+
+[[patron_actions]]
+id = "educate_family"
+name = "Образование семьи"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 10.0
+
+[patron_actions.effects]
+"family:family_knowledge" = 10.0
+
+[patron_actions.cost]
+"family:family_wealth" = -6.0
+
+[[patron_actions]]
+id = "lay_low"
+name = "Затаиться"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"family:family_wealth" = 3.0
+
+[patron_actions.cost]
+"family:family_influence" = -2.0
+
+[[patron_actions]]
+id = "support_city"
+name = "Поддержать город"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 15.0
+
+[patron_actions.effects]
+"family:family_influence" = 4.0
+"actor:rome.economic_output" = 2.0
+"actor:rome.cohesion" = 1.0
+
+[patron_actions.cost]
+"family:family_wealth" = -8.0
+
+[[patron_actions]]
+id = "back_administration"
+name = "Поддержать администрацию"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_connections"
+operator = "greater"
+value = 15.0
+
+[patron_actions.effects]
+"family:family_connections" = 5.0
+"actor:rome.legitimacy" = 2.0
+
+[patron_actions.cost]
+"family:family_wealth" = -6.0
+
+[[patron_actions]]
+id = "fund_defense"
+name = "Вложить в оборону"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 20.0
+
+[patron_actions.effects]
+"family:family_influence" = 3.0
+"actor:rome.military_quality" = 2.0
+
+[patron_actions.cost]
+"family:family_wealth" = -10.0
+
+# Universal actions
+[[universal_actions]]
+id = "observe"
+name = "Наблюдать"
+
+[universal_actions.available_if]
+type = "always"
+
+[universal_actions.effects]
+
+[universal_actions.cost]
+
+[[universal_actions]]
+id = "support_stability"
+name = "Поддержать стабильность"
+
+[universal_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 50.0
+
+[universal_actions.effects]
+"family:family_cohesion" = 3.0
+"family:family_legitimacy" = 2.0
+
+[universal_actions.cost]
+"family:family_wealth" = -50.0
+
+[[universal_actions]]
+id = "raise_taxes"
+name = "Повысить налоги"
+
+[universal_actions.available_if]
+type = "always"
+
+[universal_actions.effects]
+"family:family_wealth" = 80.0
+"family:family_cohesion" = -3.0
+"family:family_legitimacy" = -5.0
+
+[universal_actions.cost]
+
+[[universal_actions]]
+id = "recruit_soldiers"
+name = "Нанять солдат"
+
+[universal_actions.available_if]
+type = "metric"
+metric = "family:family_wealth"
+operator = "greater"
+value = 100.0
+
+[universal_actions.effects]
+"actor:rome.military_size" = 10.0
+"actor:rome.military_quality" = -5.0
+
+[universal_actions.cost]
+"family:family_wealth" = -100.0

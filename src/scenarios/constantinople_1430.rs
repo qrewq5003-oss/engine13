@@ -5,13 +5,27 @@ use serde::Deserialize;
 use crate::core::{
     Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
     EventCondition, EventConditionType, MilestoneEvent, Neighbor,
-    PatronAction, RankCondition, RankResult, Scenario, Successor,
+    PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
 };
 
 /// Dependencies file structure for TOML deserialization
 #[derive(Deserialize)]
 struct DependenciesFile {
     dependencies: Vec<DependencyRule>,
+}
+
+/// Actions file structure for TOML deserialization
+#[derive(Deserialize)]
+struct ActionsFile {
+    patron_actions: Vec<PatronAction>,
+    #[serde(default)]
+    universal_actions: Vec<PatronAction>,
+}
+
+/// Rank bonuses file structure for TOML deserialization
+#[derive(Deserialize)]
+struct RankBonusesFile {
+    rank_bonuses: Vec<RankBonusRule>,
 }
 
 /// Known metrics for validation
@@ -32,17 +46,39 @@ fn load_dependencies() -> Vec<DependencyRule> {
     let deps_file: DependenciesFile = toml::from_str(
         include_str!("constantinople_1430/dependencies.toml")
     ).expect("constantinople_1430/dependencies.toml parse error");
-    
+
     crate::engine::validate_dependencies(&deps_file.dependencies, KNOWN_METRICS);
-    
+
     deps_file.dependencies
+}
+
+/// Load actions from TOML file
+fn load_actions() -> (Vec<PatronAction>, Vec<PatronAction>) {
+    let actions_file: ActionsFile = toml::from_str(
+        include_str!("constantinople_1430/actions.toml")
+    ).expect("constantinople_1430/actions.toml parse error");
+
+    crate::core::validate_patron_actions(&actions_file.patron_actions, KNOWN_METRICS);
+
+    (actions_file.patron_actions, actions_file.universal_actions)
+}
+
+/// Load rank bonuses from TOML file
+fn load_rank_bonuses() -> Vec<RankBonusRule> {
+    let rank_file: RankBonusesFile = toml::from_str(
+        include_str!("constantinople_1430/rank_bonuses.toml")
+    ).expect("constantinople_1430/rank_bonuses.toml parse error");
+
+    rank_file.rank_bonuses
 }
 
 /// Load the Constantinople 1430 scenario
 pub fn load_constantinople_1430() -> Scenario {
     eprintln!("[SCENARIO] load_constantinople_1430 - starting");
     let dependencies = load_dependencies();
-    
+    let (patron_actions, universal_actions) = load_actions();
+    let rank_bonuses = load_rank_bonuses();
+
     let scenario = Scenario {
         id: "constantinople_1430".to_string(),
         label: "Constantinople 1430 — Федерация".to_string(),
@@ -54,7 +90,6 @@ pub fn load_constantinople_1430() -> Scenario {
         tick_label: "год".to_string(),
         actors: create_actors(),
         auto_deltas: create_auto_deltas(),
-        patron_actions: create_patron_actions(),
         milestone_events: create_milestone_events(),
         rank_conditions: create_rank_conditions(),
         generation_mechanics: None,
@@ -94,16 +129,6 @@ pub fn load_constantinople_1430() -> Scenario {
             ],
             sustained_ticks_required: 3,
         }),
-        universal_actions: vec![
-            crate::core::PatronAction {
-                id: "observe".to_string(),
-                name: "Наблюдать".to_string(),
-                source_actor_id: None,
-                available_if: crate::core::ActionCondition::Always,
-                effects: HashMap::new(),
-                cost: HashMap::new(),
-            },
-        ],
         global_metrics_display: vec![
             crate::core::MetricDisplay {
                 metric: "global:federation_progress".to_string(),
@@ -147,7 +172,10 @@ pub fn load_constantinople_1430() -> Scenario {
             output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
         },
         dependencies,
+        patron_actions,
+        universal_actions,
         interaction_rules: vec![],
+        rank_bonuses,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
@@ -745,147 +773,6 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             ratio_conditions: vec![],
             noise: 0.2,
             actor_id: None,
-        },
-    ]
-}
-
-// ============================================================================
-// Patron Actions
-// ============================================================================
-
-fn create_patron_actions() -> Vec<PatronAction> {
-    vec![
-        // Venice actions (3)
-        PatronAction {
-            id: "venice_naval_support".to_string(),
-            name: "Венецианский флот".to_string(),
-            source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.military_size".to_string(), 5.0),
-                ("actor:byzantium.cohesion".to_string(), 3.0),
-                ("actor:venice.treasury".to_string(), -50.0),
-            ]),
-            cost: HashMap::new(),
-        },
-        PatronAction {
-            id: "venice_trade_deal".to_string(),
-            name: "Торговая сделка".to_string(),
-            source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.economic_output".to_string(), 8.0),
-                ("global:federation_progress".to_string(), 3.0),
-                ("actor:venice.economic_output".to_string(), -3.0),
-            ]),
-            cost: HashMap::from([("actor:venice.treasury".to_string(), -20.0)]),
-        },
-        PatronAction {
-            id: "venice_diplomacy".to_string(),
-            name: "Венецианская дипломатия".to_string(),
-            source_actor_id: Some("venice".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:venice.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
-            effects: HashMap::from([
-                ("global:federation_progress".to_string(), 5.0),
-                ("actor:genoa.cohesion".to_string(), 2.0),
-            ]),
-            cost: HashMap::from([("actor:venice.treasury".to_string(), -30.0)]),
-        },
-        // Genoa actions (3)
-        PatronAction {
-            id: "genoa_galata_garrison".to_string(),
-            name: "Гарнизон Галаты".to_string(),
-            source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.military_size".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.military_size".to_string(), 4.0),
-                ("actor:byzantium.military_quality".to_string(), 5.0),
-                ("actor:genoa.military_size".to_string(), -3.0),
-            ]),
-            cost: HashMap::from([("actor:genoa.treasury".to_string(), -30.0)]),
-        },
-        PatronAction {
-            id: "genoa_financial_aid".to_string(),
-            name: "Финансовая помощь".to_string(),
-            source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.treasury".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.treasury".to_string(), 60.0),
-                ("global:federation_progress".to_string(), 4.0),
-                ("actor:genoa.treasury".to_string(), -70.0),
-            ]),
-            cost: HashMap::new(),
-        },
-        PatronAction {
-            id: "genoa_mercenaries".to_string(),
-            name: "Генуэзские наёмники".to_string(),
-            source_actor_id: Some("genoa".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.military_size".to_string(), 6.0),
-                ("global:federation_progress".to_string(), 2.0),
-            ]),
-            cost: HashMap::from([("actor:genoa.treasury".to_string(), -40.0)]),
-        },
-        // Milan actions (3)
-        PatronAction {
-            id: "milan_condottieri".to_string(),
-            name: "Кондотьеры Милана".to_string(),
-            source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.treasury".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.military_quality".to_string(), 10.0),
-                ("actor:milan.treasury".to_string(), -80.0),
-            ]),
-            cost: HashMap::new(),
-        },
-        PatronAction {
-            id: "milan_bankers".to_string(),
-            name: "Миланские банкиры".to_string(),
-            source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.treasury".to_string(), 80.0),
-                ("global:federation_progress".to_string(), 3.0),
-                ("actor:milan.economic_output".to_string(), -5.0),
-            ]),
-            cost: HashMap::from([("actor:milan.treasury".to_string(), -40.0)]),
-        },
-        PatronAction {
-            id: "milan_legitimacy".to_string(),
-            name: "Миланский престиж".to_string(),
-            source_actor_id: Some("milan".to_string()),
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
-            effects: HashMap::from([
-                ("actor:byzantium.legitimacy".to_string(), 8.0),
-                ("global:federation_progress".to_string(), 4.0),
-            ]),
-            cost: HashMap::from([("actor:milan.treasury".to_string(), -25.0), ("actor:milan.legitimacy".to_string(), -5.0)]),
-        },
-        // Destructive actions (2)
-        PatronAction {
-            id: "sabotage_federation".to_string(),
-            name: "Саботаж федерации".to_string(),
-            source_actor_id: None,
-            available_if: crate::core::ActionCondition::Always,
-            effects: HashMap::from([
-                ("global:federation_progress".to_string(), -15.0),
-                ("actor:venice.cohesion".to_string(), -5.0),
-                ("actor:genoa.cohesion".to_string(), -5.0),
-            ]),
-            cost: HashMap::from([("actor:byzantium.legitimacy".to_string(), -10.0)]),
-        },
-        PatronAction {
-            id: "ottoman_bribe".to_string(),
-            name: "Османский подкуп".to_string(),
-            source_actor_id: None,
-            available_if: crate::core::ActionCondition::Metric { metric: "actor:byzantium.treasury".to_string(), operator: ComparisonOperator::Greater, value: 50.0 },
-            effects: HashMap::from([
-                ("actor:ottomans.external_pressure".to_string(), -10.0),
-                ("actor:byzantium.external_pressure".to_string(), -5.0),
-                ("global:federation_progress".to_string(), -10.0),
-            ]),
-            cost: HashMap::from([("actor:byzantium.treasury".to_string(), -50.0)]),
         },
     ]
 }

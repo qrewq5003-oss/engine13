@@ -181,7 +181,7 @@ pub fn tick(
     phase_auto_deltas(world, scenario, rng);
 
     // Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
-    phase_region_ranks(world);
+    phase_region_ranks(world, scenario);
 
     // Phase 3: Dependency graph and interactions
     phase_interactions(world, scenario, event_log, rng);
@@ -268,33 +268,23 @@ fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondi
 // Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
 // ============================================================================
 
-fn phase_region_ranks(world: &mut WorldState) {
+fn phase_region_ranks(world: &mut WorldState, scenario: &Scenario) {
     // Region rank bonuses are passive fixed deltas and floors.
     // Intentionally non-compounding: delta is constant, not % of current value.
-    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-
-    for actor_id in &actor_ids {
-        let actor = match world.actors.get_mut(actor_id) {
-            Some(a) => a,
-            None => continue,
-        };
-
-        // Fixed per-tick delta to economic_output
-        let eco_delta: f64 = match actor.region_rank {
-            crate::core::RegionRank::S => 0.5,
-            crate::core::RegionRank::A => 0.3,
-            crate::core::RegionRank::B => 0.1,
-            crate::core::RegionRank::C => 0.0,
-            crate::core::RegionRank::D => -0.2,
-        };
-
-        let eco = actor.get_metric("economic_output");
-        actor.set_metric("economic_output", (eco + eco_delta).clamp(0.0, 100.0));
-
-        // Legitimacy floor for rank S: not a growth bonus, prevents total collapse only
-        if matches!(actor.region_rank, crate::core::RegionRank::S) {
-            if actor.get_metric("legitimacy") < 20.0 {
-                actor.set_metric("legitimacy", 20.0);
+    for actor in world.actors.values_mut() {
+        for rule in &scenario.rank_bonuses {
+            if rule.rank == actor.region_rank {
+                for effect in &rule.effects {
+                    if let Some(floor) = effect.floor {
+                        // floor: apply as min(), don't change if already above
+                        let current = actor.get_metric(&effect.metric);
+                        if current < floor {
+                            actor.set_metric(&effect.metric, floor);
+                        }
+                    } else {
+                        actor.add_metric(&effect.metric, effect.delta);
+                    }
+                }
             }
         }
     }
@@ -1532,6 +1522,7 @@ mod tests {
             narrative_config: crate::core::NarrativeConfig::default(),
             dependencies: vec![],
             interaction_rules: vec![],
+            rank_bonuses: vec![],
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

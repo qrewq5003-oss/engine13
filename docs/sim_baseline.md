@@ -6,6 +6,38 @@
 
 ---
 
+## Post PR-D Baseline
+
+**Date:** 2026-03-11
+**Changes:** Actions and rank bonuses migrated from hardcoded Rust to TOML
+
+### Summary of Changes
+- **RankBonusEffect struct:** metric, delta (flat), floor (optional minimum value)
+- **RankBonusRule struct:** rank (RegionRank), effects (Vec<RankBonusEffect>)
+- **Scenario.rank_bonuses:** Vec<RankBonusRule> loaded from rank_bonuses.toml per scenario
+- **ActionCondition serde:** Changed to internally tagged enum with `type = "always" | "metric"`
+- **phase_region_ranks:** Now iterates scenario.rank_bonuses instead of hardcoded match
+- **Files added:** `src/scenarios/rome_375/actions.toml`, `src/scenarios/rome_375/rank_bonuses.toml`
+- **Files added:** `src/scenarios/constantinople_1430/actions.toml`, `src/scenarios/constantinople_1430/rank_bonuses.toml`
+- **Removed:** `fn create_patron_actions()` from both scenarios
+- **Removed:** `fn create_universal_actions()` from Rome 375
+
+### Baseline Results
+
+| Run | Victory Tick | Victory Year | Notes |
+|-----|-------------|--------------|-------|
+| rome scripted balanced (100 ticks) | Tick 31 | Year 385 (15.5yr) | ✓ Matches PR-C baseline |
+| rome scripted influence (100 ticks) | Tick 31 | Year 385 (15.5yr) | ✓ Matches PR-C baseline |
+| constantinople balanced (50 ticks) | Tick 43 | Year 1451 (21.5yr) | ✓ Matches PR-C baseline |
+
+### Verification
+- All 37 tests pass
+- `rg "create_patron_actions" src/` — empty (no old functions)
+- `cargo check` — no errors
+- Victory ticks match PR-C baseline exactly
+
+---
+
 ## Post PR-C Baseline
 
 **Date:** 2026-03-11

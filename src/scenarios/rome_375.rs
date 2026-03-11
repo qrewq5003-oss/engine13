@@ -5,13 +5,27 @@ use serde::Deserialize;
 use crate::core::{
     Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
     EventCondition, EventConditionType, GenerationMechanics, MilestoneEvent, Neighbor,
-    PatronAction, RankCondition, RankResult, Scenario, Successor,
+    PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
 };
 
 /// Dependencies file structure for TOML deserialization
 #[derive(Deserialize)]
 struct DependenciesFile {
     dependencies: Vec<DependencyRule>,
+}
+
+/// Actions file structure for TOML deserialization
+#[derive(Deserialize)]
+struct ActionsFile {
+    patron_actions: Vec<PatronAction>,
+    #[serde(default)]
+    universal_actions: Vec<PatronAction>,
+}
+
+/// Rank bonuses file structure for TOML deserialization
+#[derive(Deserialize)]
+struct RankBonusesFile {
+    rank_bonuses: Vec<RankBonusRule>,
 }
 
 /// Known metrics for validation
@@ -35,17 +49,39 @@ fn load_dependencies() -> Vec<DependencyRule> {
     let deps_file: DependenciesFile = toml::from_str(
         include_str!("rome_375/dependencies.toml")
     ).expect("rome_375/dependencies.toml parse error");
-    
+
     crate::engine::validate_dependencies(&deps_file.dependencies, KNOWN_METRICS);
-    
+
     deps_file.dependencies
+}
+
+/// Load actions from TOML file
+fn load_actions() -> (Vec<PatronAction>, Vec<PatronAction>) {
+    let actions_file: ActionsFile = toml::from_str(
+        include_str!("rome_375/actions.toml")
+    ).expect("rome_375/actions.toml parse error");
+
+    crate::core::validate_patron_actions(&actions_file.patron_actions, KNOWN_METRICS);
+
+    (actions_file.patron_actions, actions_file.universal_actions)
+}
+
+/// Load rank bonuses from TOML file
+fn load_rank_bonuses() -> Vec<RankBonusRule> {
+    let rank_file: RankBonusesFile = toml::from_str(
+        include_str!("rome_375/rank_bonuses.toml")
+    ).expect("rome_375/rank_bonuses.toml parse error");
+
+    rank_file.rank_bonuses
 }
 
 /// Load the Rome 375 scenario
 pub fn load_rome_375() -> Scenario {
     eprintln!("[SCENARIO] load_rome_375 - starting");
     let dependencies = load_dependencies();
-    
+    let (patron_actions, universal_actions) = load_actions();
+    let rank_bonuses = load_rank_bonuses();
+
     let scenario = Scenario {
         id: "rome_375".to_string(),
         label: "Rome 375 — Семья Ди Милано".to_string(),
@@ -57,7 +93,6 @@ pub fn load_rome_375() -> Scenario {
         tick_label: "год".to_string(),
         actors: create_actors(),
         auto_deltas: create_auto_deltas(),
-        patron_actions: create_patron_actions(),
         milestone_events: create_milestone_events(),
         rank_conditions: create_rank_conditions(),
         generation_mechanics: Some(create_generation_mechanics()),
@@ -85,7 +120,6 @@ pub fn load_rome_375() -> Scenario {
             additional_conditions: vec![],
             sustained_ticks_required: 1,
         }),
-        universal_actions: create_universal_actions(),
         global_metrics_display: vec![],
         initial_family_metrics: Some(HashMap::from([
             ("family:family_influence".to_string(), 60.0),
@@ -123,7 +157,10 @@ pub fn load_rome_375() -> Scenario {
             output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
         },
         dependencies,
+        patron_actions,
+        universal_actions,
         interaction_rules: vec![],
+        rank_bonuses,
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1300,101 +1337,6 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
 }
 
 // ============================================================================
-// Patron Actions
-// ============================================================================
-
-fn create_patron_actions() -> Vec<PatronAction> {
-    // Family actions
-    let actions = vec![
-        PatronAction {
-            source_actor_id: None,
-            id: "expand_network".to_string(),
-            name: "Расширить связи".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
-            effects: HashMap::from([("family:family_connections".to_string(), 6.0)]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -4.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "gather_information".to_string(),
-            name: "Собрать информацию".to_string(),
-            available_if: crate::core::ActionCondition::Always,
-            effects: HashMap::from([("family:family_knowledge".to_string(), 6.0)]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -2.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "invest_wealth".to_string(),
-            name: "Вложить средства".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
-            effects: HashMap::from([("family:family_wealth".to_string(), 5.0)]),
-            cost: HashMap::from([("family:family_connections".to_string(), -3.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "build_reputation".to_string(),
-            name: "Укрепить репутацию".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
-            effects: HashMap::from([("family:family_influence".to_string(), 6.0)]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -5.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "educate_family".to_string(),
-            name: "Образование семьи".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 10.0 },
-            effects: HashMap::from([("family:family_knowledge".to_string(), 10.0)]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -6.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "lay_low".to_string(),
-            name: "Затаиться".to_string(),
-            available_if: crate::core::ActionCondition::Always,
-            effects: HashMap::from([("family:family_wealth".to_string(), 3.0)]),
-            cost: HashMap::from([("family:family_influence".to_string(), -2.0)]),
-        },
-        // City support actions
-        PatronAction {
-            source_actor_id: None,
-            id: "support_city".to_string(),
-            name: "Поддержать город".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
-            effects: HashMap::from([
-                ("family:family_influence".to_string(), 4.0),
-                ("actor:rome.economic_output".to_string(), 2.0),
-                ("actor:rome.cohesion".to_string(), 1.0),
-            ]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -8.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "back_administration".to_string(),
-            name: "Поддержать администрацию".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 15.0 },
-            effects: HashMap::from([
-                ("family:family_connections".to_string(), 5.0),
-                ("actor:rome.legitimacy".to_string(), 2.0),
-            ]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -6.0)]),
-        },
-        PatronAction {
-            source_actor_id: None,
-            id: "fund_defense".to_string(),
-            name: "Вложить в оборону".to_string(),
-            available_if: crate::core::ActionCondition::Metric { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 20.0 },
-            effects: HashMap::from([
-                ("family:family_influence".to_string(), 3.0),
-                ("actor:rome.military_quality".to_string(), 2.0),
-            ]),
-            cost: HashMap::from([("family:family_wealth".to_string(), -10.0)]),
-        },
-    ];
-
-    actions
-}
-
-// ============================================================================
 // Milestone Events
 // ============================================================================
 
@@ -1756,71 +1698,6 @@ mod tests {
     }
 }
 
-fn create_universal_actions() -> Vec<crate::core::PatronAction> {
-    use crate::core::{PatronAction, ActionCondition, ComparisonOperator};
-    use std::collections::HashMap;
-
-    vec![
-        // 1. Observe - always available, no effects, no cost
-        PatronAction {
-            id: "observe".to_string(),
-            name: "Наблюдать".to_string(),
-            source_actor_id: None,
-            available_if: ActionCondition::Always,
-            effects: HashMap::new(),
-            cost: HashMap::new(),
-        },
-        // 2. Support Stability - requires family_wealth > 50
-        PatronAction {
-            id: "support_stability".to_string(),
-            name: "Поддержать стабильность".to_string(),
-            source_actor_id: None,
-            available_if: ActionCondition::Metric {
-                metric: "family:family_wealth".to_string(),
-                operator: ComparisonOperator::Greater,
-                value: 50.0,
-            },
-            effects: HashMap::from([
-                ("family:family_cohesion".to_string(), 3.0),
-                ("family:family_legitimacy".to_string(), 2.0),
-            ]),
-            cost: HashMap::from([
-                ("family:family_wealth".to_string(), -50.0),
-            ]),
-        },
-        // 3. Raise Taxes - always available
-        PatronAction {
-            id: "raise_taxes".to_string(),
-            name: "Повысить налоги".to_string(),
-            source_actor_id: None,
-            available_if: ActionCondition::Always,
-            effects: HashMap::from([
-                ("family:family_wealth".to_string(), 80.0),
-                ("family:family_cohesion".to_string(), -3.0),
-                ("family:family_legitimacy".to_string(), -5.0),
-            ]),
-            cost: HashMap::new(),
-        },
-        // 4. Recruit Soldiers - requires family_wealth > 100
-        PatronAction {
-            id: "recruit_soldiers".to_string(),
-            name: "Нанять солдат".to_string(),
-            source_actor_id: None,
-            available_if: ActionCondition::Metric {
-                metric: "family:family_wealth".to_string(),
-                operator: ComparisonOperator::Greater,
-                value: 100.0,
-            },
-            effects: HashMap::from([
-                ("actor:rome.military_size".to_string(), 10.0),
-                ("actor:rome.military_quality".to_string(), -5.0),
-            ]),
-            cost: HashMap::from([
-                ("family:family_wealth".to_string(), -100.0),
-            ]),
-        },
-    ]
-}
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {
     use crate::core::{Condition, EventTarget, ComparisonOperator, RandomEvent};
