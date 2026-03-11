@@ -1,0 +1,115 @@
+[[milestone_events]]
+id = "church_union"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Уния церквей подписана. Папа обещает помощь. Православные недовольны."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:byzantium.legitimacy"
+operator = "greater"
+value = 65.0
+duration = 3
+
+[[milestone_events]]
+id = "varna_crusade"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Варненский крестовый поход собран. Венгрия ведёт католиков против осман."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:hungary.military_size"
+operator = "greater"
+value = 60.0
+duration = 2
+
+[[milestone_events]]
+id = "mehmed_accelerates"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Мехмед форсирует подготовку. Федерация работает — османы торопятся."
+[milestone_events.condition]
+type = "metric"
+metric = "global:federation_progress"
+operator = "greater"
+value = 60.0
+duration = 2
+
+[[milestone_events]]
+id = "mehmed_rises"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Мехмед II восходит на трон. Молодой амбициозный султан."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:ottomans.military_size"
+operator = "greater"
+value = 250.0
+duration = 5
+
+[[milestone_events]]
+id = "final_assault"
+is_key = true
+triggers_collapse = true
+llm_context_shift = "Финальный штурм Константинополя начался."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:ottomans.military_size"
+operator = "greater"
+value = 280.0
+duration = 3
+
+[[milestone_events]]
+id = "constantinople_holds"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Константинополь выстоял! Город непобедим."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:byzantium.cohesion"
+operator = "greater"
+value = 70.0
+duration = 5
+
+[[milestone_events]]
+id = "outcome_best"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Север Италии — новый центр Запада. Черноморская торговля под контролем федерации. Константинополь как протекторат. Венеция, Генуя, Милан выходят из этого сильнее чем вошли."
+[milestone_events.condition]
+type = "metric"
+metric = "global:federation_progress"
+operator = "greater_or_equal"
+value = 100.0
+duration = 2
+
+[[milestone_events]]
+id = "outcome_survived_alone"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова."
+[milestone_events.condition]
+type = "actor_state"
+actor_id = "byzantium"
+state = "alive"
+
+[[milestone_events]]
+id = "outcome_fell_federation"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Константинополь пал. Но федерация выжила. Греческие учёные бегут на север — в Венецию, в Милан. Знания, рукописи, мастера. Ренессанс ускоряется. Север Италии выигрывает от трагедии которую не смог предотвратить."
+[milestone_events.condition]
+type = "metric"
+metric = "global:federation_progress"
+operator = "greater_or_equal"
+value = 80.0
+duration = 2
+
+[[milestone_events]]
+id = "outcome_historical"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Исторический исход. Город пал. Федерация не сложилась. Ottoman давит на Адриатику. Венеция платит дань. Генуя теряет Галату. Милан смотрит в сторону."
+[milestone_events.condition]
+type = "actor_state"
+actor_id = "byzantium"
+state = "dead"

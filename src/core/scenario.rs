@@ -274,7 +274,9 @@ pub struct RandomEvent {
 pub struct AutoDelta {
     pub metric: String,
     pub base: f64,
+    #[serde(default)]
     pub conditions: Vec<DeltaCondition>,
+    #[serde(default)]
     pub ratio_conditions: Vec<DeltaConditionRatio>,
     pub noise: f64,
     pub actor_id: Option<String>,

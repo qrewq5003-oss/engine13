@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::core::{
-    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
-    EventCondition, EventConditionType, MapConfig, MilestoneEvent, Neighbor,
+    Actor, AutoDelta, BorderType, ComparisonOperator,
+    DependencyRule, EventCondition, EventConditionType, MapConfig, MilestoneEvent, Neighbor,
     PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
 };
 
@@ -32,6 +32,18 @@ struct RankBonusesFile {
 #[derive(Deserialize)]
 struct MapFile {
     map: MapConfig,
+}
+
+/// Auto deltas file structure for TOML deserialization
+#[derive(Deserialize)]
+struct AutoDeltasFile {
+    auto_deltas: Vec<AutoDelta>,
+}
+
+/// Milestone events file structure for TOML deserialization
+#[derive(Deserialize)]
+struct MilestoneEventsFile {
+    milestone_events: Vec<MilestoneEvent>,
 }
 
 /// Known metrics for validation
@@ -95,6 +107,22 @@ fn load_map_config() -> Option<MapConfig> {
     Some(map_file.map)
 }
 
+/// Load auto deltas from TOML file
+fn load_auto_deltas() -> Vec<AutoDelta> {
+    let file: AutoDeltasFile = toml::from_str(
+        include_str!("constantinople_1430/auto_deltas.toml")
+    ).expect("constantinople_1430/auto_deltas.toml parse error");
+    file.auto_deltas
+}
+
+/// Load milestone events from TOML file
+fn load_milestone_events() -> Vec<MilestoneEvent> {
+    let file: MilestoneEventsFile = toml::from_str(
+        include_str!("constantinople_1430/milestone_events.toml")
+    ).expect("constantinople_1430/milestone_events.toml parse error");
+    file.milestone_events
+}
+
 /// Load the Constantinople 1430 scenario
 pub fn load_constantinople_1430() -> Scenario {
     eprintln!("[SCENARIO] load_constantinople_1430 - starting");
@@ -113,8 +141,8 @@ pub fn load_constantinople_1430() -> Scenario {
         era: crate::core::Era::LateMedieval,
         tick_label: "год".to_string(),
         actors: create_actors(),
-        auto_deltas: create_auto_deltas(),
-        milestone_events: create_milestone_events(),
+        auto_deltas: load_auto_deltas(),
+        milestone_events: load_milestone_events(),
         rank_conditions: create_rank_conditions(),
         generation_mechanics: None,
         llm_context: create_llm_context(),
@@ -607,375 +635,6 @@ fn create_trebizond() -> Actor {
         minimum_survival_ticks: None,
         leader: Some("Иоанн IV Великий Комнин".to_string()),
     }
-}
-
-// ============================================================================
-// Auto Deltas
-// ============================================================================
-
-fn create_auto_deltas() -> Vec<AutoDelta> {
-    use crate::core::DeltaConditionRatio;
-
-    vec![
-        // Actor auto-deltas
-        AutoDelta {
-            metric: "population".to_string(),
-            base: 0.2,
-            conditions: vec![
-                DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.3 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.1,
-            actor_id: None,
-        },
-        AutoDelta {
-            metric: "military_size".to_string(),
-            base: 0.3,
-            conditions: vec![
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 50.0, delta: -0.5 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.4 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.2,
-            actor_id: None,
-        },
-        AutoDelta {
-            metric: "cohesion".to_string(),
-            base: -0.1,
-            conditions: vec![
-                DeltaCondition { metric: "legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: 0.2 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.15,
-            actor_id: None,
-        },
-        AutoDelta {
-            metric: "legitimacy".to_string(),
-            base: 0.0,
-            conditions: vec![
-                DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.1,
-            actor_id: None,
-        },
-        AutoDelta {
-            metric: "external_pressure".to_string(),
-            base: 0.0,
-            conditions: vec![
-                DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: 5.0 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.3,
-            actor_id: None,
-        },
-        // Ottoman military growth (natural pressure)
-        AutoDelta {
-            metric: "actor:ottomans.military_size".to_string(),
-            base: 0.5,
-            conditions: vec![],
-            ratio_conditions: vec![],
-            noise: 0.1,
-            actor_id: Some("ottomans".to_string()),
-        },
-        // Byzantium external pressure growth (ottoman siege pressure)
-        // Pressure grows slower if Byzantium has strong military relative to Ottomans
-        AutoDelta {
-            metric: "actor:byzantium.external_pressure".to_string(),
-            base: 2.125, // reduced by 15% from 2.5
-            conditions: vec![
-                // Acceleration if Ottomans are strong
-                DeltaCondition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0, delta: 1.5 },
-            ],
-            ratio_conditions: vec![
-                DeltaConditionRatio {
-                    metric_a: "actor:byzantium.military_size".to_string(),
-                    metric_b: "actor:ottomans.military_size".to_string(),
-                    ratio: 0.167, // byzantium > 1/6 of ottoman army
-                    operator: ComparisonOperator::Greater,
-                    delta: -2.0, // compensates pressure growth
-                },
-                DeltaConditionRatio {
-                    metric_a: "actor:byzantium.military_size".to_string(),
-                    metric_b: "actor:ottomans.military_size".to_string(),
-                    ratio: 0.25, // byzantium > 1/4 — actively resisting
-                    operator: ComparisonOperator::Greater,
-                    delta: -1.5, // additional compensation
-                },
-            ],
-            noise: 0.5,
-            actor_id: Some("byzantium".to_string()),
-        },
-        // Byzantium soft protection: slow recovery at low pressure
-        AutoDelta {
-            metric: "actor:byzantium.external_pressure".to_string(),
-            base: 0.0,
-            conditions: vec![
-                DeltaCondition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Less, value: 50.0, delta: -0.5 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.0,
-            actor_id: Some("byzantium".to_string()),
-        },
-        // Byzantium soft protection: federation progress helps
-        AutoDelta {
-            metric: "actor:byzantium.external_pressure".to_string(),
-            base: 0.0,
-            conditions: vec![
-                DeltaCondition { metric: "global:federation_progress".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: -0.8 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.0,
-            actor_id: Some("byzantium".to_string()),
-        },
-        // Serbia external pressure from Ottomans
-        AutoDelta {
-            metric: "actor:serbia.external_pressure".to_string(),
-            base: 1.5,
-            conditions: vec![],
-            ratio_conditions: vec![
-                DeltaConditionRatio {
-                    metric_a: "actor:serbia.military_size".to_string(),
-                    metric_b: "actor:ottomans.military_size".to_string(),
-                    ratio: 0.2,
-                    operator: ComparisonOperator::Greater,
-                    delta: -1.5,
-                },
-            ],
-            noise: 0.3,
-            actor_id: Some("serbia".to_string()),
-        },
-        // Trebizond external pressure from Ottomans
-        AutoDelta {
-            metric: "actor:trebizond.external_pressure".to_string(),
-            base: 1.8,
-            conditions: vec![],
-            ratio_conditions: vec![
-                DeltaConditionRatio {
-                    metric_a: "actor:trebizond.military_size".to_string(),
-                    metric_b: "actor:ottomans.military_size".to_string(),
-                    ratio: 0.1,
-                    operator: ComparisonOperator::Greater,
-                    delta: -1.5,
-                },
-            ],
-            noise: 0.3,
-            actor_id: Some("trebizond".to_string()),
-        },
-        // Hungary external pressure
-        AutoDelta {
-            metric: "actor:hungary.external_pressure".to_string(),
-            base: 0.8,
-            conditions: vec![],
-            ratio_conditions: vec![
-                DeltaConditionRatio {
-                    metric_a: "actor:hungary.military_size".to_string(),
-                    metric_b: "actor:ottomans.military_size".to_string(),
-                    ratio: 0.3,
-                    operator: ComparisonOperator::Greater,
-                    delta: -1.0,
-                },
-            ],
-            noise: 0.2,
-            actor_id: Some("hungary".to_string()),
-        },
-        // Federation progress auto-deltas
-        AutoDelta {
-            metric: "global:federation_progress".to_string(),
-            base: 0.0,
-            conditions: vec![
-                // Venice + Genoa + Milan cooperation bonus
-                DeltaCondition { metric: "actor:venice.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 65.0, delta: 0.5 },
-                DeltaCondition { metric: "actor:genoa.cohesion".to_string(), operator: ComparisonOperator::Greater, value: 55.0, delta: 0.3 },
-                DeltaCondition { metric: "actor:milan.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 58.0, delta: 0.2 },
-                // Ottoman pressure penalty
-                DeltaCondition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -2.0 },
-                DeltaCondition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 220.0, delta: -3.0 },
-            ],
-            ratio_conditions: vec![],
-            noise: 0.2,
-            actor_id: None,
-        },
-    ]
-}
-
-// ============================================================================
-// Milestone Events
-// ============================================================================
-
-fn create_milestone_events() -> Vec<MilestoneEvent> {
-    vec![
-        // Church union
-        MilestoneEvent {
-            id: "church_union".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "actor:byzantium.legitimacy".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 65.0,
-                },
-                duration: Some(3),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Уния церквей подписана. Папа обещает помощь. Православные недовольны.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Varna crusade
-        MilestoneEvent {
-            id: "varna_crusade".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "actor:hungary.military_size".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 60.0,
-                },
-                duration: Some(2),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Варненский крестовый поход собран. Венгрия ведёт католиков против осман.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Mehmed accelerates due to federation
-        MilestoneEvent {
-            id: "mehmed_accelerates".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "global:federation_progress".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 60.0,
-                },
-                duration: Some(2),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Мехмед форсирует подготовку. Федерация работает — османы торопятся.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Mehmed rises naturally
-        MilestoneEvent {
-            id: "mehmed_rises".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "actor:ottomans.military_size".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 250.0,
-                },
-                duration: Some(5),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Мехмед II восходит на трон. Молодой амбициозный султан.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Final assault
-        MilestoneEvent {
-            id: "final_assault".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "actor:ottomans.military_size".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 280.0,
-                },
-                duration: Some(3),
-            },
-            is_key: true,
-            triggers_collapse: true,
-            llm_context_shift: "Финальный штурм Константинополя начался.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Constantinople holds
-        MilestoneEvent {
-            id: "constantinople_holds".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "actor:byzantium.cohesion".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::Greater,
-                    value: 70.0,
-                },
-                duration: Some(5),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Константинополь выстоял! Город непобедим.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Outcome: Best case - byzantium alive AND federation >= 100
-        MilestoneEvent {
-            id: "outcome_best".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "global:federation_progress".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::GreaterOrEqual,
-                    value: 100.0,
-                },
-                duration: Some(2),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Север Италии — новый центр Запада. Черноморская торговля под контролем федерации. Константинополь как протекторат. Венеция, Генуя, Милан выходят из этого сильнее чем вошли.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Outcome: Survived alone - byzantium alive but federation < 50
-        // This fires when byzantium survives but federation is weak
-        MilestoneEvent {
-            id: "outcome_survived_alone".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::ActorState {
-                    actor_id: "byzantium".to_string(),
-                    state: crate::core::ActorState::Alive,
-                },
-                duration: None,
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Outcome: Fell with federation - federation >= 80 but byzantium fell
-        MilestoneEvent {
-            id: "outcome_fell_federation".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: "global:federation_progress".to_string(),
-                    actor_id: None,
-                    operator: ComparisonOperator::GreaterOrEqual,
-                    value: 80.0,
-                },
-                duration: Some(2),
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Константинополь пал. Но федерация выжила. Греческие учёные бегут на север — в Венецию, в Милан. Знания, рукописи, мастера. Ренессанс ускоряется. Север Италии выигрывает от трагедии которую не смог предотвратить.".to_string(),
-            cooldown_ticks: None,
-        },
-        // Outcome: Historical - byzantium dead AND federation < 50
-        MilestoneEvent {
-            id: "outcome_historical".to_string(),
-            condition: EventCondition {
-                condition_type: EventConditionType::ActorState {
-                    actor_id: "byzantium".to_string(),
-                    state: crate::core::ActorState::Dead,
-                },
-                duration: None,
-            },
-            is_key: true,
-            triggers_collapse: false,
-            llm_context_shift: "Исторический исход. Город пал. Федерация не сложилась. Ottoman давит на Адриатику. Венеция платит дань. Генуя теряет Галату. Милан смотрит в сторону.".to_string(),
-            cooldown_ticks: None,
-        },
-    ]
 }
 
 // ============================================================================

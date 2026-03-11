@@ -1,0 +1,206 @@
+# ============================================================
+# Global actor deltas (actor_id omitted = None = applies to all)
+# ============================================================
+
+[[auto_deltas]]
+metric = "population"
+base = 0.2
+noise = 0.1
+[[auto_deltas.conditions]]
+metric = "economic_output"
+operator = "less"
+value = 20.0
+delta = -0.3
+[[auto_deltas.conditions]]
+metric = "external_pressure"
+operator = "greater"
+value = 70.0
+delta = -0.2
+
+[[auto_deltas]]
+metric = "military_size"
+base = 0.3
+noise = 0.2
+[[auto_deltas.conditions]]
+metric = "treasury"
+operator = "less"
+value = 50.0
+delta = -0.5
+[[auto_deltas.conditions]]
+metric = "external_pressure"
+operator = "greater"
+value = 60.0
+delta = 0.4
+
+[[auto_deltas]]
+metric = "cohesion"
+base = -0.1
+noise = 0.15
+[[auto_deltas.conditions]]
+metric = "legitimacy"
+operator = "greater"
+value = 70.0
+delta = 0.2
+[[auto_deltas.conditions]]
+metric = "external_pressure"
+operator = "greater"
+value = 70.0
+delta = -0.3
+
+[[auto_deltas]]
+metric = "legitimacy"
+base = 0.0
+noise = 0.1
+[[auto_deltas.conditions]]
+metric = "cohesion"
+operator = "greater"
+value = 60.0
+delta = 0.1
+[[auto_deltas.conditions]]
+metric = "treasury"
+operator = "less"
+value = 0.0
+delta = -0.2
+
+[[auto_deltas]]
+metric = "external_pressure"
+base = 0.0
+noise = 0.3
+[[auto_deltas.conditions]]
+metric = "military_size"
+operator = "less"
+value = 20.0
+delta = 5.0
+
+# ============================================================
+# Ottoman military growth
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:ottomans.military_size"
+base = 0.5
+noise = 0.1
+actor_id = "ottomans"
+
+# ============================================================
+# Byzantium external pressure (siege pressure)
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:byzantium.external_pressure"
+base = 2.125
+noise = 0.5
+actor_id = "byzantium"
+[[auto_deltas.conditions]]
+metric = "actor:ottomans.military_size"
+operator = "greater"
+value = 150.0
+delta = 1.5
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:byzantium.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.167
+operator = "greater"
+delta = -2.0
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:byzantium.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.25
+operator = "greater"
+delta = -1.5
+
+[[auto_deltas]]
+metric = "actor:byzantium.external_pressure"
+base = 0.0
+noise = 0.0
+actor_id = "byzantium"
+[[auto_deltas.conditions]]
+metric = "actor:byzantium.external_pressure"
+operator = "less"
+value = 50.0
+delta = -0.5
+
+[[auto_deltas]]
+metric = "actor:byzantium.external_pressure"
+base = 0.0
+noise = 0.0
+actor_id = "byzantium"
+[[auto_deltas.conditions]]
+metric = "global:federation_progress"
+operator = "greater"
+value = 40.0
+delta = -0.8
+
+# ============================================================
+# Peripheral actors pressure
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:serbia.external_pressure"
+base = 1.5
+noise = 0.3
+actor_id = "serbia"
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:serbia.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.2
+operator = "greater"
+delta = -1.5
+
+[[auto_deltas]]
+metric = "actor:trebizond.external_pressure"
+base = 1.8
+noise = 0.3
+actor_id = "trebizond"
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:trebizond.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.1
+operator = "greater"
+delta = -1.5
+
+[[auto_deltas]]
+metric = "actor:hungary.external_pressure"
+base = 0.8
+noise = 0.2
+actor_id = "hungary"
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:hungary.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.3
+operator = "greater"
+delta = -1.0
+
+# ============================================================
+# Federation progress
+# ============================================================
+
+[[auto_deltas]]
+metric = "global:federation_progress"
+base = 0.0
+noise = 0.2
+[[auto_deltas.conditions]]
+metric = "actor:venice.cohesion"
+operator = "greater"
+value = 65.0
+delta = 0.5
+[[auto_deltas.conditions]]
+metric = "actor:genoa.cohesion"
+operator = "greater"
+value = 55.0
+delta = 0.3
+[[auto_deltas.conditions]]
+metric = "actor:milan.legitimacy"
+operator = "greater"
+value = 58.0
+delta = 0.2
+[[auto_deltas.conditions]]
+metric = "actor:byzantium.external_pressure"
+operator = "greater"
+value = 70.0
+delta = -2.0
+[[auto_deltas.conditions]]
+metric = "actor:ottomans.military_size"
+operator = "greater"
+value = 220.0
+delta = -3.0

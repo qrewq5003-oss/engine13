@@ -55,6 +55,9 @@ const KNOWN_ACTOR_IDS: &[&str] = &[
     "rome", "huns", "visigoths", "ostrogoths", "sassanids", "vandals",
     "burgundians", "franks", "saxons", "alamanni", "berbers", "armenia",
     "kushans", "guptas", "eastern_jin",
+    // Successor states (appear on collapse)
+    "rome_west", "rome_east", "visigoth_kingdom", "ostrogoth_kingdom",
+    "vandal_kingdom_africa", "frankish_kingdom", "late_sassanids",
 ];
 
 /// Load dependencies from TOML file
