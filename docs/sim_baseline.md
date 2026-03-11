@@ -6,6 +6,37 @@
 
 ---
 
+## Post PR-B Baseline
+
+**Date:** 2026-03-11
+**Changes:** Dependency graph migrated from hardcoded Rust constants (COEF/THRESH) to TOML-based dependency rules
+
+### Summary of Changes
+- **DependencyRule struct:** Added to `scenario.rs` with fields: id, from, to, coefficient, threshold, mode
+- **DependencyMode enum:** Deficit, Excess, Bonus, Linear modes for different dependency types
+- **Scenario.dependencies:** Vec<DependencyRule> loaded from dependencies.toml per scenario
+- **validate_dependencies:** Validates rules at load time — typos in metric names or missing thresholds fail fast
+- **apply_dependency_rule:** Sequential mutation semantics — each rule reads current actor state (modified by previous rules)
+- **phase_apply_dependencies:** Rules applied in strict file order — order is part of simulation logic
+- **Removed:** struct Coefficients, struct Thresholds, static COEF, static THRESH, apply_dependency_graph function
+- **Files added:** `src/scenarios/rome_375/dependencies.toml`, `src/scenarios/constantinople_1430/dependencies.toml`
+
+### Baseline Results
+
+| Run | Victory Tick | Victory Year | Notes |
+|-----|-------------|--------------|-------|
+| rome scripted balanced (100 ticks) | Tick 31 | Year 385 (15.5yr) | ✓ Matches PR-A baseline |
+| rome scripted influence (100 ticks) | Tick 31 | Year 385 (15.5yr) | ✓ Matches PR-A baseline |
+| constantinople balanced (50 ticks) | Tick 43 | Year 1451 (21.5yr) | ✓ Matches PR-A baseline |
+
+### Verification
+- All 37 tests pass
+- `rg "COEF\.|THRESH\." src/` — empty (no old constants)
+- `rg "apply_dependency_graph|struct Coefficients|struct Thresholds" src/` — empty (no old code)
+- `cargo check` — no errors
+
+---
+
 ## Post Half-Year Baseline
 
 **Date:** 2026-03-10

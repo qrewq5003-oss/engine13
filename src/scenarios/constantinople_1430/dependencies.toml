@@ -1,0 +1,123 @@
+# Dependency rules for Constantinople 1430 scenario
+# Order matters - rules are applied sequentially in this order
+# Same rules as Rome 375 (global dependency graph)
+
+[[dependencies]]
+id = "legitimacy_to_cohesion"
+from = "legitimacy"
+to = "cohesion"
+coefficient = 0.03
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "cohesion_to_legitimacy"
+from = "cohesion"
+to = "legitimacy"
+coefficient = 0.02
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "legitimacy_to_military_quality"
+from = "legitimacy"
+to = "military_quality"
+coefficient = 0.02
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "cohesion_to_economic_output"
+from = "cohesion"
+to = "economic_output"
+coefficient = 0.03
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "external_pressure_to_cohesion"
+from = "external_pressure"
+to = "cohesion"
+coefficient = 0.02
+threshold = 50.0
+mode = "excess"
+
+[[dependencies]]
+id = "external_pressure_to_legitimacy"
+from = "external_pressure"
+to = "legitimacy"
+coefficient = 0.01
+threshold = 50.0
+mode = "excess"
+
+[[dependencies]]
+id = "external_pressure_to_military_quality"
+from = "external_pressure"
+to = "military_quality"
+coefficient = 0.02
+threshold = 50.0
+mode = "excess"
+
+[[dependencies]]
+id = "external_pressure_to_military_size"
+from = "external_pressure"
+to = "military_size"
+coefficient = 0.01
+threshold = 50.0
+mode = "excess"
+
+[[dependencies]]
+id = "economic_output_to_treasury"
+from = "economic_output"
+to = "treasury"
+coefficient = 0.15
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "military_size_to_economic_output"
+from = "military_size"
+to = "economic_output"
+coefficient = 0.01
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "population_to_economic_output"
+from = "population"
+to = "economic_output"
+coefficient = 0.00005
+threshold = 3000.0
+mode = "bonus"
+
+[[dependencies]]
+id = "economic_output_to_population"
+from = "economic_output"
+to = "population"
+coefficient = 20.0
+threshold = 50.0
+mode = "deficit"
+
+[[dependencies]]
+id = "external_pressure_legitimacy_to_cohesion_bonus"
+from = "external_pressure"
+to = "cohesion"
+coefficient = 5.0
+threshold = 65.0
+mode = "bonus"
+
+[[dependencies]]
+id = "low_legitimacy_to_military_quality_decay"
+from = "legitimacy"
+to = "military_quality"
+coefficient = 0.5
+threshold = 20.0
+mode = "deficit"
+
+[[dependencies]]
+id = "low_economic_output_to_population_decay"
+from = "economic_output"
+to = "population"
+coefficient = 100.0
+threshold = 15.0
+mode = "deficit"

@@ -3,12 +3,81 @@ use std::collections::{HashMap, VecDeque};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
-    ActorDelta, ComparisonOperator, Event, EventConditionType, EventCondition,
+    ActorDelta, ComparisonOperator, DependencyMode, DependencyRule, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
 use serde::Serialize;
 
 mod interactions;
+
+/// Validate dependency rules against known metrics
+pub fn validate_dependencies(rules: &[DependencyRule], known_metrics: &[&str]) {
+    for rule in rules {
+        // threshold is required for non-Linear modes
+        match rule.mode {
+            DependencyMode::Linear => {}
+            _ => {
+                assert!(
+                    rule.threshold.is_some(),
+                    "DependencyRule '{}': threshold required for mode {:?}",
+                    rule.id, rule.mode
+                );
+            }
+        }
+        // from and to must be known metrics
+        assert!(
+            known_metrics.contains(&rule.from.as_str()),
+            "DependencyRule '{}': unknown 'from' metric '{}'",
+            rule.id, rule.from
+        );
+        assert!(
+            known_metrics.contains(&rule.to.as_str()),
+            "DependencyRule '{}': unknown 'to' metric '{}'",
+            rule.id, rule.to
+        );
+    }
+}
+
+/// Apply a single dependency rule to an actor
+/// Sequential mutation semantics - each rule reads the current state
+/// of the actor (already modified by previous rules).
+fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
+    let from_val = actor.get_metric(&rule.from);
+    let delta = match rule.mode {
+        DependencyMode::Deficit => {
+            let threshold = rule.threshold.expect("threshold required for Deficit");
+            if from_val < threshold {
+                -((threshold - from_val) * rule.coefficient)
+            } else { 0.0 }
+        }
+        DependencyMode::Excess => {
+            let threshold = rule.threshold.expect("threshold required for Excess");
+            if from_val > threshold {
+                -((from_val - threshold) * rule.coefficient)
+            } else { 0.0 }
+        }
+        DependencyMode::Bonus => {
+            let threshold = rule.threshold.expect("threshold required for Bonus");
+            if from_val > threshold {
+                (from_val - threshold) * rule.coefficient
+            } else { 0.0 }
+        }
+        DependencyMode::Linear => from_val * rule.coefficient,
+    };
+    if delta != 0.0 {
+        actor.add_metric(&rule.to, delta);
+    }
+}
+
+/// Phase: Apply dependency rules to all actors
+/// Rules are applied in strict file order - order is part of simulation logic.
+fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
+    for actor in world.actors.values_mut() {
+        for rule in &scenario.dependencies {
+            apply_dependency_rule(actor, rule);
+        }
+    }
+}
 
 /// Tick explanation for debug mode
 #[derive(Debug, Default, Serialize)]
@@ -58,93 +127,6 @@ pub struct RandomEventEntry {
 pub struct ForegroundChange {
     pub actor_id: String,
     pub reason: String,
-}
-
-/// Coefficients for dependency graph relationships
-#[derive(Debug, Clone, Copy)]
-pub struct DependencyCoefficients {
-    // legitimacy ↓10 → cohesion ↓3
-    pub legitimacy_to_cohesion: f64,
-    // cohesion ↓10 → legitimacy ↓2
-    pub cohesion_to_legitimacy: f64,
-    // legitimacy ↓10 → military_quality ↓2
-    pub legitimacy_to_military_quality: f64,
-    // cohesion ↓10 → economic_output ↓3
-    pub cohesion_to_economic_output: f64,
-    // external_pressure ↑10 → cohesion ↓2
-    pub external_pressure_to_cohesion: f64,
-    // external_pressure ↑10 → legitimacy ↓1
-    pub external_pressure_to_legitimacy: f64,
-    // external_pressure ↑10 → military_quality ↓2
-    pub external_pressure_to_military_quality: f64,
-    // external_pressure ↑10 → military_size ↓1
-    pub external_pressure_to_military_size: f64,
-    // economic_output ↓10 → treasury ↓15
-    pub economic_output_to_treasury: f64,
-    // military_size ↓10 → economic_output ↓1
-    pub military_size_to_economic_output: f64,
-    // population ↑5000 → economic_output ↑0.5
-    pub population_to_economic_output: f64,
-    // economic_output ↓10 → population ↓200
-    pub economic_output_to_population: f64,
-    // cohesion bonus when external_pressure > 65 AND legitimacy > 60
-    pub cohesion_bonus_value: f64,
-    // legitimacy < 20 → military_quality falls -0.5/tick
-    pub low_legitimacy_military_quality_decay: f64,
-    // economic_output < 15 → population falls -100/tick
-    pub low_economic_output_population_decay: f64,
-}
-
-impl Default for DependencyCoefficients {
-    fn default() -> Self {
-        Self {
-            legitimacy_to_cohesion: 0.03,
-            cohesion_to_legitimacy: 0.02,
-            legitimacy_to_military_quality: 0.02,
-            cohesion_to_economic_output: 0.03,
-            external_pressure_to_cohesion: 0.02,
-            external_pressure_to_legitimacy: 0.01,
-            external_pressure_to_military_quality: 0.02,
-            external_pressure_to_military_size: 0.01,
-            economic_output_to_treasury: 0.15,
-            military_size_to_economic_output: 0.01,
-            population_to_economic_output: 0.00005,
-            economic_output_to_population: 20.0,
-            cohesion_bonus_value: 5.0,
-            low_legitimacy_military_quality_decay: 0.5,
-            low_economic_output_population_decay: 100.0,
-        }
-    }
-}
-
-/// Thresholds for dependency graph effects
-#[derive(Debug, Clone, Copy)]
-pub struct DependencyThresholds {
-    pub legitimacy_low: f64,           // 50.0
-    pub cohesion_low: f64,             // 50.0
-    pub external_pressure_high: f64,   // 50.0
-    pub external_pressure_critical: f64, // 65.0
-    pub economic_output_low: f64,      // 50.0
-    pub military_size_low: f64,        // 50.0
-    pub population_high: f64,          // 3000.0
-    pub legitimacy_critical: f64,      // 20.0
-    pub economic_output_critical: f64, // 15.0
-}
-
-impl Default for DependencyThresholds {
-    fn default() -> Self {
-        Self {
-            legitimacy_low: 50.0,
-            cohesion_low: 50.0,
-            external_pressure_high: 50.0,
-            external_pressure_critical: 65.0,
-            economic_output_low: 50.0,
-            military_size_low: 50.0,
-            population_high: 3000.0,
-            legitimacy_critical: 20.0,
-            economic_output_critical: 15.0,
-        }
-    }
 }
 
 /// Event log for recording simulation events
@@ -323,8 +305,8 @@ fn phase_region_ranks(world: &mut WorldState) {
 // ============================================================================
 
 fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
-    // Apply dependency graph coefficients
-    apply_dependency_graph(world);
+    // Apply dependency rules from scenario
+    phase_apply_dependencies(world, scenario);
 
     // Calculate neighbor interactions (six types: military, trade, diplomatic, migration, vassalage, cultural)
     interactions::calculate_interactions(world, scenario, event_log, rng);
@@ -550,141 +532,6 @@ fn apply_treasury(world: &mut WorldState) {
             let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * 0.001;
             let expenses = actor.get_metric("military_size") * 0.8;
             actor.add_metric("treasury", incomes - expenses);
-        }
-    }
-}
-
-// ============================================================================
-// Step 2: Dependency Graph
-// ============================================================================
-
-const COEF: DependencyCoefficients = DependencyCoefficients {
-    legitimacy_to_cohesion: 0.03,
-    cohesion_to_legitimacy: 0.02,
-    legitimacy_to_military_quality: 0.02,
-    cohesion_to_economic_output: 0.03,
-    external_pressure_to_cohesion: 0.02,
-    external_pressure_to_legitimacy: 0.01,
-    external_pressure_to_military_quality: 0.02,
-    external_pressure_to_military_size: 0.01,
-    economic_output_to_treasury: 0.15,
-    military_size_to_economic_output: 0.01,
-    population_to_economic_output: 0.00005,
-    economic_output_to_population: 20.0,
-    cohesion_bonus_value: 5.0,
-    low_legitimacy_military_quality_decay: 0.5,
-    low_economic_output_population_decay: 100.0,
-};
-
-const THRESH: DependencyThresholds = DependencyThresholds {
-    legitimacy_low: 50.0,
-    cohesion_low: 50.0,
-    external_pressure_high: 50.0,
-    external_pressure_critical: 65.0,
-    economic_output_low: 50.0,
-    military_size_low: 50.0,
-    population_high: 3000.0,
-    legitimacy_critical: 20.0,
-    economic_output_critical: 15.0,
-};
-
-fn apply_dependency_graph(world: &mut WorldState) {
-    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
-
-    for actor_id in actor_ids {
-        if let Some(actor) = world.actors.get_mut(&actor_id) {
-            // legitimacy ↓10 → cohesion ↓3
-            let legitimacy = actor.get_metric("legitimacy");
-            if legitimacy < THRESH.legitimacy_low {
-                let deficit = THRESH.legitimacy_low - legitimacy;
-                actor.add_metric("cohesion", -deficit * COEF.legitimacy_to_cohesion);
-            }
-
-            // cohesion ↓10 → legitimacy ↓2
-            let cohesion = actor.get_metric("cohesion");
-            if cohesion < THRESH.cohesion_low {
-                let deficit = THRESH.cohesion_low - cohesion;
-                actor.add_metric("legitimacy", -deficit * COEF.cohesion_to_legitimacy);
-            }
-
-            // legitimacy ↓10 → military_quality ↓2
-            if legitimacy < THRESH.legitimacy_low {
-                let deficit = THRESH.legitimacy_low - legitimacy;
-                actor.add_metric("military_quality", -deficit * COEF.legitimacy_to_military_quality);
-            }
-
-            // cohesion ↓10 → economic_output ↓3
-            if cohesion < THRESH.cohesion_low {
-                let deficit = THRESH.cohesion_low - cohesion;
-                actor.add_metric("economic_output", -deficit * COEF.cohesion_to_economic_output);
-            }
-
-            // external_pressure ↑10 → cohesion ↓2
-            let external_pressure = actor.get_metric("external_pressure");
-            if external_pressure > THRESH.external_pressure_high {
-                let excess = external_pressure - THRESH.external_pressure_high;
-                actor.add_metric("cohesion", -excess * COEF.external_pressure_to_cohesion);
-            }
-
-            // external_pressure ↑10 → legitimacy ↓1
-            if external_pressure > THRESH.external_pressure_high {
-                let excess = external_pressure - THRESH.external_pressure_high;
-                actor.add_metric("legitimacy", -excess * COEF.external_pressure_to_legitimacy);
-            }
-
-            // external_pressure ↑10 → military_quality ↓2
-            if external_pressure > THRESH.external_pressure_high {
-                let excess = external_pressure - THRESH.external_pressure_high;
-                actor.add_metric("military_quality", -excess * COEF.external_pressure_to_military_quality);
-            }
-
-            // external_pressure ↑10 → military_size ↓1
-            if external_pressure > THRESH.external_pressure_high {
-                let excess = external_pressure - THRESH.external_pressure_high;
-                actor.add_metric("military_size", -excess * COEF.external_pressure_to_military_size);
-            }
-
-            // economic_output ↓10 → treasury ↓15
-            let economic_output = actor.get_metric("economic_output");
-            if economic_output < THRESH.economic_output_low {
-                let deficit = THRESH.economic_output_low - economic_output;
-                actor.add_metric("treasury", -deficit * COEF.economic_output_to_treasury);
-            }
-
-            // military_size ↓10 → economic_output ↓1
-            let military_size = actor.get_metric("military_size");
-            if military_size < THRESH.military_size_low {
-                let deficit = THRESH.military_size_low - military_size;
-                actor.add_metric("economic_output", -deficit * COEF.military_size_to_economic_output);
-            }
-
-            // population ↑5000 → economic_output ↑0.5 (Rome-scale populations)
-            let population = actor.get_metric("population");
-            if population > THRESH.population_high {
-                actor.add_metric("economic_output", (population - THRESH.population_high) * COEF.population_to_economic_output);
-            }
-
-            // economic_output ↓10 → population ↓200
-            if economic_output < THRESH.economic_output_low {
-                let deficit = THRESH.economic_output_low - economic_output;
-                actor.add_metric("population", -deficit * COEF.economic_output_to_population);
-            }
-
-            // Cohesion bonus effect (external_pressure > 65 AND legitimacy > 60)
-            if external_pressure > THRESH.external_pressure_critical && legitimacy > 60.0 {
-                actor.add_metric("cohesion", COEF.cohesion_bonus_value);
-            }
-
-            // Threshold effects
-            // legitimacy < 20 → military_quality falls -0.5/tick
-            if legitimacy < THRESH.legitimacy_critical {
-                actor.add_metric("military_quality", -COEF.low_legitimacy_military_quality_decay);
-            }
-
-            // economic_output < 15 → population falls -100/tick
-            if economic_output < THRESH.economic_output_critical {
-                actor.add_metric("population", -COEF.low_economic_output_population_decay);
-            }
         }
     }
 }
@@ -1683,6 +1530,7 @@ mod tests {
             initial_family_metrics: None,
             max_random_events_per_tick: 0,
             narrative_config: crate::core::NarrativeConfig::default(),
+            dependencies: vec![],
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

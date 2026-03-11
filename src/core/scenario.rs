@@ -3,6 +3,37 @@ use std::collections::HashMap;
 
 use super::actor::{Actor, Era};
 
+/// Dependency rule mode - determines how the dependency affects the target metric
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyMode {
+    /// Penalty when from < threshold
+    Deficit,
+    /// Penalty when from > threshold
+    Excess,
+    /// Bonus when from > threshold
+    Bonus,
+    /// Linear: delta = from * coefficient, no threshold
+    Linear,
+}
+
+/// Dependency rule configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyRule {
+    /// Identifier for logging and debugging (e.g., "legitimacy_to_cohesion")
+    pub id: String,
+    /// Source metric name
+    pub from: String,
+    /// Target metric name
+    pub to: String,
+    /// Coefficient for delta calculation
+    pub coefficient: f64,
+    /// Threshold value (required for Deficit/Excess/Bonus modes, None for Linear)
+    pub threshold: Option<f64>,
+    /// Mode of operation
+    pub mode: DependencyMode,
+}
+
 /// Narrative configuration for data-driven chronicle generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
@@ -68,6 +99,9 @@ pub struct Scenario {
     pub max_random_events_per_tick: u32,
     /// Narrative configuration for data-driven chronicle generation
     pub narrative_config: NarrativeConfig,
+    /// Dependency rules loaded from dependencies.toml
+    #[serde(default)]
+    pub dependencies: Vec<DependencyRule>,
 }
 
 /// Metric display configuration for UI

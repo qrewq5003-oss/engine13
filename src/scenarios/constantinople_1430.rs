@@ -1,14 +1,48 @@
 use std::collections::HashMap;
 
+use serde::Deserialize;
+
 use crate::core::{
-    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition,
+    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
     EventCondition, EventConditionType, MilestoneEvent, Neighbor,
     PatronAction, RankCondition, RankResult, Scenario, Successor,
 };
 
+/// Dependencies file structure for TOML deserialization
+#[derive(Deserialize)]
+struct DependenciesFile {
+    dependencies: Vec<DependencyRule>,
+}
+
+/// Known metrics for validation
+const KNOWN_METRICS: &[&str] = &[
+    "population",
+    "military_size",
+    "military_quality",
+    "economic_output",
+    "cohesion",
+    "legitimacy",
+    "external_pressure",
+    "treasury",
+    "global:federation_progress",
+];
+
+/// Load dependencies from TOML file
+fn load_dependencies() -> Vec<DependencyRule> {
+    let deps_file: DependenciesFile = toml::from_str(
+        include_str!("constantinople_1430/dependencies.toml")
+    ).expect("constantinople_1430/dependencies.toml parse error");
+    
+    crate::engine::validate_dependencies(&deps_file.dependencies, KNOWN_METRICS);
+    
+    deps_file.dependencies
+}
+
 /// Load the Constantinople 1430 scenario
 pub fn load_constantinople_1430() -> Scenario {
     eprintln!("[SCENARIO] load_constantinople_1430 - starting");
+    let dependencies = load_dependencies();
+    
     let scenario = Scenario {
         id: "constantinople_1430".to_string(),
         label: "Constantinople 1430 — Федерация".to_string(),
@@ -112,6 +146,7 @@ pub fn load_constantinople_1430() -> Scenario {
             paragraph_target: 6,
             output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
         },
+        dependencies,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario
