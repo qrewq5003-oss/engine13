@@ -156,21 +156,10 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     [worldState?.actors]
   );
 
-  if (!mapConfig) return null;
-
-  const isAlive = (actorId: string) => actorId in actorMap;
-
-  // Build set of actor IDs that have polygons
   const polygonActorIds = useMemo(() => {
-    return new Set(mapConfig.polygons.map(p => p.actor_id));
+    return new Set((mapConfig?.polygons ?? []).map(p => p.actor_id));
   }, [mapConfig]);
 
-  // Filter visible polygons: only alive or fading out
-  const visiblePolygons = mapConfig.polygons.filter(polygon =>
-    isAlive(polygon.actor_id) || fadingOut.has(polygon.actor_id)
-  );
-
-  // Find spawned actors: alive, no polygon, has center coordinates
   const spawnedActors = useMemo(() => {
     return Object.values(actorMap).filter(actor =>
       !polygonActorIds.has(actor.id) &&
@@ -178,6 +167,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       actor.center !== undefined
     );
   }, [actorMap, polygonActorIds]);
+
+  if (!mapConfig) return null;
+
+  const isAlive = (actorId: string) => actorId in actorMap;
+
+  const visiblePolygons = mapConfig.polygons.filter(polygon =>
+    isAlive(polygon.actor_id) || fadingOut.has(polygon.actor_id)
+  );
 
   return (
     <div className="map-panel">
