@@ -103,6 +103,7 @@ pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::cor
 
 /// Type of interaction between actors
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum InteractionType {
     Military,
     Trade,
@@ -112,6 +113,7 @@ pub enum InteractionType {
     Cultural,
 }
 
+#[allow(dead_code)]
 /// Interaction between two actors
 pub struct Interaction {
     pub actor_a: String,
