@@ -1386,6 +1386,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             triggers_collapse: false,
             llm_context_shift: "Семья Ди Милано стала одной из значимых сил города. Их больше не игнорируют.".to_string(),
             cooldown_ticks: None,
+            spawn_actor: None,
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1402,6 +1403,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             triggers_collapse: true,
             llm_context_shift: "Империя раскололась. Западная и Восточная части теперь идут разными путями.".to_string(),
             cooldown_ticks: None,
+            spawn_actor: None,
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1418,6 +1420,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             triggers_collapse: false,
             llm_context_shift: "Готы перешли черту. Адрианополь. Валент мёртв. Мир изменился навсегда.".to_string(),
             cooldown_ticks: None,
+            spawn_actor: None,
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1434,6 +1437,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             triggers_collapse: false,
             llm_context_shift: "Гунны больше не слухи. Их видели у Дуная. Паника нарастает.".to_string(),
             cooldown_ticks: None,
+            spawn_actor: None,
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1450,6 +1454,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             triggers_collapse: false,
             llm_context_shift: "Семья Ди Милано потеряла всё что нажила. Они снова никто.".to_string(),
             cooldown_ticks: None,
+            spawn_actor: None,
         },
     ]
 }

@@ -65,6 +65,8 @@ const KNOWN_ACTOR_IDS: &[&str] = &[
     "papacy", "hungary", "serbia", "trebizond",
     // Successor states (appear on collapse)
     "ottoman_balkans", "ottoman_anatolia", "ottoman_byzantium", "ottoman_serbia", "ottoman_trebizond",
+    // Spawned actors (appear via milestone events)
+    "wallachia", "poland_lithuania", "mamluks",
 ];
 
 /// Load dependencies from TOML file

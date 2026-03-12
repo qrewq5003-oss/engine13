@@ -353,6 +353,19 @@ pub struct MilestoneEvent {
     pub triggers_collapse: bool,
     pub llm_context_shift: String,
     pub cooldown_ticks: Option<u32>,  // Minimum ticks between firings
+    #[serde(default)]
+    pub spawn_actor: Option<SpawnActorConfig>,
+}
+
+/// Configuration for spawning a new actor via milestone event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnActorConfig {
+    pub actor_id: String,
+    pub label: String,
+    pub initial_metrics: HashMap<String, f64>,
+    pub lat: f64,
+    pub lng: f64,
+    pub color: String,
 }
 
 /// Condition for milestone event triggering

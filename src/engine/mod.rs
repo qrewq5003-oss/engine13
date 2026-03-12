@@ -745,6 +745,52 @@ fn check_milestone_events(
             // Apply one-time effects for specific milestones
             apply_milestone_effects(world, &milestone.id);
 
+            // Spawn actor if configured
+            if let Some(cfg) = &milestone.spawn_actor {
+                // Idempotency: don't spawn if already exists
+                if !world.actors.contains_key(&cfg.actor_id)
+                    && !world.dead_actors.iter().any(|d| d.id == cfg.actor_id)
+                {
+                    use crate::core::{Actor, GeoCoordinate, NarrativeStatus, RegionRank, Religion, Culture};
+                    
+                    let actor = Actor {
+                        id: cfg.actor_id.clone(),
+                        name: cfg.label.clone(),
+                        name_short: cfg.label.clone(),
+                        region: cfg.actor_id.clone(),
+                        region_rank: RegionRank::C,
+                        era: scenario.era.clone(),
+                        narrative_status: NarrativeStatus::Background,
+                        tags: vec![],
+                        metrics: cfg.initial_metrics.clone(),
+                        scenario_metrics: HashMap::new(),
+                        neighbors: vec![],
+                        on_collapse: vec![],
+                        actor_tags: HashMap::new(),
+                        center: Some(GeoCoordinate { lat: cfg.lat, lng: cfg.lng }),
+                        is_successor_template: false,
+                        religion: Religion::Orthodox,
+                        culture: Culture::Slavic,
+                        minimum_survival_ticks: None,
+                        leader: None,
+                    };
+                    
+                    world.actors.insert(cfg.actor_id.clone(), actor);
+                    
+                    // is_key event for spawn
+                    let event = Event::new(
+                        format!("spawn_{}", cfg.actor_id),
+                        current_tick,
+                        current_year,
+                        cfg.actor_id.clone(),
+                        EventType::Milestone,
+                        true,
+                        format!("{} появился на сцене истории.", cfg.label),
+                    );
+                    event_log.add(event);
+                }
+            }
+
             let event_type = if milestone.triggers_collapse {
                 EventType::Collapse
             } else {

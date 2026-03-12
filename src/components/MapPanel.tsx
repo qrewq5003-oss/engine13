@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, Tooltip, CircleMarker } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMapConfig, getWorldState } from '../api';
 import type { MapConfig, WorldState } from '../types/index';
 import type { HeatmapMetric } from '../utils/heatmapColor';
-import { HEATMAP_LABELS } from '../utils/heatmapColor';
+import { HEATMAP_LABELS, metricToHeatmapColor } from '../utils/heatmapColor';
 import { computePathStyle } from '../utils/mapStyle';
 
 interface MapPanelProps {
@@ -160,10 +160,24 @@ export const MapPanel: React.FC<MapPanelProps> = ({
 
   const isAlive = (actorId: string) => actorId in actorMap;
 
+  // Build set of actor IDs that have polygons
+  const polygonActorIds = useMemo(() => {
+    return new Set(mapConfig.polygons.map(p => p.actor_id));
+  }, [mapConfig]);
+
   // Filter visible polygons: only alive or fading out
   const visiblePolygons = mapConfig.polygons.filter(polygon =>
     isAlive(polygon.actor_id) || fadingOut.has(polygon.actor_id)
   );
+
+  // Find spawned actors: alive, no polygon, has center coordinates
+  const spawnedActors = useMemo(() => {
+    return Object.values(actorMap).filter(actor =>
+      !polygonActorIds.has(actor.id) &&
+      actor.center !== null &&
+      actor.center !== undefined
+    );
+  }, [actorMap, polygonActorIds]);
 
   return (
     <div className="map-panel">
@@ -270,6 +284,87 @@ export const MapPanel: React.FC<MapPanelProps> = ({
                 </Tooltip>
               )}
             </GeoJSON>
+          );
+        })}
+
+        {/* Spawned actor markers (actors without polygons) */}
+        {spawnedActors.map((actor) => {
+          if (!actor.center) return null;
+          
+          const isFading = fadingOut.has(actor.id);
+          const isSelected = selectedActorId === actor.id;
+          const isHovered = hoveredActorId === actor.id;
+          
+          // Default color for spawned actors
+          const baseColor = '#607d8b';
+          
+          // Heatmap color if enabled
+          const fillColor = heatmapEnabled && !isFading
+            ? metricToHeatmapColor(heatmapMetric, actor.metrics[heatmapMetric] ?? 50)
+            : baseColor;
+          
+          const borderColor = isFading
+            ? baseColor
+            : isSelected || isHovered
+            ? '#ffffff'
+            : baseColor;
+          
+          // Radius based on military_size
+          const militarySize = actor.metrics.military_size ?? 0;
+          const radius = 6 + Math.min(10, militarySize / 100 * 10);
+          
+          const fillOpacity = isFading
+            ? 0
+            : isSelected
+            ? Math.min(0.7, 0.5 + 0.2)
+            : isHovered
+            ? Math.min(0.6, 0.5 + 0.1)
+            : 0.5;
+
+          return (
+            <CircleMarker
+              key={actor.id}
+              center={[actor.center.lat, actor.center.lng]}
+              radius={radius}
+              fillColor={fillColor}
+              color={borderColor}
+              fillOpacity={fillOpacity}
+              weight={isSelected ? 2 : isHovered ? 1.5 : 1}
+              eventHandlers={{
+                click: () => {
+                  if (!isFading) {
+                    onSelectActor(actor.id);
+                  }
+                },
+                mouseover: () => {
+                  if (!isFading) {
+                    setHoveredActorId(actor.id);
+                  }
+                },
+                mouseout: () => {
+                  setHoveredActorId(null);
+                },
+              }}
+            >
+              {/* Tooltip: only for alive, non-fading actors */}
+              {!isFading && (
+                <Tooltip sticky>
+                  <div className="map-tooltip">
+                    <strong>{actor.name}</strong>
+                    {(['cohesion', 'legitimacy', 'military_size', 'economic_output'] as const).map(key => {
+                      const val = actor.metrics[key];
+                      if (val === undefined) return null;
+                      return (
+                        <div key={key} className="map-tooltip-row">
+                          <span className="map-tooltip-key">{tooltipLabel[key]}</span>
+                          <span>{val.toFixed(1)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Tooltip>
+              )}
+            </CircleMarker>
           );
         })}
       </MapContainer>

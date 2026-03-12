@@ -113,3 +113,58 @@ llm_context_shift = "Исторический исход. Город пал. Ф�
 type = "actor_state"
 actor_id = "byzantium"
 state = "dead"
+
+[[milestone_events]]
+id = "wallachia_emerges"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Валахия усилилась под давлением османской угрозы."
+cooldown_ticks = 999
+[milestone_events.condition]
+type = "metric"
+metric = "actor:ottomans.military_size"
+operator = "greater"
+value = 70.0
+[milestone_events.spawn_actor]
+actor_id = "wallachia"
+label = "Валахия"
+lat = 44.4
+lng = 26.1
+color = "#5d4037"
+initial_metrics = { cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0 }
+
+[[milestone_events]]
+id = "poland_lithuania_intervenes"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Польша-Литва обратила взор на юг."
+cooldown_ticks = 999
+[milestone_events.condition]
+type = "tick"
+tick = 5
+[milestone_events.spawn_actor]
+actor_id = "poland_lithuania"
+label = "Польша-Литва"
+lat = 52.2
+lng = 21.0
+color = "#bf360c"
+initial_metrics = { cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0 }
+
+[[milestone_events]]
+id = "mamluks_watch"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Мамлюки следят за ослаблением Османов."
+cooldown_ticks = 999
+[milestone_events.condition]
+type = "metric"
+metric = "actor:ottomans.cohesion"
+operator = "less"
+value = 40.0
+[milestone_events.spawn_actor]
+actor_id = "mamluks"
+label = "Мамлюки"
+lat = 30.0
+lng = 31.2
+color = "#f9a825"
+initial_metrics = { cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0 }
