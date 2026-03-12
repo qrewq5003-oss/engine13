@@ -150,13 +150,13 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     });
   }, [heatmapEnabled, heatmapMetric, worldState?.actors, fadingOut, selectedActorId, hoveredActorId, mapConfig]);
 
-  if (!mapConfig) return null;
-
   // Build actor map for quick lookup
   const actorMap = useMemo(
     () => worldState?.actors ?? {},
     [worldState?.actors]
   );
+
+  if (!mapConfig) return null;
 
   const isAlive = (actorId: string) => actorId in actorMap;
 

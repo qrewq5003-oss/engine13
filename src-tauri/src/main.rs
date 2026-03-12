@@ -337,6 +337,12 @@ fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<Strin
 fn main() {
     eprintln!("[RUST] Starting ENGINE13 Tauri v2 app");
 
+#[tauri::command]
+fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::core::MapConfig>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.current_scenario.as_ref().and_then(|sc| sc.map.clone()))
+}
+
     // Initialize database
     let db_path = Db::default_path().unwrap_or_else(|e| {
         eprintln!("[RUST] Failed to get default db path: {}, using fallback", e);
@@ -374,7 +380,7 @@ fn main() {
             cmd_set_game_mode,
             cmd_get_available_models,
             cmd_save_llm_config,
-            commands::cmd_get_map_config,
+            cmd_get_map_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
