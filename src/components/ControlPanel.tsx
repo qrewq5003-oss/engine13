@@ -158,11 +158,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             lastThreeEvents.map((event) => (
               <div
                 key={event.id}
-                className={`event-item ${event.is_key ? 'key-event' : ''}`}
+                className={`event-row ${event.is_key ? 'event-key' : ''}`}
               >
-                <div className="event-year">{event.year}</div>
-                <div className="event-description">{event.description}</div>
-                {event.is_key && <span className="key-badge">KEY</span>}
+                <div className="event-meta">
+                  <span className="event-year">{event.year}</span>
+                  {event.is_key && <span className="event-key-badge">KEY</span>}
+                </div>
+                <div className="event-text">{event.description}</div>
               </div>
             ))
           )}
