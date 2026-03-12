@@ -63,6 +63,8 @@ const KNOWN_METRICS: &[&str] = &[
 const KNOWN_ACTOR_IDS: &[&str] = &[
     "byzantium", "ottomans", "venice", "genoa", "milan",
     "papacy", "hungary", "serbia", "trebizond",
+    // Successor states (appear on collapse)
+    "ottoman_balkans", "ottoman_anatolia", "ottoman_byzantium", "ottoman_serbia", "ottoman_trebizond",
 ];
 
 /// Load dependencies from TOML file
@@ -285,7 +287,7 @@ fn create_byzantium() -> Actor {
             Neighbor { id: "trebizond".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottoman_byzantium".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 28.9 }),
@@ -330,7 +332,10 @@ fn create_ottomans() -> Actor {
             Neighbor { id: "trebizond".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "venice".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
-        on_collapse: vec![],
+        on_collapse: vec![
+            Successor { id: "ottoman_balkans".to_string(), weight: 0.5 },
+            Successor { id: "ottoman_anatolia".to_string(), weight: 0.5 },
+        ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 39.0, lng: 35.0 }),
         is_successor_template: false,
@@ -583,7 +588,7 @@ fn create_serbia() -> Actor {
             Neighbor { id: "hungary".to_string(), distance: 2, border_type: BorderType::Land },
         ],
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottoman_serbia".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 21.0 }),
@@ -625,7 +630,7 @@ fn create_trebizond() -> Actor {
             Neighbor { id: "byzantium".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottoman_trebizond".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 39.7 }),
