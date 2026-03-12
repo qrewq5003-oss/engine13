@@ -67,6 +67,8 @@ pub struct NarrativeWorldSnapshot {
     pub narrative_axes: Vec<String>,
     pub tone_tags: Vec<String>,
     pub game_mode: crate::core::GameMode,
+    /// Actors that collapsed this tick: (actor_name, successor_ids)
+    pub collapsed_this_tick: Vec<(String, Vec<String>)>,
 }
 
 /// Minimal narrative memory for anti-repetition across turns
@@ -276,7 +278,31 @@ pub fn build_snapshot(
     // Narrative axes and tone tags from config
     let narrative_axes = scenario.narrative_config.narrative_axes.clone();
     let tone_tags = scenario.narrative_config.tone_tags.clone();
+
+    // Collapsed actors this tick: filter event_log for EventType::Collapse
+    // Deduplicate by actor_id, get successor_ids from world.dead_actors
+    let mut collapsed_this_tick: Vec<(String, Vec<String>)> = Vec::new();
+    let mut seen_collapse_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     
+    for event in &event_log.events {
+        if event.event_type == crate::core::EventType::Collapse 
+            && !seen_collapse_ids.contains(&event.actor_id) 
+        {
+            seen_collapse_ids.insert(event.actor_id.clone());
+            
+            // Get successor_ids from dead_actors
+            let successor_ids: Vec<String> = world.dead_actors.iter()
+                .find(|d| d.id == event.actor_id)
+                .map(|d| d.successor_ids.iter().map(|s| s.id.clone()).collect())
+                .unwrap_or_default();
+            
+            // Get actor name from event description or use actor_id
+            let actor_name = event.actor_id.clone();
+            
+            collapsed_this_tick.push((actor_name, successor_ids));
+        }
+    }
+
     NarrativeWorldSnapshot {
         year: world.year,
         half_year,
@@ -291,6 +317,7 @@ pub fn build_snapshot(
         narrative_axes,
         tone_tags,
         game_mode: world.game_mode,
+        collapsed_this_tick,
     }
 }
 
@@ -500,6 +527,30 @@ pub fn generate_narrative_prompt(
         if snapshot.victory_achieved { "да" } else { "нет" },
     );
     prompt.push_str(&factual_rules);
+
+    // ========================================================================
+    // Section 2b: Events This Period — Collapses with Successors
+    // ========================================================================
+    if !snapshot.collapsed_this_tick.is_empty() {
+        prompt.push_str("=== СОБЫТИЯ ЭТОГО ПЕРИОДА ===\n");
+        for (actor_name, successors) in &snapshot.collapsed_this_tick {
+            if successors.is_empty() {
+                prompt.push_str(&format!("{} прекратил существование.\n", actor_name));
+            } else {
+                prompt.push_str(&format!("{} прекратил существование. Наследники: {}.\n", 
+                    actor_name, successors.join(", ")));
+            }
+        }
+        prompt.push('\n');
+    }
+
+    // ========================================================================
+    // Section 2c: Fallen States — All dead actors accumulated
+    // ========================================================================
+    if !snapshot.dead_actors.is_empty() {
+        prompt.push_str("=== ПАВШИЕ ДЕРЖАВЫ ===\n");
+        prompt.push_str(&format!("{}\n\n", snapshot.dead_actors.join(", ")));
+    }
 
     // ========================================================================
     // Section 3: Previous Narrative Memory — Soft Anti-Repetition Guard
