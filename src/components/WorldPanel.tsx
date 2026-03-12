@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Actor } from '../types';
+import type { Actor, WorldState } from '../types';
 import ActorDetailPanel from './ActorDetailPanel';
 import './WorldPanel.css';
 
@@ -7,12 +7,14 @@ interface WorldPanelProps {
   actors: Actor[];
   selectedActorId: string | null;
   onSelectActor: (id: string) => void;
+  prevWorldState: WorldState | null;
 }
 
 export const WorldPanel: React.FC<WorldPanelProps> = ({
   actors,
   selectedActorId,
   onSelectActor,
+  prevWorldState,
 }) => {
   const [detailActor, setDetailActor] = useState<Actor | null>(null);
 
@@ -55,22 +57,26 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
                 label="Legitimacy"
                 value={actor.metrics.legitimacy}
                 color="#4caf50"
+                prevValue={prevWorldState?.actors[actor.id]?.metrics.legitimacy}
               />
               <MetricBar
                 label="Cohesion"
                 value={actor.metrics.cohesion}
                 color="#2196f3"
+                prevValue={prevWorldState?.actors[actor.id]?.metrics.cohesion}
               />
               <MetricBar
                 label="Military"
                 value={actor.metrics.military_size}
                 max={500}
                 color="#f44336"
+                prevValue={prevWorldState?.actors[actor.id]?.metrics.military_size}
               />
               <MetricBar
                 label="Economy"
                 value={actor.metrics.economic_output}
                 color="#ff9800"
+                prevValue={prevWorldState?.actors[actor.id]?.metrics.economic_output}
               />
             </div>
           </div>
@@ -92,10 +98,25 @@ interface MetricBarProps {
   value: number;
   max?: number;
   color: string;
+  prevValue?: number;
 }
 
-const MetricBar: React.FC<MetricBarProps> = ({ label, value, max = 100, color }) => {
+const MetricBar: React.FC<MetricBarProps> = ({ label, value, max = 100, color, prevValue }) => {
   const percentage = Math.min(100, Math.max(0, (value / max) * 100));
+  
+  // Compute delta only if prevValue exists (actor existed in previous state)
+  const delta = prevValue !== undefined ? value - prevValue : undefined;
+  const deltaColor = delta !== undefined ? (delta > 0 ? '#4caf50' : delta < 0 ? '#f44336' : undefined) : undefined;
+  const deltaSign = delta !== undefined ? (delta > 0 ? '+' : delta < 0 ? '' : '') : undefined;
+  const deltaAbs = delta !== undefined ? Math.abs(delta) : undefined;
+  
+  // Format delta: use integer for metrics displayed as integers
+  const formatDelta = (d: number | undefined): string => {
+    if (d === undefined) return '';
+    // For military_size and economic_output (larger values), show as integer
+    // For legitimacy and cohesion (0-100), show as integer
+    return d.toFixed(0);
+  };
 
   return (
     <div className="metric-bar">
@@ -106,7 +127,17 @@ const MetricBar: React.FC<MetricBarProps> = ({ label, value, max = 100, color })
           style={{ width: `${percentage}%`, backgroundColor: color }}
         />
       </div>
-      <span className="metric-value">{value.toFixed(0)}</span>
+      <div className="metric-value-wrapper">
+        <span className="metric-value">{value.toFixed(0)}</span>
+        {delta !== undefined && delta !== 0 && (
+          <span 
+            className="metric-delta" 
+            style={{ color: deltaColor }}
+          >
+            {deltaSign}{formatDelta(deltaAbs)}
+          </span>
+        )}
+      </div>
     </div>
   );
 };

@@ -39,6 +39,7 @@ const App: React.FC = () => {
   
   // Game state
   const [worldState, setWorldState] = useState<WorldState | null>(null);
+  const prevWorldStateRef = React.useRef<WorldState | null>(null);
   const [availableActions, setAvailableActions] = useState<ActionInfo[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
@@ -152,6 +153,10 @@ const App: React.FC = () => {
       ]);
 
       if (world) {
+        // Save previous world state before updating
+        if (worldState) {
+          prevWorldStateRef.current = worldState;
+        }
         setWorldState(world);
         // Get recent events for narrative actors
         const actors = Object.values(world.actors) as Actor[];
@@ -174,7 +179,7 @@ const App: React.FC = () => {
     } catch (err) {
       setError(`Failed to refresh state: ${err}`);
     }
-  }, []);
+  }, [worldState]);
 
   // Refresh narrative (streaming - uses current world state from API)
   const refreshNarrative = useCallback(async (stateForNarrative?: WorldState) => {
@@ -234,6 +239,10 @@ const App: React.FC = () => {
 
       // Step 1: Advance tick - updates world_state
       const response = await advanceTick();
+      // Save previous world state before updating
+      if (worldState) {
+        prevWorldStateRef.current = worldState;
+      }
       setWorldState(response.world_state);
       if (response.events.length > 0) {
         setRecentEvents(response.events);
@@ -249,7 +258,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, isGeneratingNarrative, refreshState, refreshNarrative]);
+  }, [isLoading, isGeneratingNarrative, refreshState, refreshNarrative, worldState]);
 
   // Handle action submit
   const handleActionSubmit = useCallback(async (actionId: string) => {
@@ -265,6 +274,10 @@ const App: React.FC = () => {
       console.log('[App] Calling submitAction API with:', actionId);
       const response = await submitAction(actionId);
       console.log('[App] submitAction response:', response);
+      // Save previous world state before updating
+      if (worldState) {
+        prevWorldStateRef.current = worldState;
+      }
       setWorldState(response.new_state);
       await refreshState();
     } catch (err) {
@@ -273,7 +286,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, refreshState]);
+  }, [isLoading, refreshState, worldState]);
 
   // Handle save game - opens modal
   const handleOpenSaveModal = useCallback(() => {
@@ -399,6 +412,7 @@ const App: React.FC = () => {
             actors={Object.values(worldState.actors)}
             selectedActorId={selectedActorId}
             onSelectActor={setSelectedActorId}
+            prevWorldState={prevWorldStateRef.current}
           />
         </div>
 
