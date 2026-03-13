@@ -205,14 +205,18 @@ pub fn set_metric(state: &mut AppState, actor_id: String, metric: String, value:
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
     let actor = world_state.actors.get_mut(&actor_id).ok_or_else(|| format!("Actor '{}' not found", actor_id))?;
-    
+
     // Check if metric exists
     if !actor.metrics.contains_key(&metric) {
         return Err(format!("Metric '{}' not found for actor '{}'", metric, actor_id));
     }
 
-    // Clamp metric to valid range (0-100 for most metrics)
-    let clamped_value = value.clamp(0.0, 100.0);
+    // Metric-specific validation
+    let clamped_value = match metric.as_str() {
+        "treasury" => value,  // can go negative (debts)
+        "population" | "military_size" => value.max(0.0),  // no upper bound
+        _ => value.clamp(0.0, 100.0),  // cohesion, legitimacy, etc.
+    };
     actor.metrics.insert(metric, clamped_value);
 
     Ok(())
