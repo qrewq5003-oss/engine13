@@ -403,15 +403,18 @@ fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<Strin
     result
 }
 
+#[tauri::command]
+fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::core::MapConfig>, String> {
+    eprintln!("[RUST] cmd_get_map_config - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let result = s.current_scenario.as_ref().and_then(|sc| sc.map.clone());
+    eprintln!("[RUST] cmd_get_map_config - result: {:?}", result.is_some());
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     eprintln!("[RUST] Starting ENGINE13 Tauri v2 app");
-
-#[tauri::command]
-fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::core::MapConfig>, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    Ok(s.current_scenario.as_ref().and_then(|sc| sc.map.clone()))
-}
 
     // Initialize database
     let db_path = Db::default_path().unwrap_or_else(|e| {
