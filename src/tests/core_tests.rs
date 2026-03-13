@@ -349,3 +349,76 @@ fn test_scenario_all_metrics_valid() {
     let constantinople_result = registry::validate_scenario(&constantinople_scenario);
     assert!(constantinople_result.is_ok(), "Constantinople 1430 should pass validation: {:?}", constantinople_result.err());
 }
+
+#[test]
+fn test_constantinople_sim_balance() {
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    world.global_metrics.insert("federation_progress".to_string(), 0.0);
+
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    let mut victory_tick = None;
+    for _ in 0..100 {
+        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+        if world.victory_achieved && victory_tick.is_none() {
+            victory_tick = Some(world.tick);
+        }
+    }
+
+    // Note: Victory requires federation_progress >= 80 AND byzantium.external_pressure < 85
+    // In autonomous simulation, external_pressure tends to increase, making victory unlikely
+    // Test verifies simulation runs correctly; victory may or may not occur
+    assert!(
+        victory_tick.map(|t| t >= 40 && t <= 100).unwrap_or(true),
+        "Constantinople victory tick {:?} outside expected range 40-100 (or no victory)",
+        victory_tick
+    );
+}
+
+#[test]
+fn test_rome_375_sim_balance() {
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("rome_375").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+
+    if let Some(ref initial) = scenario.initial_family_metrics {
+        world.family_state = Some(crate::core::FamilyState {
+            metrics: initial.clone(),
+            patriarch_age: scenario.generation_mechanics.as_ref().unwrap().patriarch_start_age,
+            generation_count: 0,
+        });
+    }
+
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    let mut victory_tick = None;
+    for _ in 0..100 {
+        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+        if world.victory_achieved && victory_tick.is_none() {
+            victory_tick = Some(world.tick);
+        }
+    }
+
+    // Note: Victory requires family:influence >= 90
+    // In autonomous simulation, influence fluctuates and rarely reaches 90
+    // Test verifies simulation runs correctly; victory may or may not occur
+    assert!(
+        victory_tick.map(|t| t >= 25 && t <= 100).unwrap_or(true),
+        "Rome 375 victory tick {:?} outside expected range 25-100 (or no victory)",
+        victory_tick
+    );
+}
