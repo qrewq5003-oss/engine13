@@ -12,14 +12,14 @@ export const ActorDetailPanel: React.FC<ActorDetailPanelProps> = ({ actor, onClo
     return Math.min(100, Math.max(0, (value / max) * 100));
   };
 
-  const renderMetricBar = (label: string, value: number, max: number = 100, color: string) => (
+  const renderMetricBar = (label: string, value: number | undefined, max: number = 100, color: string) => (
     <div className="detail-metric-row">
       <span className="detail-metric-label">{label}</span>
-      <span className="detail-metric-value">{value.toFixed(0)}</span>
+      <span className="detail-metric-value">{(value ?? 0).toFixed(0)}</span>
       <div className="detail-metric-fill-container">
         <div
           className="detail-metric-fill"
-          style={{ width: `${getPercentage(value, max)}%`, backgroundColor: color }}
+          style={{ width: `${getPercentage(value ?? 0, max)}%`, backgroundColor: color }}
         />
       </div>
     </div>
@@ -61,12 +61,12 @@ export const ActorDetailPanel: React.FC<ActorDetailPanelProps> = ({ actor, onClo
           
           <div className="detail-resource-row">
             <span className="detail-resource-label">Treasury</span>
-            <span className="detail-resource-value">{actor.metrics.treasury.toFixed(0)}</span>
+            <span className="detail-resource-value">{(actor.metrics.treasury ?? 0).toFixed(0)}</span>
           </div>
           
           <div className="detail-resource-row">
             <span className="detail-resource-label">Population</span>
-            <span className="detail-resource-value">{actor.metrics.population.toFixed(0)}</span>
+            <span className="detail-resource-value">{(actor.metrics.population ?? 0).toFixed(0)}</span>
           </div>
         </div>
 
@@ -76,7 +76,7 @@ export const ActorDetailPanel: React.FC<ActorDetailPanelProps> = ({ actor, onClo
             {Object.entries(actor.scenario_metrics).map(([key, value]) => (
               <div key={key} className="detail-scenario-metric">
                 <span className="detail-scenario-key">{key}</span>
-                <span className="detail-scenario-value">{value.toFixed(0)}</span>
+                <span className="detail-scenario-value">{(value ?? 0).toFixed(0)}</span>
               </div>
             ))}
           </div>
