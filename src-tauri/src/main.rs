@@ -243,12 +243,15 @@ fn cmd_list_saves_with_slots(
 
 #[tauri::command]
 fn cmd_get_relevant_events(
+    state: State<Mutex<AppState>>,
     db: State<Mutex<Db>>,
     actor_ids: Vec<String>,
 ) -> Result<Vec<engine13::Event>, String> {
     eprintln!("[RUST] cmd_get_relevant_events - acquiring lock");
+    let s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_relevant_events(&*db_guard, actor_ids);
+    let current_tick = s.world_state.as_ref().map(|ws| ws.tick).unwrap_or(0);
+    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick);
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }
