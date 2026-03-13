@@ -251,7 +251,24 @@ fn cmd_get_relevant_events(
     let s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
     let current_tick = s.world_state.as_ref().map(|ws| ws.tick).unwrap_or(0);
-    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick);
+    
+    // Build query_tags from narrative actors (id, name, region - lowercase, deduplicated)
+    let query_tags: Vec<String> = s.world_state.as_ref()
+        .map(|ws| {
+            use std::collections::HashSet;
+            let mut tags_set: HashSet<String> = HashSet::new();
+            for actor in ws.actors.values() {
+                if actor.narrative_status == engine13::NarrativeStatus::Foreground {
+                    tags_set.insert(actor.id.to_lowercase());
+                    tags_set.insert(actor.name.to_lowercase());
+                    tags_set.insert(actor.region.to_lowercase());
+                }
+            }
+            tags_set.into_iter().collect()
+        })
+        .unwrap_or_default();
+    
+    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick, query_tags);
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }
