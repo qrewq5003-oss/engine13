@@ -53,6 +53,13 @@ pub struct AdvanceTickResponse {
     pub llm_trigger: Option<crate::llm::LlmTrigger>,
 }
 
+/// Response from advance_tick_silent (no LLM trigger)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvanceTickSilentResponse {
+    pub world_state: WorldState,
+    pub events: Vec<Event>,
+}
+
 /// Response from submit_action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitActionResponse {
@@ -150,6 +157,22 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
     })
 }
 
+/// Advance simulation by one tick without LLM trigger
+pub fn advance_tick_silent(state: &mut AppState) -> Result<AdvanceTickSilentResponse, String> {
+    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+    let rng = state.rng.as_mut().ok_or("No RNG initialized")?;
+
+    tick(world_state, scenario, &mut state.event_log, rng);
+
+    let events = state.event_log.events.clone();
+
+    Ok(AdvanceTickSilentResponse {
+        world_state: world_state.clone(),
+        events,
+    })
+}
+
 /// Get available actions for the player - delegates to application::actions
 pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::PatronAction>, String> {
     crate::application::get_available_actions(state)
@@ -171,6 +194,107 @@ pub fn submit_action(state: &mut AppState, action_id: String) -> Result<SubmitAc
         target_actor_id: None,
     };
     actions::submit_action(state, action_input)
+}
+
+/// Set actor metric value (debug command)
+pub fn set_metric(state: &mut AppState, actor_id: String, metric: String, value: f64) -> Result<(), String> {
+    // Validate value
+    if value.is_nan() || value.is_infinite() {
+        return Err("Invalid metric value: NaN or infinity".to_string());
+    }
+
+    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
+    let actor = world_state.actors.get_mut(&actor_id).ok_or_else(|| format!("Actor '{}' not found", actor_id))?;
+    
+    // Check if metric exists
+    if !actor.metrics.contains_key(&metric) {
+        return Err(format!("Metric '{}' not found for actor '{}'", metric, actor_id));
+    }
+
+    // Clamp metric to valid range (0-100 for most metrics)
+    let clamped_value = value.clamp(0.0, 100.0);
+    actor.metrics.insert(metric, clamped_value);
+
+    Ok(())
+}
+
+/// Force spawn a new actor (debug command)
+pub fn force_spawn(
+    state: &mut AppState,
+    actor_id: String,
+    label: String,
+    lat: f64,
+    lng: f64,
+    initial_metrics: std::collections::HashMap<String, f64>,
+) -> Result<(), String> {
+    use crate::core::{Actor, GeoCoordinate, NarrativeStatus, RegionRank, Religion, Culture, Event, EventType};
+    use std::collections::HashMap;
+
+    // Validate actor_id format: only [a-z0-9_]+
+    if !actor_id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+        return Err("Invalid actor_id: only [a-z0-9_]+ allowed".to_string());
+    }
+
+    // Validate lat/lng
+    if lat < -90.0 || lat > 90.0 {
+        return Err("Invalid lat: must be between -90 and 90".to_string());
+    }
+    if lng < -180.0 || lng > 180.0 {
+        return Err("Invalid lng: must be between -180 and 180".to_string());
+    }
+
+    let world_state = state.world_state.as_mut().ok_or("No active world state")?;
+
+    // Check for duplicate
+    if world_state.actors.contains_key(&actor_id) {
+        return Err(format!("Actor '{}' already exists", actor_id));
+    }
+    if world_state.dead_actors.iter().any(|d| d.id == actor_id) {
+        return Err(format!("Actor '{}' is already dead", actor_id));
+    }
+
+    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
+
+    // Create actor
+    let actor = Actor {
+        id: actor_id.clone(),
+        name: label.clone(),
+        name_short: label.clone(),
+        region: actor_id.clone(),
+        region_rank: RegionRank::C,
+        era: scenario.era.clone(),
+        narrative_status: NarrativeStatus::Background,
+        tags: vec![],
+        metrics: initial_metrics,
+        scenario_metrics: HashMap::new(),
+        neighbors: vec![],
+        on_collapse: vec![],
+        actor_tags: HashMap::new(),
+        center: Some(GeoCoordinate { lat, lng }),
+        is_successor_template: false,
+        religion: Religion::Orthodox,
+        culture: Culture::Slavic,
+        minimum_survival_ticks: None,
+        leader: None,
+    };
+
+    world_state.actors.insert(actor_id.clone(), actor);
+
+    // Create event
+    let current_tick = world_state.tick;
+    let current_year = world_state.year;
+    let event = Event::new(
+        format!("force_spawn_{}", actor_id),
+        current_tick,
+        current_year,
+        actor_id.clone(),
+        EventType::Milestone,
+        true,
+        format!("{} появился на сцене истории (debug).", label),
+    );
+    state.event_log.add(event);
+
+    Ok(())
 }
 
 /// Save current game state - delegates to application::save_load

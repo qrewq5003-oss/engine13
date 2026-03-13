@@ -44,13 +44,13 @@ fn cmd_advance_tick(
     action: Option<commands::PlayerActionInput>,
 ) -> Result<commands::AdvanceTickResponse, String> {
     eprintln!("[RUST] cmd_advance_tick - acquiring locks");
-    
+
     // First, advance the tick and get events
     let mut s = state.lock().map_err(|e| e.to_string())?;
     eprintln!("[RUST] cmd_advance_tick - calling advance_tick");
     let result = commands::advance_tick(&mut *s, action);
     eprintln!("[RUST] cmd_advance_tick - result: {:?}", result.is_ok());
-    
+
     // If successful, write events and dead actors to database
     if let Ok(ref response) = result {
         let mut db_guard = db.lock().map_err(|e| e.to_string())?;
@@ -77,8 +77,58 @@ fn cmd_advance_tick(
             }
         }
     }
-    
+
     result
+}
+
+#[tauri::command]
+fn cmd_advance_tick_silent(
+    state: State<Mutex<AppState>>,
+    db: State<Mutex<Db>>,
+) -> Result<commands::AdvanceTickSilentResponse, String> {
+    eprintln!("[RUST] cmd_advance_tick_silent - acquiring locks");
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = commands::advance_tick_silent(&mut *s);
+
+    // Write events to database if successful
+    if let Ok(ref response) = result {
+        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
+
+        if !response.events.is_empty() {
+            if let Err(e) = (&mut *db_guard).insert_events_batch(&response.events) {
+                eprintln!("[RUST] cmd_advance_tick_silent - failed to write events to DB: {}", e);
+            }
+        }
+    }
+
+    result
+}
+
+#[tauri::command]
+fn cmd_set_metric(
+    state: State<Mutex<AppState>>,
+    actor_id: String,
+    metric: String,
+    value: f64,
+) -> Result<(), String> {
+    eprintln!("[RUST] cmd_set_metric - actor={}, metric={}, value={}", actor_id, metric, value);
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    commands::set_metric(&mut *s, actor_id, metric, value)
+}
+
+#[tauri::command]
+fn cmd_force_spawn(
+    state: State<Mutex<AppState>>,
+    actor_id: String,
+    label: String,
+    lat: f64,
+    lng: f64,
+    initial_metrics: std::collections::HashMap<String, f64>,
+) -> Result<(), String> {
+    eprintln!("[RUST] cmd_force_spawn - actor={}, label={}, lat={}, lng={}", actor_id, label, lat, lng);
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    commands::force_spawn(&mut *s, actor_id, label, lat, lng, initial_metrics)
 }
 
 #[tauri::command]
@@ -363,6 +413,9 @@ fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::
             cmd_get_world_state,
             cmd_get_status_indicators,
             cmd_advance_tick,
+            cmd_advance_tick_silent,
+            cmd_set_metric,
+            cmd_force_spawn,
             cmd_get_narrative_actors,
             cmd_get_available_actions,
             cmd_get_actions_with_availability,

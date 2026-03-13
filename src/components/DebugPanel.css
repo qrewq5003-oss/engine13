@@ -1,0 +1,198 @@
+.debug-panel {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10000;
+}
+
+.debug-panel.collapsed {
+  width: auto;
+}
+
+.debug-panel.expanded {
+  width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.debug-toggle {
+  width: 40px;
+  height: 40px;
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.debug-toggle:hover {
+  background: rgba(50, 50, 50, 0.9);
+  transform: scale(1.05);
+}
+
+.debug-content {
+  margin-top: 8px;
+  background: rgba(30, 30, 46, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.debug-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cdd6f4;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.debug-error {
+  background: rgba(243, 139, 168, 0.15);
+  border: 1px solid #f38ba8;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #f38ba8;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.debug-error-dismiss {
+  background: none;
+  border: none;
+  color: #f38ba8;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.debug-error-dismiss:hover {
+  color: #fab387;
+}
+
+.debug-section {
+  margin-bottom: 16px;
+}
+
+.debug-section:last-child {
+  margin-bottom: 0;
+}
+
+.debug-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a6adc8;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.debug-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.debug-row {
+  display: flex;
+  gap: 6px;
+}
+
+.debug-select,
+.debug-input {
+  background: rgba(24, 24, 37, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #cdd6f4;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.debug-select:focus,
+.debug-input:focus {
+  border-color: #89b4fa;
+}
+
+.debug-select {
+  cursor: pointer;
+}
+
+.debug-input {
+  width: 100%;
+}
+
+.debug-input-small {
+  flex: 1;
+  min-width: 0;
+}
+
+.debug-button {
+  background: rgba(137, 180, 250, 0.2);
+  border: 1px solid rgba(137, 180, 250, 0.4);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #89b4fa;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.debug-button:hover:not(:disabled) {
+  background: rgba(137, 180, 250, 0.3);
+}
+
+.debug-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.debug-button-apply {
+  background: rgba(166, 227, 161, 0.2);
+  border-color: rgba(166, 227, 161, 0.4);
+  color: #a6e3a1;
+}
+
+.debug-button-apply:hover:not(:disabled) {
+  background: rgba(166, 227, 161, 0.3);
+}
+
+.debug-button-spawn {
+  background: rgba(250, 179, 135, 0.2);
+  border-color: rgba(250, 179, 135, 0.4);
+  color: #fab387;
+}
+
+.debug-button-spawn:hover:not(:disabled) {
+  background: rgba(250, 179, 135, 0.3);
+}
+
+/* Scrollbar */
+.debug-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.debug-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.debug-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.debug-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

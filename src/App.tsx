@@ -7,6 +7,7 @@ import { ActionHistory } from './components/ActionHistory';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { DebugPanel } from './components/DebugPanel';
 import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
 import { SaveSlotModal } from './components/SaveSlotModal';
 import { MapPanel } from './components/MapPanel';
@@ -58,6 +59,9 @@ const App: React.FC = () => {
 
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Debug panel state
+  const [isDebugOpen, setIsDebugOpen] = useState(false);
 
   // Initialize menu on mount
   useEffect(() => {
@@ -372,6 +376,13 @@ const App: React.FC = () => {
         </div>
         <button
           className="settings-button"
+          onClick={() => setIsDebugOpen(!isDebugOpen)}
+          title="Debug Panel"
+        >
+          🔧
+        </button>
+        <button
+          className="settings-button"
           onClick={() => setIsSettingsOpen(true)}
           title="LLM Settings"
         >
@@ -474,6 +485,15 @@ const App: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {gameState === 'playing' && worldState && (
+        <DebugPanel
+          worldState={worldState}
+          onRefresh={refreshState}
+          isOpen={isDebugOpen}
+          onClose={() => setIsDebugOpen(false)}
+        />
+      )}
     </div>
   );
 };
