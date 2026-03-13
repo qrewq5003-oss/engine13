@@ -2,25 +2,26 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Tooltip, CircleMarker } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getMapConfig, getWorldState } from '../api';
-import type { MapConfig, WorldState } from '../types/index';
+import { getMapConfig } from '../api';
+import type { MapConfig } from '../types/index';
 import type { HeatmapMetric } from '../utils/heatmapColor';
 import { HEATMAP_LABELS, metricToHeatmapColor } from '../utils/heatmapColor';
 import { computePathStyle } from '../utils/mapStyle';
 
 interface MapPanelProps {
+  worldState: import('../types/index').WorldState | null;
   selectedActorId: string | null;
   onSelectActor: (id: string) => void;
   scenarioId: string;
 }
 
 export const MapPanel: React.FC<MapPanelProps> = ({
+  worldState,
   selectedActorId,
   onSelectActor,
   scenarioId,
 }) => {
   const [mapConfig, setMapConfig] = useState<MapConfig | null>(null);
-  const [worldState, setWorldState] = useState<WorldState | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [geoJsonData, setGeoJsonData] = useState<Record<string, any>>({});
   const mapRef = useRef<LeafletMap | null>(null);
@@ -79,13 +80,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         // invalidateSize after data loads - Leaflet in flex-layout
         setTimeout(() => mapRef.current?.invalidateSize(), 100);
       });
-    });
-  }, [scenarioId]);
-
-  // Load world state
-  useEffect(() => {
-    getWorldState().then((state) => {
-      if (state) setWorldState(state);
     });
   }, [scenarioId]);
 
@@ -167,6 +161,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       actor.center !== undefined
     );
   }, [actorMap, polygonActorIds]);
+  console.log("spawnedActors:", spawnedActors.map(a => ({id: a.id, center: a.center})));
 
   if (!mapConfig) return null;
 

@@ -418,6 +418,7 @@ const App: React.FC = () => {
 
         <div className="panel-column middle-column">
           <MapPanel
+            worldState={worldState}
             selectedActorId={selectedActorId}
             onSelectActor={setSelectedActorId}
             scenarioId={worldState?.scenario_id || ''}
