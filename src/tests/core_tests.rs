@@ -343,11 +343,127 @@ fn test_scenario_all_metrics_valid() {
     let rome_scenario = registry::load_by_id("rome_375").unwrap();
     let rome_result = registry::validate_scenario(&rome_scenario);
     assert!(rome_result.is_ok(), "Rome 375 should pass validation: {:?}", rome_result.err());
-    
+
     // Validate constantinople_1430 scenario
     let constantinople_scenario = registry::load_by_id("constantinople_1430").unwrap();
     let constantinople_result = registry::validate_scenario(&constantinople_scenario);
     assert!(constantinople_result.is_ok(), "Constantinople 1430 should pass validation: {:?}", constantinople_result.err());
+}
+
+#[test]
+fn test_actor_collapse_deterministic_no_freeze() {
+    // Test that actors collapse deterministically and don't freeze in near-dead state
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add byzantium actor with metrics that will trigger collapse
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            let mut byzantium = actor.clone();
+            // Set metrics to trigger classic collapse
+            byzantium.set_metric("legitimacy", 8.0);  // < 10
+            byzantium.set_metric("cohesion", 12.0);   // < 15
+            byzantium.set_metric("external_pressure", 90.0);  // > 85
+            world.actors.insert(actor.id.clone(), byzantium);
+            break;
+        }
+    }
+    
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Run 10 ticks - actor should collapse
+    let mut collapse_tick = None;
+    for tick_num in 0..10 {
+        // Check counter before tick
+        let counter_before = world.collapse_warning_ticks.get("byzantium").copied().unwrap_or(0);
+        
+        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+        
+        if world.dead_actor_ids.contains("byzantium") && collapse_tick.is_none() {
+            collapse_tick = Some(world.tick);
+        }
+        
+        // Check counter after tick
+        let counter_after = world.collapse_warning_ticks.get("byzantium").copied().unwrap_or(0);
+        println!("tick {}: counter {} -> {}, collapsed={}", tick_num, counter_before, counter_after, world.dead_actor_ids.contains("byzantium"));
+    }
+    
+    // Verify collapse happened exactly once and within expected timeframe
+    assert!(collapse_tick.is_some(), "Byzantium should have collapsed within 10 ticks, but didn't - freeze detected! counters: see output above");
+    
+    // Verify no zombie state - actor should be in dead_actors, not in actors
+    assert!(!world.actors.contains_key("byzantium"), "Collapsed actor should be removed from actors");
+    assert!(world.dead_actors.iter().any(|d| d.id == "byzantium"), "Collapsed actor should be in dead_actors");
+}
+
+#[test]
+fn test_actor_collapse_no_oscillation_freeze() {
+    // Test that actors don't freeze due to metric oscillation
+    // This tests the fix for cumulative vs consecutive counter
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add byzantium actor
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Manually set dangerous state for 3 ticks, with temporary recovery in between
+    // This simulates oscillation that would cause freeze with consecutive counter
+    
+    // Tick 1: dangerous
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 2: temporary recovery (would reset consecutive counter)
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 50.0);
+        byz.set_metric("cohesion", 50.0);
+        byz.set_metric("external_pressure", 50.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 3: dangerous again
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 4: temporary recovery
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 50.0);
+        byz.set_metric("cohesion", 50.0);
+        byz.set_metric("external_pressure", 50.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 5: dangerous - should collapse (cumulative counter = 3)
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // With cumulative counter, collapse should happen by tick 5
+    // With consecutive counter, actor would oscillate forever
+    assert!(world.dead_actor_ids.contains("byzantium"), 
+        "Byzantium should have collapsed after 3 cumulative dangerous ticks - freeze due to oscillation!");
 }
 
 #[test]

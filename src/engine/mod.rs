@@ -177,6 +177,10 @@ pub fn tick(
         .map(|(id, actor)| (id.clone(), actor.metrics.clone()))
         .collect();
 
+    // Phase 0: Check collapse conditions on INITIAL state (before any modifications)
+    // This prevents freeze where auto_deltas/clamping "fix" metrics before collapse check
+    phase_collapse_check(world, scenario, event_log);
+
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
@@ -198,14 +202,22 @@ pub fn tick(
     // Phase 6: Events (thresholds, ranks, milestones, game mode, relevance)
     phase_events(world, scenario, event_log);
 
-    // Phase 7: Actor collapses
-    phase_collapses(world, scenario, event_log);
+    // Phase 7: Actor collapses (skip - already done in Phase 0)
+    // phase_collapses(world, scenario, event_log);
 
     // Phase 8: Record changes and generation mechanics
     phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
 
     // Phase 9: Advance tick state
     phase_advance(world, scenario);
+}
+
+// ============================================================================
+// Phase 0: Check Collapses (on initial state, before modifications)
+// ============================================================================
+
+fn phase_collapse_check(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+    check_collapses(world, scenario, event_log);
 }
 
 // ============================================================================
@@ -481,14 +493,6 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
             }
         }
     }
-}
-
-// ============================================================================
-// Phase 6: Actor collapses
-// ============================================================================
-
-fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
-    check_collapses(world, scenario, event_log);
 }
 
 // ============================================================================
@@ -1316,33 +1320,35 @@ fn check_collapses(
             }
         }
 
-        // Path 1: classic collapse (external pressure + internal weakness)
-        let classic_collapse =
-            actor.get_metric("legitimacy") < 10.0
-            && actor.get_metric("cohesion") < 15.0
-            && actor.get_metric("external_pressure") > 85.0;
-
-        // Path 2: internal collapse (civil war / disintegration without external threat)
-        let internal_collapse =
-            actor.get_metric("legitimacy") < 5.0
-            && actor.get_metric("cohesion") < 8.0;
-
-        let in_danger = classic_collapse || internal_collapse;
-
-        if in_danger {
-            // Increment warning counter
-            let counter = world.collapse_warning_ticks
-                .entry(actor_id.clone())
-                .or_insert(0);
+        // Check if actor has already entered terminal decline
+        let existing_counter = world.collapse_warning_ticks.get(actor_id).copied().unwrap_or(0);
+        
+        if existing_counter > 0 {
+            // Actor is already in terminal decline - collapse is inevitable
+            // Increment counter regardless of current metric state
+            let counter = world.collapse_warning_ticks.get_mut(actor_id).unwrap();
             *counter += 1;
-
-            // Collapse only after 3 consecutive dangerous ticks
+            
             if *counter >= 3 {
                 to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
             }
         } else {
-            // Reset counter if actor is no longer in danger
-            world.collapse_warning_ticks.remove(actor_id);
+            // Check if actor is entering terminal decline for the first time
+            // Path 1: classic collapse (external pressure + internal weakness)
+            let classic_collapse =
+                actor.get_metric("legitimacy") < 10.0
+                && actor.get_metric("cohesion") < 15.0
+                && actor.get_metric("external_pressure") > 85.0;
+
+            // Path 2: internal collapse (civil war / disintegration without external threat)
+            let internal_collapse =
+                actor.get_metric("legitimacy") < 5.0
+                && actor.get_metric("cohesion") < 8.0;
+
+            if classic_collapse || internal_collapse {
+                // Actor enters terminal decline
+                world.collapse_warning_ticks.insert(actor_id.clone(), 1);
+            }
         }
     }
 
