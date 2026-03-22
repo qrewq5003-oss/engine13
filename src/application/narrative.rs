@@ -305,8 +305,28 @@ pub async fn cmd_get_narrative(
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
-    // Build snapshot from state with db for canonical event scoring
-    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log, Some(db));
+    // Pre-select relevant events using canonical scorer
+    let foreground_actors: Vec<String> = world_state.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.clone())
+        .collect();
+    
+    let query_tags: Vec<String> = foreground_actors.iter()
+        .flat_map(|id| {
+            world_state.actors.get(id).map(|a| {
+                vec![a.id.clone(), a.name.clone(), a.region.clone()]
+            }).unwrap_or_default()
+        })
+        .collect();
+    
+    let recent_important_events = db.get_relevant_events_scored(
+        world_state.tick,
+        &query_tags,
+        &foreground_actors,
+    ).map_err(|e| format!("Failed to get relevant events: {}", e))?;
+
+    // Build snapshot from state with pre-selected events
+    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log, recent_important_events);
 
     let config = llm::get_llm_config();
     // Pass narrative memory for anti-repetition

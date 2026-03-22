@@ -336,8 +336,28 @@ async fn cmd_get_narrative(
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
 
-        // Build snapshot from state with db for canonical event scoring
-        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log, Some(&*db_guard));
+        // Pre-select relevant events using canonical scorer
+        let foreground_actors: Vec<String> = world_state.actors.values()
+            .filter(|a| a.narrative_status == engine13::NarrativeStatus::Foreground)
+            .map(|a| a.id.clone())
+            .collect();
+
+        let query_tags: Vec<String> = foreground_actors.iter()
+            .flat_map(|id| {
+                world_state.actors.get(id).map(|a| {
+                    vec![a.id.clone(), a.name.clone(), a.region.clone()]
+                }).unwrap_or_default()
+            })
+            .collect();
+
+        let recent_important_events = db_guard.get_relevant_events_scored(
+            world_state.tick,
+            &query_tags,
+            &foreground_actors,
+        ).unwrap_or_else(|_| vec![]);
+
+        // Build snapshot from state with pre-selected events
+        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log, recent_important_events);
 
         // Generate prompt using snapshot and narrative memory
         let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);

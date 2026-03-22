@@ -185,13 +185,12 @@ fn determine_world_focus(snapshot: &NarrativeWorldSnapshot) -> String {
 /// This is a pure function: it reads state but has no side effects.
 /// It does NOT call LLM, modify state, or write to DB.
 ///
-/// If `db` is provided, uses canonical scored event selection from db.
-/// Otherwise, falls back to simple filtering from event_log.
+/// Relevant events must be pre-selected using the canonical scorer before calling.
 pub fn build_snapshot(
     world: &WorldState,
     scenario: &Scenario,
     event_log: &EventLog,
-    db: Option<&crate::db::Db>,
+    recent_important_events: Vec<crate::core::Event>,
 ) -> NarrativeWorldSnapshot {
     // Half-year from tick
     let half_year = HalfYear::from_tick(world.tick);
@@ -219,34 +218,7 @@ pub fn build_snapshot(
         .map(|m| m.id.clone())
         .collect();
 
-    // Recent important events - use canonical scorer if db available
-    let recent_important_events: Vec<crate::core::Event> = if let Some(database) = db {
-        // Use canonical scored event selection
-        let query_tags: Vec<String> = foreground_actors.iter()
-            .flat_map(|id| {
-                // Build tags from actor id, name, region
-                world.actors.get(id).map(|a| {
-                    vec![a.id.clone(), a.name.clone(), a.region.clone()]
-                }).unwrap_or_default()
-            })
-            .collect();
-        
-        database.get_relevant_events_scored(world.tick, &query_tags, &foreground_actors)
-            .unwrap_or_else(|_| {
-                // Fallback to simple filtering on error
-                event_log.events.iter()
-                    .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
-                    .cloned()
-                    .collect()
-            })
-    } else {
-        // Fallback: simple filtering from event_log (backward compatible)
-        event_log.events.iter()
-            .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
-            .cloned()
-            .take(10)
-            .collect()
-    };
+    // Recent important events - pre-selected by canonical scorer (passed as parameter)
     
     // Recent player actions (last 5)
     let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
