@@ -342,13 +342,45 @@ async fn cmd_get_narrative(
             .map(|a| a.id.clone())
             .collect();
 
-        let query_tags: Vec<String> = foreground_actors.iter()
-            .flat_map(|id| {
-                world_state.actors.get(id).map(|a| {
-                    vec![a.id.clone(), a.name.clone(), a.region.clone()]
-                }).unwrap_or_default()
-            })
-            .collect();
+        // Build enriched query tags from multiple narrative-relevant sources
+        let query_tags: Vec<String> = {
+            use std::collections::HashSet;
+            let mut tags_set: HashSet<String> = HashSet::new();
+
+            for actor in world_state.actors.values() {
+                if actor.narrative_status == engine13::NarrativeStatus::Foreground {
+                    // Core identity tags
+                    tags_set.insert(actor.id.clone());
+                    tags_set.insert(actor.name.to_lowercase());
+                    tags_set.insert(actor.region.to_lowercase());
+
+                    // Semantic tags (e.g., "orthodoxy", "siege_defense", "trade_republic")
+                    for tag in &actor.tags {
+                        tags_set.insert(tag.to_lowercase());
+                    }
+
+                    // Religion and culture as narrative context
+                    tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                    tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+
+                    // Region rank as geopolitical context
+                    tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+                }
+            }
+
+            // Scenario-level narrative context (tone and thematic axes)
+            for tone_tag in &scenario.narrative_config.tone_tags {
+                tags_set.insert(tone_tag.to_lowercase());
+            }
+            for axis in &scenario.narrative_config.narrative_axes {
+                tags_set.insert(axis.to_lowercase());
+            }
+
+            // Convert to sorted vec for deterministic order
+            let mut tags: Vec<String> = tags_set.into_iter().collect();
+            tags.sort();
+            tags
+        };
 
         let recent_important_events = db_guard.get_relevant_events_scored(
             world_state.tick,

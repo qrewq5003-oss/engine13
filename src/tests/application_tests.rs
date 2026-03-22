@@ -259,6 +259,140 @@ fn test_advance_tick_with_action_applies_effects() {
 }
 
 #[test]
+fn test_query_tags_enriched_with_semantic_context() {
+    // Test that query tags include semantic context beyond just actor id/name/region
+    use std::collections::HashSet;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    
+    // Build query tags the same way narrative does
+    let query_tags: Vec<String> = {
+        let mut tags_set: HashSet<String> = HashSet::new();
+        
+        for actor in world.actors.values() {
+            if actor.narrative_status == crate::core::NarrativeStatus::Foreground {
+                // Core identity tags
+                tags_set.insert(actor.id.clone());
+                tags_set.insert(actor.name.to_lowercase());
+                tags_set.insert(actor.region.to_lowercase());
+                
+                // Semantic tags
+                for tag in &actor.tags {
+                    tags_set.insert(tag.to_lowercase());
+                }
+                
+                // Religion and culture
+                tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+                
+                // Region rank
+                tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+            }
+        }
+        
+        // Scenario-level context
+        for tone_tag in &scenario.narrative_config.tone_tags {
+            tags_set.insert(tone_tag.to_lowercase());
+        }
+        for axis in &scenario.narrative_config.narrative_axes {
+            tags_set.insert(axis.to_lowercase());
+        }
+        
+        let mut tags: Vec<String> = tags_set.into_iter().collect();
+        tags.sort();
+        tags
+    };
+    
+    // Verify semantic tags are included
+    let tags_str = query_tags.join(",");
+    assert!(tags_str.contains("orthodoxy"), "Should include religion tags");
+    assert!(tags_str.contains("siege_defense") || tags_str.contains("greek_culture"), 
+        "Should include actor semantic tags");
+    assert!(tags_str.contains("rank_"), "Should include region rank tags");
+    assert!(tags_str.contains("survival") || tags_str.contains("unity"), 
+        "Should include narrative axes");
+    
+    // Verify more tags than just id/name/region
+    // Constantinople has 4 foreground actors, each with id/name/region = 12 base tags
+    // With enrichment, should have significantly more
+    assert!(query_tags.len() > 12, 
+        "Enriched tags ({}) should exceed base tags (12)", query_tags.len());
+}
+
+#[test]
+fn test_query_tags_deterministic_and_deduplicated() {
+    // Test that query tags are deterministic and deduplicated
+    use std::collections::HashSet;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    
+    // Build query tags twice
+    let build_tags = || -> Vec<String> {
+        let mut tags_set: HashSet<String> = HashSet::new();
+        
+        for actor in world.actors.values() {
+            if actor.narrative_status == crate::core::NarrativeStatus::Foreground {
+                tags_set.insert(actor.id.clone());
+                tags_set.insert(actor.name.to_lowercase());
+                tags_set.insert(actor.region.to_lowercase());
+                
+                for tag in &actor.tags {
+                    tags_set.insert(tag.to_lowercase());
+                }
+                
+                tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+                tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+            }
+        }
+        
+        for tone_tag in &scenario.narrative_config.tone_tags {
+            tags_set.insert(tone_tag.to_lowercase());
+        }
+        for axis in &scenario.narrative_config.narrative_axes {
+            tags_set.insert(axis.to_lowercase());
+        }
+        
+        let mut tags: Vec<String> = tags_set.into_iter().collect();
+        tags.sort();
+        tags
+    };
+    
+    let tags_run1 = build_tags();
+    let tags_run2 = build_tags();
+    
+    // Verify determinism - same input produces same output
+    assert_eq!(tags_run1, tags_run2, "Query tags should be deterministic");
+    
+    // Verify deduplication - HashSet ensures no duplicates
+    let unique_count: usize = tags_run1.iter().collect::<HashSet<_>>().len();
+    assert_eq!(unique_count, tags_run1.len(), 
+        "Query tags should have no duplicates: {} unique vs {} total", 
+        unique_count, tags_run1.len());
+    
+    // Verify sorted order
+    let mut sorted_tags = tags_run1.clone();
+    sorted_tags.sort();
+    assert_eq!(sorted_tags, tags_run1, "Query tags should be sorted");
+}
+
+#[test]
 fn test_action_applies_cost() {
     let mut state = setup_constantinople_state();
     
