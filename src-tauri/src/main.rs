@@ -335,10 +335,10 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        
-        // Build snapshot from state (includes half_year)
-        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
-        
+
+        // Build snapshot from state with db for canonical event scoring
+        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log, Some(&*db_guard));
+
         // Generate prompt using snapshot and narrative memory
         let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);
         let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);

@@ -322,93 +322,10 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<crate::applic
 }
 
 /// Get relevant events with scoring based on importance, actor relevance, temporal decay, and narrative status
+/// Delegates to db.get_relevant_events_scored() as the canonical scorer.
 pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>, current_tick: u32, query_tags: Vec<String>) -> Result<Vec<Event>, String> {
-    // Fetch all events for the provided actor IDs
-    let mut all_events: Vec<Event> = Vec::new();
-    for actor_id in &actor_ids {
-        let events = db.get_events_by_actor(actor_id)
-            .map_err(|e| format!("Failed to get events: {}", e))?;
-        all_events.extend(events);
-    }
-
-    // Get current world state for narrative status lookup
-    // For now, we'll use a simplified approach - foreground actors get higher weight
-    let foreground_ids: Vec<String> = actor_ids;
-
-    // Score and sort events
-    let mut scored_events: Vec<(Event, f64)> = all_events
-        .into_iter()
-        .map(|event| {
-            let score = calculate_event_relevance(&event, &foreground_ids, current_tick, &query_tags);
-            (event, score)
-        })
-        .collect();
-
-    // Sort by score descending
-    scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Return top 20 events
-    Ok(scored_events.into_iter().take(20).map(|(e, _)| e).collect())
-}
-
-/// Calculate tag similarity between event tags and query tags
-/// Returns Jaccard-like similarity: matches / max(len(event_tags), len(query_tags))
-fn tag_similarity(event_tags: &[String], query_tags: &[String]) -> f64 {
-    if query_tags.is_empty() {
-        return 0.5;
-    }
-    
-    // Normalize to lowercase for comparison and remove duplicates
-    let query_set: std::collections::HashSet<String> = 
-        query_tags.iter().map(|t| t.to_lowercase()).collect();
-    let event_set: std::collections::HashSet<String> = 
-        event_tags.iter().map(|t| t.to_lowercase()).collect();
-    
-    let matches = event_set.iter().filter(|t| query_set.contains(t.as_str())).count();
-    let denom = event_set.len().max(query_set.len());
-    
-    if denom == 0 {
-        return 0.5;
-    }
-    
-    matches as f64 / denom as f64
-}
-
-/// Calculate relevance score for an event
-/// score = importance_weight * temporal_decay * narrative_weight * (0.25 + 0.75 * tag_similarity)
-fn calculate_event_relevance(event: &Event, foreground_ids: &[String], current_tick: u32, query_tags: &[String]) -> f64 {
-    use crate::EventType;
-
-    // Temporal decay - use step function based on age
-    let age_in_ticks = current_tick.saturating_sub(event.tick);
-    let temporal_decay = match age_in_ticks {
-        0..=2 => 1.0,
-        3..=5 => 0.7,
-        6..=10 => 0.4,
-        _ => 0.2,
-    };
-
-    // Event importance weight
-    let importance_weight = match event.event_type {
-        EventType::Collapse | EventType::Milestone => 3.0,
-        EventType::PlayerAction | EventType::War => 2.0,
-        _ => 1.0,
-    };
-
-    // Narrative status weight - foreground actors get higher weight
-    let narrative_weight = if foreground_ids.contains(&event.actor_id) {
-        1.5
-    } else {
-        1.0
-    };
-
-    // Tag similarity score
-    let tag_sim = tag_similarity(&event.tags, query_tags);
-
-    // Final score: base weights * (0.25 + 0.75 * tag_similarity)
-    // This ensures tag similarity contributes 75% to the final score
-    let base_score = importance_weight * temporal_decay * narrative_weight;
-    base_score * (0.25 + 0.75 * tag_sim)
+    // Delegate to canonical scorer in db layer
+    db.get_relevant_events_scored(current_tick, &query_tags, &actor_ids)
 }
 
 /// Status indicator state for UI

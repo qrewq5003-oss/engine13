@@ -305,8 +305,8 @@ pub async fn cmd_get_narrative(
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
-    // Build snapshot from state
-    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log);
+    // Build snapshot from state with db for canonical event scoring
+    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log, Some(db));
 
     let config = llm::get_llm_config();
     // Pass narrative memory for anti-repetition
