@@ -107,10 +107,18 @@ pub fn load_game(
     state.world_state = Some(world_state.clone());
     state.event_log = crate::engine::EventLog::new();
 
+    // Load scenario if not already loaded or if scenario changed
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
         let scenario = crate::scenarios::registry::load_by_id(&db_save.scenario_id)
             .ok_or_else(|| format!("Unknown scenario: {}", db_save.scenario_id))?;
+        
+        // Restore generation_mechanics and generation_length from scenario for family continuity
+        world_state.generation_mechanics = scenario.generation_mechanics.clone();
+        world_state.generation_length = scenario.generation_length;
+        world_state.global_metrics_display = scenario.global_metrics_display.clone();
+        
         state.current_scenario = Some(scenario);
+        state.world_state = Some(world_state.clone());
     }
 
     Ok(crate::commands::LoadResponse { success: true, world_state: Some(world_state), error: None })

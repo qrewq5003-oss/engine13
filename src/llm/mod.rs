@@ -69,6 +69,16 @@ pub struct NarrativeWorldSnapshot {
     pub game_mode: crate::core::GameMode,
     /// Actors that collapsed this tick: (actor_name, successor_ids)
     pub collapsed_this_tick: Vec<(String, Vec<String>)>,
+    /// Family state for family-based scenarios (generation count, patriarch age)
+    pub family_info: Option<FamilyInfo>,
+}
+
+/// Family information for narrative snapshot
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FamilyInfo {
+    pub generation_count: u32,
+    pub patriarch_age: u32,
+    pub generation_length: Option<u32>,
 }
 
 /// Minimal narrative memory for anti-repetition across turns
@@ -272,6 +282,13 @@ pub fn build_snapshot(
         };
         key_metrics.insert(metric_key.clone(), value);
     }
+
+    // Family info for narrative continuity
+    let family_info = world.family_state.as_ref().map(|fs| FamilyInfo {
+        generation_count: fs.generation_count,
+        patriarch_age: fs.patriarch_age,
+        generation_length: world.generation_length,
+    });
     
     // Narrative axes and tone tags from config
     let narrative_axes = scenario.narrative_config.narrative_axes.clone();
@@ -316,6 +333,7 @@ pub fn build_snapshot(
         tone_tags,
         game_mode: world.game_mode,
         collapsed_this_tick,
+        family_info,
     }
 }
 
