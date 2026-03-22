@@ -91,6 +91,174 @@ fn test_get_available_actions_constantinople() {
 }
 
 #[test]
+fn test_action_effects_applied() {
+    // Test that action effects are applied to world state
+    let mut state = setup_constantinople_state();
+
+    // Get initial federation progress
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Get initial genoa cohesion
+    let initial_genoa_cohesion = state.world_state.as_ref().unwrap()
+        .actors.get("genoa")
+        .map(|a| a.get_metric("cohesion"))
+        .unwrap_or(0.0);
+
+    // Apply venice_diplomacy (effects: +5 federation_progress, +2 genoa.cohesion)
+    // With venice weight of 2.0 for federation_progress, effect should be +10
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    let result = apply_player_action(&mut state, &action_input);
+    assert!(result.is_ok(), "apply_player_action failed: {:?}", result);
+
+    // Check federation progress was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Venice has weight 2.0 for federation_progress, so effect should be 5.0 * 2.0 = 10.0
+    assert!((final_federation - (initial_federation + 10.0)).abs() < 0.01,
+        "Federation progress should increase by 10 (5 * 2.0 weight): initial={}, final={}", 
+        initial_federation, final_federation);
+
+    // Check genoa cohesion was increased
+    let final_genoa_cohesion = state.world_state.as_ref().unwrap()
+        .actors.get("genoa")
+        .map(|a| a.get_metric("cohesion"))
+        .unwrap_or(0.0);
+
+    // No weight for genoa.cohesion, so effect should be 2.0
+    assert!((final_genoa_cohesion - (initial_genoa_cohesion + 2.0)).abs() < 0.01,
+        "Genoa cohesion should increase by 2: initial={}, final={}", 
+        initial_genoa_cohesion, final_genoa_cohesion);
+}
+
+#[test]
+fn test_action_applies_cost_and_effects_together() {
+    // Test that both cost AND effects are applied in the same action
+    let mut state = setup_constantinople_state();
+
+    // Get initial venice treasury
+    let initial_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.get_metric("treasury"))
+        .unwrap_or(0.0);
+
+    // Get initial federation progress
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Apply venice_diplomacy (cost: -30 treasury, effect: +10 federation with weight)
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    let (effects, costs) = apply_player_action(&mut state, &action_input).unwrap();
+
+    // Verify both cost and effect were applied
+    assert!(!effects.is_empty(), "Effects should not be empty");
+    assert!(!costs.is_empty(), "Costs should not be empty");
+
+    // Verify treasury was deducted
+    let final_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.get_metric("treasury"))
+        .unwrap_or(0.0);
+    assert!((final_treasury - (initial_treasury - 30.0)).abs() < 0.01,
+        "Treasury should be reduced by 30");
+
+    // Verify federation was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    assert!((final_federation - (initial_federation + 10.0)).abs() < 0.01,
+        "Federation should increase by 10");
+}
+
+#[test]
+fn test_action_effects_persist_through_tick() {
+    // Test that action effects persist after full tick processing
+    use rand::SeedableRng;
+    use crate::engine::tick;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    world.global_metrics.insert("federation_progress".to_string(), 0.0);
+    
+    // Get initial federation
+    let initial_federation = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    
+    // Apply action directly to world state (simulating what apply_player_action does)
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Apply federation effect with venice weight (2.0)
+    let federation_effect = 5.0 * 2.0; // base effect * weight
+    crate::core::MetricRef::parse("global:federation_progress").apply(&mut world, federation_effect);
+    
+    // Run full tick
+    tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Check federation persisted after tick
+    let final_federation = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    
+    // Federation should still be increased (may be modified by auto_deltas, but should be > initial)
+    assert!(final_federation > initial_federation,
+        "Federation should persist after tick: initial={}, final={}", initial_federation, final_federation);
+}
+
+#[test]
+fn test_advance_tick_with_action_applies_effects() {
+    // Test that advance_tick correctly applies action effects through the full pipeline
+    use crate::commands::{advance_tick, PlayerActionInput};
+    
+    let mut state = setup_constantinople_state();
+    
+    // Get initial federation
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    
+    // Advance tick with action
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    
+    let result = advance_tick(&mut state, Some(action_input));
+    assert!(result.is_ok(), "advance_tick should succeed: {:?}", result);
+    
+    // Check federation was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    
+    // Federation should be increased by action effect (5.0 * 2.0 weight = 10.0)
+    // May be modified by auto_deltas, but should be > initial
+    assert!(final_federation > initial_federation,
+        "Federation should increase after action+tick: initial={}, final={}", 
+        initial_federation, final_federation);
+}
+
+#[test]
 fn test_action_applies_cost() {
     let mut state = setup_constantinople_state();
     
