@@ -1383,6 +1383,9 @@ fn check_collapses(
 
             // Remove from active actors
             world.actors.remove(&actor_id);
+            
+            // Clean up collapse warning counter
+            world.collapse_warning_ticks.remove(&actor_id);
         }
 
         // Create successors (simplified - just add with split metrics)
@@ -1399,6 +1402,35 @@ fn check_collapses(
                     );
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
+                    world.actors.insert(successor.id.clone(), new_actor);
+                } else {
+                    // No template found - create minimal successor to prevent actor disappearing
+                    eprintln!("[COLLAPSE] Warning: No template found for successor '{}', creating minimal successor", successor.id);
+                    let new_actor = crate::core::Actor {
+                        id: successor.id.clone(),
+                        name: successor.id.clone(),
+                        name_short: successor.id.clone(),
+                        region: successor.id.clone(),
+                        region_rank: crate::core::RegionRank::D,
+                        era: crate::core::Era::LateMedieval,
+                        narrative_status: crate::core::NarrativeStatus::Foreground,
+                        tags: vec!["successor_state".to_string()],
+                        metrics: split_metrics_for_successor(
+                            &HashMap::new(),
+                            successor.weight,
+                            successors.len(),
+                        ),
+                        scenario_metrics: HashMap::new(),
+                        neighbors: vec![],
+                        on_collapse: vec![],
+                        actor_tags: HashMap::new(),
+                        center: None,
+                        is_successor_template: false,
+                        religion: crate::core::Religion::Orthodox,
+                        culture: crate::core::Culture::Slavic,
+                        minimum_survival_ticks: None,
+                        leader: None,
+                    };
                     world.actors.insert(successor.id.clone(), new_actor);
                 }
             }
