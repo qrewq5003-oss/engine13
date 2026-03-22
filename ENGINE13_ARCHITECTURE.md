@@ -752,10 +752,21 @@ treasury:          noise: 0.2
 
 ### Смерть и рождение акторов
 
-**Смерть** — комбинация держится 3+ тика:
+**Collapse conditions:**
 ```
-legitimacy < 10 И cohesion < 15 И external_pressure > 85
+Classic collapse:
+  legitimacy < 10 И cohesion < 15 И external_pressure > 85
+
+Internal collapse:
+  legitimacy < 5 И cohesion < 8
 ```
+
+**Deterministic terminal decline:**
+- Collapse check происходит на Phase 0 — до любых модификаций метрик
+- Как только actor входит в dangerous state, counter increment starts
+- После 3 cumulative ticks в dangerous state — collapse inevitable
+- Counter НЕ reset при временном восстановлении метрик
+- Это предотвращает freeze где actor oscillates между danger/safety бесконечно
 
 **Рождение:**
 - Раскол — метрики делятся пропорционально population и geography
@@ -772,6 +783,7 @@ legitimacy < 10 И cohesion < 15 И external_pressure > 85
   ]
   ```
 - Фоновые: процедурный раскол с равными весами (1/N), LLM придумывает название
+- Fallback: если template не найден в сценарии, создаётся minimal successor
 
 **Формула раскола:**
 ```
@@ -794,33 +806,33 @@ external_pressure: родитель × 1.3 // враги чувствуют сл
 Фиксированный порядок — менять нельзя, влияет на результат симуляции.
 
 ```
-1.  Действие игрока применяется до вызова tick() в application layer
-2.  Автономные дельты (auto_deltas + treasury)
-3.  Region rank bonuses (фиксированные дельты и legitimacy floor)
-4.  Граф зависимостей + взаимодействия акторов:
-    4а. Торговля
-    4б. Культурное влияние
-    4в. Дипломатия / союзы
-    4г. Военное давление
-    4д. Миграция
-5.  Случайные события
-6.  Actor tag effects
-7.  Clamp всех метрик в 0..100
-8.  Пороговые эффекты, rank_conditions, milestone_events, relevance
-9.  Collapse акторов + создание наследников (в одной фазе)
-10. Запись изменений + generation mechanics
-11. Advance tick (tick++, year += tick_span)
+0.  Collapse check (на INITIAL state, до любых модификаций)
+1.  Автономные дельты (auto_deltas + treasury)
+2.  Region rank bonuses (фиксированные дельты и legitimacy floor)
+3.  Граф зависимостей + взаимодействия акторов:
+    3а. Торговля
+    3б. Культурное влияние
+    3в. Дипломатия / союзы
+    3г. Военное давление
+    3д. Миграция
+4.  Случайные события
+5.  Actor tag effects
+6.  Clamp всех метрик в 0..100
+7.  Пороговые эффекты, rank_conditions, milestone_events, relevance
+8.  Запись изменений + generation mechanics
+9.  Advance tick (tick++, year = start_year + tick/2)
 ```
 
 **Примечания:**
+- Действие игрока применяется ДО tick() в application layer (advance_tick с action)
+- Collapse check на Phase 0 — до любых модификаций, чтобы предотвратить freeze
 - Рождение фоновых акторов (не наследников) не реализовано
 - LLM триггеры и снапшоты управляются на уровне application, не внутри tick()
-- Релевантность событий проверяется внутри шага 8, не отдельной фазой
+- Релевантность событий проверяется внутри шага 7, не отдельной фазой
 
 **Логика порядка:**
-- Действие игрока первым — влияет на весь тик
+- Collapse первым — метрики ещё не изменены auto_deltas/clamping
 - Миграция последней из взаимодействий — она результат давления, не причина
-- Collapse до наследников — сначала коллапс, потом создание преемников
 - Clamp до пороговых эффектов — метрики валидны перед проверкой условий
 
 ---
@@ -902,18 +914,40 @@ actor: {
 
 ## Время
 
-Триггерная модель — не real-time.
+**Контракт: 2 тика = 1 год**
 
-**Цикл:** игрок видит мир → принимает решение → тик → движок считает → LLM если нужно → игрок читает.
+```
+year = start_year + (tick / 2)
+
+half_year определяется из tick % 2:
+  tick % 2 == 0 → первая половина (January-June)
+  tick % 2 == 1 → вторая половина (July-December)
+```
+
+**Примеры:**
+```
+tick 0  → year = start_year, первая половина
+tick 1  → year = start_year, вторая половина
+tick 2  → year = start_year + 1, первая половина
+tick 3  → year = start_year + 1, вторая половина
+```
+
+**Триггерная модель — не real-time:**
+
+Цикл: игрок видит мир → принимает решение → тик → движок считает → LLM если нужно → игрок читает.
 
 ```
 scenario: {
   tempo: 1.0,
-  tick_label: "год"
+  tick_label: "полгода"
 }
 ```
 
 Rome 375 → tempo 1.5 | Britain 1760 → tempo 0.7
+
+**Сохранение/загрузка:**
+- `year` пересчитывается при загрузке из `tick` и `scenario.start_year`
+- Это обеспечивает совместимость даже если сохранение было сделано со старым year
 
 ---
 
@@ -927,7 +961,6 @@ generation_mechanics: {
   enabled: true,
   head_metric: "patriarch",     // имя персонажа в scenario_metrics
   start_age: 42,
-  tick_span_years: 5,           // лет за тик
 
   transfer_trigger: {
     age: 75,                    // обычная передача
@@ -951,6 +984,11 @@ generation_mechanics: {
 }
 ```
 
+**Время и поколения:**
+- 2 тика = 1 год
+- patriarch_age увеличивается только на even ticks (первая половина года)
+- Это обеспечивает 1 год старения за 2 тика
+
 При срабатывании:
 - LLM генерирует сцену передачи власти
 - is_key событие записывается в хранилище
@@ -962,7 +1000,26 @@ generation_mechanics: {
 
 ## Взаимодействие игрока
 
-Динамические patron_actions — список генерируется движком каждый тик.
+**Patron action pipeline (verified):**
+```
+advance_tick(state, action_input)
+  → apply_player_action(state, action_input)
+    → Check actions_per_tick limit
+    → Find action in scenario.patron_actions
+    → Check availability (conditions)
+    → Apply cost via MetricRef::apply()
+    → Apply effects via MetricRef::apply() with weights
+    → Record event to event_log
+    → Increment actions_this_tick
+  → tick(world_state, scenario, event_log, rng)
+    → All simulation phases process
+  → Return AdvanceTickResponse with final world_state
+```
+
+**Cost и effects применяются детерминированно:**
+- Cost списывается через MetricRef::apply() — treasury может быть отрицательным
+- Effects применяются с scenario.global_metric_weights
+- Effects persist через tick processing (могут быть modified auto_deltas)
 
 ```
 action: {
@@ -980,7 +1037,7 @@ action: {
 }
 ```
 
-Cost — прямые изменения метрик при выборе действия. Применяются на шаге 2 порядка операций. В treasury delta: `action_cost = action.cost.treasury если действие было, иначе 0`.
+Cost — прямые изменения метрик при выборе действия. Применяются на шаге 1 порядка операций. В treasury delta: `action_cost = action.cost.treasury если действие было, иначе 0`.
 
 **Универсальные действия** — для режимов consequences и free:
 ```
@@ -1046,6 +1103,68 @@ free → ничего:           финальное состояние
 ---
 
 ## LLM
+
+**Canonical relevance pipeline:**
+
+```
+WorldState → narrative_actor_ids → query_tags → relevant_events → NarrativeWorldSnapshot
+```
+
+**query_tags строятся из:**
+- Core identity: actor id, name, region
+- Semantic tags: actor.tags (e.g., "orthodoxy", "siege_defense")
+- Religion: "religion_orthodox", "religion_catholic"
+- Culture: "culture_greek", "culture_latin"
+- Region rank: "rank_s", "rank_a", "rank_b"
+- Scenario tone_tags: "formal chronicle", "epic scope"
+- Scenario narrative_axes: "survival vs surrender"
+
+Все теги lowercased, deduplicated, sorted для determinism.
+
+**relevant_events отбираются через:**
+```
+relevance = thematic_similarity × temporal_coefficient
+
+thematic_similarity = matching_tags / max(event_tags.len(), query_tags.len())
+
+temporal_coefficient:
+  0-10 тиков назад   → 1.0
+  11-30 тиков назад  → 0.7
+  31-60 тиков назад  → 0.4
+  61-100 тиков назад → 0.2
+  100+ тиков назад   → 0.05
+
+is_key события: minimum 0.3
+```
+
+**Final selection:**
+- Top 15 by relevance score
+- Last 5 events always included
+- is_key events from narrative actors always included
+- Deduplicated by event id
+
+**NarrativeWorldSnapshot:**
+```
+snapshot: {
+  year: i32,
+  half_year: HalfYear,
+  alive_actors: Vec<String>,
+  dead_actors: Vec<String>,
+  victory_achieved: bool,
+  foreground_actors: Vec<String>,
+  key_milestones_fired: Vec<String>,
+  recent_important_events: Vec<Event>,
+  recent_player_actions: Vec<PlayerActionSummary>,
+  key_metrics: HashMap<String, f64>,
+  narrative_axes: Vec<String>,
+  tone_tags: Vec<String>,
+  game_mode: GameMode,
+  collapsed_this_tick: Vec<(String, Vec<String>)>,
+  family_info: Option<FamilyInfo>  // generation_count, patriarch_age
+}
+```
+
+**Prompt builder reads snapshot only** — не имеет прямого доступа к WorldState или Db.
 
 **Три триггера:**
 - Действие игрока — всегда
