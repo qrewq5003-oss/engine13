@@ -170,6 +170,13 @@ pub fn load_scenario(
     // Set features from scenario
     world_state.features = Some(scenario.features.clone());
 
+    // Debug: log features for Rome 375
+    if scenario_id == "rome_375" {
+        eprintln!("[SAVE_LOAD] Rome 375 scenario.features: {:?}", scenario.features);
+        eprintln!("[SAVE_LOAD] Rome 375 world_state.features: {:?}", world_state.features);
+        eprintln!("[SAVE_LOAD] Rome 375 family_state: {:?}", world_state.family_state.is_some());
+    }
+
     // Initialize RNG from world state seed
     use rand::SeedableRng;
     state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));

@@ -20,6 +20,12 @@ fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13:
     })?;
 
     eprintln!("[RUST] cmd_get_world_state - returning state: {:?}", s.world_state.is_some());
+    if let Some(ref world) = s.world_state {
+        eprintln!("[RUST] cmd_get_world_state - scenario_id: {}", world.scenario_id);
+        eprintln!("[RUST] cmd_get_world_state - features: {:?}", world.features);
+        eprintln!("[RUST] cmd_get_world_state - family_state: {:?}", world.family_state.is_some());
+        eprintln!("[RUST] cmd_get_world_state - features.family_panel: {:?}", world.features.as_ref().map(|f| f.family_panel));
+    }
     Ok(s.world_state.clone())
 }
 
