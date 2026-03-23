@@ -157,6 +157,15 @@ const App: React.FC = () => {
       ]);
 
       if (world) {
+        // Debug: log features for Rome 375
+        if (world.scenario_id === 'rome_375') {
+          console.log('[App] Rome 375 worldState:', {
+            features: world.features,
+            family_state: world.family_state ? 'present' : 'missing',
+            scenario_start_year: world.scenario_start_year,
+            generation_length: world.generation_length,
+          });
+        }
         // Save previous world state before updating
         if (worldState) {
           prevWorldStateRef.current = worldState;
@@ -439,6 +448,16 @@ const App: React.FC = () => {
             isLoading={narrativeLoading}
           />
           {worldState.features?.family_panel && (
+            <FamilyPanel
+              worldState={worldState}
+              currentYear={worldState.year}
+              currentTick={worldState.tick}
+            />
+          )}
+          {/* Fallback: show FamilyPanel for Rome 375 if family_state exists but features flag is missing */}
+          {worldState.scenario_id === 'rome_375' && 
+           worldState.family_state && 
+           !worldState.features?.family_panel && (
             <FamilyPanel
               worldState={worldState}
               currentYear={worldState.year}

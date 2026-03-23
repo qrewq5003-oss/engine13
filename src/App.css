@@ -165,7 +165,9 @@ body {
 
 .middle-column {
   min-width: 240px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .right-column {

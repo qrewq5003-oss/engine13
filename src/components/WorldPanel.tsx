@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Actor, WorldState } from '../types';
 import ActorDetailPanel from './ActorDetailPanel';
 import './WorldPanel.css';
@@ -10,6 +10,8 @@ interface WorldPanelProps {
   prevWorldState: WorldState | null;
 }
 
+const STORAGE_KEY = 'engine13_pinned_actors';
+
 export const WorldPanel: React.FC<WorldPanelProps> = ({
   actors,
   selectedActorId,
@@ -17,15 +19,51 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
   prevWorldState,
 }) => {
   const [detailActor, setDetailActor] = useState<Actor | null>(null);
+  const [pinnedActors, setPinnedActors] = useState<Set<string>>(new Set());
 
-  // Sort actors: foreground first, then by name
+  // Load pinned actors from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const pinned: string[] = JSON.parse(stored);
+        setPinnedActors(new Set(pinned));
+      }
+    } catch (e) {
+      console.error('Failed to load pinned actors:', e);
+    }
+  }, []);
+
+  // Save pinned actors to localStorage when changed
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(pinnedActors)));
+    } catch (e) {
+      console.error('Failed to save pinned actors:', e);
+    }
+  }, [pinnedActors]);
+
+  const togglePin = (actorId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPinnedActors(prev => {
+      const next = new Set(prev);
+      if (next.has(actorId)) {
+        next.delete(actorId);
+      } else {
+        next.add(actorId);
+      }
+      return next;
+    });
+  };
+
+  // Sort actors: pinned first, then foreground, then by name
   const sortedActors = [...actors].sort((a, b) => {
-    if (a.narrative_status === 'foreground' && b.narrative_status === 'background') {
-      return -1;
-    }
-    if (a.narrative_status === 'background' && b.narrative_status === 'foreground') {
-      return 1;
-    }
+    const aPinned = pinnedActors.has(a.id);
+    const bPinned = pinnedActors.has(b.id);
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+    if (a.narrative_status === 'foreground' && b.narrative_status === 'background') return -1;
+    if (a.narrative_status === 'background' && b.narrative_status === 'foreground') return 1;
     return a.name.localeCompare(b.name);
   });
 
@@ -47,6 +85,15 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
           >
             <div className="actor-header">
               <span className="actor-name">{actor.name_short}</span>
+              <div className="actor-actions">
+                <button
+                  className={`pin-button ${pinnedActors.has(actor.id) ? 'pinned' : ''}`}
+                  onClick={(e) => togglePin(actor.id, e)}
+                  title={pinnedActors.has(actor.id) ? 'Unpin actor' : 'Pin actor'}
+                >
+                  📌
+                </button>
+              </div>
               <span className={`actor-status ${actor.narrative_status}`}>
                 {actor.narrative_status === 'foreground' ? '●' : '○'}
               </span>

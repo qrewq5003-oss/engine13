@@ -16,17 +16,29 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   // Use family_state if available
   const familyState = worldState.family_state;
   const genMechanics = worldState.generation_mechanics;
-  
+
   if (!familyState || !genMechanics) {
     return <div className="family-panel">No family data available</div>;
   }
 
-  // Dynamically render all family metrics from family_state
-  const familyMetrics = Object.entries(familyState.metrics).map(([key, value]) => ({
-    key,
-    label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    value: value as number,
-  }));
+  // Rome 375 specific: render exactly these 4 stats in fixed order
+  const romeFamilyStatKeys = [
+    'family_influence',
+    'family_knowledge',
+    'family_wealth',
+    'family_connections',
+  ];
+
+  const familyMetrics = romeFamilyStatKeys
+    .map((key) => {
+      const value = familyState.metrics[key] ?? 0;
+      return {
+        key,
+        label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        value,
+      };
+    })
+    .filter((m) => m.value !== undefined);
 
   // Get patriarch age from family_state
   const patriarchAge = familyState.patriarch_age;

@@ -56,12 +56,38 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 4px;
+  gap: 8px;
 }
 
 .actor-name {
   font-size: 13px;
   font-weight: 600;
   color: #cdd6f4;
+  flex: 1;
+}
+
+.actor-actions {
+  display: flex;
+  align-items: center;
+}
+
+.pin-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.4;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.pin-button:hover {
+  opacity: 0.8;
+  transform: scale(1.1);
+}
+
+.pin-button.pinned {
+  opacity: 1;
 }
 
 .actor-status {

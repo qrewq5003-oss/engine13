@@ -118,6 +118,9 @@ pub struct WorldState {
     pub global_metrics_display: Vec<crate::core::MetricDisplay>,
     /// Generation mechanics (from scenario, for family scenarios)
     pub generation_mechanics: Option<crate::core::GenerationMechanics>,
+    /// Feature flags for UI (derived from scenario config, not authoritative)
+    /// Source of truth remains scenario.features - this is a convenience cache
+    pub features: Option<crate::core::ScenarioFeatures>,
 }
 
 impl WorldState {
@@ -159,6 +162,7 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            features: None,
         }
     }
 
@@ -195,6 +199,7 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            features: None,
         }
     }
 

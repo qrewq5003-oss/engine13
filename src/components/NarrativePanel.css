@@ -3,9 +3,9 @@
   border: 1px solid #4a3b6e;
   border-radius: 8px;
   padding: 16px;
-  margin-bottom: 16px;
   overflow-y: auto;
-  max-height: 300px;
+  max-height: 250px;
+  flex-shrink: 0;
 }
 
 .narrative-title {

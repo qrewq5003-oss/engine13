@@ -167,6 +167,9 @@ pub fn load_scenario(
     // Set generation_mechanics from scenario
     world_state.generation_mechanics = scenario.generation_mechanics.clone();
 
+    // Set features from scenario
+    world_state.features = Some(scenario.features.clone());
+
     // Initialize RNG from world state seed
     use rand::SeedableRng;
     state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));

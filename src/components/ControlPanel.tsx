@@ -101,7 +101,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               <div
                 key={actionInfo.action.id}
                 className={`action-item ${expandedAction === actionInfo.action.id ? 'expanded' : ''} ${!actionInfo.available ? 'unavailable' : ''}`}
-                onClick={() => actionInfo.available && handleActionClick(actionInfo.action.id)}
+                onClick={() => handleActionClick(actionInfo.action.id)}
               >
                 <div className="action-header">
                   <span className="action-name">{actionInfo.action.name}</span>

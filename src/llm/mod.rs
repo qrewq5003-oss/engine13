@@ -710,11 +710,11 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     // Section 7: Recent Important Events (Top 5 as Evidence)
     // ========================================================================
-    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (используй как доказательства, не как чек-лист) ===\n");
-    
+    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (включи в хронику) ===\n");
+
     // Limit to top 5 events
     let events_to_show: Vec<_> = snapshot.recent_important_events.iter().take(5).collect();
-    
+
     if events_to_show.is_empty() {
         prompt.push_str("Нет недавних событий.\n");
     } else {
@@ -722,8 +722,9 @@ pub fn generate_narrative_prompt(
             prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
         }
     }
-    prompt.push_str("\nИспользуй эти события как доказательства, а не как обязательный список для пересказа.\n");
-    prompt.push_str("Не описывай их по одному, если одно событие явно доминирует в этой половине года.\n\n");
+    prompt.push_str("\nВАЖНО: Включи эти события в хронику — это фактическая основа повествования.\n");
+    prompt.push_str("Не игнорируй их. Используй как конкретные факты для построения нарратива.\n");
+    prompt.push_str("Если событие ключевое (KEY) — оно должно быть отражено в хронике.\n\n");
 
     // ========================================================================
     // Section 8: Recent Player Actions (as Narrative Causes)

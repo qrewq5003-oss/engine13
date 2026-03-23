@@ -343,6 +343,10 @@
 }
 
 .action-item.unavailable .action-header {
+  cursor: pointer; /* Allow clicking to expand and view details */
+}
+
+.action-item.unavailable .action-submit-button {
   cursor: not-allowed;
 }
 

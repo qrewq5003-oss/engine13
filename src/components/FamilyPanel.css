@@ -2,10 +2,9 @@
   background: #1e1e2e;
   border-radius: 8px;
   padding: 16px;
-  height: 100%;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -67,7 +66,6 @@
 }
 
 .family-metrics {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
