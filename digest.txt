@@ -2,6 +2,7 @@ Directory structure:
 └── engine13/
     ├── Cargo.toml
     ├── ENGINE13_ARCHITECTURE.md
+    ├── ENGINE13_QWEN_TASKS.md
     ├── index.html
     ├── libpng16.pc
     ├── MIGRATION.md
@@ -937,10 +938,21 @@ treasury:          noise: 0.2
 
 ### Смерть и рождение акторов
 
-**Смерть** — комбинация держится 3+ тика:
+**Collapse conditions:**
 ```
-legitimacy < 10 И cohesion < 15 И external_pressure > 85
+Classic collapse:
+  legitimacy < 10 И cohesion < 15 И external_pressure > 85
+
+Internal collapse:
+  legitimacy < 5 И cohesion < 8
 ```
+
+**Deterministic terminal decline:**
+- Collapse check происходит на Phase 0 — до любых модификаций метрик
+- Как только actor входит в dangerous state, counter increment starts
+- После 3 cumulative ticks в dangerous state — collapse inevitable
+- Counter НЕ reset при временном восстановлении метрик
+- Это предотвращает freeze где actor oscillates между danger/safety бесконечно
 
 **Рождение:**
 - Раскол — метрики делятся пропорционально population и geography
@@ -957,6 +969,7 @@ legitimacy < 10 И cohesion < 15 И external_pressure > 85
   ]
   ```
 - Фоновые: процедурный раскол с равными весами (1/N), LLM придумывает название
+- Fallback: если template не найден в сценарии, создаётся minimal successor
 
 **Формула раскола:**
 ```
@@ -979,33 +992,33 @@ external_pressure: родитель × 1.3 // враги чувствуют сл
 Фиксированный порядок — менять нельзя, влияет на результат симуляции.
 
 ```
-1.  Действие игрока применяется до вызова tick() в application layer
-2.  Автономные дельты (auto_deltas + treasury)
-3.  Region rank bonuses (фиксированные дельты и legitimacy floor)
-4.  Граф зависимостей + взаимодействия акторов:
-    4а. Торговля
-    4б. Культурное влияние
-    4в. Дипломатия / союзы
-    4г. Военное давление
-    4д. Миграция
-5.  Случайные события
-6.  Actor tag effects
-7.  Clamp всех метрик в 0..100
-8.  Пороговые эффекты, rank_conditions, milestone_events, relevance
-9.  Collapse акторов + создание наследников (в одной фазе)
-10. Запись изменений + generation mechanics
-11. Advance tick (tick++, year += tick_span)
+0.  Collapse check (на INITIAL state, до любых модификаций)
+1.  Автономные дельты (auto_deltas + treasury)
+2.  Region rank bonuses (фиксированные дельты и legitimacy floor)
+3.  Граф зависимостей + взаимодействия акторов:
+    3а. Торговля
+    3б. Культурное влияние
+    3в. Дипломатия / союзы
+    3г. Военное давление
+    3д. Миграция
+4.  Случайные события
+5.  Actor tag effects
+6.  Clamp всех метрик в 0..100
+7.  Пороговые эффекты, rank_conditions, milestone_events, relevance
+8.  Запись изменений + generation mechanics
+9.  Advance tick (tick++, year = start_year + tick/2)
 ```
 
 **Примечания:**
+- Действие игрока применяется ДО tick() в application layer (advance_tick с action)
+- Collapse check на Phase 0 — до любых модификаций, чтобы предотвратить freeze
 - Рождение фоновых акторов (не наследников) не реализовано
 - LLM триггеры и снапшоты управляются на уровне application, не внутри tick()
-- Релевантность событий проверяется внутри шага 8, не отдельной фазой
+- Релевантность событий проверяется внутри шага 7, не отдельной фазой
 
 **Логика порядка:**
-- Действие игрока первым — влияет на весь тик
+- Collapse первым — метрики ещё не изменены auto_deltas/clamping
 - Миграция последней из взаимодействий — она результат давления, не причина
-- Collapse до наследников — сначала коллапс, потом создание преемников
 - Clamp до пороговых эффектов — метрики валидны перед проверкой условий
 
 ---
@@ -1087,18 +1100,40 @@ actor: {
 
 ## Время
 
-Триггерная модель — не real-time.
+**Контракт: 2 тика = 1 год**
 
-**Цикл:** игрок видит мир → принимает решение → тик → движок считает → LLM если нужно → игрок читает.
+```
+year = start_year + (tick / 2)
+
+half_year определяется из tick % 2:
+  tick % 2 == 0 → первая половина (January-June)
+  tick % 2 == 1 → вторая половина (July-December)
+```
+
+**Примеры:**
+```
+tick 0  → year = start_year, первая половина
+tick 1  → year = start_year, вторая половина
+tick 2  → year = start_year + 1, первая половина
+tick 3  → year = start_year + 1, вторая половина
+```
+
+**Триггерная модель — не real-time:**
+
+Цикл: игрок видит мир → принимает решение → тик → движок считает → LLM если нужно → игрок читает.
 
 ```
 scenario: {
   tempo: 1.0,
-  tick_label: "год"
+  tick_label: "полгода"
 }
 ```
 
 Rome 375 → tempo 1.5 | Britain 1760 → tempo 0.7
+
+**Сохранение/загрузка:**
+- `year` пересчитывается при загрузке из `tick` и `scenario.start_year`
+- Это обеспечивает совместимость даже если сохранение было сделано со старым year
 
 ---
 
@@ -1112,7 +1147,6 @@ generation_mechanics: {
   enabled: true,
   head_metric: "patriarch",     // имя персонажа в scenario_metrics
   start_age: 42,
-  tick_span_years: 5,           // лет за тик
 
   transfer_trigger: {
     age: 75,                    // обычная передача
@@ -1136,6 +1170,11 @@ generation_mechanics: {
 }
 ```
 
+**Время и поколения:**
+- 2 тика = 1 год
+- patriarch_age увеличивается только на even ticks (первая половина года)
+- Это обеспечивает 1 год старения за 2 тика
+
 При срабатывании:
 - LLM генерирует сцену передачи власти
 - is_key событие записывается в хранилище
@@ -1147,7 +1186,26 @@ generation_mechanics: {
 
 ## Взаимодействие игрока
 
-Динамические patron_actions — список генерируется движком каждый тик.
+**Patron action pipeline (verified):**
+```
+advance_tick(state, action_input)
+  → apply_player_action(state, action_input)
+    → Check actions_per_tick limit
+    → Find action in scenario.patron_actions
+    → Check availability (conditions)
+    → Apply cost via MetricRef::apply()
+    → Apply effects via MetricRef::apply() with weights
+    → Record event to event_log
+    → Increment actions_this_tick
+  → tick(world_state, scenario, event_log, rng)
+    → All simulation phases process
+  → Return AdvanceTickResponse with final world_state
+```
+
+**Cost и effects применяются детерминированно:**
+- Cost списывается через MetricRef::apply() — treasury может быть отрицательным
+- Effects применяются с scenario.global_metric_weights
+- Effects persist через tick processing (могут быть modified auto_deltas)
 
 ```
 action: {
@@ -1165,7 +1223,7 @@ action: {
 }
 ```
 
-Cost — прямые изменения метрик при выборе действия. Применяются на шаге 2 порядка операций. В treasury delta: `action_cost = action.cost.treasury если действие было, иначе 0`.
+Cost — прямые изменения метрик при выборе действия. Применяются на шаге 1 порядка операций. В treasury delta: `action_cost = action.cost.treasury если действие было, иначе 0`.
 
 **Универсальные действия** — для режимов consequences и free:
 ```
@@ -1231,6 +1289,68 @@ free → ничего:           финальное состояние
 ---
 
 ## LLM
+
+**Canonical relevance pipeline:**
+
+```
+WorldState → narrative_actor_ids → query_tags → relevant_events → NarrativeWorldSnapshot
+```
+
+**query_tags строятся из:**
+- Core identity: actor id, name, region
+- Semantic tags: actor.tags (e.g., "orthodoxy", "siege_defense")
+- Religion: "religion_orthodox", "religion_catholic"
+- Culture: "culture_greek", "culture_latin"
+- Region rank: "rank_s", "rank_a", "rank_b"
+- Scenario tone_tags: "formal chronicle", "epic scope"
+- Scenario narrative_axes: "survival vs surrender"
+
+Все теги lowercased, deduplicated, sorted для determinism.
+
+**relevant_events отбираются через:**
+```
+relevance = thematic_similarity × temporal_coefficient
+
+thematic_similarity = matching_tags / max(event_tags.len(), query_tags.len())
+
+temporal_coefficient:
+  0-10 тиков назад   → 1.0
+  11-30 тиков назад  → 0.7
+  31-60 тиков назад  → 0.4
+  61-100 тиков назад → 0.2
+  100+ тиков назад   → 0.05
+
+is_key события: minimum 0.3
+```
+
+**Final selection:**
+- Top 15 by relevance score
+- Last 5 events always included
+- is_key events from narrative actors always included
+- Deduplicated by event id
+
+**NarrativeWorldSnapshot:**
+```
+snapshot: {
+  year: i32,
+  half_year: HalfYear,
+  alive_actors: Vec<String>,
+  dead_actors: Vec<String>,
+  victory_achieved: bool,
+  foreground_actors: Vec<String>,
+  key_milestones_fired: Vec<String>,
+  recent_important_events: Vec<Event>,
+  recent_player_actions: Vec<PlayerActionSummary>,
+  key_metrics: HashMap<String, f64>,
+  narrative_axes: Vec<String>,
+  tone_tags: Vec<String>,
+  game_mode: GameMode,
+  collapsed_this_tick: Vec<(String, Vec<String>)>,
+  family_info: Option<FamilyInfo>  // generation_count, patriarch_age
+}
+```
+
+**Prompt builder reads snapshot only** — не имеет прямого доступа к WorldState или Db.
 
 **Три триггера:**
 - Действие игрока — всегда
@@ -1428,6 +1548,112 @@ get_scenario_list()
 ```
 
 **Принцип:** `advance_tick` и `generate_narrative` разделены — UI не блокируется пока LLM генерирует текст. Фронтенд показывает новое состояние мира сразу, нарратив подгружается отдельно.
+
+
+
+================================================
+FILE: ENGINE13_QWEN_TASKS.md
+================================================
+# ENGINE13 Qwen Tasks
+
+## Completed Phases (PR 1-7)
+
+### Phase 1 — Time Contract ✅
+- **2 ticks = 1 year** confirmed and documented
+- `year = start_year + (tick / 2)`
+- `half_year` from `tick % 2` (even = FirstHalf, odd = SecondHalf)
+- Save/load compatibility preserved (year recalculated on load)
+- Patriarch aging only on even ticks (1 year per 2 ticks)
+
+### Phase 2 — Relevance Pipeline Unification ✅
+- `db.rs::get_relevant_events_scored()` is canonical scorer
+- `commands.rs::get_relevant_events()` is thin wrapper
+- Single scoring formula: `thematic_similarity × temporal_coefficient`
+- Deterministic selection: top 15 + last 5 + is_key events
+
+### Phase 3 — Snapshot Contract ✅
+- `build_snapshot()` accepts pre-selected events (no `Option<Db>`)
+- Event selection happens BEFORE snapshot assembly
+- Query tags built from foreground actors before snapshot
+- Prompt builder reads only `NarrativeWorldSnapshot`
+
+### Phase 4 — Family Continuity ✅
+- `generation_mechanics` and `generation_length` restored on load
+- `FamilyInfo` added to `NarrativeWorldSnapshot`
+- Family state survives tick advance, generation transfer, save/load
+- Narrative layer can see family continuity via `family_info`
+
+### Phase 5 — Actor Collapse / Freeze Fix ✅
+- Collapse check moved to Phase 0 (before metric modifications)
+- Terminal decline is inevitable after 3 cumulative dangerous ticks
+- Counter NOT reset on temporary recovery (prevents oscillation freeze)
+- Fallback successor creation when template missing
+- Collapse warning counters cleaned up after actor removal
+
+### Phase 6 — Patron Action Pipeline ✅
+- Full execution order verified
+- Costs and effects applied correctly via `MetricRef::apply()`
+- Effects persist through tick processing
+- 4 regression tests added
+
+### Phase 7 — Query Tag Enrichment ✅
+- Enriched with: semantic tags, religion, culture, region rank
+- Scenario context: `tone_tags`, `narrative_axes`
+- All tags lowercased, deduplicated (HashSet), sorted
+- Deterministic output for consistent retrieval
+
+---
+
+## Current Baseline
+
+### Time Contract
+```
+year = start_year + (tick / 2)
+tick % 2 == 0 → FirstHalf (January-June)
+tick % 2 == 1 → SecondHalf (July-December)
+```
+
+### Relevance Pipeline
+```
+WorldState → narrative_actor_ids → query_tags → relevant_events → NarrativeWorldSnapshot
+```
+
+### Query Tags (enriched)
+- Core: actor id, name, region
+- Semantic: actor.tags
+- Religion: "religion_orthodox", etc.
+- Culture: "culture_greek", etc.
+- Rank: "rank_s", "rank_a", etc.
+- Scenario: tone_tags, narrative_axes
+
+### Collapse Behavior
+- Phase 0 check (before modifications)
+- 3 cumulative dangerous ticks → inevitable collapse
+- No reset on temporary recovery
+
+### Family Continuity
+- Persistent across simulation
+- Survives save/load
+- Visible in snapshot via `family_info`
+
+### Patron Actions
+- Cost and effects applied deterministically
+- Persist through tick processing
+
+---
+
+## Remaining Priorities
+
+None currently — all phases 1-7 complete.
+
+---
+
+## Notes
+
+- Do not modify time contract without updating this document
+- Any changes to tick/year logic must preserve save/load compatibility
+- Generation timing must remain synchronized with half-year model
+- Documentation should reflect implemented truth, not aspirational design
 
 
 
@@ -2182,7 +2408,7 @@ family_wealth (0-100): финансовая база, торговые связ�
 family_connections (0-100): сеть людей которые тебе должны
 
 МЕХАНИКА ПОКОЛЕНИЙ:
-Tick_span = 5 лет. Главы семьи сменяются.
+2 тика = 1 год. Главы семьи сменяются.
 Patriarch начинает в 42 года. При ~75 — передача власти.
 Новый глава наследует метрики семьи, характер генерируется заново.
 
@@ -5838,93 +6064,10 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<crate::applic
 }
 
 /// Get relevant events with scoring based on importance, actor relevance, temporal decay, and narrative status
+/// Delegates to db.get_relevant_events_scored() as the canonical scorer.
 pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>, current_tick: u32, query_tags: Vec<String>) -> Result<Vec<Event>, String> {
-    // Fetch all events for the provided actor IDs
-    let mut all_events: Vec<Event> = Vec::new();
-    for actor_id in &actor_ids {
-        let events = db.get_events_by_actor(actor_id)
-            .map_err(|e| format!("Failed to get events: {}", e))?;
-        all_events.extend(events);
-    }
-
-    // Get current world state for narrative status lookup
-    // For now, we'll use a simplified approach - foreground actors get higher weight
-    let foreground_ids: Vec<String> = actor_ids;
-
-    // Score and sort events
-    let mut scored_events: Vec<(Event, f64)> = all_events
-        .into_iter()
-        .map(|event| {
-            let score = calculate_event_relevance(&event, &foreground_ids, current_tick, &query_tags);
-            (event, score)
-        })
-        .collect();
-
-    // Sort by score descending
-    scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Return top 20 events
-    Ok(scored_events.into_iter().take(20).map(|(e, _)| e).collect())
-}
-
-/// Calculate tag similarity between event tags and query tags
-/// Returns Jaccard-like similarity: matches / max(len(event_tags), len(query_tags))
-fn tag_similarity(event_tags: &[String], query_tags: &[String]) -> f64 {
-    if query_tags.is_empty() {
-        return 0.5;
-    }
-    
-    // Normalize to lowercase for comparison and remove duplicates
-    let query_set: std::collections::HashSet<String> = 
-        query_tags.iter().map(|t| t.to_lowercase()).collect();
-    let event_set: std::collections::HashSet<String> = 
-        event_tags.iter().map(|t| t.to_lowercase()).collect();
-    
-    let matches = event_set.iter().filter(|t| query_set.contains(t.as_str())).count();
-    let denom = event_set.len().max(query_set.len());
-    
-    if denom == 0 {
-        return 0.5;
-    }
-    
-    matches as f64 / denom as f64
-}
-
-/// Calculate relevance score for an event
-/// score = importance_weight * temporal_decay * narrative_weight * (0.25 + 0.75 * tag_similarity)
-fn calculate_event_relevance(event: &Event, foreground_ids: &[String], current_tick: u32, query_tags: &[String]) -> f64 {
-    use crate::EventType;
-
-    // Temporal decay - use step function based on age
-    let age_in_ticks = current_tick.saturating_sub(event.tick);
-    let temporal_decay = match age_in_ticks {
-        0..=2 => 1.0,
-        3..=5 => 0.7,
-        6..=10 => 0.4,
-        _ => 0.2,
-    };
-
-    // Event importance weight
-    let importance_weight = match event.event_type {
-        EventType::Collapse | EventType::Milestone => 3.0,
-        EventType::PlayerAction | EventType::War => 2.0,
-        _ => 1.0,
-    };
-
-    // Narrative status weight - foreground actors get higher weight
-    let narrative_weight = if foreground_ids.contains(&event.actor_id) {
-        1.5
-    } else {
-        1.0
-    };
-
-    // Tag similarity score
-    let tag_sim = tag_similarity(&event.tags, query_tags);
-
-    // Final score: base weights * (0.25 + 0.75 * tag_similarity)
-    // This ensures tag similarity contributes 75% to the final score
-    let base_score = importance_weight * temporal_decay * narrative_weight;
-    base_score * (0.25 + 0.75 * tag_sim)
+    // Delegate to canonical scorer in db layer
+    db.get_relevant_events_scored(current_tick, &query_tags, &actor_ids)
 }
 
 /// Status indicator state for UI
@@ -7767,8 +7910,60 @@ pub async fn cmd_get_narrative(
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
 
-    // Build snapshot from state
-    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log);
+    // Pre-select relevant events using canonical scorer
+    let foreground_actors: Vec<String> = world_state.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.clone())
+        .collect();
+
+    // Build enriched query tags from multiple narrative-relevant sources
+    let query_tags: Vec<String> = {
+        use std::collections::HashSet;
+        let mut tags_set: HashSet<String> = HashSet::new();
+        
+        for actor in world_state.actors.values() {
+            if actor.narrative_status == crate::core::NarrativeStatus::Foreground {
+                // Core identity tags
+                tags_set.insert(actor.id.clone());
+                tags_set.insert(actor.name.to_lowercase());
+                tags_set.insert(actor.region.to_lowercase());
+                
+                // Semantic tags (e.g., "orthodoxy", "siege_defense", "trade_republic")
+                for tag in &actor.tags {
+                    tags_set.insert(tag.to_lowercase());
+                }
+                
+                // Religion and culture as narrative context
+                tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+                
+                // Region rank as geopolitical context
+                tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+            }
+        }
+        
+        // Scenario-level narrative context (tone and thematic axes)
+        for tone_tag in &scenario.narrative_config.tone_tags {
+            tags_set.insert(tone_tag.to_lowercase());
+        }
+        for axis in &scenario.narrative_config.narrative_axes {
+            tags_set.insert(axis.to_lowercase());
+        }
+        
+        // Convert to sorted vec for deterministic order
+        let mut tags: Vec<String> = tags_set.into_iter().collect();
+        tags.sort();
+        tags
+    };
+
+    let recent_important_events = db.get_relevant_events_scored(
+        world_state.tick,
+        &query_tags,
+        &foreground_actors,
+    ).map_err(|e| format!("Failed to get relevant events: {}", e))?;
+
+    // Build snapshot from state with pre-selected events
+    let snapshot = crate::llm::build_snapshot(world_state, scenario, &state.event_log, recent_important_events);
 
     let config = llm::get_llm_config();
     // Pass narrative memory for anti-repetition
@@ -7903,10 +8098,18 @@ pub fn load_game(
     state.world_state = Some(world_state.clone());
     state.event_log = crate::engine::EventLog::new();
 
+    // Load scenario if not already loaded or if scenario changed
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
         let scenario = crate::scenarios::registry::load_by_id(&db_save.scenario_id)
             .ok_or_else(|| format!("Unknown scenario: {}", db_save.scenario_id))?;
+        
+        // Restore generation_mechanics and generation_length from scenario for family continuity
+        world_state.generation_mechanics = scenario.generation_mechanics.clone();
+        world_state.generation_length = scenario.generation_length;
+        world_state.global_metrics_display = scenario.global_metrics_display.clone();
+        
         state.current_scenario = Some(scenario);
+        state.world_state = Some(world_state.clone());
     }
 
     Ok(crate::commands::LoadResponse { success: true, world_state: Some(world_state), error: None })
@@ -9977,7 +10180,7 @@ FILE: src/components/MapPanel.tsx
 ================================================
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Tooltip, CircleMarker } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet';
+import L, { type Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMapConfig } from '../api';
 import type { MapConfig } from '../types/index';
@@ -10054,8 +10257,32 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         );
         setGeoJsonData(loaded);
 
-        // invalidateSize after data loads - Leaflet in flex-layout
-        setTimeout(() => mapRef.current?.invalidateSize(), 100);
+       // invalidateSize + auto-fit after data loads
+setTimeout(() => {
+  const map = mapRef.current;
+  if (!map) return;
+
+  map.invalidateSize();
+  let combinedBounds: L.LatLngBounds | null = null;
+
+  Object.values(loaded).forEach((data: any) => {
+    try {
+      const layer = L.geoJSON(data);
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        combinedBounds = combinedBounds
+          ? combinedBounds.extend(bounds)
+          : bounds;
+      }
+    } catch (err) {
+      console.error('MapPanel: failed to compute bounds for geojson', err);
+    }
+  });
+
+  if (combinedBounds && combinedBounds.isValid()) {
+    map.fitBounds(combinedBounds, { padding: [20, 20] });
+  }
+}, 100);
       });
     });
   }, [scenarioId]);
@@ -14502,6 +14729,10 @@ pub fn tick(
         .map(|(id, actor)| (id.clone(), actor.metrics.clone()))
         .collect();
 
+    // Phase 0: Check collapse conditions on INITIAL state (before any modifications)
+    // This prevents freeze where auto_deltas/clamping "fix" metrics before collapse check
+    phase_collapse_check(world, scenario, event_log);
+
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
@@ -14523,14 +14754,22 @@ pub fn tick(
     // Phase 6: Events (thresholds, ranks, milestones, game mode, relevance)
     phase_events(world, scenario, event_log);
 
-    // Phase 7: Actor collapses
-    phase_collapses(world, scenario, event_log);
+    // Phase 7: Actor collapses (skip - already done in Phase 0)
+    // phase_collapses(world, scenario, event_log);
 
     // Phase 8: Record changes and generation mechanics
     phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
 
     // Phase 9: Advance tick state
     phase_advance(world, scenario);
+}
+
+// ============================================================================
+// Phase 0: Check Collapses (on initial state, before modifications)
+// ============================================================================
+
+fn phase_collapse_check(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+    check_collapses(world, scenario, event_log);
 }
 
 // ============================================================================
@@ -14806,14 +15045,6 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
             }
         }
     }
-}
-
-// ============================================================================
-// Phase 6: Actor collapses
-// ============================================================================
-
-fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
-    check_collapses(world, scenario, event_log);
 }
 
 // ============================================================================
@@ -15641,33 +15872,35 @@ fn check_collapses(
             }
         }
 
-        // Path 1: classic collapse (external pressure + internal weakness)
-        let classic_collapse =
-            actor.get_metric("legitimacy") < 10.0
-            && actor.get_metric("cohesion") < 15.0
-            && actor.get_metric("external_pressure") > 85.0;
-
-        // Path 2: internal collapse (civil war / disintegration without external threat)
-        let internal_collapse =
-            actor.get_metric("legitimacy") < 5.0
-            && actor.get_metric("cohesion") < 8.0;
-
-        let in_danger = classic_collapse || internal_collapse;
-
-        if in_danger {
-            // Increment warning counter
-            let counter = world.collapse_warning_ticks
-                .entry(actor_id.clone())
-                .or_insert(0);
+        // Check if actor has already entered terminal decline
+        let existing_counter = world.collapse_warning_ticks.get(actor_id).copied().unwrap_or(0);
+        
+        if existing_counter > 0 {
+            // Actor is already in terminal decline - collapse is inevitable
+            // Increment counter regardless of current metric state
+            let counter = world.collapse_warning_ticks.get_mut(actor_id).unwrap();
             *counter += 1;
-
-            // Collapse only after 3 consecutive dangerous ticks
+            
             if *counter >= 3 {
                 to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
             }
         } else {
-            // Reset counter if actor is no longer in danger
-            world.collapse_warning_ticks.remove(actor_id);
+            // Check if actor is entering terminal decline for the first time
+            // Path 1: classic collapse (external pressure + internal weakness)
+            let classic_collapse =
+                actor.get_metric("legitimacy") < 10.0
+                && actor.get_metric("cohesion") < 15.0
+                && actor.get_metric("external_pressure") > 85.0;
+
+            // Path 2: internal collapse (civil war / disintegration without external threat)
+            let internal_collapse =
+                actor.get_metric("legitimacy") < 5.0
+                && actor.get_metric("cohesion") < 8.0;
+
+            if classic_collapse || internal_collapse {
+                // Actor enters terminal decline
+                world.collapse_warning_ticks.insert(actor_id.clone(), 1);
+            }
         }
     }
 
@@ -15708,6 +15941,9 @@ fn check_collapses(
 
             // Remove from active actors
             world.actors.remove(&actor_id);
+            
+            // Clean up collapse warning counter
+            world.collapse_warning_ticks.remove(&actor_id);
         }
 
         // Create successors (simplified - just add with split metrics)
@@ -15724,6 +15960,35 @@ fn check_collapses(
                     );
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
+                    world.actors.insert(successor.id.clone(), new_actor);
+                } else {
+                    // No template found - create minimal successor to prevent actor disappearing
+                    eprintln!("[COLLAPSE] Warning: No template found for successor '{}', creating minimal successor", successor.id);
+                    let new_actor = crate::core::Actor {
+                        id: successor.id.clone(),
+                        name: successor.id.clone(),
+                        name_short: successor.id.clone(),
+                        region: successor.id.clone(),
+                        region_rank: crate::core::RegionRank::D,
+                        era: crate::core::Era::LateMedieval,
+                        narrative_status: crate::core::NarrativeStatus::Foreground,
+                        tags: vec!["successor_state".to_string()],
+                        metrics: split_metrics_for_successor(
+                            &HashMap::new(),
+                            successor.weight,
+                            successors.len(),
+                        ),
+                        scenario_metrics: HashMap::new(),
+                        neighbors: vec![],
+                        on_collapse: vec![],
+                        actor_tags: HashMap::new(),
+                        center: None,
+                        is_successor_template: false,
+                        religion: crate::core::Religion::Orthodox,
+                        culture: crate::core::Culture::Slavic,
+                        minimum_survival_ticks: None,
+                        leader: None,
+                    };
                     world.actors.insert(successor.id.clone(), new_actor);
                 }
             }
@@ -16225,6 +16490,16 @@ pub struct NarrativeWorldSnapshot {
     pub game_mode: crate::core::GameMode,
     /// Actors that collapsed this tick: (actor_name, successor_ids)
     pub collapsed_this_tick: Vec<(String, Vec<String>)>,
+    /// Family state for family-based scenarios (generation count, patriarch age)
+    pub family_info: Option<FamilyInfo>,
+}
+
+/// Family information for narrative snapshot
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FamilyInfo {
+    pub generation_count: u32,
+    pub patriarch_age: u32,
+    pub generation_length: Option<u32>,
 }
 
 /// Minimal narrative memory for anti-repetition across turns
@@ -16337,46 +16612,44 @@ fn determine_world_focus(snapshot: &NarrativeWorldSnapshot) -> String {
 }
 
 /// Build narrative world snapshot from game state
-/// 
+///
 /// This is a pure function: it reads state but has no side effects.
 /// It does NOT call LLM, modify state, or write to DB.
+///
+/// Relevant events must be pre-selected using the canonical scorer before calling.
 pub fn build_snapshot(
     world: &WorldState,
     scenario: &Scenario,
     event_log: &EventLog,
+    recent_important_events: Vec<crate::core::Event>,
 ) -> NarrativeWorldSnapshot {
     // Half-year from tick
     let half_year = HalfYear::from_tick(world.tick);
-    
+
     // Alive actors (not in dead_actors list)
     let alive_actors: Vec<String> = world.actors.keys()
         .filter(|id| !world.dead_actors.iter().any(|d| &d.id == *id))
         .cloned()
         .collect();
-    
+
     // Dead actors
     let dead_actors: Vec<String> = world.dead_actors.iter()
         .map(|a| a.id.clone())
         .collect();
-    
+
     // Foreground actors
     let foreground_actors: Vec<String> = world.actors.values()
         .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
         .map(|a| a.id.clone())
         .collect();
-    
+
     // Key milestones fired
     let key_milestones_fired: Vec<String> = scenario.milestone_events.iter()
         .filter(|m| world.milestone_events_fired.contains(&m.id))
         .map(|m| m.id.clone())
         .collect();
-    
-    // Recent important events (last 10, keyed events first)
-    let mut recent_important_events: Vec<crate::core::Event> = event_log.events.iter()
-        .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
-        .cloned()
-        .collect();
-    recent_important_events.truncate(10);
+
+    // Recent important events - pre-selected by canonical scorer (passed as parameter)
     
     // Recent player actions (last 5)
     let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
@@ -16430,6 +16703,13 @@ pub fn build_snapshot(
         };
         key_metrics.insert(metric_key.clone(), value);
     }
+
+    // Family info for narrative continuity
+    let family_info = world.family_state.as_ref().map(|fs| FamilyInfo {
+        generation_count: fs.generation_count,
+        patriarch_age: fs.patriarch_age,
+        generation_length: world.generation_length,
+    });
     
     // Narrative axes and tone tags from config
     let narrative_axes = scenario.narrative_config.narrative_axes.clone();
@@ -16474,6 +16754,7 @@ pub fn build_snapshot(
         tone_tags,
         game_mode: world.game_mode,
         collapsed_this_tick,
+        family_info,
     }
 }
 
@@ -21280,9 +21561,9 @@ FILE: src/scenarios/rome_375/map.toml
 [map]
 tile_url = "https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png"
 tile_attribution = "CC BY 4.0 <a href='https://dh.gu.se/dare/'>DARE</a>"
-center_lat = 41.9
-center_lon = 12.5
-default_zoom = 4
+center_lat = 42.0
+center_lon = 45.0
+default_zoom = 3
 geojson_base_path = "rome_375"
 
 [[map.polygons]]
@@ -21555,6 +21836,308 @@ fn test_get_available_actions_constantinople() {
     
     // Constantinople should have federation actions
     assert!(!actions.is_empty(), "Should have at least one available action");
+}
+
+#[test]
+fn test_action_effects_applied() {
+    // Test that action effects are applied to world state
+    let mut state = setup_constantinople_state();
+
+    // Get initial federation progress
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Get initial genoa cohesion
+    let initial_genoa_cohesion = state.world_state.as_ref().unwrap()
+        .actors.get("genoa")
+        .map(|a| a.get_metric("cohesion"))
+        .unwrap_or(0.0);
+
+    // Apply venice_diplomacy (effects: +5 federation_progress, +2 genoa.cohesion)
+    // With venice weight of 2.0 for federation_progress, effect should be +10
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    let result = apply_player_action(&mut state, &action_input);
+    assert!(result.is_ok(), "apply_player_action failed: {:?}", result);
+
+    // Check federation progress was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Venice has weight 2.0 for federation_progress, so effect should be 5.0 * 2.0 = 10.0
+    assert!((final_federation - (initial_federation + 10.0)).abs() < 0.01,
+        "Federation progress should increase by 10 (5 * 2.0 weight): initial={}, final={}", 
+        initial_federation, final_federation);
+
+    // Check genoa cohesion was increased
+    let final_genoa_cohesion = state.world_state.as_ref().unwrap()
+        .actors.get("genoa")
+        .map(|a| a.get_metric("cohesion"))
+        .unwrap_or(0.0);
+
+    // No weight for genoa.cohesion, so effect should be 2.0
+    assert!((final_genoa_cohesion - (initial_genoa_cohesion + 2.0)).abs() < 0.01,
+        "Genoa cohesion should increase by 2: initial={}, final={}", 
+        initial_genoa_cohesion, final_genoa_cohesion);
+}
+
+#[test]
+fn test_action_applies_cost_and_effects_together() {
+    // Test that both cost AND effects are applied in the same action
+    let mut state = setup_constantinople_state();
+
+    // Get initial venice treasury
+    let initial_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.get_metric("treasury"))
+        .unwrap_or(0.0);
+
+    // Get initial federation progress
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+
+    // Apply venice_diplomacy (cost: -30 treasury, effect: +10 federation with weight)
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    let (effects, costs) = apply_player_action(&mut state, &action_input).unwrap();
+
+    // Verify both cost and effect were applied
+    assert!(!effects.is_empty(), "Effects should not be empty");
+    assert!(!costs.is_empty(), "Costs should not be empty");
+
+    // Verify treasury was deducted
+    let final_treasury = state.world_state.as_ref().unwrap()
+        .actors.get("venice")
+        .map(|a| a.get_metric("treasury"))
+        .unwrap_or(0.0);
+    assert!((final_treasury - (initial_treasury - 30.0)).abs() < 0.01,
+        "Treasury should be reduced by 30");
+
+    // Verify federation was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    assert!((final_federation - (initial_federation + 10.0)).abs() < 0.01,
+        "Federation should increase by 10");
+}
+
+#[test]
+fn test_action_effects_persist_through_tick() {
+    // Test that action effects persist after full tick processing
+    use rand::SeedableRng;
+    use crate::engine::tick;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    world.global_metrics.insert("federation_progress".to_string(), 0.0);
+    
+    // Get initial federation
+    let initial_federation = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    
+    // Apply action directly to world state (simulating what apply_player_action does)
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Apply federation effect with venice weight (2.0)
+    let federation_effect = 5.0 * 2.0; // base effect * weight
+    crate::core::MetricRef::parse("global:federation_progress").apply(&mut world, federation_effect);
+    
+    // Run full tick
+    tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Check federation persisted after tick
+    let final_federation = world.global_metrics.get("federation_progress").copied().unwrap_or(0.0);
+    
+    // Federation should still be increased (may be modified by auto_deltas, but should be > initial)
+    assert!(final_federation > initial_federation,
+        "Federation should persist after tick: initial={}, final={}", initial_federation, final_federation);
+}
+
+#[test]
+fn test_advance_tick_with_action_applies_effects() {
+    // Test that advance_tick correctly applies action effects through the full pipeline
+    use crate::commands::{advance_tick, PlayerActionInput};
+    
+    let mut state = setup_constantinople_state();
+    
+    // Get initial federation
+    let initial_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    
+    // Advance tick with action
+    let action_input = PlayerActionInput {
+        action_id: "venice_diplomacy".to_string(),
+        target_actor_id: None,
+    };
+    
+    let result = advance_tick(&mut state, Some(action_input));
+    assert!(result.is_ok(), "advance_tick should succeed: {:?}", result);
+    
+    // Check federation was increased
+    let final_federation = state.world_state.as_ref().unwrap()
+        .global_metrics.get("federation_progress")
+        .copied()
+        .unwrap_or(0.0);
+    
+    // Federation should be increased by action effect (5.0 * 2.0 weight = 10.0)
+    // May be modified by auto_deltas, but should be > initial
+    assert!(final_federation > initial_federation,
+        "Federation should increase after action+tick: initial={}, final={}", 
+        initial_federation, final_federation);
+}
+
+#[test]
+fn test_query_tags_enriched_with_semantic_context() {
+    // Test that query tags include semantic context beyond just actor id/name/region
+    use std::collections::HashSet;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    
+    // Build query tags the same way narrative does
+    let query_tags: Vec<String> = {
+        let mut tags_set: HashSet<String> = HashSet::new();
+        
+        for actor in world.actors.values() {
+            if actor.narrative_status == crate::core::NarrativeStatus::Foreground {
+                // Core identity tags
+                tags_set.insert(actor.id.clone());
+                tags_set.insert(actor.name.to_lowercase());
+                tags_set.insert(actor.region.to_lowercase());
+                
+                // Semantic tags
+                for tag in &actor.tags {
+                    tags_set.insert(tag.to_lowercase());
+                }
+                
+                // Religion and culture
+                tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+                
+                // Region rank
+                tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+            }
+        }
+        
+        // Scenario-level context
+        for tone_tag in &scenario.narrative_config.tone_tags {
+            tags_set.insert(tone_tag.to_lowercase());
+        }
+        for axis in &scenario.narrative_config.narrative_axes {
+            tags_set.insert(axis.to_lowercase());
+        }
+        
+        let mut tags: Vec<String> = tags_set.into_iter().collect();
+        tags.sort();
+        tags
+    };
+    
+    // Verify semantic tags are included
+    let tags_str = query_tags.join(",");
+    assert!(tags_str.contains("orthodoxy"), "Should include religion tags");
+    assert!(tags_str.contains("siege_defense") || tags_str.contains("greek_culture"), 
+        "Should include actor semantic tags");
+    assert!(tags_str.contains("rank_"), "Should include region rank tags");
+    assert!(tags_str.contains("survival") || tags_str.contains("unity"), 
+        "Should include narrative axes");
+    
+    // Verify more tags than just id/name/region
+    // Constantinople has 4 foreground actors, each with id/name/region = 12 base tags
+    // With enrichment, should have significantly more
+    assert!(query_tags.len() > 12, 
+        "Enriched tags ({}) should exceed base tags (12)", query_tags.len());
+}
+
+#[test]
+fn test_query_tags_deterministic_and_deduplicated() {
+    // Test that query tags are deterministic and deduplicated
+    use std::collections::HashSet;
+    
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add actors
+    for actor in &scenario.actors {
+        if !actor.is_successor_template {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    
+    // Build query tags twice
+    let build_tags = || -> Vec<String> {
+        let mut tags_set: HashSet<String> = HashSet::new();
+        
+        for actor in world.actors.values() {
+            if actor.narrative_status == crate::core::NarrativeStatus::Foreground {
+                tags_set.insert(actor.id.clone());
+                tags_set.insert(actor.name.to_lowercase());
+                tags_set.insert(actor.region.to_lowercase());
+                
+                for tag in &actor.tags {
+                    tags_set.insert(tag.to_lowercase());
+                }
+                
+                tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+                tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+            }
+        }
+        
+        for tone_tag in &scenario.narrative_config.tone_tags {
+            tags_set.insert(tone_tag.to_lowercase());
+        }
+        for axis in &scenario.narrative_config.narrative_axes {
+            tags_set.insert(axis.to_lowercase());
+        }
+        
+        let mut tags: Vec<String> = tags_set.into_iter().collect();
+        tags.sort();
+        tags
+    };
+    
+    let tags_run1 = build_tags();
+    let tags_run2 = build_tags();
+    
+    // Verify determinism - same input produces same output
+    assert_eq!(tags_run1, tags_run2, "Query tags should be deterministic");
+    
+    // Verify deduplication - HashSet ensures no duplicates
+    let unique_count: usize = tags_run1.iter().collect::<HashSet<_>>().len();
+    assert_eq!(unique_count, tags_run1.len(), 
+        "Query tags should have no duplicates: {} unique vs {} total", 
+        unique_count, tags_run1.len());
+    
+    // Verify sorted order
+    let mut sorted_tags = tags_run1.clone();
+    sorted_tags.sort();
+    assert_eq!(sorted_tags, tags_run1, "Query tags should be sorted");
 }
 
 #[test]
@@ -22274,11 +22857,127 @@ fn test_scenario_all_metrics_valid() {
     let rome_scenario = registry::load_by_id("rome_375").unwrap();
     let rome_result = registry::validate_scenario(&rome_scenario);
     assert!(rome_result.is_ok(), "Rome 375 should pass validation: {:?}", rome_result.err());
-    
+
     // Validate constantinople_1430 scenario
     let constantinople_scenario = registry::load_by_id("constantinople_1430").unwrap();
     let constantinople_result = registry::validate_scenario(&constantinople_scenario);
     assert!(constantinople_result.is_ok(), "Constantinople 1430 should pass validation: {:?}", constantinople_result.err());
+}
+
+#[test]
+fn test_actor_collapse_deterministic_no_freeze() {
+    // Test that actors collapse deterministically and don't freeze in near-dead state
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add byzantium actor with metrics that will trigger collapse
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            let mut byzantium = actor.clone();
+            // Set metrics to trigger classic collapse
+            byzantium.set_metric("legitimacy", 8.0);  // < 10
+            byzantium.set_metric("cohesion", 12.0);   // < 15
+            byzantium.set_metric("external_pressure", 90.0);  // > 85
+            world.actors.insert(actor.id.clone(), byzantium);
+            break;
+        }
+    }
+    
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Run 10 ticks - actor should collapse
+    let mut collapse_tick = None;
+    for tick_num in 0..10 {
+        // Check counter before tick
+        let counter_before = world.collapse_warning_ticks.get("byzantium").copied().unwrap_or(0);
+        
+        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+        
+        if world.dead_actor_ids.contains("byzantium") && collapse_tick.is_none() {
+            collapse_tick = Some(world.tick);
+        }
+        
+        // Check counter after tick
+        let counter_after = world.collapse_warning_ticks.get("byzantium").copied().unwrap_or(0);
+        println!("tick {}: counter {} -> {}, collapsed={}", tick_num, counter_before, counter_after, world.dead_actor_ids.contains("byzantium"));
+    }
+    
+    // Verify collapse happened exactly once and within expected timeframe
+    assert!(collapse_tick.is_some(), "Byzantium should have collapsed within 10 ticks, but didn't - freeze detected! counters: see output above");
+    
+    // Verify no zombie state - actor should be in dead_actors, not in actors
+    assert!(!world.actors.contains_key("byzantium"), "Collapsed actor should be removed from actors");
+    assert!(world.dead_actors.iter().any(|d| d.id == "byzantium"), "Collapsed actor should be in dead_actors");
+}
+
+#[test]
+fn test_actor_collapse_no_oscillation_freeze() {
+    // Test that actors don't freeze due to metric oscillation
+    // This tests the fix for cumulative vs consecutive counter
+    use rand::SeedableRng;
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    
+    // Add byzantium actor
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    
+    // Manually set dangerous state for 3 ticks, with temporary recovery in between
+    // This simulates oscillation that would cause freeze with consecutive counter
+    
+    // Tick 1: dangerous
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 2: temporary recovery (would reset consecutive counter)
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 50.0);
+        byz.set_metric("cohesion", 50.0);
+        byz.set_metric("external_pressure", 50.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 3: dangerous again
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 4: temporary recovery
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 50.0);
+        byz.set_metric("cohesion", 50.0);
+        byz.set_metric("external_pressure", 50.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // Tick 5: dangerous - should collapse (cumulative counter = 3)
+    if let Some(byz) = world.actors.get_mut("byzantium") {
+        byz.set_metric("legitimacy", 8.0);
+        byz.set_metric("cohesion", 12.0);
+        byz.set_metric("external_pressure", 90.0);
+    }
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    
+    // With cumulative counter, collapse should happen by tick 5
+    // With consecutive counter, actor would oscillate forever
+    assert!(world.dead_actor_ids.contains("byzantium"), 
+        "Byzantium should have collapsed after 3 cumulative dangerous ticks - freeze due to oscillation!");
 }
 
 #[test]
@@ -23338,10 +24037,62 @@ async fn cmd_get_narrative(
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
         let scenario = s.current_scenario.as_ref().ok_or("No active scenario")?;
-        
-        // Build snapshot from state (includes half_year)
-        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
-        
+
+        // Pre-select relevant events using canonical scorer
+        let foreground_actors: Vec<String> = world_state.actors.values()
+            .filter(|a| a.narrative_status == engine13::NarrativeStatus::Foreground)
+            .map(|a| a.id.clone())
+            .collect();
+
+        // Build enriched query tags from multiple narrative-relevant sources
+        let query_tags: Vec<String> = {
+            use std::collections::HashSet;
+            let mut tags_set: HashSet<String> = HashSet::new();
+
+            for actor in world_state.actors.values() {
+                if actor.narrative_status == engine13::NarrativeStatus::Foreground {
+                    // Core identity tags
+                    tags_set.insert(actor.id.clone());
+                    tags_set.insert(actor.name.to_lowercase());
+                    tags_set.insert(actor.region.to_lowercase());
+
+                    // Semantic tags (e.g., "orthodoxy", "siege_defense", "trade_republic")
+                    for tag in &actor.tags {
+                        tags_set.insert(tag.to_lowercase());
+                    }
+
+                    // Religion and culture as narrative context
+                    tags_set.insert(format!("religion_{:?}", actor.religion).to_lowercase());
+                    tags_set.insert(format!("culture_{:?}", actor.culture).to_lowercase());
+
+                    // Region rank as geopolitical context
+                    tags_set.insert(format!("rank_{:?}", actor.region_rank).to_lowercase());
+                }
+            }
+
+            // Scenario-level narrative context (tone and thematic axes)
+            for tone_tag in &scenario.narrative_config.tone_tags {
+                tags_set.insert(tone_tag.to_lowercase());
+            }
+            for axis in &scenario.narrative_config.narrative_axes {
+                tags_set.insert(axis.to_lowercase());
+            }
+
+            // Convert to sorted vec for deterministic order
+            let mut tags: Vec<String> = tags_set.into_iter().collect();
+            tags.sort();
+            tags
+        };
+
+        let recent_important_events = db_guard.get_relevant_events_scored(
+            world_state.tick,
+            &query_tags,
+            &foreground_actors,
+        ).unwrap_or_else(|_| vec![]);
+
+        // Build snapshot from state with pre-selected events
+        let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log, recent_important_events);
+
         // Generate prompt using snapshot and narrative memory
         let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);
         let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
@@ -23412,7 +24163,7 @@ fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::
     let s = state.lock().map_err(|e| e.to_string())?;
     let result = s.current_scenario.as_ref().and_then(|sc| sc.map.clone());
     eprintln!("[RUST] cmd_get_map_config - result: {:?}", result.is_some());
-    result
+    Ok(result)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

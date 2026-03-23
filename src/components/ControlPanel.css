@@ -15,6 +15,7 @@
   align-items: center;
   padding-bottom: 12px;
   border-bottom: 1px solid #313244;
+  flex-shrink: 0;
 }
 
 .year {
@@ -91,6 +92,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  flex-shrink: 1;
 }
 
 .section-title {
@@ -124,13 +127,24 @@
   font-weight: 600;
 }
 
-.actions-list,
-.events-list {
+.actions-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 200px;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
+}
+
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 18px;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
 }
 
 .no-actions,
@@ -233,14 +247,6 @@
   background: #45475a;
   color: #6c7086;
   cursor: not-allowed;
-}
-
-.events-list {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-left: 18px;
 }
 
 .events-list::before {

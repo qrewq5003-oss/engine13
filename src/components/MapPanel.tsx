@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Tooltip, CircleMarker } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet';
+import L, { type Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMapConfig } from '../api';
 import type { MapConfig } from '../types/index';
@@ -77,8 +77,32 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         );
         setGeoJsonData(loaded);
 
-        // invalidateSize after data loads - Leaflet in flex-layout
-        setTimeout(() => mapRef.current?.invalidateSize(), 100);
+       // invalidateSize + auto-fit after data loads
+setTimeout(() => {
+  const map = mapRef.current;
+  if (!map) return;
+
+  map.invalidateSize();
+  let combinedBounds: L.LatLngBounds | null = null;
+
+  Object.values(loaded).forEach((data: any) => {
+    try {
+      const layer = L.geoJSON(data);
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        combinedBounds = combinedBounds
+          ? combinedBounds.extend(bounds)
+          : bounds;
+      }
+    } catch (err) {
+      console.error('MapPanel: failed to compute bounds for geojson', err);
+    }
+  });
+
+  if (combinedBounds && combinedBounds.isValid()) {
+    map.fitBounds(combinedBounds, { padding: [20, 20] });
+  }
+}, 100);
       });
     });
   }, [scenarioId]);

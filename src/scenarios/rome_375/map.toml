@@ -1,9 +1,9 @@
 [map]
 tile_url = "https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png"
 tile_attribution = "CC BY 4.0 <a href='https://dh.gu.se/dare/'>DARE</a>"
-center_lat = 41.9
-center_lon = 12.5
-default_zoom = 4
+center_lat = 42.0
+center_lon = 45.0
+default_zoom = 3
 geojson_base_path = "rome_375"
 
 [[map.polygons]]

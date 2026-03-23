@@ -747,6 +747,14 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     prompt.push_str("=== ИНСТРУКЦИИ ПО ВЫВОДУ ===\n");
     prompt.push_str("Напиши хронику этой половины года в формате 2–4 содержательных абзацев.\n\n");
+    prompt.push_str("Target length: 1500–1700 words.\n\n");
+    prompt.push_str("Chronicle scale distribution (approximate word share):\n");
+    prompt.push_str("- Local / family level (Mediolanum, Family di Milano): 20–25%\n");
+    prompt.push_str("- Regional level (Western Empire, Italy, neighboring powers): 35–40%\n");
+    prompt.push_str("- Imperial / international level (Eastern Empire, Huns, Sassanids, migration pressures): 35–40%\n\n");
+    prompt.push_str("The family is important but must not dominate raw text share.\n");
+    prompt.push_str("The broader world must feel active, not decorative.\n");
+    prompt.push_str("External powers, imperial dynamics, and major developments must receive visible narrative weight.\n\n");
     prompt.push_str("Предпочтительная структура:\n");
     prompt.push_str("1. Первый абзац — что изменилось в общей картине мира за эту половину года.\n");
     prompt.push_str("2. Второй абзац — что это значит политически / социально / военным образом.\n");

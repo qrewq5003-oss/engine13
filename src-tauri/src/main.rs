@@ -461,7 +461,7 @@ fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::
     let s = state.lock().map_err(|e| e.to_string())?;
     let result = s.current_scenario.as_ref().and_then(|sc| sc.map.clone());
     eprintln!("[RUST] cmd_get_map_config - result: {:?}", result.is_some());
-    result
+    Ok(result)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
