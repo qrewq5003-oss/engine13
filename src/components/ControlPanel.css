@@ -2,11 +2,12 @@
   background: #1e1e2e;
   border-radius: 8px;
   padding: 16px;
-  height: 100%;
-  overflow: hidden;
+  height: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .time-display {

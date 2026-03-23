@@ -24,7 +24,6 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  overflow: hidden;
 }
 
 body {
@@ -140,7 +139,7 @@ body {
   grid-template-columns: 320px 280px 1fr;
   gap: 16px;
   padding: 16px;
-  overflow: hidden;
+  min-height: 0;
 }
 
 .panel-column {
