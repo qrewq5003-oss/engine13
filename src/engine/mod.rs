@@ -870,7 +870,7 @@ fn check_game_mode_transitions(
 /// Implements architecture rules for actor relevance
 fn check_relevance_thresholds(
     world: &mut WorldState,
-    _scenario: &Scenario,
+    scenario: &Scenario,
     event_log: &mut EventLog,
 ) {
     let current_tick = world.tick;
@@ -964,9 +964,17 @@ fn check_relevance_thresholds(
     // Check foreground actors for potential demotion to background
     let mut to_demote: Vec<String> = Vec::new();
 
+    // Get player actor ID from scenario to protect from demotion
+    let player_actor_id = scenario.player_actor_id.as_deref();
+
     for (actor_id, actor) in &world.actors {
         if actor.narrative_status != crate::core::NarrativeStatus::Foreground {
             continue; // Already background
+        }
+
+        // Protect player actor from demotion - they must remain visible
+        if Some(actor_id.as_str()) == player_actor_id {
+            continue;
         }
 
         let power_proj = actor.power_projection(1.0, max_military_size);
