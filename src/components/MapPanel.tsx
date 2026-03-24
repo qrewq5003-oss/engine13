@@ -83,7 +83,7 @@ setTimeout(() => {
   if (!map) return;
 
   map.invalidateSize();
-  let combinedBounds: L.LatLngBounds | null = null;
+  let combinedBounds: L.LatLngBounds | undefined;
 
   Object.values(loaded).forEach((data: any) => {
     try {
@@ -99,7 +99,7 @@ setTimeout(() => {
     }
   });
 
-  if (combinedBounds && combinedBounds.isValid()) {
+  if (combinedBounds) {
     map.fitBounds(combinedBounds, { padding: [20, 20] });
   }
 }, 100);

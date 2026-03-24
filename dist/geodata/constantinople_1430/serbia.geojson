@@ -1,8 +1,54 @@
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[19.0, 42.0], [23.0, 42.0], [23.0, 45.0], [19.0, 45.0], [19.0, 42.0]]]
-  },
-  "properties": { "actor_id": "serbia" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              19,
+              45.5
+            ],
+            [
+              18.5,
+              44.5
+            ],
+            [
+              19,
+              43.5
+            ],
+            [
+              20,
+              42.8
+            ],
+            [
+              21,
+              43
+            ],
+            [
+              22.5,
+              43.5
+            ],
+            [
+              22.5,
+              44.8
+            ],
+            [
+              21,
+              45.5
+            ],
+            [
+              19,
+              45.5
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "actor_id": "serbia"
+      }
+    }
+  ]
 }

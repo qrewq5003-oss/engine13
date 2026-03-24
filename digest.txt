@@ -4426,70 +4426,473 @@ FILE: public/geodata/constantinople_1430/venice.geojson
 FILE: public/geodata/rome_375/alamanni.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[5.0, 47.0], [12.0, 47.0], [12.0, 50.0], [5.0, 50.0], [5.0, 47.0]]]
-  },
-  "properties": { "actor_id": "alamanni" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "alamanni"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                8.473566895351485,
+                49.184922285331155
+              ],
+              [
+                8.515585725051148,
+                48.49354483646076
+              ],
+              [
+                9.19429598985508,
+                47.92967670070229
+              ],
+              [
+                10.871860231896873,
+                47.62444253889356
+              ],
+              [
+                17.17446896876006,
+                49.340354237760636
+              ],
+              [
+                15.598766023880737,
+                51.28749850047289
+              ],
+              [
+                8.473566895351485,
+                49.184922285331155
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                8.473566895351485,
+                49.184922285331155
+              ],
+              [
+                8.515585725051148,
+                48.49354483646076
+              ],
+              [
+                9.19429598985508,
+                47.92967670070229
+              ],
+              [
+                10.871860231896873,
+                47.62444253889356
+              ],
+              [
+                17.17446896876006,
+                49.340354237760636
+              ],
+              [
+                15.598766023880737,
+                51.28749850047289
+              ],
+              [
+                8.473566895351485,
+                49.184922285331155
+              ]
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/armenia.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[40.0, 38.0], [48.0, 38.0], [48.0, 43.0], [40.0, 43.0], [40.0, 38.0]]]
-  },
-  "properties": { "actor_id": "armenia" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "armenia"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                45.16379866331394,
+                40.527549234071984
+              ],
+              [
+                45.077825806505416,
+                40.57502459323914
+              ],
+              [
+                44.812651366721326,
+                40.7214574586578
+              ],
+              [
+                44.61129527960653,
+                40.81116502213494
+              ],
+              [
+                44.31518338679066,
+                40.90075146459694
+              ],
+              [
+                42.692490214159655,
+                41.40019470985123
+              ],
+              [
+                41.721243205723574,
+                41.400194709851284
+              ],
+              [
+                40.40650640162118,
+                40.478642483758236
+              ],
+              [
+                40.41457560298653,
+                40.466681384381495
+              ],
+              [
+                40.59601801302325,
+                38.1700474977316
+              ],
+              [
+                41.76862110857412,
+                37.93687871138054
+              ],
+              [
+                42.02131040386298,
+                37.849128448315845
+              ],
+              [
+                42.064733001389996,
+                37.83404928023477
+              ],
+              [
+                42.09937351984736,
+                37.849128448315845
+              ],
+              [
+                42.40822279705641,
+                37.98357187959661
+              ],
+              [
+                42.82277944699863,
+                38.01157352843522
+              ],
+              [
+                45.077825806505416,
+                40.43515118045203
+              ],
+              [
+                45.16379866331394,
+                40.527549234071984
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                45.16379866331394,
+                40.527549234071984
+              ],
+              [
+                45.077825806505416,
+                40.57502459323914
+              ],
+              [
+                44.812651366721326,
+                40.7214574586578
+              ],
+              [
+                44.61129527960653,
+                40.81116502213494
+              ],
+              [
+                44.31518338679066,
+                40.90075146459694
+              ],
+              [
+                42.692490214159655,
+                41.40019470985123
+              ],
+              [
+                41.721243205723574,
+                41.400194709851284
+              ],
+              [
+                40.40650640162118,
+                40.478642483758236
+              ],
+              [
+                40.41457560298653,
+                40.466681384381495
+              ],
+              [
+                40.59601801302325,
+                38.1700474977316
+              ],
+              [
+                41.76862110857412,
+                37.93687871138054
+              ],
+              [
+                42.02131040386298,
+                37.849128448315845
+              ],
+              [
+                42.064733001389996,
+                37.83404928023477
+              ],
+              [
+                42.09937351984736,
+                37.849128448315845
+              ],
+              [
+                42.40822279705641,
+                37.98357187959661
+              ],
+              [
+                42.82277944699863,
+                38.01157352843522
+              ],
+              [
+                45.077825806505416,
+                40.43515118045203
+              ],
+              [
+                45.16379866331394,
+                40.527549234071984
+              ]
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/berbers.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[-5.0, 28.0], [10.0, 28.0], [10.0, 35.0], [-5.0, 35.0], [-5.0, 28.0]]]
-  },
-  "properties": { "actor_id": "berbers" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "berbers"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                -8.866229175739214,
+                29.846751132287427
+              ],
+              [
+                -8.866229175739214,
+                27.53054795981781
+              ],
+              [
+                -5.586757247440979,
+                28.91897463460508
+              ],
+              [
+                0.37591898582853006,
+                29.17960354190199
+              ],
+              [
+                9.873610414536392,
+                29.40247430045876
+              ],
+              [
+                14.558570312105289,
+                29.17960354190199
+              ],
+              [
+                8.297760267172302,
+                31.857577731388766
+              ],
+              [
+                2.6332178455662736,
+                32.79330039709718
+              ],
+              [
+                -4.394222000787081,
+                32.398598402611924
+              ],
+              [
+                -8.866229175739214,
+                29.846751132287427
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                45.16379866331394,
+                40.527549234071984
+              ],
+              [
+                45.077825806505416,
+                40.57502459323914
+              ],
+              [
+                45.077825806505416,
+                40.43515118045203
+              ],
+              [
+                45.16379866331394,
+                40.527549234071984
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                42.09937351984736,
+                37.849128448315845
+              ],
+              [
+                42.02131040386298,
+                37.849128448315845
+              ],
+              [
+                42.064733001389996,
+                37.83404928023477
+              ],
+              [
+                42.09937351984736,
+                37.849128448315845
+              ]
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/burgundians.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[3.0, 46.0], [10.0, 46.0], [10.0, 50.0], [3.0, 50.0], [3.0, 46.0]]]
-  },
-  "properties": { "actor_id": "burgundians" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "burgundians"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              8.74383971858039,
+              50.51607401568593
+            ],
+            [
+              6.04771775542168,
+              49.65807804460513
+            ],
+            [
+              6.7379249779903105,
+              47.43097944733507
+            ],
+            [
+              8.495796497969788,
+              47.87412229265791
+            ],
+            [
+              8.042848008159126,
+              48.57105621715252
+            ],
+            [
+              7.7732358118432545,
+              49.26555292767537
+            ],
+            [
+              8.431089570853981,
+              49.30775963175756
+            ],
+            [
+              8.765408694285659,
+              49.57423016813808
+            ],
+            [
+              8.538934449380328,
+              49.82534119061169
+            ],
+            [
+              8.74383971858039,
+              50.51607401568593
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/eastern_jin.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[105.0, 30.0], [120.0, 30.0], [120.0, 42.0], [105.0, 42.0], [105.0, 30.0]]]
-  },
-  "properties": { "actor_id": "eastern_jin" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "eastern_jin"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              120.06617267533971,
+              34.24191147479906
+            ],
+            [
+              114.52609097081807,
+              32.43507441932726
+            ],
+            [
+              115.70240968890144,
+              28.478532753751747
+            ],
+            [
+              121.58400327931821,
+              28.977655874019817
+            ],
+            [
+              122.00140669541231,
+              31.372051588463925
+            ],
+            [
+              120.06617267533971,
+              34.24191147479906
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4503,56 +4906,208 @@ FILE: public/geodata/rome_375/frankish_kingdom.geojson
 FILE: public/geodata/rome_375/franks.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[2.0, 48.0], [10.0, 48.0], [10.0, 53.0], [2.0, 53.0], [2.0, 48.0]]]
-  },
-  "properties": { "actor_id": "franks" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "franks"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              5.994602456801359,
+              51.77588455203171
+            ],
+            [
+              5.953686645994183,
+              51.02715297266928
+            ],
+            [
+              6.267374528849199,
+              50.12643470482958
+            ],
+            [
+              8.040392997160161,
+              50.51828296679707
+            ],
+            [
+              9.745218447459164,
+              51.052879911563565
+            ],
+            [
+              7.8221753395218885,
+              52.55387817059611
+            ],
+            [
+              5.994602456801359,
+              51.77588455203171
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/guptas.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[70.0, 20.0], [88.0, 20.0], [88.0, 32.0], [70.0, 32.0], [70.0, 20.0]]]
-  },
-  "properties": { "actor_id": "guptas" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "guptas"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              85.1647766110743,
+              26.610258430161306
+            ],
+            [
+              74.87303637036035,
+              31.55200346941888
+            ],
+            [
+              71.74338436733623,
+              24.218614000921303
+            ],
+            [
+              84.20180676398995,
+              21.557482780354942
+            ],
+            [
+              85.1647766110743,
+              26.610258430161306
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/huns.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[40.0, 47.0], [70.0, 47.0], [70.0, 58.0], [40.0, 58.0], [40.0, 47.0]]]
-  },
-  "properties": { "actor_id": "huns" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "huns"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.014382239158,
+              47.51061391287534
+            ],
+            [
+              39.06276183633893,
+              46.03830062686944
+            ],
+            [
+              43.04546944813726,
+              45.67008540711288
+            ],
+            [
+              46.605234658682676,
+              44.67625582026892
+            ],
+            [
+              47.16915786035323,
+              45.22500840028948
+            ],
+            [
+              47.55685506150175,
+              45.768514522336574
+            ],
+            [
+              48.578965864529636,
+              45.768514522336574
+            ],
+            [
+              49.389605466931066,
+              46.42837692809056
+            ],
+            [
+              44.13807065137398,
+              49.33474370635316
+            ],
+            [
+              40.014382239158,
+              47.51061391287534
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/kushans.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[65.0, 32.0], [78.0, 32.0], [78.0, 40.0], [65.0, 40.0], [65.0, 32.0]]]
-  },
-  "properties": { "actor_id": "kushans" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "kushans"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              70.90761450038839,
+              37.117225097714226
+            ],
+            [
+              64.91088029179247,
+              34.95366836786119
+            ],
+            [
+              65.57983868956413,
+              31.4359919683126
+            ],
+            [
+              68.80517382167747,
+              31.476752451225096
+            ],
+            [
+              72.34109678132766,
+              33.23248739571057
+            ],
+            [
+              72.49316822731647,
+              34.40962599517634
+            ],
+            [
+              70.90761450038839,
+              37.117225097714226
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4573,28 +5128,174 @@ FILE: public/geodata/rome_375/ostrogoth_kingdom.geojson
 FILE: public/geodata/rome_375/ostrogoths.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[15.0, 45.0], [30.0, 45.0], [30.0, 52.0], [15.0, 52.0], [15.0, 45.0]]]
-  },
-  "properties": { "actor_id": "ostrogoths" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "ostrogoths"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.314750971784935,
+              46.85830422281623
+            ],
+            [
+              30.636051764734532,
+              44.37733973210378
+            ],
+            [
+              36.03287062438288,
+              44.68128712207751
+            ],
+            [
+              37.69635576954746,
+              46.74864585587572
+            ],
+            [
+              38.593227276276224,
+              48.20670543766555
+            ],
+            [
+              39.183629849384566,
+              49.45151429423572
+            ],
+            [
+              38.19080507019534,
+              50.493217019058434
+            ],
+            [
+              34.09269344130079,
+              50.75892067970745
+            ],
+            [
+              29.459461172213622,
+              50.66263239116884
+            ],
+            [
+              24.90222935080464,
+              50.41687841967452
+            ],
+            [
+              22.536585858922205,
+              48.97830727577439
+            ],
+            [
+              24.33179726931902,
+              47.94430458499281
+            ],
+            [
+              26.830385423635022,
+              48.144088257983924
+            ],
+            [
+              28.314750971784935,
+              46.85830422281623
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/rome.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[10.0, 35.0], [40.0, 35.0], [40.0, 50.0], [10.0, 50.0], [10.0, 35.0]]]
-  },
-  "properties": { "actor_id": "rome" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "rome"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              1.2805978331924528,
+              52.20676380665016
+            ],
+            [
+              -4.7207020955637375,
+              51.1837329485711
+            ],
+            [
+              -9.106882102468656,
+              43.01148769028973
+            ],
+            [
+              -9.200205081338977,
+              37.162989962701104
+            ],
+            [
+              -5.033080168637387,
+              33.47094424909789
+            ],
+            [
+              8.157868988540026,
+              33.587766746212374
+            ],
+            [
+              17.58348985444207,
+              29.452544898711736
+            ],
+            [
+              33.16842732578504,
+              28.718562816271533
+            ],
+            [
+              36.341408607375826,
+              31.860644451285715
+            ],
+            [
+              37.36796137494932,
+              35.81251214956183
+            ],
+            [
+              33.44839626239598,
+              40.00733263383479
+            ],
+            [
+              27.182579080999126,
+              42.4546159923037
+            ],
+            [
+              22.998674756090722,
+              42.69223992689511
+            ],
+            [
+              17.82495680404973,
+              45.236843257381835
+            ],
+            [
+              11.892031339798319,
+              46.77781323179216
+            ],
+            [
+              5.959105875546902,
+              46.44647120148824
+            ],
+            [
+              5.824794516782093,
+              48.78413022008197
+            ],
+            [
+              1.2805978331924528,
+              52.20676380665016
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4615,28 +5316,162 @@ FILE: public/geodata/rome_375/rome_west.geojson
 FILE: public/geodata/rome_375/sassanids.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[35.0, 30.0], [55.0, 30.0], [55.0, 42.0], [35.0, 42.0], [35.0, 30.0]]]
-  },
-  "properties": { "actor_id": "sassanids" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "sassanids"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              53.498421477086936,
+              39.34103747899639
+            ],
+            [
+              53.971340203803436,
+              38.00266489708008
+            ],
+            [
+              53.971340203803436,
+              36.8052522412283
+            ],
+            [
+              51.961435615258296,
+              36.4732132461648
+            ],
+            [
+              49.892416185873586,
+              37.39461029290862
+            ],
+            [
+              48.91702131202081,
+              37.48848156284438
+            ],
+            [
+              49.50816972041642,
+              40.65426667564988
+            ],
+            [
+              42.70996302386666,
+              36.13974567618032
+            ],
+            [
+              43.09420948932383,
+              33.14945341745982
+            ],
+            [
+              42.85775012596557,
+              30.360187062331146
+            ],
+            [
+              47.26180576851303,
+              29.154209778746036
+            ],
+            [
+              49.56728456125599,
+              30.283644954108485
+            ],
+            [
+              51.48851688854179,
+              28.038308968359008
+            ],
+            [
+              53.70532342002541,
+              26.884352888653392
+            ],
+            [
+              57.7251325971157,
+              25.771739601248424
+            ],
+            [
+              57.84336227879483,
+              25.79835405778306
+            ],
+            [
+              58.78919973222784,
+              26.541117246561782
+            ],
+            [
+              60.53308753699495,
+              32.851989202471785
+            ],
+            [
+              59.4985778223026,
+              39.15792391337388
+            ],
+            [
+              53.498421477086936,
+              39.34103747899639
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
 FILE: public/geodata/rome_375/saxons.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[5.0, 53.0], [12.0, 53.0], [12.0, 58.0], [5.0, 58.0], [5.0, 53.0]]]
-  },
-  "properties": { "actor_id": "saxons" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "saxons"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              11.595561876206261,
+              53.98458719077593
+            ],
+            [
+              8.401078242361832,
+              53.08999390933286
+            ],
+            [
+              10.115936583304071,
+              51.856622254473514
+            ],
+            [
+              11.031508563606158,
+              50.566227132124105
+            ],
+            [
+              14.731945317327092,
+              51.44239719635198
+            ],
+            [
+              12.349611535098955,
+              52.28902698738069
+            ],
+            [
+              12.025830611651342,
+              52.57616369988029
+            ],
+            [
+              12.040547926353506,
+              52.59404766031074
+            ],
+            [
+              11.595561876206261,
+              53.98458719077593
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4650,14 +5485,87 @@ FILE: public/geodata/rome_375/vandal_kingdom_africa.geojson
 FILE: public/geodata/rome_375/vandals.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[-5.0, 32.0], [10.0, 32.0], [10.0, 40.0], [-5.0, 40.0], [-5.0, 32.0]]]
-  },
-  "properties": { "actor_id": "vandals" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "vandals"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              19.37274980392021,
+              46.06527977483169
+            ],
+            [
+              23.2570209903704,
+              50.5124285402248
+            ],
+            [
+              22.357884141655074,
+              51.66447173121394
+            ],
+            [
+              19.768370017354943,
+              52.37271985829703
+            ],
+            [
+              16.063926200647824,
+              52.28480160524864
+            ],
+            [
+              16.315684518288112,
+              52.30679755063186
+            ],
+            [
+              16.13585714854505,
+              51.4408407553653
+            ],
+            [
+              16.747270205671466,
+              50.48955216585518
+            ],
+            [
+              18.437647481256274,
+              49.7051510922781
+            ],
+            [
+              19.01309506443408,
+              49.89087194338035
+            ],
+            [
+              18.90519864258824,
+              49.844508505027136
+            ],
+            [
+              17.070959471208983,
+              48.93151086742856
+            ],
+            [
+              13.150722810810178,
+              48.02556616342297
+            ],
+            [
+              12.827033545272666,
+              46.95632569198365
+            ],
+            [
+              17.64640705438679,
+              45.9403676402547
+            ],
+            [
+              19.37274980392021,
+              46.06527977483169
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4671,14 +5579,55 @@ FILE: public/geodata/rome_375/visigoth_kingdom.geojson
 FILE: public/geodata/rome_375/visigoths.geojson
 ================================================
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[0.0, 50.0], [20.0, 50.0], [20.0, 58.0], [0.0, 58.0], [0.0, 50.0]]]
-  },
-  "properties": { "actor_id": "visigoths" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor_id": "visigoths"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              20.092973596785725,
+              46.147825327448714
+            ],
+            [
+              22.35977050340267,
+              43.284739891965586
+            ],
+            [
+              28.602029697720923,
+              43.77023041574927
+            ],
+            [
+              27.771282788000192,
+              46.76465365303417
+            ],
+            [
+              26.069563877984734,
+              48.027382476019454
+            ],
+            [
+              22.35201743526335,
+              47.95049893897121
+            ],
+            [
+              21.11383250179324,
+              46.329730883785096
+            ],
+            [
+              20.092973596785725,
+              46.147825327448714
+            ]
+          ]
+        ]
+      }
+    }
+  ]
 }
-
 
 
 ================================================
@@ -4886,9 +5835,10 @@ FILE: src/App.css
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
+  height: auto;
+  overflow-y: auto;
   width: 100%;
-  overflow: hidden;
 }
 
 body {
@@ -4901,7 +5851,7 @@ body {
 }
 
 .app {
-  height: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
@@ -5004,7 +5954,9 @@ body {
   grid-template-columns: 320px 280px 1fr;
   gap: 16px;
   padding: 16px;
-  overflow: hidden;
+  overflow: visible;
+  height: auto;
+  min-height: auto;
 }
 
 .panel-column {
@@ -5029,7 +5981,9 @@ body {
 
 .middle-column {
   min-width: 240px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .right-column {
@@ -8158,6 +9112,16 @@ pub fn load_scenario(
     // Set generation_mechanics from scenario
     world_state.generation_mechanics = scenario.generation_mechanics.clone();
 
+    // Set features from scenario
+    world_state.features = Some(scenario.features.clone());
+
+    // Debug: log features for Rome 375
+    if scenario_id == "rome_375" {
+        eprintln!("[SAVE_LOAD] Rome 375 scenario.features: {:?}", scenario.features);
+        eprintln!("[SAVE_LOAD] Rome 375 world_state.features: {:?}", world_state.features);
+        eprintln!("[SAVE_LOAD] Rome 375 family_state: {:?}", world_state.family_state.is_some());
+    }
+
     // Initialize RNG from world state seed
     use rand::SeedableRng;
     state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));
@@ -8751,8 +9715,8 @@ FILE: src/components/ControlPanel.css
   background: #1e1e2e;
   border-radius: 8px;
   padding: 16px;
-  height: 100%;
-  overflow: hidden;
+  height: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -8764,6 +9728,7 @@ FILE: src/components/ControlPanel.css
   align-items: center;
   padding-bottom: 12px;
   border-bottom: 1px solid #313244;
+  flex-shrink: 0;
 }
 
 .year {
@@ -8840,6 +9805,8 @@ FILE: src/components/ControlPanel.css
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  flex-shrink: 1;
 }
 
 .section-title {
@@ -8873,13 +9840,24 @@ FILE: src/components/ControlPanel.css
   font-weight: 600;
 }
 
-.actions-list,
-.events-list {
+.actions-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 200px;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
+}
+
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 18px;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
 }
 
 .no-actions,
@@ -8984,14 +9962,6 @@ FILE: src/components/ControlPanel.css
   cursor: not-allowed;
 }
 
-.events-list {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-left: 18px;
-}
-
 .events-list::before {
   content: "";
   position: absolute;
@@ -9086,6 +10056,10 @@ FILE: src/components/ControlPanel.css
 }
 
 .action-item.unavailable .action-header {
+  cursor: pointer; /* Allow clicking to expand and view details */
+}
+
+.action-item.unavailable .action-submit-button {
   cursor: not-allowed;
 }
 
@@ -9208,7 +10182,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               <div
                 key={actionInfo.action.id}
                 className={`action-item ${expandedAction === actionInfo.action.id ? 'expanded' : ''} ${!actionInfo.available ? 'unavailable' : ''}`}
-                onClick={() => actionInfo.available && handleActionClick(actionInfo.action.id)}
+                onClick={() => handleActionClick(actionInfo.action.id)}
               >
                 <div className="action-header">
                   <span className="action-name">{actionInfo.action.name}</span>
@@ -9811,10 +10785,9 @@ FILE: src/components/FamilyPanel.css
   background: #1e1e2e;
   border-radius: 8px;
   padding: 16px;
-  height: 100%;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -9876,7 +10849,6 @@ FILE: src/components/FamilyPanel.css
 }
 
 .family-metrics {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -9963,17 +10935,29 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   // Use family_state if available
   const familyState = worldState.family_state;
   const genMechanics = worldState.generation_mechanics;
-  
+
   if (!familyState || !genMechanics) {
     return <div className="family-panel">No family data available</div>;
   }
 
-  // Dynamically render all family metrics from family_state
-  const familyMetrics = Object.entries(familyState.metrics).map(([key, value]) => ({
-    key,
-    label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    value: value as number,
-  }));
+  // Rome 375 specific: render exactly these 4 stats in fixed order
+  const romeFamilyStatKeys = [
+    'family_influence',
+    'family_knowledge',
+    'family_wealth',
+    'family_connections',
+  ];
+
+  const familyMetrics = romeFamilyStatKeys
+    .map((key) => {
+      const value = familyState.metrics[key] ?? 0;
+      return {
+        key,
+        label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        value,
+      };
+    })
+    .filter((m) => m.value !== undefined);
 
   // Get patriarch age from family_state
   const patriarchAge = familyState.patriarch_age;
@@ -10578,9 +11562,9 @@ FILE: src/components/NarrativePanel.css
   border: 1px solid #4a3b6e;
   border-radius: 8px;
   padding: 16px;
-  margin-bottom: 16px;
   overflow-y: auto;
-  max-height: 300px;
+  max-height: 250px;
+  flex-shrink: 0;
 }
 
 .narrative-title {
@@ -12218,12 +13202,38 @@ FILE: src/components/WorldPanel.css
   justify-content: space-between;
   align-items: center;
   margin-bottom: 4px;
+  gap: 8px;
 }
 
 .actor-name {
   font-size: 13px;
   font-weight: 600;
   color: #cdd6f4;
+  flex: 1;
+}
+
+.actor-actions {
+  display: flex;
+  align-items: center;
+}
+
+.pin-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.4;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.pin-button:hover {
+  opacity: 0.8;
+  transform: scale(1.1);
+}
+
+.pin-button.pinned {
+  opacity: 1;
 }
 
 .actor-status {
@@ -12324,7 +13334,7 @@ FILE: src/components/WorldPanel.css
 ================================================
 FILE: src/components/WorldPanel.tsx
 ================================================
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Actor, WorldState } from '../types';
 import ActorDetailPanel from './ActorDetailPanel';
 import './WorldPanel.css';
@@ -12336,6 +13346,8 @@ interface WorldPanelProps {
   prevWorldState: WorldState | null;
 }
 
+const STORAGE_KEY = 'engine13_pinned_actors';
+
 export const WorldPanel: React.FC<WorldPanelProps> = ({
   actors,
   selectedActorId,
@@ -12343,15 +13355,51 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
   prevWorldState,
 }) => {
   const [detailActor, setDetailActor] = useState<Actor | null>(null);
+  const [pinnedActors, setPinnedActors] = useState<Set<string>>(new Set());
 
-  // Sort actors: foreground first, then by name
+  // Load pinned actors from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const pinned: string[] = JSON.parse(stored);
+        setPinnedActors(new Set(pinned));
+      }
+    } catch (e) {
+      console.error('Failed to load pinned actors:', e);
+    }
+  }, []);
+
+  // Save pinned actors to localStorage when changed
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(pinnedActors)));
+    } catch (e) {
+      console.error('Failed to save pinned actors:', e);
+    }
+  }, [pinnedActors]);
+
+  const togglePin = (actorId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPinnedActors(prev => {
+      const next = new Set(prev);
+      if (next.has(actorId)) {
+        next.delete(actorId);
+      } else {
+        next.add(actorId);
+      }
+      return next;
+    });
+  };
+
+  // Sort actors: pinned first, then foreground, then by name
   const sortedActors = [...actors].sort((a, b) => {
-    if (a.narrative_status === 'foreground' && b.narrative_status === 'background') {
-      return -1;
-    }
-    if (a.narrative_status === 'background' && b.narrative_status === 'foreground') {
-      return 1;
-    }
+    const aPinned = pinnedActors.has(a.id);
+    const bPinned = pinnedActors.has(b.id);
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+    if (a.narrative_status === 'foreground' && b.narrative_status === 'background') return -1;
+    if (a.narrative_status === 'background' && b.narrative_status === 'foreground') return 1;
     return a.name.localeCompare(b.name);
   });
 
@@ -12373,6 +13421,15 @@ export const WorldPanel: React.FC<WorldPanelProps> = ({
           >
             <div className="actor-header">
               <span className="actor-name">{actor.name_short}</span>
+              <div className="actor-actions">
+                <button
+                  className={`pin-button ${pinnedActors.has(actor.id) ? 'pinned' : ''}`}
+                  onClick={(e) => togglePin(actor.id, e)}
+                  title={pinnedActors.has(actor.id) ? 'Unpin actor' : 'Pin actor'}
+                >
+                  📌
+                </button>
+              </div>
               <span className={`actor-status ${actor.narrative_status}`}>
                 {actor.narrative_status === 'foreground' ? '●' : '○'}
               </span>
@@ -13754,6 +14811,9 @@ pub struct WorldState {
     pub global_metrics_display: Vec<crate::core::MetricDisplay>,
     /// Generation mechanics (from scenario, for family scenarios)
     pub generation_mechanics: Option<crate::core::GenerationMechanics>,
+    /// Feature flags for UI (derived from scenario config, not authoritative)
+    /// Source of truth remains scenario.features - this is a convenience cache
+    pub features: Option<crate::core::ScenarioFeatures>,
 }
 
 impl WorldState {
@@ -13795,6 +14855,7 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            features: None,
         }
     }
 
@@ -13831,6 +14892,7 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            features: None,
         }
     }
 
@@ -17131,11 +18193,11 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     // Section 7: Recent Important Events (Top 5 as Evidence)
     // ========================================================================
-    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (используй как доказательства, не как чек-лист) ===\n");
-    
+    prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (включи в хронику) ===\n");
+
     // Limit to top 5 events
     let events_to_show: Vec<_> = snapshot.recent_important_events.iter().take(5).collect();
-    
+
     if events_to_show.is_empty() {
         prompt.push_str("Нет недавних событий.\n");
     } else {
@@ -17143,8 +18205,9 @@ pub fn generate_narrative_prompt(
             prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
         }
     }
-    prompt.push_str("\nИспользуй эти события как доказательства, а не как обязательный список для пересказа.\n");
-    prompt.push_str("Не описывай их по одному, если одно событие явно доминирует в этой половине года.\n\n");
+    prompt.push_str("\nВАЖНО: Включи эти события в хронику — это фактическая основа повествования.\n");
+    prompt.push_str("Не игнорируй их. Используй как конкретные факты для построения нарратива.\n");
+    prompt.push_str("Если событие ключевое (KEY) — оно должно быть отражено в хронике.\n\n");
 
     // ========================================================================
     // Section 8: Recent Player Actions (as Narrative Causes)
@@ -17168,6 +18231,14 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     prompt.push_str("=== ИНСТРУКЦИИ ПО ВЫВОДУ ===\n");
     prompt.push_str("Напиши хронику этой половины года в формате 2–4 содержательных абзацев.\n\n");
+    prompt.push_str("Target length: 1500–1700 words.\n\n");
+    prompt.push_str("Chronicle scale distribution (approximate word share):\n");
+    prompt.push_str("- Local / family level (Mediolanum, Family di Milano): 20–25%\n");
+    prompt.push_str("- Regional level (Western Empire, Italy, neighboring powers): 35–40%\n");
+    prompt.push_str("- Imperial / international level (Eastern Empire, Huns, Sassanids, migration pressures): 35–40%\n\n");
+    prompt.push_str("The family is important but must not dominate raw text share.\n");
+    prompt.push_str("The broader world must feel active, not decorative.\n");
+    prompt.push_str("External powers, imperial dynamics, and major developments must receive visible narrative weight.\n\n");
     prompt.push_str("Предпочтительная структура:\n");
     prompt.push_str("1. Первый абзац — что изменилось в общей картине мира за эту половину года.\n");
     prompt.push_str("2. Второй абзац — что это значит политически / социально / военным образом.\n");
@@ -23722,6 +24793,12 @@ fn cmd_get_world_state(state: State<Mutex<AppState>>) -> Result<Option<engine13:
     })?;
 
     eprintln!("[RUST] cmd_get_world_state - returning state: {:?}", s.world_state.is_some());
+    if let Some(ref world) = s.world_state {
+        eprintln!("[RUST] cmd_get_world_state - scenario_id: {}", world.scenario_id);
+        eprintln!("[RUST] cmd_get_world_state - features: {:?}", world.features);
+        eprintln!("[RUST] cmd_get_world_state - family_state: {:?}", world.family_state.is_some());
+        eprintln!("[RUST] cmd_get_world_state - features.family_panel: {:?}", world.features.as_ref().map(|f| f.family_panel));
+    }
     Ok(s.world_state.clone())
 }
 

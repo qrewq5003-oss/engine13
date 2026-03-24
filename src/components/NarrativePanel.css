@@ -3,8 +3,8 @@
   border: 1px solid #4a3b6e;
   border-radius: 8px;
   padding: 16px;
-  overflow-y: auto;
-  max-height: 250px;
+  overflow: visible;
+  max-height: none;
   flex-shrink: 0;
 }
 
@@ -30,7 +30,7 @@
   margin: 0;
   font-style: italic;
   font-family: Georgia, 'Times New Roman', serif;
-  overflow-y: auto;
+  overflow: visible;
   word-wrap: break-word;
   white-space: pre-wrap;
 }
