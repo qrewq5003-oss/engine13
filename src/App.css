@@ -170,6 +170,7 @@ body {
 
 .right-column {
   min-width: 300px;
+  overflow-y: auto;
 }
 
 /* Responsive adjustments */

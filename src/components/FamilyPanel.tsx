@@ -22,9 +22,12 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({
   }
 
   // Dynamically render all family metrics from family_state
+  // Keys are canonical short format (influence, wealth, knowledge, connections)
   const familyMetrics = Object.entries(familyState.metrics).map(([key, value]) => ({
     key,
-    label: key.replace('family_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    // Transform canonical key to display label
+    // Handles both 'influence' and legacy 'family_influence' formats
+    label: key.replace(/^family_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
     value: value as number,
   }));
 
