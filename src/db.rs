@@ -313,7 +313,6 @@ impl Db {
                 let tags: Vec<String> =
                     serde_json::from_str(&tags_str).unwrap_or_default();
                 let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
 
                 Ok(Event {
                     id: event_id,
@@ -321,13 +320,130 @@ impl Db {
                     year,
                     actor_id,
                     event_type,
+                    is_key: is_key != 0,
                     description,
-                    metrics_snapshot,
                     involved_actors,
                     tags,
-                    is_key: is_key != 0,
+                    metrics_snapshot,
                     scenario_id,
-                    metadata,
+                    metadata: row.get(12).unwrap_or_default(),
+                })
+            })
+            .map_err(|e| format!("Failed to query events: {}", e))?;
+
+        let mut result = Vec::new();
+        for event in events {
+            match event {
+                Ok(e) => result.push(e),
+                Err(e) => eprintln!("Error parsing event: {}", e),
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Get all events for a specific actor filtered by scenario
+    pub fn get_events_by_actor_for_scenario(&self, actor_id: &str, scenario_id: Option<&str>) -> Result<Vec<Event>, String> {
+        if let Some(sid) = scenario_id {
+            let mut stmt = self.conn
+                .prepare("SELECT * FROM events WHERE actor_id = ? AND scenario_id = ? ORDER BY tick DESC")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let events = stmt
+                .query_map(params![actor_id, sid], |row| {
+                    let event_id: String = row.get(1)?;
+                    let tick: u32 = row.get(2)?;
+                    let year: i32 = row.get(3)?;
+                    let actor_id: String = row.get(4)?;
+                    let event_type_str: String = row.get(5)?;
+                    let description: String = row.get(6)?;
+                    let metrics_snapshot_str: String = row.get(7)?;
+                    let involved_actors_str: String = row.get(8)?;
+                    let tags_str: String = row.get(9)?;
+                    let is_key: i32 = row.get(10)?;
+
+                    let event_type = Self::string_to_event_type(&event_type_str);
+                    let metrics_snapshot: HashMap<String, f64> =
+                        serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
+                    let involved_actors: Vec<String> =
+                        serde_json::from_str(&involved_actors_str).unwrap_or_default();
+                    let tags: Vec<String> =
+                        serde_json::from_str(&tags_str).unwrap_or_default();
+                    let scenario_id: String = row.get(11).unwrap_or_default();
+
+                    Ok(Event {
+                        id: event_id,
+                        tick,
+                        year,
+                        actor_id,
+                        event_type,
+                        is_key: is_key != 0,
+                        description,
+                        involved_actors,
+                        metrics_snapshot,
+                        tags,
+                        scenario_id,
+                        metadata: row.get(12).unwrap_or_default(),
+                    })
+                })
+                .map_err(|e| format!("Failed to query events: {}", e))?;
+
+            let mut result = Vec::new();
+            for event in events {
+                match event {
+                    Ok(e) => result.push(e),
+                    Err(e) => eprintln!("Error parsing event: {}", e),
+                }
+            }
+
+            Ok(result)
+        } else {
+            // No scenario filter - return all events for actor
+            self.get_events_by_actor(actor_id)
+        }
+    }
+
+    /// Get all key events for a specific scenario
+    pub fn get_key_events_for_scenario(&self, scenario_id: &str) -> Result<Vec<Event>, String> {
+        let mut stmt = self.conn
+            .prepare("SELECT * FROM events WHERE scenario_id = ? AND is_key = 1 ORDER BY tick DESC")
+            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let events = stmt
+            .query_map(params![scenario_id], |row| {
+                let event_id: String = row.get(1)?;
+                let tick: u32 = row.get(2)?;
+                let year: i32 = row.get(3)?;
+                let actor_id: String = row.get(4)?;
+                let event_type_str: String = row.get(5)?;
+                let description: String = row.get(6)?;
+                let metrics_snapshot_str: String = row.get(7)?;
+                let involved_actors_str: String = row.get(8)?;
+                let tags_str: String = row.get(9)?;
+                let is_key: i32 = row.get(10)?;
+
+                let event_type = Self::string_to_event_type(&event_type_str);
+                let metrics_snapshot: HashMap<String, f64> =
+                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
+                let involved_actors: Vec<String> =
+                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
+                let tags: Vec<String> =
+                    serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
+
+                Ok(Event {
+                    id: event_id,
+                    tick,
+                    year,
+                    actor_id,
+                    event_type,
+                    is_key: is_key != 0,
+                    description,
+                    involved_actors,
+                    tags,
+                    metrics_snapshot,
+                    scenario_id,
+                    metadata: row.get(12).unwrap_or_default(),
                 })
             })
             .map_err(|e| format!("Failed to query events: {}", e))?;

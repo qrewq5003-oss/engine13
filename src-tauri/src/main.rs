@@ -251,7 +251,8 @@ fn cmd_get_relevant_events(
     let s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
     let current_tick = s.world_state.as_ref().map(|ws| ws.tick).unwrap_or(0);
-    
+    let scenario_id = s.world_state.as_ref().map(|ws| ws.scenario_id.clone());
+
     // Build query_tags from narrative actors (id, name, region - lowercase, deduplicated)
     let query_tags: Vec<String> = s.world_state.as_ref()
         .map(|ws| {
@@ -267,8 +268,8 @@ fn cmd_get_relevant_events(
             tags_set.into_iter().collect()
         })
         .unwrap_or_default();
-    
-    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick, query_tags);
+
+    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick, query_tags, scenario_id.as_deref());
     eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
     result
 }

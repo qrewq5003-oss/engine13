@@ -322,20 +322,35 @@ pub fn list_saves_with_slots(db: &Db, scenario_id: &str) -> Result<crate::applic
 }
 
 /// Get relevant events with scoring based on importance, actor relevance, temporal decay, and narrative status
-pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>, current_tick: u32, query_tags: Vec<String>) -> Result<Vec<Event>, String> {
-    // Fetch all events for the provided actor IDs
+/// Filters events by scenario_id to prevent cross-scenario event leakage.
+pub fn get_relevant_events(
+    db: &Db,
+    actor_ids: Vec<String>,
+    current_tick: u32,
+    query_tags: Vec<String>,
+    scenario_id: Option<&str>,
+) -> Result<Vec<Event>, String> {
+    // Fetch all events for the provided actor IDs, filtered by scenario if provided
     let mut all_events: Vec<Event> = Vec::new();
     for actor_id in &actor_ids {
-        let events = db.get_events_by_actor(actor_id)
+        let events = db.get_events_by_actor_for_scenario(actor_id, scenario_id)
             .map_err(|e| format!("Failed to get events: {}", e))?;
         all_events.extend(events);
     }
 
-    // Get current world state for narrative status lookup
-    // For now, we'll use a simplified approach - foreground actors get higher weight
-    let foreground_ids: Vec<String> = actor_ids;
+    // Get key events for this scenario
+    if let Some(sid) = scenario_id {
+        let key_events = db.get_key_events_for_scenario(sid)
+            .map_err(|e| format!("Failed to get key events: {}", e))?;
+        for event in key_events {
+            if !all_events.iter().any(|e| e.id == event.id) {
+                all_events.push(event);
+            }
+        }
+    }
 
     // Score and sort events
+    let foreground_ids: Vec<String> = actor_ids;
     let mut scored_events: Vec<(Event, f64)> = all_events
         .into_iter()
         .map(|event| {
