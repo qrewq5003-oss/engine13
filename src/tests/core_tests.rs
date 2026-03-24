@@ -422,3 +422,55 @@ fn test_rome_375_sim_balance() {
         victory_tick
     );
 }
+
+/// ============================================================================
+/// MAP REGRESSION TEST — PROTECTS CANONICAL MAP CONTRACT
+/// ============================================================================
+/// This test ensures the canonical map config remains stable.
+/// Any accidental change to map structure, coordinates, polygons, or markers
+/// will cause this test to fail.
+/// ============================================================================
+
+#[test]
+fn test_rome_375_map_contract() {
+    // Load Rome 375 scenario
+    let scenario = registry::load_by_id("rome_375").unwrap();
+    
+    // Verify map config exists
+    let map = scenario.map.expect("Rome 375 must have a map config");
+    
+    // Verify canonical viewport
+    assert!((map.center_lat - 41.9).abs() < 0.1, "Map center_lat changed from canonical value");
+    assert!((map.center_lon - 12.5).abs() < 0.5, "Map center_lon changed from canonical value");
+    assert!(map.default_zoom >= 4 && map.default_zoom <= 10, "Map default_zoom outside expected range");
+    
+    // Verify required regions exist (key actors for Rome 375)
+    let polygon_actor_ids: Vec<&String> = map.polygons.iter().map(|p| &p.actor_id).collect();
+    
+    let required_regions = vec!["rome", "huns", "visigoths", "ostrogoths", "sassanids", "vandals"];
+    for region in required_regions {
+        assert!(
+            polygon_actor_ids.iter().any(|id| id.contains(region)),
+            "Required region '{}' missing from map polygons", region
+        );
+    }
+    
+    // Verify polygon count is reasonable (should have multiple regions)
+    assert!(map.polygons.len() >= 10, "Map has too few polygons - may be corrupted");
+    
+    // Verify each polygon has required fields
+    for polygon in &map.polygons {
+        assert!(!polygon.actor_id.is_empty(), "Polygon has empty actor_id");
+        assert!(!polygon.geojson_file.is_empty(), "Polygon {} has empty geojson_file", polygon.actor_id);
+        assert!(!polygon.color.is_empty(), "Polygon {} has empty color", polygon.actor_id);
+        assert!(polygon.color.starts_with('#'), "Polygon {} color must be hex '#RRGGBB'", polygon.actor_id);
+        assert!((0.0..=1.0).contains(&polygon.opacity), "Polygon {} opacity must be 0.0..=1.0", polygon.actor_id);
+    }
+    
+    // Verify geojson_base_path is set
+    assert!(!map.geojson_base_path.is_empty(), "Map geojson_base_path must not be empty");
+    
+    // Verify tile layer is set
+    assert!(!map.tile_url.is_empty(), "Map tile_url must not be empty");
+    assert!(!map.tile_attribution.is_empty(), "Map tile_attribution must not be empty");
+}

@@ -8,6 +8,24 @@ import type { HeatmapMetric } from '../utils/heatmapColor';
 import { HEATMAP_LABELS, metricToHeatmapColor } from '../utils/heatmapColor';
 import { computePathStyle } from '../utils/mapStyle';
 
+/**
+ * ============================================================================
+ * IMPORTANT: CANONICAL MAP RENDER CONTRACT
+ * ============================================================================
+ * This component must render the canonical map config as-is.
+ * 
+ * DO NOT add:
+ * - fallback map generation
+ * - map normalization
+ * - map shape rewriting
+ * - default map synthesis
+ * - coordinate transformation
+ * 
+ * If map config is missing, show explicit placeholder/error state.
+ * Do not silently draw a different map.
+ * ============================================================================
+ */
+
 interface MapPanelProps {
   worldState: import('../types/index').WorldState | null;
   selectedActorId: string | null;

@@ -91,6 +91,23 @@ fn load_rank_bonuses() -> Vec<RankBonusRule> {
     rank_file.rank_bonuses
 }
 
+/// ============================================================================
+/// IMPORTANT: CANONICAL MAP SOURCE FOR ROME 375
+/// ============================================================================
+/// This is the single canonical map source for Rome 375 scenario.
+/// The map is loaded from rome_375/map.toml and must not be modified
+/// by routine fixes, refactors, or gameplay work.
+/// 
+/// DO NOT change:
+/// - coordinates
+/// - polygons
+/// - markers
+/// - viewport
+/// - map structure
+/// 
+/// unless the task explicitly requires replacing the map itself.
+/// ============================================================================
+
 /// Load map config from TOML file
 fn load_map_config() -> Option<MapConfig> {
     let map_file: MapFile = toml::from_str(

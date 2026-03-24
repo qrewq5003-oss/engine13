@@ -403,13 +403,21 @@ fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<Strin
     result
 }
 
+/// ============================================================================
+/// IMPORTANT: CANONICAL MAP RESPONSE - NO FALLBACK
+/// ============================================================================
+/// This command returns the canonical map config from the current scenario.
+/// DO NOT add fallback map generation, map normalization, or default map synthesis here.
+/// If map config is missing, return None explicitly - do not synthesize a replacement.
+/// ============================================================================
+
 #[tauri::command]
 fn cmd_get_map_config(state: State<Mutex<AppState>>) -> Result<Option<engine13::core::MapConfig>, String> {
     eprintln!("[RUST] cmd_get_map_config - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
     let result = s.current_scenario.as_ref().and_then(|sc| sc.map.clone());
     eprintln!("[RUST] cmd_get_map_config - result: {:?}", result.is_some());
-    result
+    Ok(result)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

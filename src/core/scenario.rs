@@ -580,6 +580,23 @@ pub struct MapPolygon {
     pub opacity: f64,
 }
 
+/// ============================================================================
+/// IMPORTANT: FROZEN CANONICAL MAP
+/// ============================================================================
+/// This scenario map config is canonical and must not be modified by routine fixes,
+/// refactors, UI work, save/load changes, or gameplay work.
+/// 
+/// DO NOT change:
+/// - coordinates (center_lat, center_lon)
+/// - polygons
+/// - markers
+/// - viewport (default_zoom)
+/// - response contract
+/// - MapConfig structure
+/// 
+/// unless the task explicitly requires replacing the map itself.
+/// ============================================================================
+
 /// Map configuration for scenario
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapConfig {
