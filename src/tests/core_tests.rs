@@ -16,10 +16,20 @@ fn test_metric_ref_parse_actor() {
 
 #[test]
 fn test_metric_ref_parse_family() {
+    // Test canonical format
+    let mr = MetricRef::parse("family:influence");
+    match mr {
+        MetricRef::Family { key } => {
+            assert_eq!(key, "influence");
+        }
+        _ => panic!("Expected Family variant"),
+    }
+    
+    // Test legacy format (backward-compat, normalized to canonical)
     let mr = MetricRef::parse("family:family_influence");
     match mr {
         MetricRef::Family { key } => {
-            assert_eq!(key, "family_influence");
+            assert_eq!(key, "influence");
         }
         _ => panic!("Expected Family variant"),
     }
@@ -284,7 +294,7 @@ fn test_generation_transfer_applies_inheritance() {
     let scenario = registry::load_by_id("rome_375").unwrap();
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
     let mut event_log = crate::engine::EventLog::new();
-    
+
     // Add rome actor
     for actor in &scenario.actors {
         if actor.id == "rome" {
@@ -292,26 +302,26 @@ fn test_generation_transfer_applies_inheritance() {
             break;
         }
     }
-    
-    // Set family_state with patriarch_age at end age
+
+    // Set family_state with patriarch_age at end age (using canonical short-key format)
     let gen = scenario.generation_mechanics.as_ref().unwrap();
     world.family_state = Some(crate::core::FamilyState {
-        metrics: [("family:family_influence".to_string(), 60.0)].into(),
+        metrics: [("influence".to_string(), 60.0)].into(),
         patriarch_age: gen.patriarch_end_age,
         generation_count: 0,
     });
-    
-    let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
-    
+
+    let initial_influence = world.family_state.as_ref().unwrap().metrics.get("influence").copied().unwrap_or(0.0);
+
     // Run tick - should trigger generation transfer
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    
+
     // Check patriarch_age reset to start age
     assert_eq!(world.family_state.as_ref().unwrap().patriarch_age, gen.patriarch_start_age, "Patriarch age should reset");
-    
+
     // Check family_influence reduced by inheritance coefficient (0.85)
-    let final_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
+    let final_influence = world.family_state.as_ref().unwrap().metrics.get("influence").copied().unwrap_or(0.0);
     let expected = initial_influence * 0.85;
     assert!((final_influence - expected).abs() < 0.1, "Family influence should be reduced by inheritance coefficient");
 }
@@ -330,11 +340,11 @@ fn test_initial_family_metrics_loaded() {
 
     let family_state = world_state.family_state.as_ref().unwrap();
 
-    // Check that initial metrics are loaded
-    assert!(family_state.metrics.contains_key("family:family_influence"), "Should have family_influence");
-    assert!(family_state.metrics.contains_key("family:family_knowledge"), "Should have family_knowledge");
-    assert!(family_state.metrics.contains_key("family:family_wealth"), "Should have family_wealth");
-    assert!(family_state.metrics.contains_key("family:family_connections"), "Should have family_connections");
+    // Check that initial metrics are loaded (using canonical short-key format)
+    assert!(family_state.metrics.contains_key("influence"), "Should have influence");
+    assert!(family_state.metrics.contains_key("knowledge"), "Should have knowledge");
+    assert!(family_state.metrics.contains_key("wealth"), "Should have wealth");
+    assert!(family_state.metrics.contains_key("connections"), "Should have connections");
 }
 
 #[test]

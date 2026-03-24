@@ -88,7 +88,17 @@ pub fn load_game(
 
     // Deserialize family_state from player_state_json
     if let Ok(family_state) = serde_json::from_str::<Option<crate::core::FamilyState>>(&db_save.player_state_json) {
-        world_state.family_state = family_state;
+        // Migrate legacy family_* keys to canonical short-key format
+        world_state.family_state = family_state.map(|mut fs| {
+            let mut migrated_metrics = std::collections::HashMap::new();
+            for (key, value) in fs.metrics {
+                // Normalize legacy family_* keys to short-key format
+                let normalized_key = key.strip_prefix("family_").unwrap_or(&key).to_string();
+                migrated_metrics.insert(normalized_key, value);
+            }
+            fs.metrics = migrated_metrics;
+            fs
+        });
     }
 
     // Backward compatibility: recalculate year from tick (2 ticks per year)
@@ -151,8 +161,18 @@ pub fn load_scenario(
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
 
+        // Normalize family metric keys to canonical short-key format
+        let mut normalized_metrics = std::collections::HashMap::new();
+        for (key, value) in initial_metrics {
+            // Strip "family:" prefix if present
+            let after_colon = key.strip_prefix("family:").unwrap_or(key);
+            // Then strip "family_" prefix if present (legacy format)
+            let normalized_key = after_colon.strip_prefix("family_").unwrap_or(after_colon).to_string();
+            normalized_metrics.insert(normalized_key, *value);
+        }
+
         world_state.family_state = Some(crate::core::FamilyState {
-            metrics: initial_metrics.clone(),
+            metrics: normalized_metrics,
             patriarch_age,
             generation_count: 0,
         });

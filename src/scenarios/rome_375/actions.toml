@@ -6,15 +6,15 @@ name = "Расширить связи"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 10.0
 
 [patron_actions.effects]
-"family:family_connections" = 6.0
+"family:connections" = 6.0
 
 [patron_actions.cost]
-"family:family_wealth" = -4.0
+"family:wealth" = -4.0
 
 [[patron_actions]]
 id = "gather_information"
@@ -24,10 +24,10 @@ name = "Собрать информацию"
 type = "always"
 
 [patron_actions.effects]
-"family:family_knowledge" = 6.0
+"family:knowledge" = 6.0
 
 [patron_actions.cost]
-"family:family_wealth" = -2.0
+"family:wealth" = -2.0
 
 [[patron_actions]]
 id = "invest_wealth"
@@ -35,15 +35,15 @@ name = "Вложить средства"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 20.0
 
 [patron_actions.effects]
-"family:family_wealth" = 5.0
+"family:wealth" = 5.0
 
 [patron_actions.cost]
-"family:family_connections" = -3.0
+"family:connections" = -3.0
 
 [[patron_actions]]
 id = "build_reputation"
@@ -51,15 +51,15 @@ name = "Укрепить репутацию"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_connections"
+metric = "family:connections"
 operator = "greater"
 value = 15.0
 
 [patron_actions.effects]
-"family:family_influence" = 6.0
+"family:influence" = 6.0
 
 [patron_actions.cost]
-"family:family_wealth" = -5.0
+"family:wealth" = -5.0
 
 [[patron_actions]]
 id = "educate_family"
@@ -67,15 +67,15 @@ name = "Образование семьи"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 10.0
 
 [patron_actions.effects]
-"family:family_knowledge" = 10.0
+"family:knowledge" = 10.0
 
 [patron_actions.cost]
-"family:family_wealth" = -6.0
+"family:wealth" = -6.0
 
 [[patron_actions]]
 id = "lay_low"
@@ -85,10 +85,10 @@ name = "Затаиться"
 type = "always"
 
 [patron_actions.effects]
-"family:family_wealth" = 3.0
+"family:wealth" = 3.0
 
 [patron_actions.cost]
-"family:family_influence" = -2.0
+"family:influence" = -2.0
 
 [[patron_actions]]
 id = "support_city"
@@ -96,17 +96,17 @@ name = "Поддержать город"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 15.0
 
 [patron_actions.effects]
-"family:family_influence" = 4.0
+"family:influence" = 4.0
 "actor:rome.economic_output" = 2.0
 "actor:rome.cohesion" = 1.0
 
 [patron_actions.cost]
-"family:family_wealth" = -8.0
+"family:wealth" = -8.0
 
 [[patron_actions]]
 id = "back_administration"
@@ -114,16 +114,16 @@ name = "Поддержать администрацию"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_connections"
+metric = "family:connections"
 operator = "greater"
 value = 15.0
 
 [patron_actions.effects]
-"family:family_connections" = 5.0
+"family:connections" = 5.0
 "actor:rome.legitimacy" = 2.0
 
 [patron_actions.cost]
-"family:family_wealth" = -6.0
+"family:wealth" = -6.0
 
 [[patron_actions]]
 id = "fund_defense"
@@ -131,16 +131,16 @@ name = "Вложить в оборону"
 
 [patron_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 20.0
 
 [patron_actions.effects]
-"family:family_influence" = 3.0
+"family:influence" = 3.0
 "actor:rome.military_quality" = 2.0
 
 [patron_actions.cost]
-"family:family_wealth" = -10.0
+"family:wealth" = -10.0
 
 # Universal actions
 [[universal_actions]]
@@ -160,16 +160,16 @@ name = "Поддержать стабильность"
 
 [universal_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 50.0
 
 [universal_actions.effects]
-"family:family_cohesion" = 3.0
-"family:family_legitimacy" = 2.0
+"family:cohesion" = 3.0
+"family:legitimacy" = 2.0
 
 [universal_actions.cost]
-"family:family_wealth" = -50.0
+"family:wealth" = -50.0
 
 [[universal_actions]]
 id = "raise_taxes"
@@ -179,9 +179,9 @@ name = "Повысить налоги"
 type = "always"
 
 [universal_actions.effects]
-"family:family_wealth" = 80.0
-"family:family_cohesion" = -3.0
-"family:family_legitimacy" = -5.0
+"family:wealth" = 80.0
+"family:cohesion" = -3.0
+"family:legitimacy" = -5.0
 
 [universal_actions.cost]
 
@@ -191,7 +191,7 @@ name = "Нанять солдат"
 
 [universal_actions.available_if]
 type = "metric"
-metric = "family:family_wealth"
+metric = "family:wealth"
 operator = "greater"
 value = 100.0
 
@@ -200,4 +200,4 @@ value = 100.0
 "actor:rome.military_quality" = -5.0
 
 [universal_actions.cost]
-"family:family_wealth" = -100.0
+"family:wealth" = -100.0

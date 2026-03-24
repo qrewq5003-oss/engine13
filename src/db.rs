@@ -613,6 +613,106 @@ impl Db {
         Ok(final_events.into_iter().map(|(e, _)| e).collect())
     }
 
+    /// Get recent raw events without relevance-based pruning.
+    /// 
+    /// This returns ALL recent events for the specified actors, ordered by tick descending.
+    /// Unlike get_relevant_events_scored(), this does NOT:
+    /// - apply relevance scoring
+    /// - prune to top-N events
+    /// - filter by query_tags
+    /// 
+    /// Useful for debugging: compare raw event flow vs narrative-relevant subset.
+    /// 
+    /// Parameters:
+    /// - actor_ids: filter events by actor (empty = all actors)
+    /// - limit: max events to return (0 = no limit)
+    /// - tick_range: optional (from_tick, to_tick) range filter
+    pub fn get_recent_events_raw(
+        &self,
+        actor_ids: &[String],
+        limit: usize,
+        tick_range: Option<(u32, u32)>,
+    ) -> Result<Vec<Event>, String> {
+        let mut query = String::from("SELECT * FROM events WHERE 1=1");
+        
+        // Filter by actor_ids if provided
+        if !actor_ids.is_empty() {
+            let placeholders = actor_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            query.push_str(&format!(" AND actor_id IN ({})", placeholders));
+        }
+        
+        // Filter by tick range if provided
+        if let Some((from, to)) = tick_range {
+            query.push_str(&format!(" AND tick >= {} AND tick <= {}", from, to));
+        }
+        
+        query.push_str(" ORDER BY tick DESC");
+        
+        if limit > 0 {
+            query.push_str(&format!(" LIMIT {}", limit));
+        }
+
+        let mut stmt = self.conn
+            .prepare(&query)
+            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let params: Vec<&dyn rusqlite::ToSql> = if !actor_ids.is_empty() {
+            actor_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect()
+        } else {
+            Vec::new()
+        };
+
+        let events = stmt
+            .query_map(rusqlite::params_from_iter(params), |row: &rusqlite::Row| {
+                let event_id: String = row.get(1)?;
+                let tick: u32 = row.get(2)?;
+                let year: i32 = row.get(3)?;
+                let actor_id: String = row.get(4)?;
+                let event_type_str: String = row.get(5)?;
+                let description: String = row.get(6)?;
+                let metrics_snapshot_str: String = row.get(7)?;
+                let involved_actors_str: String = row.get(8)?;
+                let tags_str: String = row.get(9)?;
+                let is_key: i32 = row.get(10)?;
+
+                let event_type = Self::string_to_event_type(&event_type_str);
+                let metrics_snapshot: HashMap<String, f64> =
+                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
+                let involved_actors: Vec<String> =
+                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
+                let tags: Vec<String> =
+                    serde_json::from_str(&tags_str).unwrap_or_default();
+                let scenario_id: String = row.get(11).unwrap_or_default();
+                let metadata: String = row.get(12).unwrap_or_default();
+
+                Ok(Event {
+                    id: event_id,
+                    tick,
+                    year,
+                    actor_id,
+                    event_type,
+                    is_key: is_key != 0,
+                    description,
+                    involved_actors,
+                    metrics_snapshot,
+                    tags,
+                    scenario_id,
+                    metadata,
+                })
+            })
+            .map_err(|e| format!("Failed to query events: {}", e))?;
+
+        let mut result = Vec::new();
+        for event in events {
+            match event {
+                Ok(e) => result.push(e),
+                Err(e) => eprintln!("Error parsing event: {}", e),
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Get all key events from database
     fn get_all_key_events(&self) -> Result<Vec<Event>, String> {
         let mut stmt = self.conn

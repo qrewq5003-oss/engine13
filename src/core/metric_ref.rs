@@ -1,12 +1,24 @@
 use serde::{Deserialize, Serialize};
 use crate::core::WorldState;
 
+/// Normalize family metric key to canonical short-key format.
+/// 
+/// Canonical external format: `family:<short_key>` (e.g., `family:influence`)
+/// Legacy input format (backward-compat only): `family:family_<short_key>` (e.g., `family:family_influence`)
+/// 
+/// This function normalizes both to short-key for internal storage:
+/// - "influence" -> "influence"
+/// - "family_influence" -> "influence"
+fn normalize_family_key(raw: &str) -> String {
+    raw.strip_prefix("family_").unwrap_or(raw).to_string()
+}
+
 /// Reference to a metric in the world state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MetricRef {
     /// Actor-specific metric: "actor:id.metric"
     Actor { actor_id: String, metric: String },
-    /// Family metric: "family:key"
+    /// Family metric: "family:key" (canonical) or "family:family_key" (legacy, normalized)
     Family { key: String },
     /// Global metric: "global:key" or plain key
     Global { key: String },
@@ -16,14 +28,19 @@ impl MetricRef {
     /// Parse a string into a MetricRef
     ///
     /// Explicit prefixes only:
-    /// - "family:key" → MetricRef::Family
+    /// - "family:key" → MetricRef::Family (key normalized to short-key)
+    /// - "family:family_key" → MetricRef::Family (legacy, normalized to short-key)
     /// - "global:key" → MetricRef::Global
     /// - "actor:id.metric" → MetricRef::Actor
     /// - other → MetricRef::Global (plain key)
+    ///
+    /// Canonical format: `family:<short_key>` (e.g., `family:influence`)
+    /// Legacy format supported for backward compatibility: `family:family_<short_key>`
     pub fn parse(s: &str) -> Self {
         // Check explicit prefixes first
         if let Some(key) = s.strip_prefix("family:") {
-            MetricRef::Family { key: key.to_string() }
+            // Normalize family key to canonical short-key format
+            MetricRef::Family { key: normalize_family_key(key) }
         } else if let Some(key) = s.strip_prefix("global:") {
             MetricRef::Global { key: key.to_string() }
         } else if let Some(rest) = s.strip_prefix("actor:") {
@@ -50,11 +67,10 @@ impl MetricRef {
                     .unwrap_or(0.0)
             }
             MetricRef::Family { key } => {
-                // Family metrics stored in family_state.metrics
-                // Handle both "family:key" format (key without prefix) and "family_*" format (key with prefix)
-                let metric_key = key.strip_prefix("family_").unwrap_or(key);
+                // Family metrics stored in family_state.metrics using short-key format
+                // key is already normalized by parse()
                 world_state.family_state.as_ref()
-                    .and_then(|fs| fs.metrics.get(metric_key))
+                    .and_then(|fs| fs.metrics.get(key))
                     .copied()
                     .unwrap_or(0.0)
             }
@@ -82,11 +98,10 @@ impl MetricRef {
                 }
             }
             MetricRef::Family { key } => {
-                // Family metrics stored in family_state.metrics
-                // Handle both "family:key" format (key without prefix) and "family_*" format (key with prefix)
-                let metric_key = key.strip_prefix("family_").unwrap_or(key).to_string();
+                // Family metrics stored in family_state.metrics using short-key format
+                // key is already normalized by parse()
                 if let Some(ref mut fs) = world_state.family_state {
-                    let val = fs.metrics.entry(metric_key).or_insert(0.0);
+                    let val = fs.metrics.entry(key.clone()).or_insert(0.0);
                     *val += delta;
                 }
             }

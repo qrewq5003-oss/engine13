@@ -328,6 +328,35 @@ pub fn get_relevant_events(db: &Db, actor_ids: Vec<String>, current_tick: u32, q
     db.get_relevant_events_scored(current_tick, &query_tags, &actor_ids)
 }
 
+/// Get recent raw events without relevance-based pruning.
+/// 
+/// This returns ALL recent events for the specified actors, ordered by tick descending.
+/// Unlike get_relevant_events(), this does NOT apply relevance scoring or prune to top-N.
+/// 
+/// Useful for debugging: compare raw event flow vs narrative-relevant subset.
+/// 
+/// Parameters:
+/// - actor_ids: filter events by actor (empty = all actors)
+/// - limit: max events to return (0 = no limit)
+/// - from_tick: optional start tick for range filter
+/// - to_tick: optional end tick for range filter
+pub fn get_recent_events_raw(
+    db: &Db,
+    actor_ids: Vec<String>,
+    limit: usize,
+    from_tick: Option<u32>,
+    to_tick: Option<u32>,
+) -> Result<Vec<Event>, String> {
+    let tick_range = match (from_tick, to_tick) {
+        (Some(from), Some(to)) => Some((from, to)),
+        (Some(from), None) => Some((from, u32::MAX)),
+        (None, Some(to)) => Some((0, to)),
+        (None, None) => None,
+    };
+    
+    db.get_recent_events_raw(&actor_ids, limit, tick_range)
+}
+
 /// Status indicator state for UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusIndicatorState {
