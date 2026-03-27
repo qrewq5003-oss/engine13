@@ -1,8 +1,50 @@
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[8.0, 44.0], [11.0, 44.0], [11.0, 46.0], [8.0, 46.0], [8.0, 44.0]]]
-  },
-  "properties": { "actor_id": "milan" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              8.5,
+              46
+            ],
+            [
+              8,
+              45
+            ],
+            [
+              9,
+              44.5
+            ],
+            [
+              10,
+              44.5
+            ],
+            [
+              11,
+              45
+            ],
+            [
+              11.5,
+              46
+            ],
+            [
+              10.5,
+              46.5
+            ],
+            [
+              8.5,
+              46
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "actor_id": "milan"
+      }
+    }
+  ]
 }

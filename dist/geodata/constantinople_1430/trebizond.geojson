@@ -1,8 +1,54 @@
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[36.0, 40.0], [41.0, 40.0], [41.0, 42.0], [36.0, 42.0], [36.0, 40.0]]]
-  },
-  "properties": { "actor_id": "trebizond" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              36.5,
+              41.5
+            ],
+            [
+              36.5,
+              41
+            ],
+            [
+              37,
+              40.5
+            ],
+            [
+              39,
+              40.4
+            ],
+            [
+              41,
+              40.5
+            ],
+            [
+              41.5,
+              41
+            ],
+            [
+              40.5,
+              41.5
+            ],
+            [
+              38.5,
+              41.8
+            ],
+            [
+              36.5,
+              41.5
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "actor_id": "trebizond"
+      }
+    }
+  ]
 }

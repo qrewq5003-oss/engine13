@@ -1,8 +1,50 @@
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[11.0, 41.0], [14.0, 41.0], [14.0, 43.0], [11.0, 43.0], [11.0, 41.0]]]
-  },
-  "properties": { "actor_id": "papacy" }
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              11.5,
+              44.5
+            ],
+            [
+              11,
+              43
+            ],
+            [
+              11.5,
+              42
+            ],
+            [
+              12.5,
+              41.5
+            ],
+            [
+              14,
+              42
+            ],
+            [
+              14.5,
+              43
+            ],
+            [
+              13.5,
+              44
+            ],
+            [
+              11.5,
+              44.5
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "actor_id": "papacy"
+      }
+    }
+  ]
 }
