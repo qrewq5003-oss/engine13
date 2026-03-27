@@ -87,7 +87,8 @@ impl MetricRef {
                 let metric_key = key.strip_prefix("family_").unwrap_or(key).to_string();
                 if let Some(ref mut fs) = world_state.family_state {
                     let val = fs.metrics.entry(metric_key).or_insert(0.0);
-                    *val += delta;
+                    let new_value = (*val + delta).clamp(0.0, 100.0);
+                    *val = if new_value == 0.0 { 0.0 } else { new_value };
                 }
             }
             MetricRef::Global { key } => {
