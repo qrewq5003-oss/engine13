@@ -1,0 +1,216 @@
+[[tags]]
+id = "bureaucracy"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "roman_law"
+metrics_modifier = {}
+spreads_via = ["conquest"]
+spread_cooldown_ticks = 10
+spread_chance = 0.25
+
+[[tags]]
+id = "trade_networks"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.5
+
+[[tags]]
+id = "coinage"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 7
+spread_chance = 0.3
+
+[[tags]]
+id = "christianity"
+metrics_modifier = {}
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 6
+spread_chance = 0.35
+
+[[tags]]
+id = "christianity_arian"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "nomadic"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war", "migration"]
+spread_cooldown_ticks = 4
+spread_chance = 0.4
+
+[[tags]]
+id = "cavalry"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "raid_economy"
+metrics_modifier = { economic_output = -1, military_quality = 1 }
+spreads_via = ["war", "migration"]
+spread_cooldown_ticks = 5
+spread_chance = 0.25
+
+[[tags]]
+id = "pastoral"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade", "migration"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "tribal_confederation"
+metrics_modifier = {}
+spreads_via = ["war", "migration"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "federati_potential"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "steppe_adjacent"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "zoroastrianism"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "silk_road"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.4
+
+[[tags]]
+id = "cavalry_heavy"
+metrics_modifier = { military_quality = 2 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "migrating"
+metrics_modifier = { external_pressure = 1 }
+spreads_via = ["migration"]
+spread_cooldown_ticks = 4
+spread_chance = 0.35
+
+[[tags]]
+id = "rhine_border"
+metrics_modifier = { external_pressure = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.2
+
+[[tags]]
+id = "roman_contact"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade", "culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "seafaring"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 7
+spread_chance = 0.3
+
+[[tags]]
+id = "desert_warfare"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "roman_frontier"
+metrics_modifier = { external_pressure = 1, economic_output = 1 }
+spreads_via = ["trade", "war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.25
+
+[[tags]]
+id = "buffer_state"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "persian_border"
+metrics_modifier = { external_pressure = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.2
+
+[[tags]]
+id = "roman_border"
+metrics_modifier = { external_pressure = 1, economic_output = 1 }
+spreads_via = ["trade", "war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.25
+
+[[tags]]
+id = "buddhism"
+metrics_modifier = {}
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "hinduism"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.2
+
+[[tags]]
+id = "golden_age"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade", "culture"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "confucianism"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "southern_exile"
+metrics_modifier = {}
+spreads_via = []
+spread_cooldown_ticks = 0
+spread_chance = 0.0
+
+[[tags]]
+id = "declining"
+metrics_modifier = { cohesion = -1 }
+spreads_via = []
+spread_cooldown_ticks = 0
+spread_chance = 0.0

@@ -101,9 +101,17 @@ mode = "deficit"
 id = "external_pressure_legitimacy_to_cohesion_bonus"
 from = "external_pressure"
 to = "cohesion"
-coefficient = 5.0
+coefficient = 0.1
 threshold = 65.0
 mode = "bonus"
+
+[[dependencies]]
+id = "cohesion_natural_decay"
+from = "cohesion"
+to = "cohesion"
+coefficient = 0.12
+threshold = 50.0
+mode = "excess"
 
 [[dependencies]]
 id = "low_legitimacy_to_military_quality_decay"

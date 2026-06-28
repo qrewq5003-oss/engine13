@@ -1,0 +1,132 @@
+[[tags]]
+id = "orthodoxy"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "greek_culture"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 7
+spread_chance = 0.3
+
+[[tags]]
+id = "siege_defense"
+metrics_modifier = { military_quality = 2 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 10
+spread_chance = 0.2
+
+[[tags]]
+id = "islam"
+metrics_modifier = {}
+spreads_via = ["culture", "conquest"]
+spread_cooldown_ticks = 6
+spread_chance = 0.35
+
+[[tags]]
+id = "ghazi"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "siege_warfare"
+metrics_modifier = { military_quality = 2 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "janissaries"
+metrics_modifier = { military_quality = 3 }
+spreads_via = ["conquest"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "maritime"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.4
+
+[[tags]]
+id = "trade_empire"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 6
+spread_chance = 0.35
+
+[[tags]]
+id = "catholic"
+metrics_modifier = {}
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "galaata"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "condottieri"
+metrics_modifier = { military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 8
+spread_chance = 0.25
+
+[[tags]]
+id = "banking"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "religious_authority"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.15
+
+[[tags]]
+id = "crusade_caller"
+metrics_modifier = { external_pressure = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 10
+spread_chance = 0.1
+
+[[tags]]
+id = "kingdom"
+metrics_modifier = {}
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "ottoman_frontier"
+metrics_modifier = { external_pressure = 1, military_quality = 1 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.25
+
+[[tags]]
+id = "vassal"
+metrics_modifier = {}
+spreads_via = ["conquest"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "trade"
+metrics_modifier = { economic_output = 1 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.4

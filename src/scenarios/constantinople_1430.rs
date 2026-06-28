@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::core::{
-    Actor, AutoDelta, BorderType, ComparisonOperator,
-    DependencyRule, EventCondition, EventConditionType, MapConfig, MilestoneEvent, Neighbor,
-    PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
+    Actor, ActorTag, AutoDelta, BorderType, ComparisonOperator,
+    DependencyRule, EraDefinition, EventCondition, EventConditionType, MapConfig, MilestoneEvent,
+    Neighbor, PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
+    TagDefinition,
 };
 
 /// Dependencies file structure for TOML deserialization
@@ -44,6 +45,18 @@ struct AutoDeltasFile {
 #[derive(Deserialize)]
 struct MilestoneEventsFile {
     milestone_events: Vec<MilestoneEvent>,
+}
+
+/// Tags file structure for TOML deserialization
+#[derive(Deserialize)]
+struct TagsFile {
+    tags: Vec<TagDefinition>,
+}
+
+/// Eras file structure for TOML deserialization
+#[derive(Deserialize)]
+struct ErasFile {
+    eras: Vec<EraDefinition>,
 }
 
 /// Known metrics for validation
@@ -127,6 +140,38 @@ fn load_milestone_events() -> Vec<MilestoneEvent> {
     file.milestone_events
 }
 
+/// Load tag definitions from TOML file
+fn load_tags() -> Vec<TagDefinition> {
+    let tags_file: TagsFile = toml::from_str(
+        include_str!("constantinople_1430/tags.toml")
+    ).expect("constantinople_1430/tags.toml parse error");
+    tags_file.tags
+}
+
+/// Load era definitions from TOML file
+fn load_eras() -> Vec<EraDefinition> {
+    let eras_file: ErasFile = toml::from_str(
+        include_str!("constantinople_1430/eras.toml")
+    ).expect("constantinople_1430/eras.toml parse error");
+    eras_file.eras
+}
+
+/// Populate actor_tags from tag definitions based on each actor's tags vec
+fn populate_actor_tags(actors: &mut Vec<Actor>, tag_defs: &[TagDefinition]) {
+    let tag_map: std::collections::HashMap<&str, &TagDefinition> =
+        tag_defs.iter().map(|t| (t.id.as_str(), t)).collect();
+    for actor in actors.iter_mut() {
+        for tag_str in &actor.tags {
+            if let Some(td) = tag_map.get(tag_str.as_str()) {
+                actor.actor_tags.insert(tag_str.clone(), ActorTag {
+                    metrics_modifier: td.metrics_modifier.clone(),
+                    spreads_via: td.spreads_via.clone(),
+                });
+            }
+        }
+    }
+}
+
 /// Load the Constantinople 1430 scenario
 pub fn load_constantinople_1430() -> Scenario {
     eprintln!("[SCENARIO] load_constantinople_1430 - starting");
@@ -134,6 +179,11 @@ pub fn load_constantinople_1430() -> Scenario {
     let (patron_actions, universal_actions) = load_actions();
     let rank_bonuses = load_rank_bonuses();
     let map = load_map_config();
+    let tag_definitions = load_tags();
+    let era_definitions = load_eras();
+
+    let mut actors = create_actors();
+    populate_actor_tags(&mut actors, &tag_definitions);
 
     let scenario = Scenario {
         id: "constantinople_1430".to_string(),
@@ -144,7 +194,7 @@ pub fn load_constantinople_1430() -> Scenario {
         tick_span: 1,
         era: crate::core::Era::LateMedieval,
         tick_label: "год".to_string(),
-        actors: create_actors(),
+        actors,
         auto_deltas: load_auto_deltas(),
         milestone_events: load_milestone_events(),
         rank_conditions: create_rank_conditions(),
@@ -233,6 +283,8 @@ pub fn load_constantinople_1430() -> Scenario {
         interaction_rules: vec![],
         rank_bonuses,
         map,
+        tag_definitions,
+        era_definitions,
     };
     eprintln!("[SCENARIO] load_constantinople_1430 - loaded {} actors", scenario.actors.len());
     scenario

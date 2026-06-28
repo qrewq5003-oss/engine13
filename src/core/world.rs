@@ -66,6 +66,8 @@ pub struct WorldState {
     pub tick: u32,
     pub year: i32,
     pub scenario_id: String,
+    #[serde(default)]
+    pub run_id: String,
     pub game_mode: GameMode,
     pub actors: HashMap<String, Actor>,
     pub dead_actors: Vec<DeadActor>,
@@ -118,6 +120,12 @@ pub struct WorldState {
     pub global_metrics_display: Vec<crate::core::MetricDisplay>,
     /// Generation mechanics (from scenario, for family scenarios)
     pub generation_mechanics: Option<crate::core::GenerationMechanics>,
+    /// Tag spread cooldowns - key: "tag_{id}_{sorted_pair}", value: last tick
+    #[serde(default)]
+    pub tag_spread_cooldowns: HashMap<String, u32>,
+    /// Cultural displacement progress - key: target actor_id, value: accumulated progress (0..100)
+    #[serde(default)]
+    pub cultural_displacement_progress: HashMap<String, f64>,
 }
 
 impl WorldState {
@@ -127,11 +135,13 @@ impl WorldState {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64;
+        let run_id = format!("{}-{}", scenario_id, rng_seed);
 
         Self {
             tick: 0,
             year: start_year,
             scenario_id,
+            run_id,
             game_mode: GameMode::Scenario,
             actors: HashMap::new(),
             dead_actors: Vec::new(),
@@ -159,15 +169,19 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            tag_spread_cooldowns: HashMap::new(),
+            cultural_displacement_progress: HashMap::new(),
         }
     }
 
     /// Create WorldState with explicit seed (for save/load)
     pub fn with_seed(scenario_id: String, start_year: i32, rng_seed: u64) -> Self {
+        let run_id = format!("{}-{}", scenario_id, rng_seed);
         Self {
             tick: 0,
             year: start_year,
             scenario_id,
+            run_id,
             game_mode: GameMode::Scenario,
             actors: HashMap::new(),
             dead_actors: Vec::new(),
@@ -195,6 +209,8 @@ impl WorldState {
             family_state: None,
             global_metrics_display: vec![],
             generation_mechanics: None,
+            tag_spread_cooldowns: HashMap::new(),
+            cultural_displacement_progress: HashMap::new(),
         }
     }
 

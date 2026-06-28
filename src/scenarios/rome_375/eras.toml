@@ -1,0 +1,37 @@
+[[eras]]
+era = "ancient"
+min_tick = 0
+requires_tags = 0
+from_tags = []
+
+[[eras]]
+era = "early_medieval"
+min_tick = 40
+requires_tags = 4
+from_tags = ["bureaucracy", "roman_law", "trade_networks", "coinage", "christianity", "nomadic", "cavalry"]
+auto_delta_modifier = 0.9
+unlocks_tags = ["heavy_cavalry", "feudalism"]
+
+[[eras]]
+era = "high_medieval"
+min_tick = 100
+requires_tags = 5
+from_tags = ["heavy_cavalry", "feudalism", "christianity", "trade_networks", "coinage", "bureaucracy"]
+auto_delta_modifier = 0.8
+unlocks_tags = ["crossbow", "guilds", "banking"]
+
+[[eras]]
+era = "late_medieval"
+min_tick = 180
+requires_tags = 5
+from_tags = ["crossbow", "guilds", "banking", "heavy_cavalry", "feudalism", "roman_law"]
+auto_delta_modifier = 0.7
+unlocks_tags = ["plate_armor", "gunpowder", "codified_law"]
+
+[[eras]]
+era = "early_modern"
+min_tick = 280
+requires_tags = 6
+from_tags = ["plate_armor", "gunpowder", "codified_law", "banking", "guilds", "trade_networks"]
+auto_delta_modifier = 0.6
+unlocks_tags = ["printing_press", "professional_army"]

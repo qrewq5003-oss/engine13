@@ -1,0 +1,13 @@
+[[eras]]
+era = "late_medieval"
+min_tick = 0
+requires_tags = 0
+from_tags = []
+
+[[eras]]
+era = "early_modern"
+min_tick = 30
+requires_tags = 4
+from_tags = ["islam", "janissaries", "siege_warfare", "trade_empire", "banking", "orthodoxy", "greek_culture"]
+auto_delta_modifier = 0.8
+unlocks_tags = ["gunpowder", "printing_press"]

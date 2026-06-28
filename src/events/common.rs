@@ -147,12 +147,14 @@ pub fn common_events() -> Vec<RandomEvent> {
         },
         RandomEvent {
             id: "charismatic_preacher".to_string(),
-            probability: 0.09,
+            probability: 0.05,
             target: EventTarget::Any,
-            conditions: vec![],
+            conditions: vec![
+                Condition { metric: "self.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
+            ],
             effects: HashMap::from([
-                ("self.cohesion".to_string(), 6.0),
-                ("self.legitimacy".to_string(), 5.0),
+                ("self.cohesion".to_string(), 3.0),
+                ("self.legitimacy".to_string(), 2.0),
             ]),
             llm_context: "Харизматичный проповедник сплотил народ вокруг правителя".to_string(),
             one_time: false,

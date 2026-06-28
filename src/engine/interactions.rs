@@ -1,7 +1,7 @@
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::core::{BorderType, ConditionActor, Event, EventType, InteractionRule, WorldState, Scenario, Religion, Culture};
+use crate::core::{ActorTag, BorderType, ConditionActor, Event, EventType, InteractionRule, TagSpreadType, WorldState, Scenario, Religion, Culture};
 use crate::engine::EventLog;
 
 /// Cultural affinity between two cultures (0.0 = hostile, 1.0 = identical)
@@ -267,6 +267,11 @@ pub fn calculate_interactions(
         calculate_cultural_interaction(
             world, &actor_a_id, &actor_b_id, distance,
             current_tick, current_year, event_log, rng,
+        );
+
+        spread_actor_tags(
+            world, scenario, &actor_a_id, &actor_b_id, distance, &bt,
+            current_tick, rng, event_log,
         );
     }
 }
@@ -641,11 +646,11 @@ fn calculate_cultural_interaction(
         .collect();
 
     let shared_count = shared_tags.len() as f64;
-    let bonus = shared_count * 0.5 / distance as f64;
-    let malus = if shared_count == 0.0 && distance == 1 { 0.5 } else { 0.0 };
+    let bonus = shared_count * 0.01 / distance as f64;
+    let malus = if shared_count == 0.0 && distance == 1 { 0.05 } else { 0.0 };
 
-    // Apply cohesion changes
-    let cohesion_change = bonus - malus;
+    // Apply cohesion changes, capped at ±0.05 per interaction
+    let cohesion_change = (bonus - malus).clamp(-0.05, 0.05);
 
     if let Some(actor) = world.actors.get_mut(actor_a_id) {
         let coh = actor.get_metric("cohesion");
@@ -669,6 +674,22 @@ fn calculate_cultural_interaction(
         );
         event_log.add(event);
     }
+
+    // Cultural displacement: stronger culture pressures weaker neighbor
+    if distance <= 2 {
+        let actor_a = world.actors.get(actor_a_id).unwrap();
+        let actor_b = world.actors.get(actor_b_id).unwrap();
+        let a_power = cultural_power(actor_a);
+        let b_power = cultural_power(actor_b);
+
+        if a_power > b_power * 1.5 {
+            let delta = a_power - b_power;
+            apply_cultural_pressure(world, actor_a_id, actor_b_id, delta, current_tick, current_year, event_log);
+        } else if b_power > a_power * 1.5 {
+            let delta = b_power - a_power;
+            apply_cultural_pressure(world, actor_b_id, actor_a_id, delta, current_tick, current_year, event_log);
+        }
+    }
 }
 
 /// Determine if an interaction should be recorded as an event
@@ -680,5 +701,229 @@ fn should_record_event(interaction_type: &InteractionType, intensity: f64) -> bo
         InteractionType::Migration => intensity > 5.0,
         InteractionType::Vassalage => intensity > 3.0,
         InteractionType::Cultural => intensity > 3.0,
+    }
+}
+
+/// Calculate cultural power of an actor for displacement comparison
+fn cultural_power(actor: &crate::core::Actor) -> f64 {
+    let base = actor.get_metric("legitimacy") * 0.3
+        + actor.get_metric("cohesion") * 0.3
+        + actor.get_metric("economic_output") * 0.2;
+    let tag_bonus = actor.actor_tags.len() as f64 * 2.0;
+    base + tag_bonus
+}
+
+/// Apply cultural pressure from aggressor to target
+/// Accumulates displacement progress; at 100.0 triggers culture change
+fn apply_cultural_pressure(
+    world: &mut WorldState,
+    aggressor_id: &str,
+    target_id: &str,
+    pressure_delta: f64,
+    current_tick: u32,
+    current_year: i32,
+    event_log: &mut EventLog,
+) {
+    // Cap progress gain at 3.0 per tick
+    let progress_gain = (pressure_delta * 0.05).min(3.0);
+
+    let entry = world.cultural_displacement_progress
+        .entry(target_id.to_string())
+        .or_insert(0.0);
+    *entry += progress_gain;
+
+    // Check if displacement threshold reached
+    if *entry >= 100.0 {
+        // Get aggressor's culture and tags before mutable borrow
+        let aggressor_culture = world.actors.get(aggressor_id)
+            .map(|a| a.culture.clone());
+        let aggressor_tags: Vec<(String, ActorTag)> = world.actors.get(aggressor_id)
+            .map(|a| {
+                a.actor_tags.iter()
+                    .filter(|(id, _)| {
+                        // Only transfer tags the target doesn't already have
+                        !world.actors.get(target_id)
+                            .map(|t| t.tags.contains(id))
+                            .unwrap_or(true)
+                    })
+                    .take(3)
+                    .map(|(id, tag)| (id.clone(), tag.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if let (Some(culture), Some(target)) = (aggressor_culture, world.actors.get_mut(target_id)) {
+            target.culture = culture;
+
+            // Transfer tags
+            for (tag_id, actor_tag) in aggressor_tags {
+                if !target.tags.contains(&tag_id) {
+                    target.tags.push(tag_id.clone());
+                    target.actor_tags.insert(tag_id, actor_tag);
+                }
+            }
+
+            let event = Event::new(
+                format!("cultural_displacement_{}", target_id),
+                current_tick,
+                current_year,
+                target_id.to_string(),
+                EventType::Cultural,
+                true,
+                format!("{} попал под культурное доминирование {}", target_id, aggressor_id),
+            );
+            event_log.add(event);
+        }
+
+        // Reset progress
+        world.cultural_displacement_progress.insert(target_id.to_string(), 0.0);
+    }
+}
+
+/// Spread tags between neighboring actors via interaction types
+pub fn spread_actor_tags(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    actor_a_id: &str,
+    actor_b_id: &str,
+    distance: u32,
+    border_type: &BorderType,
+    current_tick: u32,
+    rng: &mut ChaCha8Rng,
+    event_log: &mut EventLog,
+) {
+    // Build tag definition lookup
+    let tag_def_map: std::collections::HashMap<&str, &crate::core::TagDefinition> =
+        scenario.tag_definitions.iter().map(|t| (t.id.as_str(), t)).collect();
+
+    // Try spreading in both directions
+    try_spread_direction(world, &tag_def_map, scenario, actor_a_id, actor_b_id, distance, border_type, current_tick, rng, event_log);
+    try_spread_direction(world, &tag_def_map, scenario, actor_b_id, actor_a_id, distance, border_type, current_tick, rng, event_log);
+}
+
+/// Try spreading tags from source to target
+fn try_spread_direction(
+    world: &mut WorldState,
+    tag_def_map: &std::collections::HashMap<&str, &crate::core::TagDefinition>,
+    scenario: &Scenario,
+    source_id: &str,
+    target_id: &str,
+    distance: u32,
+    border_type: &BorderType,
+    current_tick: u32,
+    rng: &mut ChaCha8Rng,
+    event_log: &mut EventLog,
+) {
+    // Collect tags to spread (avoid borrow issues)
+    let source_tags: Vec<String> = world.actors.get(source_id)
+        .map(|a| a.tags.clone())
+        .unwrap_or_default();
+
+    let target_tags: Vec<String> = world.actors.get(target_id)
+        .map(|a| a.tags.clone())
+        .unwrap_or_default();
+
+    let target_era = world.actors.get(target_id)
+        .map(|a| a.era.clone())
+        .unwrap_or_default();
+
+    for tag_id in &source_tags {
+        // Skip if target already has this tag
+        if target_tags.contains(tag_id) {
+            continue;
+        }
+
+        // Look up tag definition
+        let tag_def = match tag_def_map.get(tag_id.as_str()) {
+            Some(td) => td,
+            None => continue, // No definition = no spreading
+        };
+
+        // Check era requirement
+        if let Some(ref required_era) = tag_def.requires_era {
+            if target_era < *required_era {
+                continue;
+            }
+        }
+
+        // Check if any spreads_via channel is active
+        let can_spread = tag_def.spreads_via.iter().any(|via| {
+            match via {
+                TagSpreadType::Trade => {
+                    let a_econ = world.actors.get(source_id).map(|a| a.get_metric("economic_output")).unwrap_or(0.0);
+                    let b_econ = world.actors.get(target_id).map(|a| a.get_metric("economic_output")).unwrap_or(0.0);
+                    a_econ > 20.0 && b_econ > 20.0
+                }
+                TagSpreadType::War => {
+                    let a_mil = world.actors.get(source_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                    let b_mil = world.actors.get(target_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                    a_mil > b_mil * 1.3
+                }
+                TagSpreadType::Culture => {
+                    *border_type == BorderType::Land
+                }
+                TagSpreadType::Migration => {
+                    world.actors.get(target_id).map(|a| a.get_metric("external_pressure")).unwrap_or(0.0) > 50.0
+                }
+                TagSpreadType::Conquest => {
+                    let a_mil = world.actors.get(source_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                    let b_mil = world.actors.get(target_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                    a_mil > b_mil * 1.5
+                }
+            }
+        });
+
+        if !can_spread {
+            continue;
+        }
+
+        // Cooldown check
+        let (id_a, id_b) = if source_id < target_id {
+            (source_id, target_id)
+        } else {
+            (target_id, source_id)
+        };
+        let cooldown_key = format!("tag_{}_{}_{}", tag_id, id_a, id_b);
+        if tag_def.spread_cooldown_ticks > 0 {
+            if let Some(&last_tick) = world.tag_spread_cooldowns.get(&cooldown_key) {
+                if current_tick.saturating_sub(last_tick) < tag_def.spread_cooldown_ticks {
+                    continue;
+                }
+            }
+        }
+
+        // Probability roll
+        let roll: f64 = rng.gen();
+        if roll > tag_def.spread_chance {
+            continue;
+        }
+
+        // Apply spread: add tag and ActorTag to target
+        if let Some(target) = world.actors.get_mut(target_id) {
+            if !target.tags.contains(tag_id) {
+                target.tags.push(tag_id.clone());
+                target.actor_tags.insert(tag_id.clone(), ActorTag {
+                    metrics_modifier: tag_def.metrics_modifier.clone(),
+                    spreads_via: tag_def.spreads_via.clone(),
+                });
+            }
+        }
+
+        // Set cooldown
+        if tag_def.spread_cooldown_ticks > 0 {
+            world.tag_spread_cooldowns.insert(cooldown_key, current_tick);
+        }
+
+        // Log event
+        let event = Event::new(
+            format!("tag_spread_{}_{}", tag_id, target_id),
+            current_tick,
+            world.year,
+            target_id.to_string(),
+            EventType::Cultural,
+            false,
+            format!("Тег '{}' распространился от {} к {}", tag_id, source_id, target_id),
+        );
+        event_log.add(event);
     }
 }

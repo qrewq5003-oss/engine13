@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::core::{
-    Actor, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
-    EventCondition, EventConditionType, GenerationMechanics, MapConfig, MilestoneEvent, Neighbor,
-    PatronAction, RankBonusRule, RankCondition, RankResult, Scenario, Successor,
+    Actor, ActorTag, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
+    EraDefinition, EventCondition, EventConditionType, GenerationMechanics, MapConfig,
+    MilestoneEvent, Neighbor, PatronAction, RankBonusRule, RankCondition, RankResult, Scenario,
+    Successor, TagDefinition,
 };
 
 /// Dependencies file structure for TOML deserialization
@@ -32,6 +33,18 @@ struct RankBonusesFile {
 #[derive(Deserialize)]
 struct MapFile {
     map: MapConfig,
+}
+
+/// Tags file structure for TOML deserialization
+#[derive(Deserialize)]
+struct TagsFile {
+    tags: Vec<TagDefinition>,
+}
+
+/// Eras file structure for TOML deserialization
+#[derive(Deserialize)]
+struct ErasFile {
+    eras: Vec<EraDefinition>,
 }
 
 /// Known metrics for validation
@@ -102,6 +115,38 @@ fn load_map_config() -> Option<MapConfig> {
     Some(map_file.map)
 }
 
+/// Load tag definitions from TOML file
+fn load_tags() -> Vec<TagDefinition> {
+    let tags_file: TagsFile = toml::from_str(
+        include_str!("rome_375/tags.toml")
+    ).expect("rome_375/tags.toml parse error");
+    tags_file.tags
+}
+
+/// Load era definitions from TOML file
+fn load_eras() -> Vec<EraDefinition> {
+    let eras_file: ErasFile = toml::from_str(
+        include_str!("rome_375/eras.toml")
+    ).expect("rome_375/eras.toml parse error");
+    eras_file.eras
+}
+
+/// Populate actor_tags from tag definitions based on each actor's tags vec
+fn populate_actor_tags(actors: &mut Vec<Actor>, tag_defs: &[TagDefinition]) {
+    let tag_map: std::collections::HashMap<&str, &TagDefinition> =
+        tag_defs.iter().map(|t| (t.id.as_str(), t)).collect();
+    for actor in actors.iter_mut() {
+        for tag_str in &actor.tags {
+            if let Some(td) = tag_map.get(tag_str.as_str()) {
+                actor.actor_tags.insert(tag_str.clone(), ActorTag {
+                    metrics_modifier: td.metrics_modifier.clone(),
+                    spreads_via: td.spreads_via.clone(),
+                });
+            }
+        }
+    }
+}
+
 /// Load the Rome 375 scenario
 pub fn load_rome_375() -> Scenario {
     eprintln!("[SCENARIO] load_rome_375 - starting");
@@ -109,6 +154,11 @@ pub fn load_rome_375() -> Scenario {
     let (patron_actions, universal_actions) = load_actions();
     let rank_bonuses = load_rank_bonuses();
     let map = load_map_config();
+    let tag_definitions = load_tags();
+    let era_definitions = load_eras();
+
+    let mut actors = create_actors();
+    populate_actor_tags(&mut actors, &tag_definitions);
 
     let scenario = Scenario {
         id: "rome_375".to_string(),
@@ -119,7 +169,7 @@ pub fn load_rome_375() -> Scenario {
         tick_span: 1,
         era: crate::core::Era::Ancient,
         tick_label: "год".to_string(),
-        actors: create_actors(),
+        actors,
         auto_deltas: create_auto_deltas(),
         milestone_events: create_milestone_events(),
         rank_conditions: create_rank_conditions(),
@@ -150,10 +200,10 @@ pub fn load_rome_375() -> Scenario {
         }),
         global_metrics_display: vec![],
         initial_family_metrics: Some(HashMap::from([
-            ("family:family_influence".to_string(), 60.0),
-            ("family:family_knowledge".to_string(), 40.0),
-            ("family:family_wealth".to_string(), 50.0),
-            ("family:family_connections".to_string(), 45.0),
+            ("family:family_influence".to_string(), 0.0),
+            ("family:family_knowledge".to_string(), 0.0),
+            ("family:family_wealth".to_string(), 0.0),
+            ("family:family_connections".to_string(), 0.0),
         ])),
         max_random_events_per_tick: 2,
         narrative_config: crate::core::NarrativeConfig {
@@ -190,6 +240,8 @@ pub fn load_rome_375() -> Scenario {
         interaction_rules: vec![],
         rank_bonuses,
         map,
+        tag_definitions,
+        era_definitions,
     };
     eprintln!("[SCENARIO] load_rome_375 - loaded {} actors", scenario.actors.len());
     scenario
@@ -1204,14 +1256,14 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         AutoDelta {
             metric: "cohesion".to_string(),
-            base: -0.1,
+            base: -0.3,
             conditions: vec![
                 DeltaCondition { metric: "legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: 0.1 },
                 DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.4 },
                 DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
-            noise: 0.2,
+            noise: 0.1,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {

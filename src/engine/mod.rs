@@ -189,8 +189,11 @@ pub fn tick(
     // Phase 3: Random events
     phase_random_events(world, scenario, event_log, rng);
 
-    // Phase 4: Actor tag effects
+    // Phase 4: Actor tag effects + displacement decay
     phase_actor_tags(world, scenario);
+
+    // Phase 4b: Era progression (after tags settle)
+    phase_era_progression(world, scenario, event_log);
 
     // Phase 5: Clamp metrics
     phase_clamp(world);
@@ -221,15 +224,17 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         // Check conditions
         let mut delta = auto_delta.base;
         for cond in &auto_delta.conditions {
-            if check_auto_delta_condition(world, cond) {
+            if check_auto_delta_condition_scoped(world, cond, auto_delta.actor_id.as_deref()) {
                 delta += cond.delta;
             }
         }
 
         // Check ratio conditions
         for ratio_cond in &auto_delta.ratio_conditions {
-            let val_a = crate::core::MetricRef::parse(&ratio_cond.metric_a).get(world);
-            let val_b = crate::core::MetricRef::parse(&ratio_cond.metric_b).get(world);
+            let scoped_a = scope_metric_for_actor(&ratio_cond.metric_a, auto_delta.actor_id.as_deref());
+            let scoped_b = scope_metric_for_actor(&ratio_cond.metric_b, auto_delta.actor_id.as_deref());
+            let val_a = crate::core::MetricRef::parse(&scoped_a).get(world);
+            let val_b = crate::core::MetricRef::parse(&scoped_b).get(world);
             
             if val_b == 0.0 {
                 continue;
@@ -247,14 +252,29 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
         let final_delta = delta + noise;
 
-        // Apply via MetricRef - single path for all metric types
-        MetricRef::parse(&auto_delta.metric).apply(world, final_delta);
+        // Apply via MetricRef - scope to actor if actor_id is set
+        let scoped_metric = scope_metric_for_actor(&auto_delta.metric, auto_delta.actor_id.as_deref());
+        MetricRef::parse(&scoped_metric).apply(world, final_delta);
     }
 }
 
-/// Check auto_delta condition against world state
-fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
-    let value = MetricRef::parse(&cond.metric).get(world);
+/// Scope a metric name to an actor if actor_id is set and metric doesn't already have a prefix
+fn scope_metric_for_actor(metric: &str, actor_id: Option<&str>) -> String {
+    if let Some(aid) = actor_id {
+        if !metric.contains(':') && !metric.contains('.') {
+            format!("{}.{}", aid, metric)
+        } else {
+            metric.to_string()
+        }
+    } else {
+        metric.to_string()
+    }
+}
+
+/// Check auto_delta condition against world state, scoped to actor when actor_id is set
+fn check_auto_delta_condition_scoped(world: &WorldState, cond: &crate::core::DeltaCondition, actor_id: Option<&str>) -> bool {
+    let scoped_metric = scope_metric_for_actor(&cond.metric, actor_id);
+    let value = MetricRef::parse(&scoped_metric).get(world);
     match cond.operator {
         crate::core::ComparisonOperator::Less => value < cond.value,
         crate::core::ComparisonOperator::LessOrEqual => value <= cond.value,
@@ -429,11 +449,56 @@ fn phase_random_events(
 // ============================================================================
 
 fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
+    // Decay cultural displacement progress
+    for val in world.cultural_displacement_progress.values_mut() {
+        *val = (*val - 5.0).max(0.0);
+    }
+    world.cultural_displacement_progress.retain(|_, v| *v > 0.0);
+
     apply_actor_tags(world, scenario);
 }
 
 // ============================================================================
-// Phase 4: Clamp metrics
+// Phase 4b: Era progression
+// ============================================================================
+
+fn phase_era_progression(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+    for era_def in &scenario.era_definitions {
+        // Skip ancient (starting era)
+        if era_def.era == crate::core::Era::Ancient { continue; }
+
+        for actor in world.actors.values_mut() {
+            // Skip if already at or past this era
+            if actor.era >= era_def.era { continue; }
+            // Skip if tick too early
+            if world.tick < era_def.min_tick { continue; }
+
+            // Count matching tags
+            let matching = actor.tags.iter()
+                .filter(|t| era_def.from_tags.contains(t))
+                .count() as u32;
+
+            if matching >= era_def.requires_tags {
+                let old_era = actor.era.clone();
+                actor.era = era_def.era.clone();
+
+                let event = Event::new(
+                    format!("era_{}_{}", actor.id, format!("{:?}", era_def.era).to_lowercase()),
+                    world.tick,
+                    world.year,
+                    actor.id.clone(),
+                    crate::core::EventType::Milestone,
+                    true,
+                    format!("{} перешёл из {:?} в {:?} эру", actor.name, old_era, era_def.era),
+                );
+                event_log.add(event);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Phase 5: Clamp metrics
 // ============================================================================
 
 fn phase_clamp(world: &mut WorldState) {
@@ -1570,6 +1635,8 @@ mod tests {
             interaction_rules: vec![],
             rank_bonuses: vec![],
             map: None,
+            tag_definitions: vec![],
+            era_definitions: vec![],
         };
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);

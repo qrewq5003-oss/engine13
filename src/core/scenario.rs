@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::actor::{Actor, Era, RegionRank};
+use super::actor::{Actor, Era, RegionRank, TagSpreadType};
 
 /// Dependency rule mode - determines how the dependency affects the target metric
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +116,43 @@ pub struct RankBonusRule {
     pub effects: Vec<RankBonusEffect>,
 }
 
+/// Default spread cooldown in ticks
+fn default_spread_cooldown() -> u32 { 5 }
+/// Default spread probability
+fn default_spread_chance() -> f64 { 0.3 }
+
+/// Tag definition loaded from scenario config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagDefinition {
+    pub id: String,
+    pub metrics_modifier: HashMap<String, i32>,
+    pub spreads_via: Vec<TagSpreadType>,
+    #[serde(default = "default_spread_cooldown")]
+    pub spread_cooldown_ticks: u32,
+    #[serde(default = "default_spread_chance")]
+    pub spread_chance: f64,
+    #[serde(default)]
+    pub requires_era: Option<Era>,
+    #[serde(default)]
+    pub unlocks: Vec<String>,
+}
+
+/// Era definition loaded from scenario config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EraDefinition {
+    pub era: Era,
+    #[serde(default)]
+    pub min_tick: u32,
+    #[serde(default)]
+    pub requires_tags: u32,
+    #[serde(default)]
+    pub from_tags: Vec<String>,
+    #[serde(default)]
+    pub auto_delta_modifier: f64,
+    #[serde(default)]
+    pub unlocks_tags: Vec<String>,
+}
+
 /// Narrative configuration for data-driven chronicle generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
@@ -193,6 +230,12 @@ pub struct Scenario {
     /// Map configuration loaded from map.toml
     #[serde(default)]
     pub map: Option<MapConfig>,
+    /// Tag definitions loaded from tags.toml
+    #[serde(default)]
+    pub tag_definitions: Vec<TagDefinition>,
+    /// Era definitions loaded from eras.toml
+    #[serde(default)]
+    pub era_definitions: Vec<EraDefinition>,
 }
 
 /// Metric display configuration for UI
