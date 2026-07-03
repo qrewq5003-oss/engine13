@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "export PATH=/home/deck/.cargo/bin:$PATH && tauri"
+    "tauri": "tauri"
   },
   "keywords": [],
   "author": "",

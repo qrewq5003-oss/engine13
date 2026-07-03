@@ -2,3 +2,6 @@
 src-tauri/target/
 node_modules/
 /target
+dist/
+digest.txt
+libpng16.pc
