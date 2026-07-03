@@ -10,16 +10,16 @@ use serde::Serialize;
 
 mod interactions;
 
-/// Validate dependency rules against known metrics.
+/// Validate that every non-Linear dependency rule carries the threshold its mode
+/// needs.
 ///
-/// Runs at scenario load time (see each scenario's `load_dependencies`). Returns
-/// every problem found instead of panicking so callers can surface a clear load
-/// error rather than letting a malformed rule reach the per-tick hot path, where
-/// a missing threshold would otherwise panic deep inside `apply_dependency_rule`.
-pub fn validate_dependencies(
-    rules: &[DependencyRule],
-    known_metrics: &[&str],
-) -> Result<(), Vec<String>> {
+/// Split out from `validate_dependencies` so the single load choke point
+/// (`scenarios::registry::validate_scenario`) can enforce it for *every* scenario
+/// without needing that scenario's `KNOWN_METRICS` — only the from/to metric-name
+/// check in `validate_dependencies` needs those. This guarantees the threshold
+/// invariant relied on by `apply_dependency_rule` even for a scenario that forgets
+/// its own per-scenario validation call.
+pub fn validate_dependency_thresholds(rules: &[DependencyRule]) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
     for rule in rules {
         // threshold is required for non-Linear modes
@@ -34,6 +34,30 @@ pub fn validate_dependencies(
                 }
             }
         }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Validate dependency rules against known metrics.
+///
+/// Runs at scenario load time (see each scenario's `load_dependencies`). Returns
+/// every problem found instead of panicking so callers can surface a clear load
+/// error rather than letting a malformed rule reach the per-tick hot path, where
+/// a missing threshold would otherwise panic deep inside `apply_dependency_rule`.
+pub fn validate_dependencies(
+    rules: &[DependencyRule],
+    known_metrics: &[&str],
+) -> Result<(), Vec<String>> {
+    // threshold presence (mode-required) — shared with the centralized choke point
+    let mut errors = match validate_dependency_thresholds(rules) {
+        Ok(()) => Vec::new(),
+        Err(errs) => errs,
+    };
+    for rule in rules {
         // from and to must be known metrics
         if !known_metrics.contains(&rule.from.as_str()) {
             errors.push(format!(
@@ -60,11 +84,20 @@ pub fn validate_dependencies(
 /// of the actor (already modified by previous rules).
 fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
     let from_val = actor.get_metric(&rule.from);
-    // `validate_dependencies` (run at scenario load) guarantees `threshold` is
-    // `Some` for Deficit/Excess/Bonus, so `None` is unreachable for any loaded
-    // scenario. Handle it defensively as a no-op (delta 0.0) instead of panicking:
-    // this can never fire on a validated scenario, so it does not change balance,
-    // but it removes the per-tick panic if a rule ever slips past validation.
+    // Non-Linear modes require `threshold`. `validate_dependency_thresholds` runs
+    // centrally at load (`load_by_id` -> `validate_scenario`) for every scenario,
+    // plus per-scenario in `validate_dependencies`, so `None` is unreachable for
+    // any validated scenario. The `debug_assert!` makes a slip loud in debug/test
+    // while the `_ => 0.0` arms below stay a safe no-op (delta 0.0) in release
+    // rather than a per-tick panic. Note the assert targets only the missing-
+    // threshold case; `_ => 0.0` also legitimately fires when `threshold` is
+    // `Some` but the comparison guard does not hold (the normal per-tick case).
+    debug_assert!(
+        matches!(rule.mode, DependencyMode::Linear) || rule.threshold.is_some(),
+        "dependency rule '{}': threshold required for mode {:?} reached hot path unvalidated",
+        rule.id,
+        rule.mode
+    );
     let delta = match rule.mode {
         DependencyMode::Deficit => match rule.threshold {
             Some(threshold) if from_val < threshold => -((threshold - from_val) * rule.coefficient),
