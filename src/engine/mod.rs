@@ -10,31 +10,48 @@ use serde::Serialize;
 
 mod interactions;
 
-/// Validate dependency rules against known metrics
-pub fn validate_dependencies(rules: &[DependencyRule], known_metrics: &[&str]) {
+/// Validate dependency rules against known metrics.
+///
+/// Runs at scenario load time (see each scenario's `load_dependencies`). Returns
+/// every problem found instead of panicking so callers can surface a clear load
+/// error rather than letting a malformed rule reach the per-tick hot path, where
+/// a missing threshold would otherwise panic deep inside `apply_dependency_rule`.
+pub fn validate_dependencies(
+    rules: &[DependencyRule],
+    known_metrics: &[&str],
+) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
     for rule in rules {
         // threshold is required for non-Linear modes
         match rule.mode {
             DependencyMode::Linear => {}
             _ => {
-                assert!(
-                    rule.threshold.is_some(),
-                    "DependencyRule '{}': threshold required for mode {:?}",
-                    rule.id, rule.mode
-                );
+                if rule.threshold.is_none() {
+                    errors.push(format!(
+                        "dependency rule '{}': threshold required for mode {:?}",
+                        rule.id, rule.mode
+                    ));
+                }
             }
         }
         // from and to must be known metrics
-        assert!(
-            known_metrics.contains(&rule.from.as_str()),
-            "DependencyRule '{}': unknown 'from' metric '{}'",
-            rule.id, rule.from
-        );
-        assert!(
-            known_metrics.contains(&rule.to.as_str()),
-            "DependencyRule '{}': unknown 'to' metric '{}'",
-            rule.id, rule.to
-        );
+        if !known_metrics.contains(&rule.from.as_str()) {
+            errors.push(format!(
+                "dependency rule '{}': unknown 'from' metric '{}'",
+                rule.id, rule.from
+            ));
+        }
+        if !known_metrics.contains(&rule.to.as_str()) {
+            errors.push(format!(
+                "dependency rule '{}': unknown 'to' metric '{}'",
+                rule.id, rule.to
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
@@ -43,25 +60,24 @@ pub fn validate_dependencies(rules: &[DependencyRule], known_metrics: &[&str]) {
 /// of the actor (already modified by previous rules).
 fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
     let from_val = actor.get_metric(&rule.from);
+    // `validate_dependencies` (run at scenario load) guarantees `threshold` is
+    // `Some` for Deficit/Excess/Bonus, so `None` is unreachable for any loaded
+    // scenario. Handle it defensively as a no-op (delta 0.0) instead of panicking:
+    // this can never fire on a validated scenario, so it does not change balance,
+    // but it removes the per-tick panic if a rule ever slips past validation.
     let delta = match rule.mode {
-        DependencyMode::Deficit => {
-            let threshold = rule.threshold.expect("threshold required for Deficit");
-            if from_val < threshold {
-                -((threshold - from_val) * rule.coefficient)
-            } else { 0.0 }
-        }
-        DependencyMode::Excess => {
-            let threshold = rule.threshold.expect("threshold required for Excess");
-            if from_val > threshold {
-                -((from_val - threshold) * rule.coefficient)
-            } else { 0.0 }
-        }
-        DependencyMode::Bonus => {
-            let threshold = rule.threshold.expect("threshold required for Bonus");
-            if from_val > threshold {
-                (from_val - threshold) * rule.coefficient
-            } else { 0.0 }
-        }
+        DependencyMode::Deficit => match rule.threshold {
+            Some(threshold) if from_val < threshold => -((threshold - from_val) * rule.coefficient),
+            _ => 0.0,
+        },
+        DependencyMode::Excess => match rule.threshold {
+            Some(threshold) if from_val > threshold => -((from_val - threshold) * rule.coefficient),
+            _ => 0.0,
+        },
+        DependencyMode::Bonus => match rule.threshold {
+            Some(threshold) if from_val > threshold => (from_val - threshold) * rule.coefficient,
+            _ => 0.0,
+        },
         DependencyMode::Linear => from_val * rule.coefficient,
     };
     if delta != 0.0 {
