@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
@@ -591,7 +591,7 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &Ha
 fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     world.tick += 1;
     // Year is derived from tick: 2 ticks per year (tick 0-1 = year 0, tick 2-3 = year 1, etc.)
-    world.year = scenario.start_year as i32 + (world.tick / 2) as i32;
+    world.year = scenario.start_year + (world.tick / 2) as i32;
     world.actions_this_tick = 0;
 }
 
@@ -618,7 +618,7 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            for (_tag_id, actor_tag) in &actor.actor_tags {
+            for actor_tag in actor.actor_tags.values() {
                 for (metric, modifier) in &actor_tag.metrics_modifier {
                     let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
                     actor.metrics.insert(metric.clone(), current + *modifier as f64);
@@ -894,19 +894,16 @@ fn check_milestone_events(
 
 /// Apply one-time effects for specific milestone events
 fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
-    match milestone_id {
-        "mehmed_accelerates" => {
-            // Ottoman response: all-in acceleration
-            // military_quality -15, treasury -200, cohesion -10
-            if let Some(ottomans) = world.actors.get_mut("ottomans") {
-                let mil_q = ottomans.get_metric("military_quality");
-                ottomans.set_metric("military_quality", (mil_q - 15.0).max(0.0));
-                ottomans.add_metric("treasury", -200.0);
-                let coh = ottomans.get_metric("cohesion");
-                ottomans.set_metric("cohesion", (coh - 10.0).max(0.0));
-            }
+    if milestone_id == "mehmed_accelerates" {
+        // Ottoman response: all-in acceleration
+        // military_quality -15, treasury -200, cohesion -10
+        if let Some(ottomans) = world.actors.get_mut("ottomans") {
+            let mil_q = ottomans.get_metric("military_quality");
+            ottomans.set_metric("military_quality", (mil_q - 15.0).max(0.0));
+            ottomans.add_metric("treasury", -200.0);
+            let coh = ottomans.get_metric("cohesion");
+            ottomans.set_metric("cohesion", (coh - 10.0).max(0.0));
         }
-        _ => {}
     }
 }
 
@@ -1141,7 +1138,7 @@ fn update_metric_history(world: &mut WorldState) {
 
         for (metric_name, value) in &metrics {
             let key = format!("{}:{}", actor_id, metric_name);
-            let history = world.metric_history.entry(key).or_insert_with(VecDeque::new);
+            let history = world.metric_history.entry(key).or_default();
             history.push_back(*value);
 
             // Keep only last 5 ticks
@@ -1296,13 +1293,13 @@ fn check_generation_transfer(
 
     // Age the patriarch only on even ticks (FirstHalf = start of year)
     // This ensures 1 year of aging per 2 ticks
-    if world.tick % 2 == 0 {
+    if world.tick.is_multiple_of(2) {
         family_state.patriarch_age += 1;
     }
 
     // Check triggers
     let patriarch_age = family_state.patriarch_age;
-    let normal_trigger = patriarch_age >= gen_mechanics.patriarch_end_age as u32;
+    let normal_trigger = patriarch_age >= gen_mechanics.patriarch_end_age;
 
     // For early trigger, we need to check external metric - do this after dropping family_state borrow
     let early_trigger_check = gen_mechanics.early_transfer.as_ref().map(|early| {
@@ -1313,7 +1310,7 @@ fn check_generation_transfer(
     let _ = family_state; // End mutable borrow scope
 
     // Check early trigger condition (needs world access)
-    let early_trigger = early_trigger_check.map_or(false, |(age, metric, operator, value)| {
+    let early_trigger = early_trigger_check.is_some_and(|(age, metric, operator, value)| {
         if patriarch_age < age {
             return false;
         }
@@ -1345,7 +1342,7 @@ fn check_generation_transfer(
         }
 
         // 3. Reset patriarch age to start age for new generation
-        family_state.patriarch_age = gen_mechanics.patriarch_start_age as u32;
+        family_state.patriarch_age = gen_mechanics.patriarch_start_age;
 
         // 4. Log event with current generation number
         let event = Event::new(
