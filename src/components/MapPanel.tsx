@@ -37,7 +37,6 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('cohesion');
 
   // Per-polygon GeoJSON refs for fade-out styling
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const geoJsonRefs = useRef<Record<string, L.GeoJSON | null>>({});
 
   // Track previous actor IDs to detect collapses
@@ -116,14 +115,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     });
 
     prevActorIds.current = currentIds;
-  }, [worldState?.actors]);
+  }, [worldState]);
 
   // Reset selection when selected actor collapses
   useEffect(() => {
     if (selectedActorId && worldState && !(selectedActorId in worldState.actors)) {
       onSelectActor('');
     }
-  }, [worldState?.actors, selectedActorId, onSelectActor]);
+  }, [worldState, selectedActorId, onSelectActor]);
 
   // Update all polygon styles when heatmap mode or metric changes
   useEffect(() => {
@@ -142,7 +141,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         heatmapMetric,
       }));
     });
-  }, [heatmapEnabled, heatmapMetric, worldState?.actors, fadingOut, selectedActorId, hoveredActorId, mapConfig]);
+  }, [heatmapEnabled, heatmapMetric, worldState, fadingOut, selectedActorId, hoveredActorId, mapConfig]);
 
   // Build actor map for quick lookup
   const actorMap = useMemo(
