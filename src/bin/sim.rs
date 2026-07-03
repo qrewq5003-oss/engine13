@@ -739,7 +739,7 @@ fn run_batch(scenario_id: &str, ticks: u32) {
                 *actor_counts.entry(actor_id.clone()).or_insert(0) += 1;
             }
             let mut sorted_actors: Vec<_> = actor_counts.iter().collect();
-            sorted_actors.sort_by(|a, b| b.1.cmp(a.1));
+            sorted_actors.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
             
             println!();
             println!("Most common collapsed actors:");
@@ -1166,7 +1166,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         println!();
         println!("Actions applied by type:");
         let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
-        sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
+        sorted_actions.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         for (action_id, count) in sorted_actions {
             println!("  - {}: {}", action_id, count);
         }
@@ -1190,7 +1190,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         println!();
         println!("Actions applied by type:");
         let mut sorted_actions: Vec<_> = actions_by_type.iter().collect();
-        sorted_actions.sort_by(|a, b| b.1.cmp(a.1));
+        sorted_actions.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         for (action_id, count) in sorted_actions {
             println!("  - {}: {}", action_id, count);
         }

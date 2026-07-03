@@ -366,11 +366,16 @@ fn phase_random_events(
         .map(|a| a.id.clone())
         .collect();
 
-    // Get foreground actor IDs
-    let foreground_ids: Vec<String> = world.actors.values()
+    // Get foreground actor IDs.
+    // Sorted for a deterministic order: `world.actors` is a HashMap, so this
+    // collection order is randomized per process. `foreground_ids.choose(rng)`
+    // below picks an element by index, so an unsorted order makes the chosen
+    // event target vary run-to-run, breaking fixed-seed reproducibility.
+    let mut foreground_ids: Vec<String> = world.actors.values()
         .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground && !world.dead_actor_ids.contains(&a.id))
         .map(|a| a.id.clone())
         .collect();
+    foreground_ids.sort();
 
     // Track fired events this tick for cap
     let mut fired_this_tick = 0u32;

@@ -6,6 +6,111 @@
 
 ---
 
+## Post Determinism Fix (D3) Baseline
+
+**Date:** 2026-07-03
+**Changes:** Made fixed-seed simulation reproducible run-to-run (task D3)
+
+### Root cause
+
+The `sim` binary already runs on an explicitly seeded `ChaCha8Rng`
+(`ChaCha8Rng::seed_from_u64(seed)`), yet the same seed produced different
+numbers on every process launch. Cause: `world.actors` is a `HashMap`, whose
+iteration order is randomized per process (Rust `RandomState`). Two RNG-consuming
+engine phases iterated that map and let its order decide the order/target of RNG
+draws:
+
+1. `engine/interactions.rs::get_neighbor_pairs` — built the neighbor-pair list
+   by iterating `world.actors`; each pair then consumes `rng` (military rolls,
+   etc.), so pair order changed the RNG draw sequence.
+2. `engine/mod.rs::phase_random_events` — built `foreground_ids` from
+   `world.actors.values()`; `foreground_ids.choose(rng)` then picks by index,
+   so the map order decided which actor an event hit.
+
+A third, harness-only source lived in `bin/sim.rs`: the "actions/actors by count"
+reports sorted a `HashMap` view by count only, so equal-count entries tied in
+random order (display order only — not simulation state).
+
+### Fix
+
+- `get_neighbor_pairs`: `pairs.sort_by(|x, y| (&x.0, &x.1).cmp(&(&y.0, &y.1)))`
+  before returning (deterministic canonical pair order).
+- `phase_random_events`: collect `foreground_ids` into a `mut` Vec and `.sort()`.
+- `bin/sim.rs`: count sorts get a secondary tie-break on the key
+  (`b.1.cmp(a.1).then_with(|| a.0.cmp(b.0))`).
+
+No engine phase order, formula, threshold, or scenario balance was changed — only
+iteration order within two RNG-consuming phases was pinned. Fixed-seed mode itself
+already existed (`sim <scenario> <ticks> <seed>` → `run_single`); no new mode was
+needed.
+
+### Verification method (now seed-based, not eyeballed ranges)
+
+Reproducibility is now checked by byte-identical output under a fixed seed, not by
+comparing value ranges by hand. Each command is run 3× and the outputs `md5sum`-ed;
+all hashes must be identical:
+
+```bash
+for cmd in \
+  "rome_375 50 42" "rome_375 50 scripted balanced" "rome_375 50 scripted influence" \
+  "rome_375 50 scripted wealth" "rome_375 50 batch" \
+  "constantinople_1430 50 42" "constantinople_1430 50 batch" \
+  "constantinople_1430 25 scripted balanced" "constantinople_1430 25 scripted diplomacy" \
+  "constantinople_1430 25 scripted military"; do
+  h=$(for r in 1 2 3; do cargo run --bin sim $cmd 2>/dev/null | md5sum; done | sort -u | wc -l)
+  [ "$h" = 1 ] && echo "IDENTICAL  | sim $cmd" || echo "DIVERGENT  | sim $cmd"
+done
+```
+
+Result: all 10 scenario/mode combinations `IDENTICAL x3`. `cargo test --workspace`
+→ 46/46 pass. `cargo clippy --workspace` → no new warnings.
+
+### Deterministic baseline values (seed 42 / fixed batch seeds 0–99)
+
+| Run | Result |
+|-----|--------|
+| rome_375 50 42 | random events 759, gen transitions 1, foreground shifts 15, FINAL military 337.4 / cohesion 73.7 / legitimacy 52.6 |
+| rome scripted balanced (50) | Victory tick 31 (influence → 99.8) |
+| rome scripted influence (50) | Victory tick 35 |
+| rome scripted wealth (50) | no victory (tempo-resource path, as designed) |
+| constantinople scripted military (50) | Victory tick 43 |
+| constantinople scripted balanced / diplomacy (50) | no victory within 50 ticks |
+| constantinople batch (50) | random events avg 50.9 |
+
+> **Note on older tables below:** every "Victory Tick" recorded before this section
+> was sampled from a *non-deterministic* run (one arbitrary HashMap order), so those
+> numbers were never reproducible and should not be diffed against. This section is
+> the first reproducible baseline.
+
+### Did the fix change any scenario outcome? (regression audit)
+
+A determinism fix must only make the outcome *reproducible*, never silently flip
+*who wins*. Audited by characterizing the pre-fix (non-deterministic) victory
+distribution — 15 runs per scripted strategy — against the post-fix deterministic
+outcome (internal seed 42):
+
+| Strategy | Pre-fix wins (15 runs) | Pre-fix victory tick(s) | Post-fix (deterministic) | Verdict |
+|----------|------------------------|-------------------------|--------------------------|---------|
+| constantinople military | 15/15 | all 43 | win @ 43 | ✓ same |
+| constantinople diplomacy | 0/15 | never | no win | ✓ same |
+| constantinople balanced | 3/15 (~20%) | 43 when it wins | no win | ⚠ marginal — see below |
+| rome balanced | 15/15 | 31–43 | win @ 31 | ✓ same (in range) |
+| rome influence | 12/15 (~80%) | 31–44 | win @ 35 | ✓ same (in range) |
+| rome wealth | 0/15 | never | no win | ✓ same |
+
+**No strategy flipped from always-win to never-win.** For 5 of 6 strategies the
+deterministic outcome equals the pre-fix unanimous/majority outcome (and any pinned
+victory tick falls inside the pre-fix range). The single nuance is
+**constantinople scripted balanced**: in the *current* code it is already a marginal
+~20%-win strategy (NOT the reliable "tick 24" from the stale PR-D table above —
+balance drifted between 2026-03-11 and now, independently of this fix). Determinism
+necessarily commits a mixed-outcome strategy to one sample; seed 42's pinned order
+lands on the ~80% majority "no sustained victory" outcome. No formula, threshold, or
+balance value was touched by this fix — only iteration order was pinned — so this is
+sampling of a pre-existing distribution, not a balance regression.
+
+---
+
 ## Post PR-D Baseline
 
 **Date:** 2026-03-11
