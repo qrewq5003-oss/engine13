@@ -29,11 +29,14 @@ pub struct PlayerActionInput {
     pub target_actor_id: Option<String>,
 }
 
+/// (effects, costs) metric deltas applied by a player action
+pub type ActionMetricDeltas = (HashMap<String, f64>, HashMap<String, f64>);
+
 /// Apply player action - unified for all scenarios via MetricRef
 pub fn apply_player_action(
     state: &mut AppState,
     action_input: &PlayerActionInput,
-) -> Result<(HashMap<String, f64>, HashMap<String, f64>), String> {
+) -> Result<ActionMetricDeltas, String> {
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
@@ -149,8 +152,7 @@ fn describe_condition(cond: &Condition) -> String {
     let resource = metric
         .strip_prefix("actor:")
         .unwrap_or(metric)
-        .replace('.', " ")
-        .replace('_', " ");
+        .replace(['.', '_'], " ");
     
     // Capitalize first letter
     let mut chars = resource.chars();
@@ -213,8 +215,7 @@ pub fn list_actions_with_availability(
                     let resource = metric
                         .strip_prefix("actor:")
                         .unwrap_or(metric.as_str())
-                        .replace('.', " ")
-                        .replace('_', " ");
+                        .replace(['.', '_'], " ");
                     unavailable_reason = Some(UnavailableReason::InsufficientCost {
                         required: cost.abs(),
                         available: current,

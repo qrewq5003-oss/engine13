@@ -81,18 +81,15 @@ pub enum NarrativeStatus {
 }
 
 /// Era of an actor (determines available tags)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Era {
+    #[default]
     Ancient,
     EarlyMedieval,
     HighMedieval,
     LateMedieval,
     EarlyModern,
-}
-
-impl Default for Era {
-    fn default() -> Self { Era::Ancient }
 }
 
 /// Region rank (D → C → B → A → S)

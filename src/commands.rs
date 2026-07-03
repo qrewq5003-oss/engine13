@@ -113,12 +113,15 @@ pub struct PlayerActionInput {
 // Core Command Functions (delegate to application modules)
 // ============================================================================
 
+/// (action, effects, costs) triple tracked for LLM trigger evaluation
+type ActionTriggerInfo = (crate::core::PatronAction, HashMap<String, f64>, HashMap<String, f64>);
+
 /// Advance simulation by one tick
 pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> Result<AdvanceTickResponse, String> {
     use crate::application::{apply_player_action, check_llm_trigger_with_data};
 
     // Track action info for trigger
-    let mut action_info: Option<(crate::core::PatronAction, HashMap<String, f64>, HashMap<String, f64>)> = None;
+    let mut action_info: Option<ActionTriggerInfo> = None;
 
     if let Some(action_input) = action {
         let action_id = action_input.action_id.clone();
@@ -240,10 +243,10 @@ pub fn force_spawn(
     }
 
     // Validate lat/lng
-    if lat < -90.0 || lat > 90.0 {
+    if !(-90.0..=90.0).contains(&lat) {
         return Err("Invalid lat: must be between -90 and 90".to_string());
     }
-    if lng < -180.0 || lng > 180.0 {
+    if !(-180.0..=180.0).contains(&lng) {
         return Err("Invalid lng: must be between -180 and 180".to_string());
     }
 

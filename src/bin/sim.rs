@@ -507,7 +507,7 @@ fn run_narrative_pack(scenario_id: &str) {
 
     for (case_num, tick, _narrative) in &cases_found {
         let case_idx = case_num - 1;
-        markdown.push_str(&format!("## Case {}: {}\n\n", case_num, case_names[case_idx as usize]));
+        markdown.push_str(&format!("## Case {}: {}\n\n", case_num, case_names[case_idx]));
         markdown.push_str(&format!("**Tick:** {} | **Year:** {}\n\n", tick, world.year));
 
         // World state summary
@@ -531,7 +531,7 @@ fn run_narrative_pack(scenario_id: &str) {
         markdown.push_str(&format!("| collapse_warnings | {} |\n",
             if collapse_warnings.is_empty() { "none".to_string() } else { collapse_warnings.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ") }
         ));
-        markdown.push_str("\n");
+        markdown.push('\n');
 
         markdown.push_str("**Player actions this tick:** [none]\n\n");
         markdown.push_str("**Key events (last 3):** [events would be listed here]\n\n");

@@ -18,7 +18,7 @@ pub enum HalfYear {
 impl HalfYear {
     pub fn from_tick(tick: u32) -> Self {
         // Even ticks = FirstHalf, Odd ticks = SecondHalf
-        if tick % 2 == 0 {
+        if tick.is_multiple_of(2) {
             HalfYear::FirstHalf
         } else {
             HalfYear::SecondHalf
@@ -98,7 +98,7 @@ pub fn extract_narrative_gist(narrative: &str) -> String {
     let first_paragraph = narrative.split("\n\n").next().unwrap_or(narrative);
     
     // Try to find last sentence (ends with . ! ?)
-    let sentences: Vec<&str> = first_paragraph.split(|c| c == '.' || c == '!' || c == '?').collect();
+    let sentences: Vec<&str> = first_paragraph.split(['.', '!', '?']).collect();
     
     if sentences.len() > 1 {
         // Get the last non-empty sentence
@@ -570,7 +570,7 @@ pub fn generate_narrative_prompt(
             prompt.push_str(&format!("Мирофокус: {}\n", focus));
         }
         
-        prompt.push_str("\n");
+        prompt.push('\n');
         prompt.push_str("Используй эту память чтобы избегать повторения тех же паттернов:\n");
         prompt.push_str("- Не ставь того же актора в центр без новой причины.\n");
         prompt.push_str("- Не используй ту же риторическую рамку, если состояние мира не требует этого.\n");
@@ -837,8 +837,7 @@ pub async fn stream_narrative_anthropic(
 
         if let Ok(text) = std::str::from_utf8(&chunk) {
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = &line[6..];
+                if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         break;
                     }
@@ -929,8 +928,7 @@ pub async fn stream_narrative_openai(
 
         if let Ok(text) = std::str::from_utf8(&chunk) {
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = &line[6..];
+                if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         break;
                     }

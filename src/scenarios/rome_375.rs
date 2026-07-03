@@ -137,7 +137,7 @@ fn load_eras() -> Vec<EraDefinition> {
 }
 
 /// Populate actor_tags from tag definitions based on each actor's tags vec
-fn populate_actor_tags(actors: &mut Vec<Actor>, tag_defs: &[TagDefinition]) {
+fn populate_actor_tags(actors: &mut [Actor], tag_defs: &[TagDefinition]) {
     let tag_map: std::collections::HashMap<&str, &TagDefinition> =
         tag_defs.iter().map(|t| (t.id.as_str(), t)).collect();
     for actor in actors.iter_mut() {

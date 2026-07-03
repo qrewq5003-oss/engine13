@@ -15,7 +15,7 @@ pub fn set_game_mode(
     match (current_mode, new_mode) {
         // Scenario → Consequences: automatic only, not allowed here
         (crate::core::GameMode::Scenario, _) => {
-            return Err("Переход из Scenario возможен только автоматически при срабатывании milestone события".to_string());
+            Err("Переход из Scenario возможен только автоматически при срабатывании milestone события".to_string())
         }
         // Consequences → Free: allowed
         (crate::core::GameMode::Consequences, crate::core::GameMode::Free) => {

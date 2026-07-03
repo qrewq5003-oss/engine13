@@ -172,12 +172,10 @@ impl Db {
             .map_err(|e| format!("Failed to query columns: {}", e))?;
         
         let mut has_scenario_id = false;
-        for col_result in column_names {
-            if let Ok(col_name) = col_result {
-                if col_name == "scenario_id" {
-                    has_scenario_id = true;
-                    break;
-                }
+        for col_name in column_names.flatten() {
+            if col_name == "scenario_id" {
+                has_scenario_id = true;
+                break;
             }
         }
 
@@ -660,10 +658,8 @@ impl Db {
             .map_err(|e| format!("Failed to query key events: {}", e))?;
 
         let mut result = Vec::new();
-        for event in events {
-            if let Ok(e) = event {
-                result.push(e);
-            }
+        for e in events.flatten() {
+            result.push(e);
         }
 
         Ok(result)

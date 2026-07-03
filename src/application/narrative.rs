@@ -22,12 +22,15 @@ enum TriggerDetail {
     Time,
 }
 
+/// Borrowed (action, effects, costs) triple for LLM trigger evaluation
+type ActionTriggerInfoRef<'a> = (&'a PatronAction, &'a HashMap<String, f64>, &'a HashMap<String, f64>);
+
 /// Check LLM trigger with action info
 pub fn check_llm_trigger_with_data(
     world_state: &mut WorldState,
     scenario: &Scenario,
     event_log: &EventLog,
-    action_info: Option<(&PatronAction, &HashMap<String, f64>, &HashMap<String, f64>)>,
+    action_info: Option<ActionTriggerInfoRef>,
 ) -> Option<llm::LlmTrigger> {
     let narrative_actor_ids: Vec<String> = world_state
         .actors
