@@ -308,6 +308,12 @@ fn get_neighbor_pairs(world: &WorldState) -> Vec<(String, String, u32, crate::co
         }
     }
 
+    // Sort by (actor_a_id, actor_b_id) for a deterministic iteration order.
+    // `world.actors` is a HashMap, so the collection order above is randomized
+    // per process; without this sort the order in which pairs consume `rng`
+    // (military rolls, etc.) varies run-to-run, breaking fixed-seed reproducibility.
+    pairs.sort_by(|x, y| (&x.0, &x.1).cmp(&(&y.0, &y.1)));
+
     pairs
 }
 
