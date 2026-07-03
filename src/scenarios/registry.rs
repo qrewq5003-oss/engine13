@@ -75,6 +75,14 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         validate_metric_ref(&indicator.metric, &actor_ids, &format!("status_indicator '{}'", indicator.label), &mut errors);
     }
 
+    // Check dependency thresholds. Centralized here so every scenario routed
+    // through `load_by_id` is checked even if it omits a per-scenario
+    // `validate_dependencies` call. Metric-name checks (from/to) stay per-scenario
+    // because they need that scenario's `KNOWN_METRICS`.
+    if let Err(mut dep_errors) = crate::engine::validate_dependency_thresholds(&scenario.dependencies) {
+        errors.append(&mut dep_errors);
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {

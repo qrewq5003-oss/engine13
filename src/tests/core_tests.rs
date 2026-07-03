@@ -576,3 +576,32 @@ fn test_validate_dependencies_valid_rules_ok() {
         "valid rules (threshold present, or Linear) should pass validation"
     );
 }
+
+#[test]
+fn test_validate_scenario_catches_missing_threshold_centrally() {
+    use crate::core::DependencyMode;
+    // D4: threshold validation is centralized in the load choke point
+    // (`validate_scenario`). A scenario that reaches it with a non-Linear rule
+    // missing its threshold must be rejected even without a per-scenario
+    // `validate_dependencies` call — this is what makes the `apply_dependency_rule`
+    // hot-path fallback provably unreachable for any new scenario.
+    let mut scenario = registry::load_by_id("rome_375").unwrap();
+    assert!(
+        registry::validate_scenario(&scenario).is_ok(),
+        "baseline rome_375 should be valid"
+    );
+
+    scenario
+        .dependencies
+        .push(dep_rule("injected_bad", DependencyMode::Deficit, None));
+
+    let errors = registry::validate_scenario(&scenario)
+        .expect_err("central choke point must reject a non-Linear rule without a threshold");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("injected_bad") && e.contains("threshold required")),
+        "central validation should name the offending rule, got: {:?}",
+        errors
+    );
+}
