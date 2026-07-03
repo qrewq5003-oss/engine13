@@ -531,3 +531,48 @@ fn test_cultural_displacement_progress_accumulates() {
     // The key test is that it didn't panic and the system works
     assert!(progress >= 0.0, "Displacement progress should be non-negative");
 }
+
+// --- Dependency rule validation (load-time guard for threshold-required modes) ---
+
+fn dep_rule(id: &str, mode: crate::core::DependencyMode, threshold: Option<f64>) -> crate::core::DependencyRule {
+    crate::core::DependencyRule {
+        id: id.to_string(),
+        from: "legitimacy".to_string(),
+        to: "cohesion".to_string(),
+        coefficient: 1.0,
+        threshold,
+        mode,
+    }
+}
+
+#[test]
+fn test_validate_dependencies_missing_threshold_is_load_error() {
+    use crate::core::DependencyMode;
+    let metrics = ["legitimacy", "cohesion"];
+
+    // Deficit/Excess/Bonus without a threshold must be rejected at load time
+    for mode in [DependencyMode::Deficit, DependencyMode::Excess, DependencyMode::Bonus] {
+        let rules = vec![dep_rule("bad_rule", mode.clone(), None)];
+        let result = crate::engine::validate_dependencies(&rules, &metrics);
+        let errors = result.expect_err("missing threshold should be a load error, not accepted");
+        assert!(
+            errors.iter().any(|e| e.contains("bad_rule") && e.contains("threshold required")),
+            "error message should name the rule and the missing threshold, got: {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
+fn test_validate_dependencies_valid_rules_ok() {
+    use crate::core::DependencyMode;
+    let metrics = ["legitimacy", "cohesion"];
+    let rules = vec![
+        dep_rule("deficit_ok", DependencyMode::Deficit, Some(50.0)),
+        dep_rule("linear_ok", DependencyMode::Linear, None), // Linear needs no threshold
+    ];
+    assert!(
+        crate::engine::validate_dependencies(&rules, &metrics).is_ok(),
+        "valid rules (threshold present, or Linear) should pass validation"
+    );
+}

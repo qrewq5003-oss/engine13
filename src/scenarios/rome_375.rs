@@ -79,7 +79,12 @@ fn load_dependencies() -> Vec<DependencyRule> {
         include_str!("rome_375/dependencies.toml")
     ).expect("rome_375/dependencies.toml parse error");
 
-    crate::engine::validate_dependencies(&deps_file.dependencies, KNOWN_METRICS);
+    if let Err(errors) = crate::engine::validate_dependencies(&deps_file.dependencies, KNOWN_METRICS) {
+        panic!(
+            "scenario 'rome_375': invalid dependencies.toml:\n  - {}",
+            errors.join("\n  - ")
+        );
+    }
 
     deps_file.dependencies
 }
