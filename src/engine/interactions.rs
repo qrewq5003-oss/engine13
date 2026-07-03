@@ -325,8 +325,14 @@ fn calculate_military_interaction(
         return;
     }
 
-    let actor_a = world.actors.get(actor_a_id).unwrap();
-    let actor_b = world.actors.get(actor_b_id).unwrap();
+    let actor_a = match world.actors.get(actor_a_id) {
+        Some(a) => a,
+        None => return,
+    };
+    let actor_b = match world.actors.get(actor_b_id) {
+        Some(a) => a,
+        None => return,
+    };
 
     // Condition: both alive, distance == 1
     if distance != 1 {
@@ -367,8 +373,14 @@ fn calculate_military_interaction(
     };
 
     // Calculate modifiers
-    let attacker = world.actors.get(&attacker_id).unwrap();
-    let defender = world.actors.get(&defender_id).unwrap();
+    let attacker = match world.actors.get(&attacker_id) {
+        Some(a) => a,
+        None => return,
+    };
+    let defender = match world.actors.get(&defender_id) {
+        Some(a) => a,
+        None => return,
+    };
 
     let pressure_mod = (attacker.get_metric("external_pressure") / 100.0) * 0.2;
     let military_mod = if attacker.get_metric("military_size") > defender.get_metric("military_size") * 1.5 {
@@ -439,8 +451,14 @@ fn calculate_trade_interaction(
     event_log: &mut EventLog,
     _rng: &mut ChaCha8Rng,
 ) {
-    let actor_a = world.actors.get(actor_a_id).unwrap();
-    let actor_b = world.actors.get(actor_b_id).unwrap();
+    let actor_a = match world.actors.get(actor_a_id) {
+        Some(a) => a,
+        None => return,
+    };
+    let actor_b = match world.actors.get(actor_b_id) {
+        Some(a) => a,
+        None => return,
+    };
 
     // Condition: external_pressure_avg < 60, economic_output_both > 20
     let external_pressure_avg = (actor_a.get_metric("external_pressure") + actor_b.get_metric("external_pressure")) / 2.0;
@@ -505,8 +523,14 @@ fn calculate_diplomatic_interaction(
     event_log: &mut EventLog,
     _rng: &mut ChaCha8Rng,
 ) {
-    let actor_a = world.actors.get(actor_a_id).unwrap();
-    let actor_b = world.actors.get(actor_b_id).unwrap();
+    let actor_a = match world.actors.get(actor_a_id) {
+        Some(a) => a,
+        None => return,
+    };
+    let actor_b = match world.actors.get(actor_b_id) {
+        Some(a) => a,
+        None => return,
+    };
 
     // Condition: legitimacy_diff > 15
     let legitimacy_diff = (actor_a.get_metric("legitimacy") - actor_b.get_metric("legitimacy")).abs();
@@ -562,8 +586,14 @@ fn calculate_migration_interaction(
 
     // Find the pressuring actor (high external_pressure, low cohesion)
     let pressuring_id = {
-        let actor_a = world.actors.get(actor_a_id).unwrap();
-        let actor_b = world.actors.get(actor_b_id).unwrap();
+        let actor_a = match world.actors.get(actor_a_id) {
+            Some(a) => a,
+            None => return,
+        };
+        let actor_b = match world.actors.get(actor_b_id) {
+            Some(a) => a,
+            None => return,
+        };
 
         if actor_a.get_metric("external_pressure") > 65.0 && actor_a.get_metric("cohesion") < 40.0 {
             Some(actor_a_id.to_string())
@@ -586,14 +616,14 @@ fn calculate_migration_interaction(
     };
 
     // Apply migration effects
-    let pressuring_pop = {
-        let pressuring = world.actors.get(&pressuring_id).unwrap();
-        pressuring.get_metric("population")
+    let pressuring_pop = match world.actors.get(&pressuring_id) {
+        Some(p) => p.get_metric("population"),
+        None => return,
     };
 
-    let pressuring_pressure = {
-        let pressuring = world.actors.get(&pressuring_id).unwrap();
-        pressuring.get_metric("external_pressure")
+    let pressuring_pressure = match world.actors.get(&pressuring_id) {
+        Some(p) => p.get_metric("external_pressure"),
+        None => return,
     };
 
     let pressure_transfer = (pressuring_pressure - 65.0) * 0.2 / distance as f64;
@@ -637,8 +667,14 @@ fn calculate_cultural_interaction(
     event_log: &mut EventLog,
     _rng: &mut ChaCha8Rng,
 ) {
-    let actor_a = world.actors.get(actor_a_id).unwrap();
-    let actor_b = world.actors.get(actor_b_id).unwrap();
+    let actor_a = match world.actors.get(actor_a_id) {
+        Some(a) => a,
+        None => return,
+    };
+    let actor_b = match world.actors.get(actor_b_id) {
+        Some(a) => a,
+        None => return,
+    };
 
     // Calculate shared tags
     let shared_tags: Vec<&String> = actor_a.tags.iter()
@@ -677,8 +713,14 @@ fn calculate_cultural_interaction(
 
     // Cultural displacement: stronger culture pressures weaker neighbor
     if distance <= 2 {
-        let actor_a = world.actors.get(actor_a_id).unwrap();
-        let actor_b = world.actors.get(actor_b_id).unwrap();
+        let actor_a = match world.actors.get(actor_a_id) {
+            Some(a) => a,
+            None => return,
+        };
+        let actor_b = match world.actors.get(actor_b_id) {
+            Some(a) => a,
+            None => return,
+        };
         let a_power = cultural_power(actor_a);
         let b_power = cultural_power(actor_b);
 
