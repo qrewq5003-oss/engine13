@@ -124,6 +124,10 @@ pub struct Interaction {
 
 /// Apply a data-driven interaction rule to an actor pair
 /// Order: distance → border → cooldown → conditions → effects
+// Interaction rules are driven by scenario data; the parameter list mirrors the
+// full interaction context and is intentionally wide. Splitting it into a struct
+// would obscure the call sites without changing behavior.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_interaction_rule(
     world: &mut WorldState,
     source_id: &str,
@@ -308,6 +312,7 @@ fn get_neighbor_pairs(world: &WorldState) -> Vec<(String, String, u32, crate::co
 }
 
 /// Military interaction — conflict between neighbors
+#[allow(clippy::too_many_arguments)]
 fn calculate_military_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
@@ -440,6 +445,7 @@ fn calculate_military_interaction(
 }
 
 /// Trade interaction — economic exchange
+#[allow(clippy::too_many_arguments)]
 fn calculate_trade_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
@@ -513,6 +519,7 @@ fn calculate_trade_interaction(
 }
 
 /// Diplomatic interaction — legitimacy influence
+#[allow(clippy::too_many_arguments)]
 fn calculate_diplomatic_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
@@ -568,6 +575,7 @@ fn calculate_diplomatic_interaction(
 }
 
 /// Migration interaction — population pressure
+#[allow(clippy::too_many_arguments)]
 fn calculate_migration_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
@@ -657,6 +665,7 @@ fn calculate_migration_interaction(
 }
 
 /// Cultural interaction — shared tags influence
+#[allow(clippy::too_many_arguments)]
 fn calculate_cultural_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
@@ -823,6 +832,7 @@ fn apply_cultural_pressure(
 }
 
 /// Spread tags between neighboring actors via interaction types
+#[allow(clippy::too_many_arguments)]
 pub fn spread_actor_tags(
     world: &mut WorldState,
     scenario: &Scenario,
@@ -844,13 +854,14 @@ pub fn spread_actor_tags(
 }
 
 /// Try spreading tags from source to target
+#[allow(clippy::too_many_arguments)]
 fn try_spread_direction(
     world: &mut WorldState,
     tag_def_map: &std::collections::HashMap<&str, &crate::core::TagDefinition>,
-    scenario: &Scenario,
+    _scenario: &Scenario,
     source_id: &str,
     target_id: &str,
-    distance: u32,
+    _distance: u32,
     border_type: &BorderType,
     current_tick: u32,
     rng: &mut ChaCha8Rng,
