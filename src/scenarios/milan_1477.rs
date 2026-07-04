@@ -6,7 +6,7 @@ use crate::core::{
     Actor, ActorTag, AutoDelta, BorderType, ComparisonOperator,
     DependencyRule, EraDefinition, EventCondition, EventConditionType, MapConfig, MilestoneEvent,
     Neighbor, PatronAction, RankBonusRule, RankCondition, RankResult, Scenario,
-    TagDefinition,
+    Successor, TagDefinition,
 };
 
 /// Dependencies file structure for TOML deserialization
@@ -782,7 +782,14 @@ fn create_savoy() -> Actor {
             Neighbor { id: "milan".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "genoa".to_string(), distance: 1, border_type: BorderType::Land },
         ],
-        on_collapse: vec![],
+        // Milan as heir: confirmed by playtest (ENGINE13_SCENARIO3_DESIGN.md,
+        // "Найдено при плейтесте C/D") to be the actor that reliably grinds
+        // Savoy's military_size to zero (affinity()==0.0 disables force
+        // projection for this culturally-homogeneous cast, so raw
+        // military_size alone decides the Milan-vs-Savoy conflict). Milan is
+        // already alive, so this feeds the heir-absorption branch of
+        // check_collapses (expansion_count), not a fresh successor template.
+        on_collapse: vec![Successor { id: "milan".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.07, lng: 7.69 }),
         is_successor_template: false,
@@ -1082,6 +1089,16 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
     // crosses a threshold - the remaining great powers (not second tier) react
     // to a Milan that is visibly swallowing its neighbours. France is
     // deliberately excluded (unpredictable third player, see design doc).
+    //
+    // Threshold calibrated to N=1, not the originally-guessed N=3 (see
+    // ENGINE13_SCENARIO3_DESIGN.md, "Найдено при плейтесте C/D"). Playtest
+    // (15 seeds x 300/600 ticks, after wiring Savoy's on_collapse successor
+    // to Milan) shows expansion_count reliably reaches exactly 1 per game
+    // (Savoy -> Milan, deterministic due to affinity()==0.0 disabling force
+    // projection for this culturally-homogeneous cast) and never grows
+    // further - vassalage doesn't fire at all (separate open question), and
+    // no other actor has been observed to collapse in the tested window.
+    // N=3 would never trigger under current data.
     events.push(RandomEvent {
         id: "italian_league_against_milan".to_string(),
         probability: 0.9,
@@ -1090,7 +1107,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             Condition {
                 metric: "actor:milan.expansion_count".to_string(),
                 operator: ComparisonOperator::GreaterOrEqual,
-                value: 3.0,
+                value: 1.0,
             },
         ],
         effects: HashMap::from([
