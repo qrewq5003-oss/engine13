@@ -1,7 +1,7 @@
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::core::{ActorTag, BorderType, ConditionActor, Event, EventType, InteractionRule, TagSpreadType, WorldState, Scenario, Religion, Culture};
+use crate::core::{ActorTag, BorderType, ConditionActor, Event, EventType, InteractionRule, TagSpreadType, Vassalage, WorldState, Scenario, Religion, Culture};
 use crate::engine::EventLog;
 
 /// Cultural affinity between two cultures (0.0 = hostile, 1.0 = identical)
@@ -745,6 +745,239 @@ fn calculate_cultural_interaction(
         } else if b_power > a_power * 1.5 {
             let delta = b_power - a_power;
             apply_cultural_pressure(world, actor_b_id, actor_a_id, delta, current_tick, current_year, event_log);
+        }
+    }
+}
+
+// ============================================================================
+// Vassalage
+// ============================================================================
+
+/// The vassalage danger band — an actor that is seriously pressured but not yet
+/// collapsing. Deliberately sits strictly *above* the collapse thresholds
+/// (`legitimacy < 10`, `cohesion < 15`, `external_pressure > 85`): an actor in this
+/// band is a candidate to submit to a stronger neighbour rather than disintegrate.
+fn in_vassalage_band(actor: &crate::core::Actor) -> bool {
+    let ep = actor.get_metric("external_pressure");
+    let leg = actor.get_metric("legitimacy");
+    let coh = actor.get_metric("cohesion");
+    (70.0..=85.0).contains(&ep) && (10.0..=25.0).contains(&leg) && (15.0..=30.0).contains(&coh)
+}
+
+/// Vassalage formation, dissolution (revolt) and cleanup. Runs parallel to
+/// `check_collapses` (see `engine::phase_vassalage`).
+///
+/// Three sequential steps:
+/// 1. Prune relationships whose vassal or overlord is no longer alive.
+/// 2. Dissolve (revolt) where the vassal's military has caught up to the overlord's
+///    (`vassal_mil >= overlord_mil * 0.8`, the `cultural_power` comparison shape) OR
+///    the overlord has itself entered the full vassalage band (`in_vassalage_band`:
+///    external_pressure 70–85 AND legitimacy 10–25 AND cohesion 15–30).
+/// 3. Form new relationships for actors that have spent 3 consecutive ticks in the
+///    band, submitting to the neighbour projecting the most military pressure.
+///
+/// Hierarchy is forbidden: a vassal can never also be an overlord. Overlord
+/// attribution is computed on the fly here and never stored as history.
+///
+/// Consumes no RNG — formation and revolt are fully deterministic — so scenarios
+/// that never form a vassalage see an unchanged simulation.
+pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
+    let current_tick = world.tick;
+    let current_year = world.year;
+
+    // --- 1. Prune dead relationships ---------------------------------------
+    world
+        .vassalages
+        .retain(|v| world.actors.contains_key(&v.vassal_id) && world.actors.contains_key(&v.overlord_id));
+
+    // --- 2. Revolt / exit --------------------------------------------------
+    let mut revolts: Vec<(String, String)> = Vec::new(); // (vassal_id, overlord_id)
+    for v in &world.vassalages {
+        let vassal_mil = world
+            .actors
+            .get(&v.vassal_id)
+            .map(|a| a.get_metric("military_size"))
+            .unwrap_or(0.0);
+        let overlord = world.actors.get(&v.overlord_id);
+        let overlord_mil = overlord.map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+        // "Overlord itself crosses the band" = the full three-metric vassalage band
+        // (external_pressure 70–85, legitimacy 10–25, cohesion 15–30), i.e. the
+        // overlord has become as weak as something that would itself submit — not a
+        // single slipped metric.
+        let overlord_in_band = overlord.map(in_vassalage_band).unwrap_or(false);
+
+        let vassal_strong_enough = vassal_mil >= overlord_mil * 0.8;
+        if vassal_strong_enough || overlord_in_band {
+            revolts.push((v.vassal_id.clone(), v.overlord_id.clone()));
+        }
+    }
+    if !revolts.is_empty() {
+        let revolt_set: std::collections::HashSet<(String, String)> = revolts.iter().cloned().collect();
+        world
+            .vassalages
+            .retain(|v| !revolt_set.contains(&(v.vassal_id.clone(), v.overlord_id.clone())));
+        for (vassal_id, overlord_id) in &revolts {
+            let event = Event::new(
+                format!("vassalage_end_{}_{}", overlord_id, vassal_id),
+                current_tick,
+                current_year,
+                vassal_id.clone(),
+                EventType::Diplomatic,
+                true,
+                format!("{} вышел из-под власти {}", vassal_id, overlord_id),
+            );
+            event_log.add(event);
+        }
+    }
+
+    // --- 3. Formation ------------------------------------------------------
+    // Hierarchy guard sets: an actor bound as a vassal can never be an overlord and
+    // vice versa. Kept mutable so relationships formed earlier in this same tick are
+    // respected by later candidates.
+    let mut vassal_ids: std::collections::HashSet<String> =
+        world.vassalages.iter().map(|v| v.vassal_id.clone()).collect();
+    let mut overlord_ids: std::collections::HashSet<String> =
+        world.vassalages.iter().map(|v| v.overlord_id.clone()).collect();
+
+    // Deterministic order: `world.actors` is a HashMap. Formation order feeds the
+    // `vassalages` Vec order, which drives RNG-consuming tribute iteration in
+    // `calculate_vassalage_interaction`, so candidates must be processed sorted.
+    let mut actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+    actor_ids.sort();
+
+    for actor_id in &actor_ids {
+        // Update the band counter for every actor each tick.
+        let in_band = world.actors.get(actor_id).map(in_vassalage_band).unwrap_or(false);
+        if !in_band {
+            world.vassalage_warning_ticks.remove(actor_id);
+            continue;
+        }
+        let counter = world.vassalage_warning_ticks.entry(actor_id.clone()).or_insert(0);
+        *counter += 1;
+        if *counter < 3 {
+            continue;
+        }
+
+        // Hierarchy guard: candidate must be free — not already a vassal, and (the
+        // explicit rule) not already someone's overlord.
+        if vassal_ids.contains(actor_id) || overlord_ids.contains(actor_id) {
+            continue;
+        }
+
+        // Attribution: strongest neighbour by military pressure (military_size scaled
+        // down by distance), tie-broken by lexicographic id for determinism. The
+        // overlord must itself be free of vassalage so it does not gain a vassal
+        // while being one (no hierarchy).
+        let overlord_id = {
+            let actor = match world.actors.get(actor_id) {
+                Some(a) => a,
+                None => continue,
+            };
+            let mut neighbor_ids: Vec<(String, u32)> =
+                actor.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+            neighbor_ids.sort_by(|a, b| a.0.cmp(&b.0));
+
+            let mut best: Option<(String, f64)> = None;
+            for (nid, distance) in &neighbor_ids {
+                if nid == actor_id || !world.actors.contains_key(nid) || vassal_ids.contains(nid) {
+                    continue;
+                }
+                let mil = world.actors.get(nid).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                let pressure = mil / (*distance).max(1) as f64;
+                if best.as_ref().map(|(_, p)| pressure > *p).unwrap_or(true) {
+                    best = Some((nid.clone(), pressure));
+                }
+            }
+            match best {
+                Some((id, _)) => id,
+                None => continue,
+            }
+        };
+
+        // Only submit to a clearly stronger overlord. If the candidate is already
+        // ~as strong militarily it would revolt next tick — don't churn.
+        let vassal_mil = world.actors.get(actor_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+        let overlord_mil = world.actors.get(&overlord_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+        if vassal_mil >= overlord_mil * 0.8 {
+            continue;
+        }
+
+        world.vassalages.push(Vassalage {
+            vassal_id: actor_id.clone(),
+            overlord_id: overlord_id.clone(),
+            formed_tick: current_tick,
+        });
+        // Shared expansion counter (also incremented on collapse+heir absorption in
+        // `check_collapses`); consumed by the coalition trigger in task D.
+        if let Some(overlord) = world.actors.get_mut(&overlord_id) {
+            overlord.add_metric("expansion_count", 1.0);
+        }
+        world.vassalage_warning_ticks.remove(actor_id);
+        vassal_ids.insert(actor_id.clone());
+        overlord_ids.insert(overlord_id.clone());
+
+        let event = Event::new(
+            format!("vassalage_form_{}_{}", overlord_id, actor_id),
+            current_tick,
+            current_year,
+            actor_id.clone(),
+            EventType::Diplomatic,
+            true,
+            format!("{} признал сюзеренитет {}", actor_id, overlord_id),
+        );
+        event_log.add(event);
+    }
+}
+
+/// Per-tick vassal tribute: 3–5% of the vassal's `economic_output` moves from the
+/// vassal's `treasury` to the overlord's `treasury` (symmetric, routed through
+/// `treasury` rather than `economic_output` directly — the trade-interaction
+/// precedent). Iterates the stable `vassalages` Vec so RNG is consumed
+/// deterministically for a fixed seed.
+pub fn calculate_vassalage_interaction(
+    world: &mut WorldState,
+    event_log: &mut EventLog,
+    rng: &mut ChaCha8Rng,
+) {
+    let current_tick = world.tick;
+    let current_year = world.year;
+
+    let relationships: Vec<(String, String)> = world
+        .vassalages
+        .iter()
+        .map(|v| (v.vassal_id.clone(), v.overlord_id.clone()))
+        .collect();
+
+    for (vassal_id, overlord_id) in relationships {
+        let econ = match world.actors.get(&vassal_id) {
+            Some(a) => a.get_metric("economic_output"),
+            None => continue,
+        };
+        if !world.actors.contains_key(&overlord_id) {
+            continue;
+        }
+
+        let rate = 0.03 + rng.gen::<f64>() * 0.02; // 3–5%
+        let tribute = econ * rate;
+
+        if let Some(vassal) = world.actors.get_mut(&vassal_id) {
+            vassal.add_metric("treasury", -tribute);
+        }
+        if let Some(overlord) = world.actors.get_mut(&overlord_id) {
+            overlord.add_metric("treasury", tribute);
+        }
+
+        if should_record_event(&InteractionType::Vassalage, tribute) {
+            let event = Event::new(
+                format!("vassalage_tribute_{}_{}", overlord_id, vassal_id),
+                current_tick,
+                current_year,
+                overlord_id.clone(),
+                EventType::Diplomatic,
+                false,
+                format!("{} выплатил дань {} ({:.1})", vassal_id, overlord_id, tribute),
+            );
+            event_log.add(event);
         }
     }
 }
