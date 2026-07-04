@@ -43,16 +43,20 @@ spread_chance = 0.35
 [[tags]]
 id = "oligarchy"
 metrics_modifier = { legitimacy = 1, cohesion = 1 }
-spreads_via = ["culture"]
+# legitimacy/cohesion-modifying tags don't spread (see rome_375/constantinople_1430
+# convention) - otherwise cultural contagion across the dense Italian neighbor
+# graph stacks these modifiers on every actor within ~20 ticks, saturating
+# legitimacy/cohesion at their clamp and making the vassalage band unreachable.
+spreads_via = []
 spread_cooldown_ticks = 9
-spread_chance = 0.15
+spread_chance = 0.0
 
 [[tags]]
 id = "humanism"
 metrics_modifier = { legitimacy = 1 }
-spreads_via = ["culture"]
+spreads_via = []
 spread_cooldown_ticks = 6
-spread_chance = 0.3
+spread_chance = 0.0
 
 [[tags]]
 id = "medici_faction"
@@ -64,9 +68,9 @@ spread_chance = 0.0
 [[tags]]
 id = "aragonese_crown"
 metrics_modifier = { legitimacy = 1 }
-spreads_via = ["culture"]
+spreads_via = []
 spread_cooldown_ticks = 8
-spread_chance = 0.2
+spread_chance = 0.0
 
 [[tags]]
 id = "baronial_fronde"
@@ -85,9 +89,9 @@ spread_chance = 0.2
 [[tags]]
 id = "religious_authority"
 metrics_modifier = { legitimacy = 2 }
-spreads_via = ["culture"]
+spreads_via = []
 spread_cooldown_ticks = 8
-spread_chance = 0.2
+spread_chance = 0.0
 
 [[tags]]
 id = "nepotism"
@@ -106,23 +110,23 @@ spread_chance = 0.0
 [[tags]]
 id = "este_court"
 metrics_modifier = { legitimacy = 2 }
-spreads_via = ["culture"]
+spreads_via = []
 spread_cooldown_ticks = 7
-spread_chance = 0.2
+spread_chance = 0.0
 
 [[tags]]
 id = "gonzaga_court"
 metrics_modifier = { legitimacy = 1, military_quality = 1 }
-spreads_via = ["culture"]
+spreads_via = []
 spread_cooldown_ticks = 7
-spread_chance = 0.2
+spread_chance = 0.0
 
 [[tags]]
 id = "patronage"
 metrics_modifier = { legitimacy = 1 }
-spreads_via = ["culture", "trade"]
+spreads_via = []
 spread_cooldown_ticks = 6
-spread_chance = 0.25
+spread_chance = 0.0
 
 [[tags]]
 id = "papal_vicariate"

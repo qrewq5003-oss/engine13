@@ -968,6 +968,144 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
 }
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {
-    // Reserved for tasks C (patronage) and D (coalition) - deliberately empty here.
-    vec![]
+    use crate::core::{Condition, EventTarget, RandomEvent};
+    use std::collections::HashMap;
+
+    let mut events = Vec::new();
+
+    // --- Task C: patronage / Renaissance archetype (repeatable) ---
+    // "Двор спонсирует мастера" - every court occasionally funds art, scholarship
+    // or architecture. Milan rolls more often (player, wealthiest regency court);
+    // everyone else rolls rarely. Cost/reward scaled by treasury tier so the
+    // event doesn't bankrupt the smaller second-tier courts.
+    const PATRONAGE_ARCHETYPE: &[(&str, f64, f64, f64, &str)] = &[
+        // (actor_id, probability, legitimacy_gain, treasury_cost, llm_context)
+        ("milan", 0.09, 5.0, 25.0, "Двор Сфорца финансирует художника и укрепляет престиж регентства"),
+        ("venice", 0.03, 5.0, 25.0, "Венецианский Сенат заказывает новое украшение для города"),
+        ("florence", 0.03, 5.0, 25.0, "Медичи спонсируют очередного мастера при своём дворе"),
+        ("naples", 0.025, 4.0, 18.0, "Арагонский двор в Неаполе привлекает гуманиста ко двору"),
+        ("papacy", 0.03, 5.0, 25.0, "Папский престол заказывает украшение для Рима"),
+        ("genoa", 0.025, 4.0, 18.0, "Генуэзские патриции финансируют мастера в знак престижа"),
+        ("ferrara", 0.03, 4.0, 18.0, "Двор Эсте в Ферраре привлекает очередного гуманиста"),
+        ("mantua", 0.03, 4.0, 18.0, "Гонзага заказывают работу для украшения мантуанского двора"),
+        ("siena", 0.02, 4.0, 18.0, "Сиенская синьория финансирует местного мастера"),
+        ("urbino", 0.03, 4.0, 18.0, "Двор Монтефельтро в Урбино привлекает учёного или художника"),
+        ("bologna", 0.025, 4.0, 18.0, "Бентивольо украшают Болонью в знак укрепления власти"),
+        ("savoy", 0.02, 4.0, 18.0, "Савойский двор приглашает мастера ко двору"),
+        ("sicily", 0.025, 4.0, 18.0, "Палермский двор финансирует украшение резиденции"),
+    ];
+
+    for (actor_id, probability, legitimacy_gain, treasury_cost, llm_context) in PATRONAGE_ARCHETYPE {
+        events.push(RandomEvent {
+            id: format!("patronage_{}", actor_id),
+            probability: *probability,
+            target: EventTarget::Actor(actor_id.to_string()),
+            conditions: vec![],
+            effects: HashMap::from([
+                (format!("actor:{}.legitimacy", actor_id), *legitimacy_gain),
+                (format!("actor:{}.treasury", actor_id), -*treasury_cost),
+            ]),
+            llm_context: llm_context.to_string(),
+            one_time: false,
+        });
+    }
+
+    // --- Task C: unique named patronage moments (one-time, larger effect) ---
+    events.push(RandomEvent {
+        id: "bramante_arrives_milan".to_string(),
+        probability: 0.05,
+        target: EventTarget::Actor("milan".to_string()),
+        conditions: vec![],
+        effects: HashMap::from([
+            ("actor:milan.legitimacy".to_string(), 10.0),
+            ("actor:milan.treasury".to_string(), -30.0),
+        ]),
+        llm_context: "Донато Браманте прибывает в Милан — начало новой архитектурной школы при дворе Сфорца".to_string(),
+        one_time: true,
+    });
+
+    events.push(RandomEvent {
+        id: "ficino_platonic_academy".to_string(),
+        probability: 0.05,
+        target: EventTarget::Actor("florence".to_string()),
+        conditions: vec![],
+        effects: HashMap::from([
+            ("actor:florence.legitimacy".to_string(), 10.0),
+            ("actor:florence.treasury".to_string(), -25.0),
+        ]),
+        llm_context: "Марсилио Фичино и Платоновская академия расцветают под покровительством Медичи".to_string(),
+        one_time: true,
+    });
+
+    events.push(RandomEvent {
+        id: "mantegna_camera_degli_sposi".to_string(),
+        probability: 0.05,
+        target: EventTarget::Actor("mantua".to_string()),
+        conditions: vec![],
+        effects: HashMap::from([
+            ("actor:mantua.legitimacy".to_string(), 12.0),
+            ("actor:mantua.treasury".to_string(), -15.0),
+        ]),
+        llm_context: "Андреа Мантенья завершает фрески Camera degli Sposi для Гонзага — небольшой двор Мантуи прославлен по всей Италии".to_string(),
+        one_time: true,
+    });
+
+    events.push(RandomEvent {
+        id: "este_court_humanists".to_string(),
+        probability: 0.05,
+        target: EventTarget::Actor("ferrara".to_string()),
+        conditions: vec![],
+        effects: HashMap::from([
+            ("actor:ferrara.legitimacy".to_string(), 10.0),
+            ("actor:ferrara.treasury".to_string(), -20.0),
+        ]),
+        llm_context: "Феррарский университет и двор Эсте привлекают гуманистов со всей Италии — Эрколе I укрепляет культурный престиж герцогства".to_string(),
+        one_time: true,
+    });
+
+    events.push(RandomEvent {
+        id: "montefeltro_studiolo".to_string(),
+        probability: 0.05,
+        target: EventTarget::Actor("urbino".to_string()),
+        conditions: vec![],
+        effects: HashMap::from([
+            ("actor:urbino.legitimacy".to_string(), 14.0),
+            ("actor:urbino.military_quality".to_string(), 5.0),
+            ("actor:urbino.treasury".to_string(), -25.0),
+        ]),
+        llm_context: "Федерико да Монтефельтро завершает урбинский студиоло и собирает одну из богатейших библиотек Италии — кондотьер, ставший образцом гуманистического государя".to_string(),
+        one_time: true,
+    });
+
+    // --- Task D: coalition against Milan ---
+    // Fires once Milan's expansion_count (vassal formation / absorption, task A)
+    // crosses a threshold - the remaining great powers (not second tier) react
+    // to a Milan that is visibly swallowing its neighbours. France is
+    // deliberately excluded (unpredictable third player, see design doc).
+    events.push(RandomEvent {
+        id: "italian_league_against_milan".to_string(),
+        probability: 0.9,
+        target: EventTarget::Actor("milan".to_string()),
+        conditions: vec![
+            Condition {
+                metric: "actor:milan.expansion_count".to_string(),
+                operator: ComparisonOperator::GreaterOrEqual,
+                value: 3.0,
+            },
+        ],
+        effects: HashMap::from([
+            ("actor:milan.external_pressure".to_string(), 20.0),
+            ("actor:milan.legitimacy".to_string(), -12.0),
+            ("actor:milan.cohesion".to_string(), -8.0),
+            ("actor:venice.legitimacy".to_string(), 6.0),
+            ("actor:florence.legitimacy".to_string(), 6.0),
+            ("actor:naples.legitimacy".to_string(), 6.0),
+            ("actor:sicily.legitimacy".to_string(), 6.0),
+            ("actor:papacy.legitimacy".to_string(), 6.0),
+        ]),
+        llm_context: "Венеция, Флоренция, Неаполь, Сицилия и Папская область заключают лигу против растущей мощи Милана — призрак 1454 года, теперь направленный против самого Милана".to_string(),
+        one_time: true,
+    });
+
+    events
 }
