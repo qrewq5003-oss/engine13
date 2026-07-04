@@ -758,6 +758,7 @@ enum ScriptedStrategy {
     RomeBalanced,
     RomeInfluence,
     RomeWealth,
+    MilanAggressive,
 }
 
 impl ScriptedStrategy {
@@ -769,6 +770,12 @@ impl ScriptedStrategy {
                 "wealth" | "wealth_heavy" => ScriptedStrategy::RomeWealth,
                 _ => ScriptedStrategy::RomeBalanced,
             }
+        } else if scenario_id == "milan_1477" {
+            // Milan 1477 - only one strategy defined so far (aggressive/expansionist),
+            // used to test whether military_size can grow at all under real
+            // player-like action-taking (see ENGINE13_SCENARIO3_DESIGN.md,
+            // "Найдено при плейтесте C/D" for why this was needed).
+            ScriptedStrategy::MilanAggressive
         } else {
             // Constantinople strategies
             match s.to_lowercase().as_str() {
@@ -849,9 +856,28 @@ impl ScriptedStrategy {
                 "build_reputation",
                 "fund_defense",
             ],
+            // Milan 1477 - aggressive/expansionist: pressure neighbours, destabilize
+            // Naples, hire condottieri (military_quality - note: no action in
+            // milan_1477/actions.toml increases military_size directly), keep
+            // treasury flowing to afford the gated actions.
+            ScriptedStrategy::MilanAggressive => vec![
+                "milan_pressure_genoa",
+                "incite_baronial_revolt",
+                "milan_hire_condottieri",
+                "milan_hire_urbino_condottieri",
+                "milan_lease_genoese_fleet",
+                "milan_banking_deal_florence",
+                "milan_bribe_curia",
+                "milan_court_patronage",
+                "milan_diplomacy_ferrara",
+                "milan_marriage_venice",
+                "milan_marriage_naples",
+                "call_papal_arbitration",
+                "milan_savoy_alliance",
+            ],
         }
     }
-    
+
     fn name(&self) -> &'static str {
         match self {
             ScriptedStrategy::Balanced => "balanced",
@@ -860,6 +886,7 @@ impl ScriptedStrategy {
             ScriptedStrategy::RomeBalanced => "balanced",
             ScriptedStrategy::RomeInfluence => "influence",
             ScriptedStrategy::RomeWealth => "wealth",
+            ScriptedStrategy::MilanAggressive => "aggressive",
         }
     }
 }
@@ -1066,6 +1093,17 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
 
             println!("tick {:2}: influence {:6.1}->{:6.1}  knowledge {:5.1}->{:5.1}  wealth {:7.1}->{:7.1}  connections {:6.1}->{:6.1}  legitimacy {:5.1}->{:5.1}  cohesion {:5.1}->{:5.1}  actions=[{}]  applied={} rejected={}",
                 tick_num, inf_before, inf_after, know_before, know_after, wea_before, wea_after, con_before, con_after, leg_before, leg_after, coh_before, coh_after,
+                actions_applied.join(", "), applied_this_tick, rejected_this_tick);
+        } else if scenario_id == "milan_1477" {
+            let world = state.world_state.as_ref().unwrap();
+            let milan = world.actors.get("milan");
+            let mil_after = milan.map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+            let treasury_after = milan.map(|a| a.get_metric("treasury")).unwrap_or(0.0);
+            let leg_after = milan.map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
+            let ec_after = milan.map(|a| a.get_metric("expansion_count")).unwrap_or(0.0);
+
+            println!("tick {:2}: milan.military_size={:6.2}  treasury={:7.1}  legitimacy={:5.1}  expansion_count={:.0}  actions=[{}]  applied={} rejected={}",
+                tick_num, mil_after, treasury_after, leg_after, ec_after,
                 actions_applied.join(", "), applied_this_tick, rejected_this_tick);
         } else {
             // Constantinople output
