@@ -27,6 +27,13 @@ pub fn get_registry() -> Vec<ScenarioEntry> {
             description: "1430 год. Фессалоники пали. Константинополь стоит — но ненадолго.",
             loader: crate::scenarios::constantinople_1430::load_constantinople_1430,
         },
+        ScenarioEntry {
+            id: "milan_1477",
+            name: "Milan 1477 — Регентство",
+            year: 1477,
+            description: "1477 год. Галеаццо Мария Сфорца убит. Милан правит малолетний герцог — и все это знают.",
+            loader: crate::scenarios::milan_1477::load_milan_1477,
+        },
     ]
 }
 

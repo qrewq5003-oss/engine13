@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[11.5, 44.8], [14.0, 44.8], [14.0, 46.5], [11.5, 46.5], [11.5, 44.8]]]
+  },
+  "properties": { "actor_id": "venice" }
+}

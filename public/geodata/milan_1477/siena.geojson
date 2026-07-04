@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[10.8, 42.6], [11.8, 42.6], [11.8, 43.3], [10.8, 43.3], [10.8, 42.6]]]
+  },
+  "properties": { "actor_id": "siena" }
+}

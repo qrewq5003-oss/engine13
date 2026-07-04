@@ -1,0 +1,241 @@
+# Patron actions for Milan 1477 scenario — Milan is the player actor.
+# Actions represent diplomacy, marriage ties, bribery, condottieri and
+# banking moves available to the Duchy during the regency crisis.
+
+[[patron_actions]]
+id = "milan_marriage_venice"
+name = "Брачный союз с Венецией"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 80.0
+
+[patron_actions.effects]
+"actor:venice.cohesion" = 3.0
+"actor:milan.legitimacy" = 5.0
+"actor:venice.external_pressure" = -3.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -60.0
+
+[[patron_actions]]
+id = "milan_marriage_naples"
+name = "Брачный союз с Неаполем"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 90.0
+
+[patron_actions.effects]
+"actor:naples.legitimacy" = 5.0
+"actor:milan.legitimacy" = 4.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -70.0
+
+[[patron_actions]]
+id = "milan_bribe_curia"
+name = "Подкуп курии"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"actor:papacy.legitimacy" = 3.0
+"actor:milan.legitimacy" = 6.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -50.0
+
+[[patron_actions]]
+id = "milan_hire_condottieri"
+name = "Наём кондотьеров"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 100.0
+
+[patron_actions.effects]
+"actor:milan.military_quality" = 8.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -80.0
+
+[[patron_actions]]
+id = "milan_banking_deal_florence"
+name = "Банковский союз с Флоренцией"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.economic_output"
+operator = "greater"
+value = 60.0
+
+[patron_actions.effects]
+"actor:florence.economic_output" = 5.0
+"actor:milan.economic_output" = 3.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -30.0
+
+[[patron_actions]]
+id = "milan_pressure_genoa"
+name = "Давление на Геную"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.military_size"
+operator = "greater"
+value = 30.0
+
+[patron_actions.effects]
+"actor:genoa.external_pressure" = 8.0
+"actor:genoa.cohesion" = -3.0
+"actor:milan.legitimacy" = -3.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -20.0
+
+[[patron_actions]]
+id = "milan_court_patronage"
+name = "Двор и меценатство"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"actor:milan.legitimacy" = 6.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -25.0
+
+[[patron_actions]]
+id = "milan_diplomacy_ferrara"
+name = "Сговор с Феррарой"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"actor:ferrara.cohesion" = 4.0
+"actor:milan.legitimacy" = 2.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -20.0
+
+[[patron_actions]]
+id = "milan_hire_urbino_condottieri"
+name = "Наём кондотьера Урбино"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 90.0
+
+[patron_actions.effects]
+"actor:milan.military_quality" = 6.0
+"actor:urbino.treasury" = 30.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -50.0
+
+[[patron_actions]]
+id = "milan_savoy_alliance"
+name = "Союз с Савойей"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "always"
+
+[patron_actions.effects]
+"actor:savoy.external_pressure" = -5.0
+"actor:milan.external_pressure" = -3.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -30.0
+
+[[patron_actions]]
+id = "milan_lease_genoese_fleet"
+name = "Аренда генуэзского флота"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 50.0
+
+[patron_actions.effects]
+"actor:milan.economic_output" = 4.0
+"actor:genoa.treasury" = 40.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -40.0
+
+# Destructive / opportunistic actions (no fixed source)
+
+[[patron_actions]]
+id = "incite_baronial_revolt"
+name = "Подстрекать баронов Неаполя"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:naples.cohesion"
+operator = "less"
+value = 45.0
+
+[patron_actions.effects]
+"actor:naples.cohesion" = -8.0
+"actor:naples.external_pressure" = 5.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -40.0
+"actor:milan.legitimacy" = -5.0
+
+[[patron_actions]]
+id = "call_papal_arbitration"
+name = "Папский арбитраж"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:papacy.legitimacy"
+operator = "greater"
+value = 70.0
+
+[patron_actions.effects]
+"actor:milan.external_pressure" = -6.0
+"actor:papacy.treasury" = 20.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -50.0
+
+# Universal actions
+[[universal_actions]]
+id = "observe"
+name = "Наблюдать"
+
+[universal_actions.available_if]
+type = "always"
+
+[universal_actions.effects]
+
+[universal_actions.cost]

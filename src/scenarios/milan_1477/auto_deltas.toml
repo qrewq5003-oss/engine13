@@ -1,0 +1,125 @@
+# ============================================================
+# Milan — regency crisis: legitimacy/cohesion erosion, neighbors
+# probing weakness raise external pressure over time.
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:milan.legitimacy"
+base = -0.15
+noise = 0.15
+actor_id = "milan"
+[[auto_deltas.conditions]]
+metric = "actor:milan.cohesion"
+operator = "greater"
+value = 60.0
+delta = 0.15
+[[auto_deltas.conditions]]
+metric = "actor:milan.treasury"
+operator = "less"
+value = 0.0
+delta = -0.2
+
+[[auto_deltas]]
+metric = "actor:milan.cohesion"
+base = -0.1
+noise = 0.15
+actor_id = "milan"
+[[auto_deltas.conditions]]
+metric = "actor:milan.legitimacy"
+operator = "greater"
+value = 60.0
+delta = 0.15
+[[auto_deltas.conditions]]
+metric = "actor:milan.external_pressure"
+operator = "greater"
+value = 60.0
+delta = -0.3
+
+[[auto_deltas]]
+metric = "actor:milan.external_pressure"
+base = 0.35
+noise = 0.3
+actor_id = "milan"
+[[auto_deltas.conditions]]
+metric = "actor:milan.legitimacy"
+operator = "less"
+value = 40.0
+delta = 0.6
+
+[[auto_deltas]]
+metric = "actor:milan.economic_output"
+base = 0.15
+noise = 0.2
+actor_id = "milan"
+[[auto_deltas.conditions]]
+metric = "actor:milan.treasury"
+operator = "less"
+value = 0.0
+delta = -0.3
+
+# ============================================================
+# Naples — Ottoman pressure on the coast (Otranto, 1480) plus
+# the baronial fronde eating away at internal cohesion.
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:naples.external_pressure"
+base = 0.5
+noise = 0.3
+actor_id = "naples"
+[[auto_deltas.conditions]]
+metric = "actor:naples.military_size"
+operator = "less"
+value = 40.0
+delta = 0.3
+
+[[auto_deltas]]
+metric = "actor:naples.cohesion"
+base = -0.25
+noise = 0.2
+actor_id = "naples"
+[[auto_deltas.conditions]]
+metric = "actor:naples.legitimacy"
+operator = "less"
+value = 50.0
+delta = -0.2
+
+# ============================================================
+# Fragile second-tier actors — chronic internal or external
+# instability that can, over time, push them into the
+# vassalage danger band (external_pressure 70-85, legitimacy
+# 10-25, cohesion 15-30).
+# ============================================================
+
+[[auto_deltas]]
+metric = "actor:siena.cohesion"
+base = -0.2
+noise = 0.2
+actor_id = "siena"
+[[auto_deltas.conditions]]
+metric = "actor:siena.legitimacy"
+operator = "less"
+value = 50.0
+delta = -0.15
+
+[[auto_deltas]]
+metric = "actor:bologna.external_pressure"
+base = 0.3
+noise = 0.2
+actor_id = "bologna"
+[[auto_deltas.conditions]]
+metric = "actor:bologna.legitimacy"
+operator = "less"
+value = 55.0
+delta = 0.2
+
+[[auto_deltas]]
+metric = "actor:savoy.external_pressure"
+base = 0.3
+noise = 0.2
+actor_id = "savoy"
+[[auto_deltas.conditions]]
+metric = "actor:savoy.cohesion"
+operator = "less"
+value = 50.0
+delta = 0.2

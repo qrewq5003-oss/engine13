@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[10.0, 43.2], [11.8, 43.2], [11.8, 44.2], [10.0, 44.2], [10.0, 43.2]]]
+  },
+  "properties": { "actor_id": "florence" }
+}

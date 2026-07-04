@@ -1,0 +1,146 @@
+[[tags]]
+id = "catholic"
+metrics_modifier = {}
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "condottieri"
+metrics_modifier = { military_quality = 2 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "banking"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "regency_crisis"
+metrics_modifier = { legitimacy = -2, cohesion = -1 }
+spreads_via = []
+spread_cooldown_ticks = 5
+spread_chance = 0.0
+
+[[tags]]
+id = "maritime"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.4
+
+[[tags]]
+id = "trade_empire"
+metrics_modifier = { economic_output = 2 }
+spreads_via = ["trade"]
+spread_cooldown_ticks = 5
+spread_chance = 0.35
+
+[[tags]]
+id = "oligarchy"
+metrics_modifier = { legitimacy = 1, cohesion = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 9
+spread_chance = 0.15
+
+[[tags]]
+id = "humanism"
+metrics_modifier = { legitimacy = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 6
+spread_chance = 0.3
+
+[[tags]]
+id = "medici_faction"
+metrics_modifier = { economic_output = 1, legitimacy = 1 }
+spreads_via = []
+spread_cooldown_ticks = 10
+spread_chance = 0.0
+
+[[tags]]
+id = "aragonese_crown"
+metrics_modifier = { legitimacy = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "baronial_fronde"
+metrics_modifier = { cohesion = -2 }
+spreads_via = []
+spread_cooldown_ticks = 5
+spread_chance = 0.0
+
+[[tags]]
+id = "ottoman_frontier"
+metrics_modifier = { external_pressure = 2 }
+spreads_via = ["war"]
+spread_cooldown_ticks = 6
+spread_chance = 0.2
+
+[[tags]]
+id = "religious_authority"
+metrics_modifier = { legitimacy = 2 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 8
+spread_chance = 0.2
+
+[[tags]]
+id = "nepotism"
+metrics_modifier = { cohesion = -1 }
+spreads_via = []
+spread_cooldown_ticks = 6
+spread_chance = 0.0
+
+[[tags]]
+id = "factionalism"
+metrics_modifier = { cohesion = -2 }
+spreads_via = []
+spread_cooldown_ticks = 5
+spread_chance = 0.0
+
+[[tags]]
+id = "este_court"
+metrics_modifier = { legitimacy = 2 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 7
+spread_chance = 0.2
+
+[[tags]]
+id = "gonzaga_court"
+metrics_modifier = { legitimacy = 1, military_quality = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 7
+spread_chance = 0.2
+
+[[tags]]
+id = "patronage"
+metrics_modifier = { legitimacy = 1 }
+spreads_via = ["culture", "trade"]
+spread_cooldown_ticks = 6
+spread_chance = 0.25
+
+[[tags]]
+id = "papal_vicariate"
+metrics_modifier = { legitimacy = 1, external_pressure = 1 }
+spreads_via = []
+spread_cooldown_ticks = 6
+spread_chance = 0.0
+
+[[tags]]
+id = "french_orbit"
+metrics_modifier = { external_pressure = 1 }
+spreads_via = ["culture"]
+spread_cooldown_ticks = 7
+spread_chance = 0.2
+
+[[tags]]
+id = "separate_pole"
+metrics_modifier = { legitimacy = 1 }
+spreads_via = []
+spread_cooldown_ticks = 8
+spread_chance = 0.0

@@ -1,0 +1,83 @@
+# Milestone events for Milan 1477 scenario.
+# Victory condition / "Italy unified" transition to Consequences is task E's
+# job (out of scope here) - none of these trigger_collapse.
+
+[[milestone_events]]
+id = "otranto_threat_rises"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Османский флот у берегов Апулии тревожит Неаполь. Отранто готовится к худшему."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:naples.external_pressure"
+operator = "greater"
+value = 60.0
+duration = 3
+
+[[milestone_events]]
+id = "otranto_falls"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Отранто взято османским десантом. Паника охватывает юг Италии — Ферранте вынужден искать помощь у северных держав."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:naples.external_pressure"
+operator = "greater"
+value = 80.0
+duration = 2
+
+[[milestone_events]]
+id = "baronial_fronde_erupts"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Неаполитанские бароны открыто восстают против Ферранте. Королевство трещит изнутри."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:naples.cohesion"
+operator = "less"
+value = 35.0
+duration = 3
+
+[[milestone_events]]
+id = "milan_regency_stabilizes"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Регентство в Милане укрепилось. Двор Сфорца обрёл устойчивость — по крайней мере на время."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:milan.legitimacy"
+operator = "greater"
+value = 65.0
+duration = 5
+
+[[milestone_events]]
+id = "milan_regency_crisis_deepens"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Борьба за регентство в Милане обостряется. Соседи всё внимательнее следят за слабостью герцогства."
+[milestone_events.condition]
+type = "metric"
+metric = "actor:milan.legitimacy"
+operator = "less"
+value = 25.0
+duration = 3
+
+[[milestone_events]]
+id = "france_intervenes"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Французская корона обращает взор за Альпы. Савойя больше не кажется надёжным щитом."
+cooldown_ticks = 999
+[milestone_events.condition]
+type = "metric"
+metric = "actor:savoy.external_pressure"
+operator = "greater"
+value = 55.0
+duration = 3
+[milestone_events.spawn_actor]
+actor_id = "france"
+label = "Франция"
+lat = 48.85
+lng = 2.35
+color = "#1e3a8a"
+initial_metrics = { cohesion = 70.0, legitimacy = 75.0, military_size = 90.0, economic_output = 90.0, external_pressure = 15.0, treasury = 500.0, population = 800.0, military_quality = 65.0 }

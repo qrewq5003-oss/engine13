@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[12.4, 36.6], [15.7, 36.6], [15.7, 38.3], [12.4, 38.3], [12.4, 36.6]]]
+  },
+  "properties": { "actor_id": "sicily" }
+}

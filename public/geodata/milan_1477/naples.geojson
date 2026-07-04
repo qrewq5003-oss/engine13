@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[13.0, 39.0], [18.5, 39.0], [18.5, 42.3], [13.0, 42.3], [13.0, 39.0]]]
+  },
+  "properties": { "actor_id": "naples" }
+}
