@@ -253,6 +253,10 @@ pub fn tick(
     // Phase 7: Actor collapses
     phase_collapses(world, scenario, event_log);
 
+    // Phase 7b: Vassalage formation / dissolution (parallel to collapses).
+    // Runs after collapses so dead actors are already pruned and never vassalized.
+    phase_vassalage(world, event_log);
+
     // Phase 8: Record changes and generation mechanics
     phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
 
@@ -369,6 +373,12 @@ fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &m
 
     // Calculate neighbor interactions (six types: military, trade, diplomatic, migration, vassalage, cultural)
     interactions::calculate_interactions(world, scenario, event_log, rng);
+
+    // Vassal tribute over persistent vassalage relationships (not neighbor-pair
+    // based, so applied once here rather than inside calculate_interactions).
+    // Rolls RNG only when a vassalage exists, keeping vassalage-free scenarios
+    // byte-identical.
+    interactions::calculate_vassalage_interaction(world, event_log, rng);
 }
 
 // ============================================================================
@@ -608,6 +618,14 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
 
 fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     check_collapses(world, scenario, event_log);
+}
+
+// ============================================================================
+// Phase 7b: Vassalage (formation / dissolution)
+// ============================================================================
+
+fn phase_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
+    interactions::check_vassalage(world, event_log);
 }
 
 // ============================================================================
@@ -1517,6 +1535,14 @@ fn check_collapses(
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
                     world.actors.insert(successor.id.clone(), new_actor);
                 }
+            } else {
+                // Heir is an already-living power: this is full absorption via
+                // collapse, not a split into a fresh successor. Credit the shared
+                // expansion counter (same counter vassalage formation increments;
+                // consumed by the coalition trigger in task D).
+                if let Some(heir) = world.actors.get_mut(&successor.id) {
+                    heir.add_metric("expansion_count", 1.0);
+                }
             }
         }
     }
@@ -1706,6 +1732,134 @@ mod tests {
         // After 2 ticks, year should increment
         assert_eq!(world.tick, 2);
         assert_eq!(world.year, initial_year + 1);  // tick 2 = start_year + (2/2) = start_year + 1
+    }
+
+    // ------------------------------------------------------------------
+    // Vassalage (task A)
+    // ------------------------------------------------------------------
+
+    fn vassalage_actor(id: &str, military: f64, ep: f64, leg: f64, coh: f64, neighbors: &[&str]) -> crate::core::Actor {
+        use crate::core::{Actor, BorderType, Culture, Era, NarrativeStatus, Neighbor, RegionRank, Religion};
+        let mut metrics = crate::core::actor::default_metrics();
+        metrics.insert("military_size".to_string(), military);
+        metrics.insert("external_pressure".to_string(), ep);
+        metrics.insert("legitimacy".to_string(), leg);
+        metrics.insert("cohesion".to_string(), coh);
+        metrics.insert("economic_output".to_string(), 50.0);
+        metrics.insert("treasury".to_string(), 100.0);
+        Actor {
+            id: id.to_string(),
+            name: id.to_string(),
+            name_short: id.to_string(),
+            region: id.to_string(),
+            region_rank: RegionRank::C,
+            era: Era::LateMedieval,
+            narrative_status: NarrativeStatus::Foreground,
+            tags: vec![],
+            metrics,
+            scenario_metrics: HashMap::new(),
+            neighbors: neighbors.iter().map(|n| Neighbor { id: n.to_string(), distance: 1, border_type: BorderType::Land }).collect(),
+            on_collapse: vec![],
+            actor_tags: HashMap::new(),
+            center: None,
+            is_successor_template: false,
+            religion: Religion::Catholic,
+            culture: Culture::Latin,
+            minimum_survival_ticks: None,
+            leader: None,
+        }
+    }
+
+    #[test]
+    fn test_vassalage_forms_after_three_ticks_and_pays_tribute() {
+        let mut world = WorldState::new("test".to_string(), 1477);
+        // Weak actor sitting inside the danger band, strong healthy neighbour.
+        world.actors.insert("small".into(), vassalage_actor("small", 10.0, 78.0, 18.0, 22.0, &["big"]));
+        world.actors.insert("big".into(), vassalage_actor("big", 100.0, 30.0, 60.0, 60.0, &["small"]));
+        let mut log = EventLog::new();
+
+        // Needs 3 consecutive ticks in band before forming.
+        interactions::check_vassalage(&mut world, &mut log);
+        assert!(world.vassalages.is_empty(), "must not form before 3 ticks");
+        interactions::check_vassalage(&mut world, &mut log);
+        assert!(world.vassalages.is_empty(), "must not form before 3 ticks");
+        interactions::check_vassalage(&mut world, &mut log);
+
+        assert_eq!(world.vassalages.len(), 1);
+        let v = &world.vassalages[0];
+        assert_eq!(v.vassal_id, "small");
+        assert_eq!(v.overlord_id, "big");
+        // Overlord's shared expansion counter incremented on formation.
+        assert_eq!(world.actors.get("big").unwrap().get_metric("expansion_count"), 1.0);
+
+        // Tribute: 3–5% of vassal economic_output (50.0) => 1.5..=2.5, symmetric.
+        let vassal_before = world.actors.get("small").unwrap().get_metric("treasury");
+        let overlord_before = world.actors.get("big").unwrap().get_metric("treasury");
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+        interactions::calculate_vassalage_interaction(&mut world, &mut log, &mut rng);
+        let paid = vassal_before - world.actors.get("small").unwrap().get_metric("treasury");
+        let received = world.actors.get("big").unwrap().get_metric("treasury") - overlord_before;
+        assert!((paid - received).abs() < 1e-9, "tribute must be symmetric");
+        assert!((1.5..=2.5).contains(&paid), "tribute {paid} out of 3-5% band");
+    }
+
+    #[test]
+    fn test_vassalage_overlord_is_never_a_vassal() {
+        // No hierarchy: a vassal can never gain a vassal, so overlord attribution
+        // must skip a neighbour that is itself a vassal — even if it is the
+        // strongest one available.
+        let mut world = WorldState::new("test".to_string(), 1477);
+        world.actors.insert("small".into(), vassalage_actor("small", 10.0, 78.0, 18.0, 22.0, &["free", "v"]));
+        world.actors.insert("free".into(), vassalage_actor("free", 50.0, 30.0, 60.0, 60.0, &["small"]));
+        world.actors.insert("v".into(), vassalage_actor("v", 100.0, 30.0, 60.0, 60.0, &["small", "lord"]));
+        world.actors.insert("lord".into(), vassalage_actor("lord", 200.0, 30.0, 60.0, 60.0, &["v"]));
+        // "v" is already a vassal of a healthy "lord", so it stays bound.
+        world.vassalages.push(crate::core::Vassalage { vassal_id: "v".into(), overlord_id: "lord".into(), formed_tick: 0 });
+        let mut log = EventLog::new();
+
+        for _ in 0..3 {
+            interactions::check_vassalage(&mut world, &mut log);
+        }
+
+        // "small" submits — but to "free", not to the stronger vassal "v".
+        assert_eq!(world.vassalages.len(), 2);
+        let small_v = world.vassalages.iter().find(|v| v.vassal_id == "small").expect("small should be a vassal");
+        assert_eq!(small_v.overlord_id, "free", "must not pick a vassal as overlord");
+        assert_eq!(world.actors.get("free").unwrap().get_metric("expansion_count"), 1.0);
+    }
+
+    #[test]
+    fn test_vassalage_revolt_conditions() {
+        let mut world = WorldState::new("test".to_string(), 1477);
+        world.actors.insert("small".into(), vassalage_actor("small", 10.0, 30.0, 60.0, 60.0, &["big"]));
+        world.actors.insert("big".into(), vassalage_actor("big", 20.0, 30.0, 60.0, 60.0, &["small"]));
+        world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "big".into(), formed_tick: 0 });
+        let mut log = EventLog::new();
+
+        // Stable: vassal weak (10 < 80% of 20) and overlord healthy.
+        interactions::check_vassalage(&mut world, &mut log);
+        assert_eq!(world.vassalages.len(), 1, "must stay bound while weak");
+
+        // Revolt path 1: vassal's military catches up (>= 80% of overlord).
+        world.actors.get_mut("small").unwrap().set_metric("military_size", 16.0); // 16 >= 20*0.8
+        interactions::check_vassalage(&mut world, &mut log);
+        assert!(world.vassalages.is_empty(), "vassal must revolt once strong enough");
+
+        // Revolt path 2: overlord itself enters the FULL vassalage band (all three
+        // metrics together), not merely one slipped metric.
+        world.actors.get_mut("small").unwrap().set_metric("military_size", 5.0);
+        world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "big".into(), formed_tick: 0 });
+        // Only external_pressure in band — legitimacy/cohesion still healthy: must NOT revolt.
+        let big = world.actors.get_mut("big").unwrap();
+        big.set_metric("external_pressure", 75.0);
+        interactions::check_vassalage(&mut world, &mut log);
+        assert_eq!(world.vassalages.len(), 1, "single slipped metric must not free the vassal");
+        // Now drive legitimacy and cohesion into band too → full band → revolt.
+        let big = world.actors.get_mut("big").unwrap();
+        big.set_metric("legitimacy", 18.0);
+        big.set_metric("cohesion", 22.0);
+        interactions::check_vassalage(&mut world, &mut log);
+        assert!(world.vassalages.is_empty(), "vassal must break free from a fully-weakened overlord");
     }
 }
 

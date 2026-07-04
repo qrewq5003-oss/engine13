@@ -42,6 +42,16 @@ pub struct Alliance {
     pub formed_tick: u32,
 }
 
+/// Vassalage relationship — a weaker actor (`vassal`) pays tribute to a stronger
+/// overlord. Strictly 1:1 with no hierarchy: a vassal can never itself be an
+/// overlord (enforced at formation in `check_vassalage`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Vassalage {
+    pub vassal_id: String,
+    pub overlord_id: String,
+    pub formed_tick: u32,
+}
+
 /// Actor delta for tracking metric changes between ticks
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActorDelta {
@@ -74,6 +84,15 @@ pub struct WorldState {
     /// Set of dead actor IDs for fast lookup (prevents duplicate death events)
     pub dead_actor_ids: HashSet<String>,
     pub alliances: Vec<Alliance>,
+    /// Active vassalage relationships (see `Vassalage`). Formed/dissolved in
+    /// `check_vassalage`, tribute applied in `calculate_vassalage_interaction`.
+    #[serde(default)]
+    pub vassalages: Vec<Vassalage>,
+    /// Vassalage trigger counter — consecutive ticks an actor has spent inside the
+    /// vassalage danger band. Mirrors `collapse_warning_ticks`; actor becomes a
+    /// vassal after 3 consecutive ticks in the band.
+    #[serde(default)]
+    pub vassalage_warning_ticks: HashMap<String, u32>,
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     /// Global scenario metrics (e.g. federation_progress). Family metrics live in family_state.
@@ -147,6 +166,8 @@ impl WorldState {
             dead_actors: Vec::new(),
             dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
+            vassalages: Vec::new(),
+            vassalage_warning_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             global_metrics: HashMap::new(),
@@ -187,6 +208,8 @@ impl WorldState {
             dead_actors: Vec::new(),
             dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
+            vassalages: Vec::new(),
+            vassalage_warning_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             global_metrics: HashMap::new(),
