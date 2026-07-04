@@ -75,6 +75,23 @@ value = 100.0
 "actor:milan.treasury" = -80.0
 
 [[patron_actions]]
+id = "milan_raise_troops"
+name = "Сбор ополчения"
+source_actor_id = "milan"
+
+[patron_actions.available_if]
+type = "metric"
+metric = "actor:milan.treasury"
+operator = "greater"
+value = 70.0
+
+[patron_actions.effects]
+"actor:milan.military_size" = 8.0
+
+[patron_actions.cost]
+"actor:milan.treasury" = -45.0
+
+[[patron_actions]]
 id = "milan_banking_deal_florence"
 name = "Банковский союз с Флоренцией"
 source_actor_id = "milan"

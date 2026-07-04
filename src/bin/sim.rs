@@ -856,11 +856,11 @@ impl ScriptedStrategy {
                 "build_reputation",
                 "fund_defense",
             ],
-            // Milan 1477 - aggressive/expansionist: pressure neighbours, destabilize
-            // Naples, hire condottieri (military_quality - note: no action in
-            // milan_1477/actions.toml increases military_size directly), keep
-            // treasury flowing to afford the gated actions.
+            // Milan 1477 - aggressive/expansionist: raise troops (military_size),
+            // pressure neighbours, destabilize Naples, hire condottieri
+            // (military_quality), keep treasury flowing to afford gated actions.
             ScriptedStrategy::MilanAggressive => vec![
+                "milan_raise_troops",
                 "milan_pressure_genoa",
                 "incite_baronial_revolt",
                 "milan_hire_condottieri",
