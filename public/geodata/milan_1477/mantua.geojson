@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[10.3, 44.9], [11.2, 44.9], [11.2, 45.4], [10.3, 45.4], [10.3, 44.9]]]
+  },
+  "properties": { "actor_id": "mantua" }
+}

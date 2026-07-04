@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[7.5, 43.8], [9.9, 43.8], [9.9, 44.6], [7.5, 44.6], [7.5, 43.8]]]
+  },
+  "properties": { "actor_id": "genoa" }
+}

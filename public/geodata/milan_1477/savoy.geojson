@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[6.0, 44.8], [7.8, 44.8], [7.8, 46.3], [6.0, 46.3], [6.0, 44.8]]]
+  },
+  "properties": { "actor_id": "savoy" }
+}

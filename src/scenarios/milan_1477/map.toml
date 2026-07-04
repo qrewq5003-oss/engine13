@@ -1,0 +1,85 @@
+[map]
+tile_url = "https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png"
+tile_attribution = "CC BY 4.0 <a href='https://dh.gu.se/dare/'>DARE</a>"
+center_lat = 43.0
+center_lon = 12.0
+default_zoom = 5
+geojson_base_path = "milan_1477"
+
+[[map.polygons]]
+actor_id = "milan"
+geojson_file = "milan.geojson"
+color = "#8B0000"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "venice"
+geojson_file = "venice.geojson"
+color = "#B8860B"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "florence"
+geojson_file = "florence.geojson"
+color = "#4A7C59"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "naples"
+geojson_file = "naples.geojson"
+color = "#5C4A7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "papacy"
+geojson_file = "papacy.geojson"
+color = "#FFD700"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "genoa"
+geojson_file = "genoa.geojson"
+color = "#7C4A4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "ferrara"
+geojson_file = "ferrara.geojson"
+color = "#4A5C7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "mantua"
+geojson_file = "mantua.geojson"
+color = "#7C7C4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "siena"
+geojson_file = "siena.geojson"
+color = "#5C7C4A"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "urbino"
+geojson_file = "urbino.geojson"
+color = "#7C4A5C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "bologna"
+geojson_file = "bologna.geojson"
+color = "#4A4A7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "savoy"
+geojson_file = "savoy.geojson"
+color = "#4A7C7C"
+opacity = 0.5
+
+[[map.polygons]]
+actor_id = "sicily"
+geojson_file = "sicily.geojson"
+color = "#7C5C4A"
+opacity = 0.5

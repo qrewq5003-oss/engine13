@@ -1,0 +1,109 @@
+# Milestone events for Milan 1477 scenario.
+# Victory condition / "Italy unified" transition to Consequences: see
+# italy_unified at the bottom of this file (task E, triggers_collapse=true).
+# All other entries below are flavor milestones (triggers_collapse=false).
+
+[[milestone_events]]
+id = "otranto_threat_rises"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Османский флот у берегов Апулии тревожит Неаполь. Отранто готовится к худшему."
+[milestone_events.condition]
+type = "metric"
+metric = "external_pressure"
+actor_id = "naples"
+operator = "greater"
+value = 60.0
+duration = 3
+
+[[milestone_events]]
+id = "otranto_falls"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Отранто взято османским десантом. Паника охватывает юг Италии — Ферранте вынужден искать помощь у северных держав."
+[milestone_events.condition]
+type = "metric"
+metric = "external_pressure"
+actor_id = "naples"
+operator = "greater"
+value = 80.0
+duration = 2
+
+[[milestone_events]]
+id = "baronial_fronde_erupts"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Неаполитанские бароны открыто восстают против Ферранте. Королевство трещит изнутри."
+[milestone_events.condition]
+type = "metric"
+metric = "cohesion"
+actor_id = "naples"
+operator = "less"
+value = 35.0
+duration = 3
+
+[[milestone_events]]
+id = "milan_regency_stabilizes"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Регентство в Милане укрепилось. Двор Сфорца обрёл устойчивость — по крайней мере на время."
+[milestone_events.condition]
+type = "metric"
+metric = "legitimacy"
+actor_id = "milan"
+operator = "greater"
+value = 65.0
+duration = 5
+
+[[milestone_events]]
+id = "milan_regency_crisis_deepens"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Борьба за регентство в Милане обостряется. Соседи всё внимательнее следят за слабостью герцогства."
+[milestone_events.condition]
+type = "metric"
+metric = "legitimacy"
+actor_id = "milan"
+operator = "less"
+value = 25.0
+duration = 3
+
+[[milestone_events]]
+id = "france_intervenes"
+is_key = true
+triggers_collapse = false
+llm_context_shift = "Французская корона обращает взор за Альпы. Савойя больше не кажется надёжным щитом."
+cooldown_ticks = 999
+[milestone_events.condition]
+type = "metric"
+metric = "external_pressure"
+actor_id = "savoy"
+operator = "greater"
+value = 55.0
+duration = 3
+[milestone_events.spawn_actor]
+actor_id = "france"
+label = "Франция"
+lat = 48.85
+lng = 2.35
+color = "#1e3a8a"
+initial_metrics = { cohesion = 70.0, legitimacy = 75.0, military_size = 90.0, economic_output = 90.0, external_pressure = 15.0, treasury = 500.0, population = 800.0, military_quality = 65.0 }
+
+# Task E: victory condition / transition to Consequences->Free (see
+# ENGINE13_SCENARIO3_DESIGN.md, "Найдено при плейтесте C/D" for how N was
+# calibrated). expansion_count >= 1 is the only threshold confirmed
+# reachable by playtest (15 seeds x 300/600 ticks: Savoy -> Milan via
+# on_collapse, the sole reliable absorption path right now). This is a
+# provisional "Italy unified" trigger, not a full unification narrative -
+# see the design doc caveat before treating this as final.
+[[milestone_events]]
+id = "italy_unified"
+is_key = true
+triggers_collapse = true
+llm_context_shift = "Милан поглощает первого соседа — первая трещина в старом равновесии итальянских государств. Эпоха герцогской регентства завершается; начинается эпоха последствий."
+[milestone_events.condition]
+type = "metric"
+metric = "expansion_count"
+actor_id = "milan"
+operator = "greater_or_equal"
+value = 1.0

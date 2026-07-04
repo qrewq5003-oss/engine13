@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[11.2, 44.6], [12.2, 44.6], [12.2, 45.1], [11.2, 45.1], [11.2, 44.6]]]
+  },
+  "properties": { "actor_id": "ferrara" }
+}
