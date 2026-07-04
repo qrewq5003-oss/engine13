@@ -67,7 +67,8 @@ fn main() {
         "batch" => run_batch(scenario_id, ticks),
         "scripted" => {
             let strategy = submode.unwrap_or("balanced");
-            run_scripted(scenario_id, ticks, strategy);
+            let seed: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(42);
+            run_scripted(scenario_id, ticks, strategy, seed);
         },
         "narrative_eval" => run_narrative_eval(scenario_id, ticks),
         "narrative_pack" => run_narrative_pack(scenario_id),
@@ -891,19 +892,19 @@ impl ScriptedStrategy {
     }
 }
 
-fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
+fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
     use engine13::application::actions::{apply_player_action, PlayerActionInput, get_available_actions};
     use engine13::commands::AppState;
 
     let strategy = ScriptedStrategy::from_str(strategy_str, scenario_id);
-    
-    println!("Running scripted mode with {} strategy", strategy.name());
+
+    println!("Running scripted mode with {} strategy (seed {})", strategy.name(), seed);
     println!();
 
     let scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
 
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
 
     // Initialize actors from scenario
     for actor in &scenario.actors {
@@ -945,7 +946,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         world_state: Some(world),
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
-        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
         narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
@@ -1042,25 +1043,85 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str) {
         let mut rejected_this_tick = 0u32;
         let mut actions_applied = Vec::new();
 
-        for action_id in &priority_actions {
-            if applied_this_tick >= scenario.actions_per_tick {
-                break;
-            }
-
-            // Try to apply action through application layer
-            let action_input = PlayerActionInput {
-                action_id: action_id.to_string(),
+        if scenario_id == "milan_1477" {
+            // Disciplined strategy: milan_raise_troops (the only military_size
+            // growth lever) always gets first claim on treasury. Everything
+            // else is discretionary - only funded from the surplus left over
+            // above milan_raise_troops' own gate (treasury > 70), never at
+            // its expense. See ENGINE13_SCENARIO3_DESIGN.md, "Найдено при
+            // плейтесте C/D" for why the earlier naive priority-list strategy
+            // (spend on everything every tick) couldn't sustain growth.
+            const RAISE_TROOPS_GATE: f64 = 70.0;
+            let raise_input = PlayerActionInput {
+                action_id: "milan_raise_troops".to_string(),
                 target_actor_id: None,
             };
-
-            match apply_player_action(&mut state, &action_input) {
-                Ok(_) => {
-                    applied_this_tick += 1;
-                    actions_applied.push(*action_id);
-                    *actions_by_type.entry(*action_id).or_insert(0) += 1;
+            let treasury_before = state.world_state.as_ref().unwrap()
+                .actors.get("milan").map(|a| a.get_metric("treasury")).unwrap_or(0.0);
+            if treasury_before > RAISE_TROOPS_GATE {
+                match apply_player_action(&mut state, &raise_input) {
+                    Ok(_) => {
+                        applied_this_tick += 1;
+                        actions_applied.push("milan_raise_troops");
+                        *actions_by_type.entry("milan_raise_troops").or_insert(0) += 1;
+                    }
+                    Err(_) => rejected_this_tick += 1,
                 }
-                Err(_) => {
-                    rejected_this_tick += 1;
+            }
+
+            for action_id in priority_actions.iter().filter(|id| **id != "milan_raise_troops") {
+                if applied_this_tick >= scenario.actions_per_tick {
+                    break;
+                }
+                let treasury_now = state.world_state.as_ref().unwrap()
+                    .actors.get("milan").map(|a| a.get_metric("treasury")).unwrap_or(0.0);
+                let surplus = treasury_now - RAISE_TROOPS_GATE;
+                if surplus <= 0.0 {
+                    break; // preserve the reserve - no discretionary spend below it
+                }
+                let cost = scenario.patron_actions.iter()
+                    .find(|a| a.id == *action_id)
+                    .and_then(|a| a.cost.get("actor:milan.treasury"))
+                    .map(|c| -c) // cost values are negative deltas
+                    .unwrap_or(f64::MAX);
+                if cost > surplus {
+                    continue; // can't afford this one without dipping into the reserve
+                }
+
+                let action_input = PlayerActionInput {
+                    action_id: action_id.to_string(),
+                    target_actor_id: None,
+                };
+                match apply_player_action(&mut state, &action_input) {
+                    Ok(_) => {
+                        applied_this_tick += 1;
+                        actions_applied.push(*action_id);
+                        *actions_by_type.entry(*action_id).or_insert(0) += 1;
+                    }
+                    Err(_) => rejected_this_tick += 1,
+                }
+            }
+        } else {
+            for action_id in &priority_actions {
+                if applied_this_tick >= scenario.actions_per_tick {
+                    break;
+                }
+
+                // Try to apply action through application layer
+                let action_input = PlayerActionInput {
+                    action_id: action_id.to_string(),
+                    target_actor_id: None,
+                };
+
+                match apply_player_action(&mut state, &action_input) {
+                    Ok(_) => {
+                        applied_this_tick += 1;
+                        actions_applied.push(*action_id);
+                        *actions_by_type.entry(*action_id).or_insert(0) += 1;
+                    }
+                    Err(_) => {
+                        rejected_this_tick += 1;
+                    }
                 }
             }
         }

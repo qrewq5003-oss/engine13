@@ -1085,29 +1085,49 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
     });
 
     // --- Task D: coalition against Milan ---
-    // Fires once Milan's expansion_count (vassal formation / absorption, task A)
-    // crosses a threshold - the remaining great powers (not second tier) react
-    // to a Milan that is visibly swallowing its neighbours. France is
-    // deliberately excluded (unpredictable third player, see design doc).
+    // Fires once Milan's military_size crosses a threshold - the remaining
+    // great powers (not second tier) react to a Milan that is visibly
+    // militarizing. France is deliberately excluded (unpredictable third
+    // player, see design doc).
     //
-    // Threshold calibrated to N=1, not the originally-guessed N=3 (see
-    // ENGINE13_SCENARIO3_DESIGN.md, "Найдено при плейтесте C/D"). Playtest
-    // (15 seeds x 300/600 ticks, after wiring Savoy's on_collapse successor
-    // to Milan) shows expansion_count reliably reaches exactly 1 per game
-    // (Savoy -> Milan, deterministic due to affinity()==0.0 disabling force
-    // projection for this culturally-homogeneous cast) and never grows
-    // further - vassalage doesn't fire at all (separate open question), and
-    // no other actor has been observed to collapse in the tested window.
-    // N=3 would never trigger under current data.
+    // NOT gated on expansion_count (superseded - see
+    // ENGINE13_SCENARIO3_DESIGN.md, "Найдено при плейтесте C/D"): D and E
+    // (italy_unified) both firing off expansion_count(milan) >= 1 meant D
+    // could never precede E - the coalition and the victory condition
+    // triggered on the exact same event (Savoy's collapse) in the same tick,
+    // so the coalition never had a chance to be an obstacle. military_size
+    // is an earlier, independent signal - it only rises when Milan actively
+    // invests in troops (milan_raise_troops), unlike passive play where it
+    // only ever decays from the 40 starting baseline (confirmed by every
+    // no-action playtest).
+    //
+    // Threshold = 50 (not 45 or 55, the other two candidates considered):
+    // distinguishes real militarization from a single token action (45 is
+    // reachable with one raise above baseline) without requiring the
+    // maximally-aggressive play style needed to approach the observed
+    // ceiling (55, close to the 64 peak seen only under an all-in troop-
+    // raising strategy). Calibrated against a single synthetic scripted
+    // strategy (MilanAggressive, disciplined variant - treasury reserved
+    // above the milan_raise_troops gate of 70, other spending only from
+    // surplus): 15 seeds x 100 ticks, military_size crosses 50 in the
+    // deterministic RNG-free opening window (ticks 0-2, before the engine's
+    // 3-tick combat stabilization period ends) in every seed, then falls
+    // back below 40 within 8-18 ticks and oscillates in a lower range for
+    // the rest of the game - well before Savoy's eventual collapse (tick
+    // 39-57), giving a real 26-45 tick gap for the coalition to matter
+    // before "Italy unified" fires. NOT verified against mixed play styles
+    // (diplomacy/economy/patronage-first) - a real GUI player may show
+    // different dynamics. This is a limitation of the calibration, not a
+    // proven universal number.
     events.push(RandomEvent {
         id: "italian_league_against_milan".to_string(),
         probability: 0.9,
         target: EventTarget::Actor("milan".to_string()),
         conditions: vec![
             Condition {
-                metric: "actor:milan.expansion_count".to_string(),
+                metric: "actor:milan.military_size".to_string(),
                 operator: ComparisonOperator::GreaterOrEqual,
-                value: 1.0,
+                value: 50.0,
             },
         ],
         effects: HashMap::from([
