@@ -47,72 +47,89 @@ fn tags_touching_guarded_metrics_do_not_spread() {
     );
 }
 
-/// Bug class 2: a `type = "metric"` milestone/rank condition must use the
-/// split `metric` + `actor_id` fields, not a merged "actor:X.metric" string.
-/// `check_event_condition` (engine/mod.rs) reads `actor_id` as a required
-/// `Option<String>` and does a raw `actor.metrics.get(metric)` lookup - if
-/// `actor_id` is `None` the condition is unconditionally `false`, and if
-/// `metric` still carries an "actor:"/"global:" prefix, the lookup key never
-/// matches a real metric name either way. Either mistake makes the
-/// milestone dead: it silently never fires, exactly like the bug found in
-/// Milan 1477's original milestone_events.toml before it was split into
-/// separate fields.
+/// Bug class 2: a `type = "metric"` milestone/rank condition must be resolvable
+/// by the engine to a real metric value. `check_event_condition` and
+/// `check_rank_conditions` (engine/mod.rs) route every metric condition through
+/// the shared `eval_metric_condition`, which mirrors `MetricRef`:
+///   - `actor_id = Some(id)`: an actor-scoped lookup - `metric` must be a BARE
+///     metric name ("legitimacy"), never a prefixed string, or the lookup key
+///     never matches a real metric.
+///   - `actor_id = None`: the `metric` string carries its own scope, parsed by
+///     `MetricRef::parse` - it must start with an explicit `global:`/`family:`
+///     prefix, or be an `actor:id.metric` string. A bare metric with no
+///     `actor_id` resolves to `global:<name>`, silently reading 0.0.
 ///
-/// KNOWN, STILL-OPEN EXCEPTIONS (not covered by this test): `global:`- and
-/// `family:`-scoped milestone conditions cannot be expressed correctly at
-/// all right now, because `check_event_condition`/`check_rank_conditions`
-/// only support the actor-scoped `metric` + `actor_id` lookup - unlike
-/// `victory_condition`, which resolves via `MetricRef::parse` and does
-/// support those prefixes. Fixing these needs an engine change (bringing
-/// `check_event_condition` in line with `MetricRef::parse`), which is out of
-/// scope for a content-only check. Tracked as a follow-up engine task, not
-/// silently ignored:
-///   - constantinople_1430: `mehmed_accelerates`, `outcome_best`,
-///     `outcome_fell_federation` (all `global:federation_progress`; see the
-///     header comment in constantinople_1430/milestone_events.toml). The
-///     scenario's actual ending is unaffected - it fires through
-///     `check_victory_condition`, which resolves `global:` correctly on its
-///     own separate path.
-///   - rome_375: `family_rises`, `family_falls` (both
-///     `family:family_influence`; flavor-only, not on the collapse path).
-const KNOWN_UNSCOPED_METRIC_EXCEPTIONS: &[(&str, &str)] = &[
-    ("constantinople_1430", "mehmed_accelerates"),
-    ("constantinople_1430", "outcome_best"),
-    ("constantinople_1430", "outcome_fell_federation"),
-    ("rome_375", "family_rises"),
-    ("rome_375", "family_falls"),
-];
+/// Getting this wrong makes the milestone/rank condition dead: it silently
+/// never fires, exactly like the bug found in Milan 1477's original
+/// milestone_events.toml before it was split into separate fields.
+///
+/// This check covers milestone conditions AND rank conditions (both share
+/// `eval_metric_condition`). `global:`/`family:`-scoped conditions with no
+/// `actor_id` are now VALID and expected to pass - the engine resolves them
+/// the same way `victory_condition` does (see ENGINE13_INFRASTRUCTURE_TASKS.md
+/// Задача 4). The previously-allowlisted dead conditions
+/// (`mehmed_accelerates`, `outcome_best`, `outcome_fell_federation`,
+/// `family_rises`, `family_falls`, and the anatolia/veneto/lombardy rank
+/// conditions) are covered here and must resolve cleanly.
+
+/// Return a violation reason if a split `metric` + `actor_id` condition cannot
+/// be resolved to a real metric by the engine, mirroring `eval_metric_condition`.
+fn metric_condition_violation(metric: &str, actor_id: &Option<String>) -> Option<String> {
+    match actor_id {
+        Some(_) => {
+            if metric.contains(':') {
+                Some(format!(
+                    "actor_id is set but metric '{metric}' embeds a scope prefix - \
+                     use a bare metric name (e.g. 'legitimacy') together with actor_id"
+                ))
+            } else {
+                None
+            }
+        }
+        None => match MetricRef::parse(metric) {
+            // Explicit global:/family: scope, or a well-formed actor:id.metric string.
+            MetricRef::Family { .. } => None,
+            MetricRef::Actor { .. } => None,
+            MetricRef::Global { .. } => {
+                if metric.starts_with("global:") {
+                    None
+                } else {
+                    Some(format!(
+                        "metric '{metric}' has no actor_id and no explicit scope prefix - \
+                         it resolves to global:{metric} and silently reads 0.0, so this \
+                         condition can never fire"
+                    ))
+                }
+            }
+        },
+    }
+}
 
 #[test]
-fn milestone_metric_conditions_use_split_actor_id_format() {
+fn milestone_and_rank_metric_conditions_are_resolvable() {
     let mut failures = Vec::new();
     for &id in SCENARIO_IDS {
         let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+
         for milestone in &scenario.milestone_events {
-            if KNOWN_UNSCOPED_METRIC_EXCEPTIONS.contains(&(id, milestone.id.as_str())) {
-                continue;
-            }
             if let EventConditionType::Metric { metric, actor_id, .. } = &milestone.condition.condition_type {
-                if actor_id.is_none() {
-                    failures.push(format!(
-                        "{id}: milestone '{}' has type=metric with no actor_id (metric = '{}') - \
-                         check_event_condition returns false unconditionally in this case, so this \
-                         milestone can never fire",
-                        milestone.id, metric
-                    ));
-                } else if metric.contains(':') {
-                    failures.push(format!(
-                        "{id}: milestone '{}' metric '{}' still embeds an 'actor:'/'global:' prefix - \
-                         use a bare metric name together with actor_id instead",
-                        milestone.id, metric
-                    ));
+                if let Some(reason) = metric_condition_violation(metric, actor_id) {
+                    failures.push(format!("{id}: milestone '{}': {reason}", milestone.id));
+                }
+            }
+        }
+
+        for rank in &scenario.rank_conditions {
+            if let EventConditionType::Metric { metric, actor_id, .. } = &rank.condition.condition_type {
+                if let Some(reason) = metric_condition_violation(metric, actor_id) {
+                    failures.push(format!("{id}: rank condition '{}': {reason}", rank.region_id));
                 }
             }
         }
     }
     assert!(
         failures.is_empty(),
-        "Milestone condition format violation(s) - these milestones are dead content:\n{}",
+        "Metric-condition resolution violation(s) - these milestones/rank conditions are dead content:\n{}",
         failures.join("\n")
     );
 }

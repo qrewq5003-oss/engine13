@@ -769,18 +769,7 @@ fn check_rank_conditions(
                 actor_id,
                 operator,
                 value,
-            } => {
-                if let Some(aid) = actor_id {
-                    if let Some(actor) = world.actors.get(aid) {
-                        let actor_value = actor.metrics.get(metric).copied().unwrap_or(0.0);
-                        compare(actor_value, operator, value)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
+            } => eval_metric_condition(world, metric, actor_id, operator, *value),
             EventConditionType::ActorState { actor_id, state } => match state {
                 crate::core::ActorState::Dead => !world.is_actor_alive(actor_id),
                 crate::core::ActorState::Alive => world.is_actor_alive(actor_id),
@@ -827,6 +816,40 @@ fn compare(value: f64, operator: &ComparisonOperator, target: &f64) -> bool {
         ComparisonOperator::GreaterOrEqual => value >= *target,
         ComparisonOperator::Equal => (value - target).abs() < 0.001,
     }
+}
+
+/// Resolve a split `metric` + `actor_id` metric condition to a bool.
+///
+/// Single resolution path shared by `check_event_condition` (milestones) and
+/// `check_rank_conditions` (rank changes), brought in line with how
+/// `check_victory_condition` resolves metrics through `MetricRef`:
+///
+/// - `actor_id = Some(id)`: actor-scoped lookup. Preserves the original
+///   semantics exactly — a missing actor makes the condition false (rather than
+///   reading a default 0.0), so every already-working actor condition is
+///   byte-identical.
+/// - `actor_id = None`: the `metric` string carries its own scope, resolved via
+///   `MetricRef::parse` (`global:`/`family:`/`actor:` prefixes, plain → global).
+///   Previously an unscoped condition was unconditionally `false`, which
+///   silently killed every `global:`/`family:`-scoped milestone and rank
+///   condition — unlike `victory_condition`, which already resolved these.
+fn eval_metric_condition(
+    world: &WorldState,
+    metric: &str,
+    actor_id: &Option<String>,
+    operator: &ComparisonOperator,
+    value: f64,
+) -> bool {
+    let metric_ref = match actor_id {
+        Some(aid) => {
+            if !world.actors.contains_key(aid) {
+                return false;
+            }
+            MetricRef::Actor { actor_id: aid.clone(), metric: metric.to_string() }
+        }
+        None => MetricRef::parse(metric),
+    };
+    compare(metric_ref.get(world), operator, &value)
 }
 
 fn check_milestone_events(
@@ -1300,18 +1323,7 @@ fn check_event_condition(world: &WorldState, condition: &EventCondition) -> bool
             actor_id,
             operator,
             value,
-        } => {
-            if let Some(aid) = actor_id {
-                if let Some(actor) = world.actors.get(aid) {
-                    let actor_value = actor.metrics.get(metric).copied().unwrap_or(0.0);
-                    compare(actor_value, operator, value)
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        }
+        } => eval_metric_condition(world, metric, actor_id, operator, *value),
         EventConditionType::ActorState { actor_id, state } => match state {
             crate::core::ActorState::Dead => !world.is_actor_alive(actor_id),
             crate::core::ActorState::Alive => world.is_actor_alive(actor_id),
@@ -1737,6 +1749,79 @@ mod tests {
         // After 2 ticks, year should increment
         assert_eq!(world.tick, 2);
         assert_eq!(world.year, initial_year + 1);  // tick 2 = start_year + (2/2) = start_year + 1
+    }
+
+    // ------------------------------------------------------------------
+    // Metric-condition resolution (task 4): check_event_condition /
+    // check_rank_conditions must resolve global:/family:/actor: scopes the
+    // same way victory_condition does, via the shared eval_metric_condition.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn eval_metric_condition_resolves_all_scopes() {
+        let mut world = WorldState::new("test".to_string(), 1430);
+        world.global_metrics.insert("federation_progress".to_string(), 90.0);
+        world.family_state = Some(crate::core::FamilyState {
+            metrics: HashMap::from([("influence".to_string(), 75.0)]),
+            patriarch_age: 40,
+            generation_count: 0,
+        });
+        world
+            .actors
+            .insert("ottomans".into(), vassalage_actor("ottomans", 260.0, 30.0, 60.0, 60.0, &[]));
+
+        // global: scope with actor_id = None — was unconditionally false before the fix.
+        assert!(eval_metric_condition(&world, "global:federation_progress", &None, &ComparisonOperator::Greater, 60.0));
+        assert!(!eval_metric_condition(&world, "global:federation_progress", &None, &ComparisonOperator::Greater, 95.0));
+
+        // family: scope with actor_id = None.
+        assert!(eval_metric_condition(&world, "family:influence", &None, &ComparisonOperator::Greater, 70.0));
+        assert!(!eval_metric_condition(&world, "family:influence", &None, &ComparisonOperator::Less, 70.0));
+
+        // actor:id.metric embedded in the metric string (rank-condition style, actor_id = None).
+        assert!(eval_metric_condition(&world, "actor:ottomans.military_size", &None, &ComparisonOperator::Greater, 250.0));
+
+        // Split actor-scoped form (actor_id = Some) still works unchanged.
+        assert!(eval_metric_condition(&world, "military_size", &Some("ottomans".to_string()), &ComparisonOperator::Greater, 250.0));
+
+        // Missing actor in the split form stays false — NOT a 0.0 comparison.
+        // (a `less` check must not newly fire just because the actor is absent).
+        assert!(!eval_metric_condition(&world, "military_size", &Some("nonexistent".to_string()), &ComparisonOperator::Less, 999.0));
+    }
+
+    #[test]
+    fn check_event_condition_fires_global_and_family_scoped_milestones() {
+        let mut world = WorldState::new("test".to_string(), 1430);
+        world.global_metrics.insert("federation_progress".to_string(), 85.0);
+        world.family_state = Some(crate::core::FamilyState {
+            metrics: HashMap::from([("influence".to_string(), 20.0)]),
+            patriarch_age: 40,
+            generation_count: 0,
+        });
+
+        // constantinople_1430 `outcome_fell_federation`: global:federation_progress >= 80.
+        let global_cond = EventCondition {
+            condition_type: EventConditionType::Metric {
+                metric: "global:federation_progress".to_string(),
+                actor_id: None,
+                operator: ComparisonOperator::GreaterOrEqual,
+                value: 80.0,
+            },
+            duration: None,
+        };
+        assert!(check_event_condition(&world, &global_cond));
+
+        // rome_375 `family_falls`: family:family_influence below a floor.
+        let family_cond = EventCondition {
+            condition_type: EventConditionType::Metric {
+                metric: "family:family_influence".to_string(),
+                actor_id: None,
+                operator: ComparisonOperator::Less,
+                value: 25.0,
+            },
+            duration: None,
+        };
+        assert!(check_event_condition(&world, &family_cond));
     }
 
     // ------------------------------------------------------------------

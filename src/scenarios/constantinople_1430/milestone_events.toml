@@ -1,15 +1,11 @@
 # NOTE: `mehmed_accelerates`, `outcome_best`, and `outcome_fell_federation`
-# below still use `metric = "global:federation_progress"` with no `actor_id`.
-# This is a known, still-open bug: `check_event_condition` (engine/mod.rs)
-# only supports the split `metric` + `actor_id` actor-scoped lookup - unlike
-# `victory_condition`, which correctly resolves via `MetricRef::parse` and
-# does support `global:`/`family:` prefixes. These three milestones cannot
-# be fixed by content edits alone; fixing them requires bringing
-# `check_event_condition`/`check_rank_conditions` in line with
-# `MetricRef::parse` (engine change, tracked as a follow-up, not scenario
-# content debt). The scenario's actual ending is unaffected - it fires via
-# `check_victory_condition`, which resolves `global:federation_progress`
-# correctly on its own path.
+# below use `metric = "global:federation_progress"` with no `actor_id`. This
+# is a supported form as of ENGINE13_INFRASTRUCTURE_TASKS.md Задача 4:
+# `check_event_condition`/`check_rank_conditions` now route metric conditions
+# through the shared `eval_metric_condition`, which resolves `global:`/
+# `family:`/`actor:` scopes via `MetricRef` exactly like `victory_condition`
+# already did. Before that fix these three milestones were silently dead
+# (an unscoped `actor_id = None` condition returned false unconditionally).
 
 [[milestone_events]]
 id = "church_union"
