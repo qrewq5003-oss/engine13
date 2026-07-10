@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::actor::{Actor, Era, RegionRank, TagSpreadType};
+use super::actor::{Actor, Era, Neighbor, RegionRank, TagSpreadType};
 
 /// Dependency rule mode - determines how the dependency affects the target metric
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,6 +409,15 @@ pub struct SpawnActorConfig {
     pub lat: f64,
     pub lng: f64,
     pub color: String,
+    /// Neighbor edges the spawned actor enters the world with.
+    /// Explicit (not derived from lat/lng) because `border_type` (land/sea)
+    /// and the small hand-authored integer `distance` scale are load-bearing
+    /// for interaction rules and cannot be inferred from coordinates. Without
+    /// at least one live neighbor here, the spawned actor never appears in any
+    /// pair from `get_neighbor_pairs` and stays inert (the France-in-Milan bug).
+    /// Defaults to empty for back-compat with configs that predate this field.
+    #[serde(default)]
+    pub neighbors: Vec<Neighbor>,
 }
 
 /// Condition for milestone event triggering

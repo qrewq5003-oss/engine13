@@ -88,6 +88,16 @@ lat = 48.85
 lng = 2.35
 color = "#1e3a8a"
 initial_metrics = { cohesion = 70.0, legitimacy = 75.0, military_size = 90.0, economic_output = 90.0, external_pressure = 15.0, treasury = 500.0, population = 800.0, military_quality = 65.0 }
+# France enters over the western Alps against Savoy (the actor this milestone is
+# keyed on — its rising external_pressure is the trigger, so it is guaranteed
+# alive here) and along the Ligurian coast toward Genoa. Both are background
+# actors, not the player (Milan), so the intervention creates real interactions
+# without directly attacking the player. Without these edges France would spawn
+# inert and never interact — see SpawnActorConfig.neighbors.
+neighbors = [
+    { id = "savoy", distance = 1, border_type = "land" },
+    { id = "genoa", distance = 2, border_type = "sea" },
+]
 
 # Task E: victory condition / transition to Consequences->Free (see
 # ENGINE13_SCENARIO3_DESIGN.md, "Найдено при плейтесте C/D" for how N was

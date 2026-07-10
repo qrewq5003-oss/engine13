@@ -901,7 +901,12 @@ fn check_milestone_events(
                         tags: vec![],
                         metrics: cfg.initial_metrics.clone(),
                         scenario_metrics: HashMap::new(),
-                        neighbors: vec![],
+                        // Neighbor edges from config. `get_neighbor_pairs` treats
+                        // an edge as bidirectional (it dedups sorted pairs), so
+                        // listing them on the spawned actor alone is enough for it
+                        // to enter interactions — no need to mutate the neighbors of
+                        // pre-existing actors.
+                        neighbors: cfg.neighbors.clone(),
                         on_collapse: vec![],
                         actor_tags: HashMap::new(),
                         center: Some(GeoCoordinate { lat: cfg.lat, lng: cfg.lng }),
