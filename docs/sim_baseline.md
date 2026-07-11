@@ -6,6 +6,62 @@
 
 ---
 
+## Post Constantinople Victory-Condition Redesign (external_pressure → ottomans.military_size)
+
+**Date:** 2026-07-11
+**Change:** constantinople_1430 `victory_condition.additional_conditions`:
+`actor:byzantium.external_pressure < 85` → `actor:ottomans.military_size < 40`.
+Main metric (`global:federation_progress >= 80`), `minimum_tick: 40`, and
+`sustained_ticks_required: 3` are unchanged.
+
+### Why
+
+The old `external_pressure < 85` gate was **structurally unreachable under
+balanced play**: byzantium external_pressure saturates *upward* toward ~100
+within the first few ticks and has no decay path, so it never falls below 85.
+`federation_progress` holds `>= 80` on 100% of ticks from tick 40 onward, yet
+balanced never won on any of seeds 1/7/13/42/99 (≤300 ticks) — the ep gate
+alone blocked it every tick. `ottomans.military_size` instead *decays* through
+combat losses (180 → ~0 by tick ~150), making `< 40` reachable. Full diagnosis:
+the ep and military-size traces in this PR's description.
+
+### Post-change victory ticks (300 ticks, seeds 1 / 7 / 13 / 42 / 99)
+
+| Strategy  | OLD gate `ep < 85`                          | NEW gate `ottomans.military_size < 40` |
+|-----------|---------------------------------------------|----------------------------------------|
+| military  | no / no / no / 101 / 93                      | **42 / 42 / 42 / 42 / 42** |
+| diplomacy | no / 126 / 131 / 130 / 161                   | **76 / 78 / 70 / 76 / 76** |
+| balanced  | no / no / no / no / no                       | **53 / 54 / 51 / 49 / 59** |
+
+("no" = no victory within 300 ticks.) Balanced — the previously unwinnable
+flagship path — now wins robustly in every seed. Military wins at tick 42
+(= `minimum_tick` 40 + `sustained` 3, the earliest legal tick, since it breaks
+the Ottoman army below 40 before tick 40). Diplomacy wins ~70-78.
+
+### ⚠ Warning 1 — this gate now controls TIMING, not ACHIEVABILITY
+
+`ottomans.military_size` marches deterministically to ~0 in **every** balanced
+run of **every** seed (it is combat-driven and monotone downward, floored at 0).
+Consequently **any** threshold in the reachable band (empirically ~10–150) yields
+a **100% win rate** under balanced play — the threshold only moves the victory
+*tick*, it does not decide *whether* the player wins. This is the opposite
+failure mode of the old ep gate (0% win rate, unreachable). If a future design
+goal is "balanced should sometimes NOT win," a single `military_size` threshold
+cannot express that; a composite condition would be required. `< 40` was chosen
+because it sits mid-band (window traversed is 0–88 during the fed≥80 window),
+giving ~10-20 ticks of play past `minimum_tick` rather than an instant win.
+
+### ⚠ Warning 2 — deeper coalition-vs-Ottoman combat imbalance (NOT fixed here)
+
+The reason `military_size` "works" as a gate is that the coalition annihilates
+the 180-strong Ottoman field army down to 0 by ~tick 150 in *every* balanced
+run — the Ottomans, the scenario's nominal looming threat, are deterministically
+destroyed rather than posing a sustained danger. This is a separate balance
+concern, logged as **Задача 5** in `ENGINE13_INFRASTRUCTURE_TASKS.md` (not
+addressed in this PR).
+
+---
+
 ## Post Constantinople Cohesion-Bonus Coefficient Fix (PR #12)
 
 **Date:** 2026-07-11
