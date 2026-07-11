@@ -284,11 +284,10 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
 
         // Check ratio conditions
         for ratio_cond in &auto_delta.ratio_conditions {
-            let scoped_a = scope_metric_for_actor(&ratio_cond.metric_a, auto_delta.actor_id.as_deref());
-            let scoped_b = scope_metric_for_actor(&ratio_cond.metric_b, auto_delta.actor_id.as_deref());
-            let val_a = crate::core::MetricRef::parse(&scoped_a).get(world);
-            let val_b = crate::core::MetricRef::parse(&scoped_b).get(world);
-            
+            let actor_id = auto_delta.actor_id.as_deref();
+            let val_a = MetricRef::parse_scoped(&ratio_cond.metric_a, actor_id).get(world);
+            let val_b = MetricRef::parse_scoped(&ratio_cond.metric_b, actor_id).get(world);
+
             if val_b == 0.0 {
                 continue;
             }
@@ -306,28 +305,14 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         let final_delta = delta + noise;
 
         // Apply via MetricRef - scope to actor if actor_id is set
-        let scoped_metric = scope_metric_for_actor(&auto_delta.metric, auto_delta.actor_id.as_deref());
-        MetricRef::parse(&scoped_metric).apply(world, final_delta);
-    }
-}
-
-/// Scope a metric name to an actor if actor_id is set and metric doesn't already have a prefix
-fn scope_metric_for_actor(metric: &str, actor_id: Option<&str>) -> String {
-    if let Some(aid) = actor_id {
-        if !metric.contains(':') && !metric.contains('.') {
-            format!("{}.{}", aid, metric)
-        } else {
-            metric.to_string()
-        }
-    } else {
-        metric.to_string()
+        MetricRef::parse_scoped(&auto_delta.metric, auto_delta.actor_id.as_deref())
+            .apply(world, final_delta);
     }
 }
 
 /// Check auto_delta condition against world state, scoped to actor when actor_id is set
 fn check_auto_delta_condition_scoped(world: &WorldState, cond: &crate::core::DeltaCondition, actor_id: Option<&str>) -> bool {
-    let scoped_metric = scope_metric_for_actor(&cond.metric, actor_id);
-    let value = MetricRef::parse(&scoped_metric).get(world);
+    let value = MetricRef::parse_scoped(&cond.metric, actor_id).get(world);
     match cond.operator {
         crate::core::ComparisonOperator::Less => value < cond.value,
         crate::core::ComparisonOperator::LessOrEqual => value <= cond.value,
