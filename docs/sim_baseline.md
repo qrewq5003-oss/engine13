@@ -6,6 +6,69 @@
 
 ---
 
+## Post Constantinople Military-Flow Caps (task 5, level 1 fix)
+
+**Date:** 2026-07-11
+**Change:** `constantinople_1430/auto_deltas.toml` only — two new/extended auto_deltas.
+No engine change, no action change, no victory-threshold change.
+
+Fixes the root cause found in
+[`investigation_combat_asymmetry.md`](investigation_combat_asymmetry.md): Byzantium's
+military inflow was **uncapped** (+5.5/tick from three patron actions) against an Ottoman
+trickle (+0.3/tick) — an ~18× asymmetry that drove Byzantium to 637 by tick 200 and ground
+the Ottomans deterministically to 0 in **every** seed.
+
+1. **Byzantium military upkeep (diminishing returns).** Cumulative attrition tiers on
+   `byzantium.military_size`: `>50 → −1.5`, `>90 → −2.5`, `>130 → −5.0`. A besieged rump
+   state cannot sustain an unbounded field army. Chosen over a hard cap because
+   `available_if` is a *single* condition — a cap gate would have to displace the existing
+   patron-treasury gate. Precedent: stacked negative auto_delta conditions, used throughout
+   this same file.
+2. **Ottoman growth lever.** Extends their existing auto_delta (was a flat +0.5): `+1.2`
+   when `global:federation_progress > 40`, and `+2.0` when `byz/ott military ratio > 0.4`.
+   Straight from the scenario's own `llm_context` — *«Мехмед не пассивен. Если федерация
+   растёт — он форсирует»*. Precedent: the byzantium-pressure auto_delta already uses both
+   a `global:` condition and exactly this byz/ott ratio pair.
+
+Levels 2 (`effective_military` divisor) and 3 (attacker/defender loss asymmetry) were
+**deliberately not touched** — the investigation's counterfactual proved neither is the
+root cause, and level 2 risks all three scenarios.
+
+### Result — the outcome is no longer deterministic
+
+Victory tick, 300 ticks, `−` = no victory:
+
+| strategy | s1 | s7 | s13 | s42 | s99 | s3 | s21 | s55 | s77 | s88 |
+|-----------|----|----|-----|-----|-----|----|-----|-----|-----|-----|
+| balanced  | 137 | 130 | 109 | 104 | 190 | 114 | 190 | 132 | 226 | 123 |
+| military  | 154 | **−** | 182 | 160 | 109 | 169 | 147 | 160 | **−** | 176 |
+| diplomacy | 189 | **−** | 220 | 207 | 176 | 215 | 212 | 227 | 221 | 172 |
+
+- **Coalition victory stays achievable but is no longer guaranteed:** 3 of 30 runs now
+  end with no victory (military s7/s77, diplomacy s7). Before the fix, *every* strategy
+  won on *every* seed.
+- **Timing spread appeared:** balanced was 49–59 (a 10-tick band); it is now 104–226
+  (a 122-tick band). Victory is no longer a near-fixed tick.
+- **Byzantium is bounded:** peak military 94–105 across seeds (was **637**).
+- **Ottomans are a real force:** they now oscillate around 130–140 instead of being ground
+  to 0 on a fixed schedule.
+
+### Victory threshold `ottomans.military_size < 40` — re-checked, NOT recalibrated
+
+The ottoman *minimum* per run is cleanly **bimodal**: either ~**0.0** (the coalition broke
+through) or **51–64** (the Ottomans held). Across all 30 runs nothing lands in 35–50, so
+the threshold 40 sits in a clean gap between the two modes — it separates "broke through"
+from "held" rather than sitting on a knife-edge, and it is nowhere near the edge of the
+traversed range (0–188). **No recalibration needed.**
+
+### Verification
+
+`cargo test` green (52 passed); no Rust changed (TOML only), so clippy is untouched.
+`rome_375` and `milan_1477` sim output **byte-identical** (10-command suite) — they do not
+use these actors or auto_deltas.
+
+---
+
 ## Post Constantinople Victory-Condition Redesign (external_pressure → ottomans.military_size)
 
 **Date:** 2026-07-11
