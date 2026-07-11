@@ -40,6 +40,31 @@ impl MetricRef {
         }
     }
 
+    /// Parse a metric string that is written *relative to an actor*.
+    ///
+    /// Several subsystems store metric keys as bare strings alongside a separate
+    /// actor context (`auto_delta.actor_id`, an event's target actor). Only the
+    /// explicit `actor:` prefix makes [`parse`](Self::parse) resolve to an actor,
+    /// so building `"{actor_id}.{metric}"` by hand yields a `Global` ref pointing
+    /// at a key nothing else reads or writes. This is the one place that turns an
+    /// actor-relative string into a ref, so no caller has to build it by hand.
+    ///
+    /// - explicit `global:` / `family:` / `actor:` prefix → honoured as written,
+    ///   even when `actor_id` is set (an auto_delta scoped to an actor may still
+    ///   read a global gate)
+    /// - bare `metric` → that metric on `actor_id`; global when `actor_id` is None
+    pub fn parse_scoped(s: &str, actor_id: Option<&str>) -> Self {
+        match actor_id {
+            // A bare key (no explicit prefix, no dot) is actor-relative.
+            // Dotted-but-unprefixed keys are left to `parse` rather than guessed at.
+            Some(aid) if !s.contains(':') && !s.contains('.') => MetricRef::Actor {
+                actor_id: aid.to_string(),
+                metric: s.to_string(),
+            },
+            _ => Self::parse(s),
+        }
+    }
+
     /// Get the metric value from world_state
     pub fn get(&self, world_state: &WorldState) -> f64 {
         match self {

@@ -37,6 +37,48 @@ fn test_metric_ref_parse_global() {
 }
 
 #[test]
+fn test_parse_scoped_bare_metric_resolves_to_actor() {
+    // The regression this guards: a bare key next to an actor context used to be
+    // concatenated into "rome.cohesion", which `parse` reads as a Global key that
+    // nothing else touches, so the delta never reached the actor.
+    match MetricRef::parse_scoped("cohesion", Some("rome")) {
+        MetricRef::Actor { actor_id, metric } => {
+            assert_eq!(actor_id, "rome");
+            assert_eq!(metric, "cohesion");
+        }
+        other => panic!("Expected Actor variant, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_scoped_bare_metric_without_actor_stays_global() {
+    match MetricRef::parse_scoped("federation_progress", None) {
+        MetricRef::Global { key } => assert_eq!(key, "federation_progress"),
+        other => panic!("Expected Global variant, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_scoped_explicit_prefix_wins_over_actor_scope() {
+    // An actor-scoped auto_delta may still gate on a global or another actor.
+    match MetricRef::parse_scoped("global:federation_progress", Some("byzantium")) {
+        MetricRef::Global { key } => assert_eq!(key, "federation_progress"),
+        other => panic!("Expected Global variant, got {:?}", other),
+    }
+    match MetricRef::parse_scoped("actor:ottomans.military_size", Some("byzantium")) {
+        MetricRef::Actor { actor_id, metric } => {
+            assert_eq!(actor_id, "ottomans");
+            assert_eq!(metric, "military_size");
+        }
+        other => panic!("Expected Actor variant, got {:?}", other),
+    }
+    match MetricRef::parse_scoped("family:family_influence", Some("rome")) {
+        MetricRef::Family { key } => assert_eq!(key, "family_influence"),
+        other => panic!("Expected Family variant, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_metric_ref_apply_actor_treasury() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);

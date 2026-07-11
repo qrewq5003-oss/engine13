@@ -217,8 +217,8 @@ pub fn load_rome_375() -> Scenario {
                 "family:family_knowledge".to_string(),
                 "family:family_wealth".to_string(),
                 "family:family_connections".to_string(),
-                "rome.legitimacy".to_string(),
-                "rome.cohesion".to_string(),
+                "actor:rome.legitimacy".to_string(),
+                "actor:rome.cohesion".to_string(),
             ],
             narrative_axes: vec![
                 "stability vs ambition".to_string(),
