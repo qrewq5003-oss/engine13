@@ -120,9 +120,10 @@ Post-fix scripted victory (seed 42, engine a79665d):
 | balanced  | win @73              | no win ≤300 (also seeds 1/7/13/42/99) | knife-edge, see below |
 
 The scenario is **not** globally unwinnable (military + diplomacy still win). But the
-follow-up is **scenario-wide victory/federation calibration, NOT an isolated "tune
-balanced" tweak.** Three experiments establish the scope, and specifically refute the
-tempting "balanced was propped up by the bug pumping federation" story:
+follow-up is a **victory-condition design decision (see below), NOT an isolated "tune
+balanced" tweak, and NOT push-magnitude tuning.** Three experiments establish the scope,
+and specifically refute the tempting "balanced was propped up by the bug pumping
+federation" story:
 
 **1. The passive cohesion→federation channel is not load-bearing.** Ablating the two
 federation auto-delta terms the bug could pin (`venice.cohesion>65 → +0.5`,
@@ -150,21 +151,60 @@ and never within 300 under 0.1. **So balanced's "win @73" was a lucky threshold 
 on a noisy bounce, not honest robust balance — neither a clean bug-pumped win nor a
 strategy that "worked and then broke."**
 
-**Corroboration:** military's **43 → 102** shift is large and non-knife-edge, and the
-coefficient materially changes *when* the faster strategies clear the federation
-ceiling. The whole scenario's victory timing was calibrated against pinned byzantium
-cohesion — the same coupling, visible across all three strategies.
+**Corroboration that this is not balanced-specific:** military's **43 → 102** shift is
+large and non-knife-edge, and diplomacy is ~unchanged (130 → 131). The coefficient
+changes *when* every strategy approaches the federation ceiling — the whole scenario's
+victory timing rode on pinned byzantium cohesion. The bug **masked** the fragility; it
+did not create it.
 
-**Conclusion — scope = scenario-level**, comparable to calibrating Milan 1477 from
-scratch. Retune the federation→victory margin as a *system*: patron-action
-`+federation` magnitudes, the `byz ep>70 → −2.0` drag, the ±5–8 random-event federation
-swings, and the victory condition itself (`federation ≥ 100` sustained 3 sitting
-*exactly at the hard 100 clamp* is inherently noise-fragile). A balanced-only action
-tweak would not address the military 43→102 shift, which is the same coupling.
+### Root cause: the victory condition sits at the edge of the metric's reachable range
 
-**Not traced here (belongs to that task, not this fix):** the exact byzantium-cohesion
-→ federation-perturbation micro-paths. That is the expensive part, deliberately left
-for the calibration pass.
+`federation_progress` is hard-clamped at 100. The victory condition is
+`federation ≥ 100` **sustained for 3 consecutive ticks** — the threshold is placed
+*exactly at the ceiling of the metric's reachable range*. Federation can touch 100 but
+never rise above it, so it has no headroom to absorb the ±5–8 swings from random events
+(cardinal_death −8, mehmed_threatens, …) plus the `byz ep>70 → −2.0` drag. Holding ≥100
+for three ticks straight is therefore a matter of **luck against noise, not strategy** —
+"win @73" was a lucky run of three quiet ticks at the top, not a stable balance point.
+This is a **design** property of the condition, independent of the bug and of any
+push-magnitude tuning.
+
+### One class of problem, with a second known instance
+
+> **Victory/trigger conditions calibrated at the edge of a metric's reachable range are
+> noise-fragile by construction.** When a threshold sits at a metric's ceiling — or in a
+> narrow transient band it only passes through — ordinary per-tick noise, not player
+> strategy, decides whether the condition catches. Success then looks random, and the
+> condition looks "broken" under any recalibration.
+
+Known instances:
+1. **constantinople_1430** — `federation_progress ≥ 100` sustained 3 ticks, against the
+   hard 100 clamp (this document).
+2. **vassalage trigger** — the `external_pressure` 70–85 band is a *transient window
+   during monotonic growth to saturation at 100*, not a stable reachable zone, so the
+   trigger effectively never fires. Documented in `ENGINE13_SCENARIO3_DESIGN.md` →
+   `vassalage-pressure-reachability`.
+
+These are **not two separate bugs** — the same structural mistake in two places.
+
+### Follow-up = a design decision, not magnitude tuning (v2-class)
+
+Tuning patron-action `+federation` values or the drag treats the *symptom*. The real
+choice is to move the condition off the edge of the range — exactly the decision the
+vassalage trigger also needs:
+
+- **lower the threshold below the ceiling** (e.g. `federation ≥ 90` sustained, leaving
+  headroom for noise), **or**
+- **drop the sustained-3-ticks requirement** in favour of a single achievement (reach
+  100 once), removing the "hold at the ceiling through noise" demand entirely.
+
+Either makes victory depend on the strategy reaching the target rather than on a quiet
+noise window at the top. Both are **v2-class design work** (they change what winning
+*means*), not a quick tweak — and constantinople and vassalage should be decided
+together, because it is the same decision.
+
+**Not traced here (belongs to that task, not this fix):** the exact byzantium-cohesion →
+federation-perturbation micro-paths. That is the expensive part, deliberately left out.
 
 ## Method / reproduction
 
