@@ -75,12 +75,71 @@ delta = 5.0
 # ============================================================
 # Ottoman military growth
 # ============================================================
+#
+# Mehmed is not passive: if the federation grows, he forces the pace
+# (see llm_context, "ОСМАНСКИЙ ОТВЕТ"). Before task 5 this was a flat
+# +0.5/tick trickle with no response to the threat, while Byzantium was
+# pumped +5.5/tick by uncapped patron actions — an ~18x inflow asymmetry
+# that ground the Ottomans deterministically to 0 in every seed.
+# See docs/investigation_combat_asymmetry.md.
 
 [[auto_deltas]]
 metric = "actor:ottomans.military_size"
 base = 0.5
 noise = 0.1
 actor_id = "ottomans"
+# The coalition coalescing is itself the mobilization trigger.
+[[auto_deltas.conditions]]
+metric = "global:federation_progress"
+operator = "greater"
+value = 40.0
+delta = 1.2
+# Arms race: once Byzantium closes the gap, the Ottomans levy in earnest.
+[[auto_deltas.ratio_conditions]]
+metric_a = "actor:byzantium.military_size"
+metric_b = "actor:ottomans.military_size"
+ratio = 0.4
+operator = "greater"
+delta = 2.0
+
+# ============================================================
+# Byzantium military upkeep — diminishing returns on patron aid
+# ============================================================
+#
+# Three patron actions add byzantium.military_size (+5/+4/+6) and the
+# balanced strategy spends 3 actions every tick, with no upper bound:
+# Byzantium reached 637 by tick 200 and the outcome became deterministic.
+# A besieged rump state cannot sustain a large field army — attrition
+# scales with size, so patron aid has diminishing returns instead of a
+# hard cap (the cap would have to displace the existing patron-treasury
+# `available_if` gate, which is a single condition). Tiers are cumulative.
+# See docs/investigation_combat_asymmetry.md, task 5.
+
+[[auto_deltas]]
+metric = "actor:byzantium.military_size"
+base = 0.0
+noise = 0.1
+actor_id = "byzantium"
+# NB: conditions must use the fully-qualified `actor:` form. A bare
+# `military_size` here is scoped to `byzantium.military_size`, which
+# MetricRef::parse treats as a GLOBAL key (no `actor:` prefix) and reads
+# as 0.0 — the condition would silently never fire. Same resolution trap
+# as Задача 4.
+[[auto_deltas.conditions]]
+metric = "actor:byzantium.military_size"
+operator = "greater"
+value = 50.0
+delta = -1.5
+[[auto_deltas.conditions]]
+metric = "actor:byzantium.military_size"
+operator = "greater"
+value = 90.0
+delta = -2.5
+[[auto_deltas.conditions]]
+metric = "actor:byzantium.military_size"
+operator = "greater"
+value = 130.0
+delta = -5.0
 
 # ============================================================
 # Byzantium external pressure (siege pressure)
