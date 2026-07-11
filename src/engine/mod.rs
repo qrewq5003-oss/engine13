@@ -8,7 +8,7 @@ use crate::core::{
 };
 use serde::Serialize;
 
-mod interactions;
+pub mod interactions;
 
 /// Validate that every non-Linear dependency rule carries the threshold its mode
 /// needs.
