@@ -9,7 +9,7 @@
 //! These tests are content checks only — they load scenarios through the
 //! normal registry and inspect config, they do not modify `engine/`.
 
-use engine13::core::{EventConditionType, MetricRef, Scenario};
+use engine13::core::{ComparisonOperator, EventConditionType, MetricRef, Scenario};
 use engine13::scenarios::registry;
 use std::process::Command;
 
@@ -137,8 +137,8 @@ fn milestone_and_rank_metric_conditions_are_resolvable() {
 /// Determine the scenario's protagonist actor: the one whose survival /
 /// growth the scenario is actually about. Prefer the explicit
 /// `player_actor_id`; scenarios that leave it `None` (e.g. a federation
-/// scenario played through patrons) are inferred from the actor scope of
-/// their `victory_condition`, which always names the at-risk actor.
+/// scenario played through patrons) are inferred from the victory_condition
+/// and, failing that, from the survival status indicator.
 fn protagonist_actor_id(scenario: &Scenario) -> Option<String> {
     if let Some(ref id) = scenario.player_actor_id {
         return Some(id.clone());
@@ -147,9 +147,29 @@ fn protagonist_actor_id(scenario: &Scenario) -> Option<String> {
     if let MetricRef::Actor { actor_id, .. } = MetricRef::parse(&vc.metric) {
         return Some(actor_id);
     }
+    // Additional conditions may name either the protagonist (a survival gate,
+    // e.g. `external_pressure < N`) or an *antagonist* (a suppression gate, e.g.
+    // `ottomans.military_size < 40`). A scenario never gates its own victory on
+    // the protagonist's military *shrinking*, so a `Less`/`LessOrEqual` bound on
+    // `military_size` names the enemy — skip it, don't mistake it for the hero.
     for cond in &vc.additional_conditions {
-        if let MetricRef::Actor { actor_id, .. } = MetricRef::parse(&cond.metric) {
-            return Some(actor_id);
+        if let MetricRef::Actor { actor_id, metric } = MetricRef::parse(&cond.metric) {
+            let is_antagonist_suppression = metric == "military_size"
+                && matches!(cond.operator, ComparisonOperator::Less | ComparisonOperator::LessOrEqual);
+            if !is_antagonist_suppression {
+                return Some(actor_id);
+            }
+        }
+    }
+    // Federation/patron scenarios whose victory is a global metric gated only by
+    // antagonist suppression don't name the protagonist anywhere in the victory
+    // condition. Fall back to the survival status indicator: an `invert: true`
+    // gauge (lower-is-better, e.g. external_pressure) marks the at-risk actor.
+    for ind in &scenario.status_indicators {
+        if ind.invert {
+            if let MetricRef::Actor { actor_id, .. } = MetricRef::parse(&ind.metric) {
+                return Some(actor_id);
+            }
         }
     }
     None

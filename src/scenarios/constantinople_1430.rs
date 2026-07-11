@@ -231,11 +231,20 @@ pub fn load_constantinople_1430() -> Scenario {
             title: "Федерация Севера основана".to_string(),
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
             minimum_tick: 40,  // 20 years × 2 ticks/year
+            // Additional gate: the Ottoman field army must be materially broken.
+            // Replaces the old `byzantium.external_pressure < 85` gate, which was
+            // structurally unreachable — external_pressure saturates upward toward
+            // ~100 within the first few ticks and never falls below 85, so victory
+            // was impossible under balanced play regardless of federation progress.
+            // ottomans.military_size decays through combat losses (180 → ~0 by
+            // tick ~150), so `< 40` is reachable and lands victory around tick
+            // 49-59 under balanced. NOTE: this gate now controls victory TIMING,
+            // not ACHIEVABILITY — see docs/sim_baseline.md and the PR description.
             additional_conditions: vec![
                 crate::core::Condition {
-                    metric: "actor:byzantium.external_pressure".to_string(),
+                    metric: "actor:ottomans.military_size".to_string(),
                     operator: crate::core::ComparisonOperator::Less,
-                    value: 85.0,
+                    value: 40.0,
                 },
             ],
             sustained_ticks_required: 3,

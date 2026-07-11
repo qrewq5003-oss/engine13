@@ -197,40 +197,42 @@ fn test_scenario_victory_requires_byzantium_alive() {
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
     let mut event_log = crate::engine::EventLog::new();
     
-    // Add byzantium actor
+    // Add byzantium and ottomans actors. The victory additional-condition gate is
+    // `ottomans.military_size < 40` (replaced the old `external_pressure < 85`),
+    // so ottomans must be present for the gate to read a real value.
     for actor in &scenario.actors {
-        if actor.id == "byzantium" {
+        if actor.id == "byzantium" || actor.id == "ottomans" {
             world.actors.insert(actor.id.clone(), actor.clone());
-            break;
         }
     }
-    
+
     // Set federation_progress = 100 (high enough to stay above 80 after auto_deltas), tick = 45
     // Note: MetricRef strips "global:" prefix when storing
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
     world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
-    
-    // Set byzantium.external_pressure = 90 (above threshold 85)
-    if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.set_metric("external_pressure", 90.0);
+
+    // Set ottomans.military_size = 120 (well above threshold 40) → gate fails.
+    // Wide margin so any per-tick combat drift can't cross 40.
+    if let Some(ott) = world.actors.get_mut("ottomans") {
+        ott.set_metric("military_size", 120.0);
     }
 
     // Run check_victory_condition via tick
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
 
-    // victory_achieved should be false because pressure is too high
-    assert!(!world.victory_achieved, "Victory should not be achieved when pressure > 85");
+    // victory_achieved should be false because ottoman military is too strong
+    assert!(!world.victory_achieved, "Victory should not be achieved when ottoman military_size >= 40");
 
-    // Lower pressure to 70
-    if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.set_metric("external_pressure", 70.0);
+    // Break the Ottoman army: military_size = 10 (well below threshold 40)
+    if let Some(ott) = world.actors.get_mut("ottomans") {
+        ott.set_metric("military_size", 10.0);
     }
-    
+
     // Run tick again
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    
+
     // victory_sustained_ticks should be 1, victory_achieved still false (needs 3 ticks)
     assert_eq!(world.victory_sustained_ticks, 1, "Should have 1 sustained tick");
     assert!(!world.victory_achieved, "Victory should not be achieved yet (needs 3 ticks)");
@@ -243,19 +245,19 @@ fn test_victory_sustained_ticks_resets() {
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
     let mut event_log = crate::engine::EventLog::new();
     
-    // Add byzantium actor
+    // Add byzantium and ottomans actors (victory gate is ottomans.military_size < 40)
     for actor in &scenario.actors {
-        if actor.id == "byzantium" {
+        if actor.id == "byzantium" || actor.id == "ottomans" {
             world.actors.insert(actor.id.clone(), actor.clone());
-            break;
         }
     }
-    
-    // Set victory conditions: federation = 100 (high enough to stay above 80), pressure = 70, tick = 45
+
+    // Set victory conditions: federation = 100 (high enough to stay above 80),
+    // ottomans.military_size = 10 (below threshold 40 → gate passes), tick = 45
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
     world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
-    if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.set_metric("external_pressure", 70.0);
+    if let Some(ott) = world.actors.get_mut("ottomans") {
+        ott.set_metric("military_size", 10.0);
     }
 
     // Run 2 ticks - should accumulate sustained ticks
@@ -266,15 +268,15 @@ fn test_victory_sustained_ticks_resets() {
 
     assert_eq!(world.victory_sustained_ticks, 2, "Should have 2 sustained ticks");
 
-    // Raise pressure above threshold
-    if let Some(byz) = world.actors.get_mut("byzantium") {
-        byz.set_metric("external_pressure", 90.0);
+    // Rebuild the Ottoman army above threshold → gate fails
+    if let Some(ott) = world.actors.get_mut("ottomans") {
+        ott.set_metric("military_size", 120.0);
     }
-    
+
     // Run another tick - should reset sustained ticks
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    
+
     assert_eq!(world.victory_sustained_ticks, 0, "Sustained ticks should reset when condition fails");
 }
 
