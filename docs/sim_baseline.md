@@ -6,6 +6,57 @@
 
 ---
 
+## Post Constantinople Cohesion-Bonus Coefficient Fix (PR #12)
+
+**Date:** 2026-07-11
+**Change:** `external_pressure_legitimacy_to_cohesion_bonus` coefficient `5.0 → 0.1`
+(constantinople_1430 `dependencies.toml`). See
+[`investigation_constantinople_cohesion_bonus.md`](investigation_constantinople_cohesion_bonus.md)
+for the full diagnosis.
+
+### Why the older constantinople victory ticks below are invalid
+
+At coefficient 5.0 the bonus rule dumped `+5·(external_pressure−65)` cohesion/tick
+onto **every** actor under siege (`external_pressure > 65`), pinning cohesion at the
+100 clamp. Because the rule is global, venice/genoa cohesion were also pinned at 100,
+which fed `federation_progress` a constant artificial tailwind
+(`venice.cohesion>65 → +0.5`, `genoa.cohesion>55 → +0.3`, i.e. **+0.8/tick**). Every
+"Victory Tick" recorded for constantinople in the sections below was sampled under
+that pinned-cohesion bug and is **not a valid balance baseline**. The values here
+replace them.
+
+### Post-fix deterministic baseline (seed 42, engine a79665d)
+
+| Strategy  | Pre-fix (5.0, buggy) | Post-fix (0.1) | Status |
+|-----------|----------------------|----------------|--------|
+| military  | win @43              | win @102       | ✓ still winnable, delayed |
+| diplomacy | win @130             | win @131       | ✓ ~unchanged |
+| balanced  | win @73              | **no win ≤300** (also no win at seeds 1/7/13/42/99, 200 ticks) | ⚠ regressed — see note |
+
+Measured on current engine (a79665d) by comparing the toml at 5.0 vs 0.1, seed 42,
+`scripted` mode. The stale D3 table below (2026-07-03) predates recent engine changes
+and its constantinople numbers should not be diffed against these.
+
+### Is the scenario still winnable? (answer: yes)
+
+**Yes — via military (tick 102) and diplomacy (tick 131).** The scenario is *not*
+globally unwinnable. The military delay (43 → 102) and the ~unchanged diplomacy path
+are the expected consequence of removing the artificial cohesion pin, and are
+acceptable ("victory moved later but is achievable").
+
+The **balanced** strategy no longer reaches victory (unwinnable at 300 ticks and
+across seeds 1/7/13/42/99). Crucially this is **not** an isolated balanced tweak:
+experiments show balanced was a knife-edge under *both* coefficients (federation
+oscillates at ~90–100 against the hard 100 clamp; the old "win @73" was a lucky
+`sustained=3` catch, not robust balance), and the coefficient shifts victory timing
+scenario-wide (military 43→102 is the same coupling). The follow-up is therefore a
+**scenario-level federation/victory calibration**, comparable to calibrating Milan
+1477 from scratch — see the "Scope of rebalance needed" section in
+[`investigation_constantinople_cohesion_bonus.md`](investigation_constantinople_cohesion_bonus.md).
+It does **not** block the coefficient fix, which is correct on its own merits.
+
+---
+
 ## Post Determinism Fix (D3) Baseline
 
 **Date:** 2026-07-03
