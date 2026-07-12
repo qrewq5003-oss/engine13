@@ -248,30 +248,13 @@ pub fn build_snapshot(
     // Key metrics from narrative config
     let mut key_metrics: HashMap<String, f64> = HashMap::new();
     for metric_key in &scenario.narrative_config.key_metrics {
-        // Try to get the metric value using existing patterns
-        let value = if metric_key.starts_with("family:") {
-            // Family metric
-            world.family_state.as_ref()
-                .and_then(|fs| fs.metrics.get(metric_key))
-                .copied()
-                .unwrap_or(0.0)
-        } else if metric_key.starts_with("actor:") {
-            // Actor metric: "actor:id.metric"
-            if let Some((actor_id, metric)) = metric_key.strip_prefix("actor:").and_then(|s| s.split_once('.')) {
-                world.actors.get(actor_id)
-                    .and_then(|a| a.metrics.get(metric))
-                    .copied()
-                    .unwrap_or(0.0)
-            } else {
-                0.0
-            }
-        } else if metric_key.starts_with("global:") {
-            // Global metric
-            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
-        } else {
-            // Try as global metric without prefix
-            world.global_metrics.get(metric_key).copied().unwrap_or(0.0)
-        };
+        // Resolve through MetricRef rather than re-deriving the parse rules here. The
+        // hand-rolled copy this replaces got two of the four branches wrong, and both
+        // failures were silent: it looked the *prefixed* string up in the target map
+        // ("family:family_influence" in family_state.metrics, "global:federation_progress"
+        // in global_metrics), while MetricRef strips the prefix before storing. Every
+        // family: and global: key in the chronicler's prompt was therefore 0.0.
+        let value = crate::core::MetricRef::parse(metric_key).get(world);
         key_metrics.insert(metric_key.clone(), value);
     }
     

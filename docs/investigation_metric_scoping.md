@@ -256,3 +256,44 @@ Two cheap, non-structural guards worth considering in the meantime (neither is i
 these PRs): have `validate_scenario` **reject** a `Global` ref whose key contains a
 `.` or matches a known actor id (every one of these bugs produced exactly such a
 key), and make `llm/mod.rs` call `MetricRef::parse` instead of its hand-rolled copy.
+
+---
+
+## Follow-up (2026-07-12): both guards implemented — and they immediately found a
+## seventh site the sweep had missed
+
+Both interim guards above are now in. The type-safe builder is still **not** done: it
+remains the structural answer, and this is not a substitute for it. What these guards
+do is make the *known shape* unrepresentable in content and stop one subsystem from
+re-deriving the parse rules.
+
+**The guard was not merely defensive — it caught a live seventh site on its first run:
+`narrative_config.key_metrics`, which had never been validated at all.**
+
+- `constantinople_1430` wrote `byzantium.external_pressure`, `byzantium.legitimacy`,
+  `byzantium.cohesion`, `ottomans.military_size` — dotted, unprefixed. `MetricRef::parse`
+  resolves each to a `Global` key nothing reads or writes.
+- `milan_1477` wrote all five of its keys the same way.
+- `rome_375`'s keys were *correctly* prefixed (`family:`, `actor:`), but `llm/mod.rs`'s
+  hand-rolled copy was wrong in the other direction: it looked the **prefixed** string up
+  in the target map (`"family:family_influence"` in `family_state.metrics`,
+  `"global:federation_progress"` in `global_metrics`), while `MetricRef` strips the prefix
+  before storing. Both branches always returned `0.0`.
+
+**13 of the 16 key metrics across the three scenarios were reaching the chronicler's
+prompt as `0.0`** — the same class as #19/#20, in the one subsystem the sweep had
+flagged as re-deriving the rules by hand, and still not caught until a guard existed.
+
+Fixed: the content keys now carry `actor:`, `llm/mod.rs` calls
+`MetricRef::parse(key).get(world)`, and `validate_scenario` checks `key_metrics`.
+
+**One false positive, and it was a real defect underneath.** The guard first flagged
+`milestone 'outcome_survived_alone'` and `'outcome_historical'` (metric `'byzantium'`).
+Those are `actor_state` conditions, not metric ones — but `EventCondition::to_metric_strings`
+returned the condition's `actor_id` as if it were a metric key. That was harmless only
+while the metric check ignored global-shaped keys. It also meant the `actor_id` of every
+`actor_state` condition had **never been validated at all**. `to_metric_strings` no longer
+conflates the two, and `actor_state` actor ids are now checked properly.
+
+Simulation output is **byte-identical** on all three scenarios (seeds 42/1/7 × 200 ticks):
+these keys feed the narrative snapshot, not the tick loop.

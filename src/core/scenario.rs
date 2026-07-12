@@ -429,12 +429,26 @@ pub struct EventCondition {
 }
 
 impl EventCondition {
-    /// Extract all metric strings from condition
+    /// Extract all metric strings from condition.
+    ///
+    /// `ActorState` yields none: its `actor_id` is an actor id, not a metric key, and
+    /// returning it here made the only caller (`validate_scenario`) check an actor id
+    /// against the metric rules. That was harmless while the metric check ignored
+    /// global-shaped keys, and became a false positive the moment it stopped ignoring
+    /// them. Use [`actor_state_actor_id`](Self::actor_state_actor_id) for that field.
     pub fn to_metric_strings(&self) -> Vec<String> {
         match &self.condition_type {
             EventConditionType::Metric { metric, .. } => vec![metric.clone()],
-            EventConditionType::ActorState { actor_id, .. } => vec![actor_id.clone()],
+            EventConditionType::ActorState { .. } => vec![],
             EventConditionType::Tick { .. } => vec![],
+        }
+    }
+
+    /// The actor an `actor_state` condition refers to, if this is one.
+    pub fn actor_state_actor_id(&self) -> Option<&str> {
+        match &self.condition_type {
+            EventConditionType::ActorState { actor_id, .. } => Some(actor_id.as_str()),
+            _ => None,
         }
     }
 }

@@ -223,11 +223,11 @@ pub fn load_milan_1477() -> Scenario {
         max_random_events_per_tick: 3,
         narrative_config: crate::core::NarrativeConfig {
             key_metrics: vec![
-                "milan.legitimacy".to_string(),
-                "milan.cohesion".to_string(),
-                "milan.external_pressure".to_string(),
-                "naples.external_pressure".to_string(),
-                "naples.cohesion".to_string(),
+                "actor:milan.legitimacy".to_string(),
+                "actor:milan.cohesion".to_string(),
+                "actor:milan.external_pressure".to_string(),
+                "actor:naples.external_pressure".to_string(),
+                "actor:naples.cohesion".to_string(),
             ],
             narrative_axes: vec![
                 "legitimacy vs force".to_string(),
