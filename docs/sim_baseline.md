@@ -6,6 +6,117 @@
 
 ---
 
+## Post Constantinople Military-Flow Caps (task 5, level 1 fix)
+
+**Date:** 2026-07-11, **recalibrated 2026-07-12** (task 6, rebased onto `main` after #19/#20).
+**Change:** `constantinople_1430/auto_deltas.toml` only — two new/extended auto_deltas.
+No engine change, no action change, no victory-threshold change.
+
+Caps the inflow asymmetry found in
+[`investigation_combat_asymmetry.md`](investigation_combat_asymmetry.md): Byzantium's
+military inflow was **uncapped** (+5.5/tick from three patron actions) against an Ottoman
+trickle (+0.3/tick) — an ~18× asymmetry that drove Byzantium to 637 by tick 200 and ground
+the Ottomans deterministically to 0 in **every** seed.
+
+**It caps the asymmetry; it does not make the outcome non-degenerate.** The Ottomans are
+still ground to `0.00` in 27 of 30 runs — see "Result" below, which is the *recalibrated*
+measurement, not the one this fix was originally written against.
+
+1. **Byzantium military upkeep (diminishing returns).** Cumulative attrition tiers on
+   `byzantium.military_size`: `>50 → −1.5`, `>90 → −2.5`, `>130 → −5.0`. A besieged rump
+   state cannot sustain an unbounded field army. Chosen over a hard cap because
+   `available_if` is a *single* condition — a cap gate would have to displace the existing
+   patron-treasury gate. Precedent: stacked negative auto_delta conditions, used throughout
+   this same file.
+2. **Ottoman growth lever.** Extends their existing auto_delta (was a flat +0.5): `+1.2`
+   when `global:federation_progress > 40`, and `+2.0` when `byz/ott military ratio > 0.4`.
+   Straight from the scenario's own `llm_context` — *«Мехмед не пассивен. Если федерация
+   растёт — он форсирует»*. Precedent: the byzantium-pressure auto_delta already uses both
+   a `global:` condition and exactly this byz/ott ratio pair.
+
+Levels 2 (`effective_military` divisor) and 3 (attacker/defender loss asymmetry) were
+**deliberately not touched** — the investigation's counterfactual proved neither is the
+root cause, and level 2 risks all three scenarios.
+
+### Result — recalibrated on today's `main` (task 6, after #19 / #20)
+
+> **These numbers replace the ones this section originally carried.** The original
+> calibration was measured on a `main` where the metric-scoping bugs were still live, so
+> **no common event could affect any actor** (see
+> [`investigation_metric_scoping.md`](investigation_metric_scoping.md)). #19 and #20 fixed
+> that, which changed the very inflows this fix caps — so every number below was re-derived
+> from scratch, not re-checked. What the flow caps do and do not achieve changed materially.
+
+Victory tick, `scripted`, 300 ticks, `−` = no victory:
+
+| strategy | s1 | s7 | s13 | s42 | s99 | s3 | s21 | s55 | s77 | s88 |
+|-----------|----|----|-----|-----|-----|----|-----|-----|-----|-----|
+| balanced  | 91 | 134 | 88 | 110 | 97 | 118 | 140 | 144 | 95 | 132 |
+| military  | 101 | **−** | 129 | 166 | 145 | 130 | 113 | 142 | 131 | 84 |
+| diplomacy | 160 | 158 | **−** | 151 | 159 | 219 | 140 | **−** | 225 | 190 |
+
+**What the fix does achieve:**
+
+- **Byzantium is bounded.** Peak `military_size` **96–127** across seeds, against **637 by
+  tick 200** uncapped. The ~18× inflow asymmetry is genuinely capped — this is the core of
+  the fix and it holds.
+- **Victory stays achievable but is no longer guaranteed:** 27 of 30 runs win, 3 end with
+  no victory (military s7, diplomacy s13/s55). Before any fix, *every* strategy won on
+  *every* seed.
+- **Timing spread appeared:** balanced was a 49–59 band (10 ticks) before any fix, and
+  48–65 (17 ticks) on `main` today; it is now **88–144** (a 56-tick band).
+
+**What it does NOT achieve — and this section previously claimed it did:**
+
+- **The Ottomans are still ground to exactly `0.00`, in 27 of 30 runs.** The original claim
+  — *"Ottomans are a real force: they oscillate around 130–140 instead of being ground to 0"*
+  — **does not hold on today's `main`**. The ottoman parity it reported was measured in a
+  world where `plague` could not hit the Ottomans and `mercenary_influx` could not feed
+  Byzantium (+30 `military_size` a fire). With those events live, the growth lever no longer
+  holds the Ottomans up.
+
+Tier `>130 → −5.0` is a **near-binding guardrail**, not dead weight: byzantium peaks at 127.
+It matters *more* now than at original calibration, precisely because `mercenary_influx`
+adds +30 spikes on top of the patron inflow it caps.
+
+### The lever cannot be tuned out of this — the endgame is bimodal
+
+Recalibration sweep on the ottoman growth lever (5 seeds, `scripted balanced`):
+
+| variant | victory ticks | ottoman outcome |
+|---|---|---|
+| as authored (`fed>40 → +1.2`, `ratio>0.4 → +2.0`) | 88–134, 5/5 win | `0.00` in 5/5 |
+| stronger arms race (`ratio>0.4 → +3.5`) | 88–233, **4/5** win | `0.00` in 4/5; **s7: Ottomans run away to 211** |
+| + ottoman war chest (`treasury>500 → +2.0`) | 153–262, **4/5** win | `0.00` in 4/5; **s7: Ottomans run away to 229** |
+
+Feeding the Ottomans harder does not produce a *stable balance of power* — it **flips which
+side is annihilated**. There is no stable middle: either the coalition grinds the Ottomans
+to 0, or the Ottomans run away and the coalition never wins. That bimodality is the
+no-termination combat cliff documented in
+[`investigation_combat_self_destruction.md`](investigation_combat_self_destruction.md)
+(task 5, part 2): once either side gains the advantage, the loser drops from ~90 to 0 in
+roughly ten ticks. **It cannot be fixed by auto_delta calibration**, and this fix does not
+claim to fix it. The thresholds are therefore kept **as authored** — they are the best of
+the tested options, and strengthening the lever only trades one degenerate mode for another.
+
+### Victory threshold `ottomans.military_size < 40` — re-verified, still NOT recalibrated
+
+The ottoman *minimum* per run remains cleanly **bimodal**: **`0.00`** when the coalition
+breaks through (27/30 runs) or **65–148** when the Ottomans hold (3/30 — exactly the three
+no-victory runs). Across all 30 runs nothing lands in 40–65, so the threshold 40 still sits
+in a clean gap between the two modes rather than on a knife-edge. **No recalibration needed**
+— the conclusion survives, on new numbers.
+
+### Verification
+
+`cargo test` green (60 passed); no Rust changed (TOML only), so clippy is untouched.
+`rome_375` and `milan_1477` sim output **byte-identical** before/after (batch, 100 seeds ×
+50 ticks; plus single seeds 42/1/7 × 200 ticks) — they use neither these actors nor these
+auto_deltas. Constantinople's no-player batch is materially unchanged (random events/run
+67.3 → 67.4); the fix bites in `scripted` mode, where the patron inflow it caps exists.
+
+---
+
 ## Post Constantinople Victory-Condition Redesign (external_pressure → ottomans.military_size)
 
 **Date:** 2026-07-11

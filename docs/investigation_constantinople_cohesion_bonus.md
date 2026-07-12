@@ -169,6 +169,21 @@ for three ticks straight is therefore a matter of **luck against noise, not stra
 This is a **design** property of the condition, independent of the bug and of any
 push-magnitude tuning.
 
+> **NB (added 2026-07-11).** The specific numbers in this section are superseded: the
+> victory condition is `federation_progress >= 80` (not 100), and its real blocker was the
+> `byzantium.external_pressure < 85` gate, which ep saturation made *unreachable*. That
+> does not change the class described here — a threshold placed outside the metric's
+> genuinely traversable range — it only moves which metric the class applies to.
+>
+> **This "edge-of-range" class now has a SIBLING class: "unbounded flow"** — a metric
+> pumped by uncapped patron actions runs away until every outcome depending on it becomes
+> deterministic (Milan D peaking at exactly 64.00 in 15/15 seeds; Byzantium reaching 637
+> and grinding the Ottomans to 0 in 5/5 seeds). The two are related but distinct: here the
+> *condition* is broken while the metric is fine; there the *metric itself* is broken. Both
+> recur, neither is caught by `cargo test`. Both are candidates for one v2 review of how the
+> engine handles unbounded metrics and threshold conditions. See the "СИСТЕМНЫЙ КЛАСС"
+> section of [`investigation_combat_asymmetry.md`](investigation_combat_asymmetry.md).
+
 ### One class of problem, with a second known instance
 
 > **Victory/trigger conditions calibrated at the edge of a metric's reachable range are
