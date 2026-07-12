@@ -6,6 +6,80 @@
 
 ---
 
+## Post Conquest-by-Exhaustion Collapse Path (mortality restored after the combat guard)
+
+**Date:** 2026-07-12. **Stacks on the combat termination guard below — read that first.**
+**Change:** `src/engine/mod.rs`, `check_collapses` — a third collapse path. No content,
+no threshold, no combat change.
+
+The guard below removed 81–95% of all fights, and with them, it turned out, **almost all
+actor mortality**: both existing collapse paths require low `cohesion`, and the only thing
+pushing cohesion down was the defender's per-fight `cohesion_loss` — phantom fights
+included. A defenceless actor became immortal (legitimacy 0, external_pressure 100, no
+army, alive forever). This restores mortality by a mechanism that isn't a phantom battle.
+
+```
+Path 3: military_size < MIN_DEFENSIBLE_MILITARY   // no army left
+     && legitimacy < 10                            // no authority left
+     && external_pressure > 85                     // saturated pressure
+     && besieged                                   // an armed actor on a distance-1 border
+```
+
+### The `besieged` clause is the whole design, and it was measured, not assumed
+
+The obvious cheap predicate — drop `cohesion`, keep the other three — **was tried first and
+refuted by measurement.** In the no-player world `legitimacy → 0` and
+`external_pressure → 100` for *nearly every actor*, so those two gates discriminate
+nothing. Without the `besieged` clause, 20 seeds × 200 ticks:
+
+- `rome_375`: **12 actors** die in 20/20 runs (every barbarian), not the 2–3 that used to
+- `constantinople_1430`: **byzantium — the protagonist — dies in 20/20 runs**, median tick 41
+- `milan_1477`: **milan — the protagonist — dies in 20/20 runs**, median tick 71
+
+Cohesion was doing all the discriminating precisely *because* combat was the only thing
+touching it. The honest reconstruction of what pre-guard mortality actually meant is not
+"the weak die" but **"those with a hostile armed neighbour on a distance-1 border die"** —
+so that is what the condition now says. `MIN_DEFENSIBLE_MILITARY` on both sides is the same
+belligerence test the combat guard uses: you die to a neighbour that could still fight you,
+and only once you no longer can. No new number was introduced.
+
+### Result: the pre-defect mortality profile, without the phantom fights
+
+Collapses per 100 no-player runs, 200 ticks:
+
+| Scenario | main (pre-guard) | +guard (immortal) | +this path |
+|---|---|---|---|
+| `rome_375` | ostrogoths 99, ostrogoth_kingdom 89, armenia 82, sassanids 2, huns 1 | sassanids 1, late_sassanids 1 | **armenia 100, ostrogoth_kingdom 98, ostrogoths 98, huns 1** |
+| `constantinople_1430` | 4% of runs (median tick 183) | 0 | **100% of runs (median tick 39)** |
+| `milan_1477` | savoy | none | **savoy, siena** (milan survives, army 52.50) |
+
+Rome lands back on its own profile. Milan's protagonist survives — it is not besieged,
+because its distance-1 neighbours have no army either.
+
+**Constantinople is the deliberate change: 4% → 100%.** In a no-player run nobody arms
+Byzantium (its +5.5/tick comes solely from patron actions), its 8-strong army is gone by
+tick 18, legitimacy decays to 0, pressure saturates, and a 180-strong Ottoman army sits on
+its only distance-1 border. It falls. That is the scenario's own premise — Byzantium
+survives *only if the player acts* — and the median tick is 39, i.e. **year 1449**
+(`1430 + 39/2`). The autonomous world now drops Constantinople within four years of 1453.
+The old 4% was not the scenario working; it was the Ottomans being too busy destroying
+themselves against an empty field to finish the job.
+
+### Victory condition: unaffected, again measured
+
+Scripted `balanced`, 300 ticks, seeds 42/1/7/13/99: **victory on all five at exactly the
+same ticks — 110 / 91 / 134 / 88 / 97**, and byzantium never dies in any of them.
+`military` and `diplomacy` strategies also still win (ticks 166 / 222, seed 42). A player
+keeps Byzantium's army above the threshold, so the conquest path — like the guard — never
+fires in a played game. Both changes are confined to the no-player world, which is exactly
+where the defect lived.
+
+64 tests green (two new: an exhausted actor dies to an armed neighbour; and it *survives*
+when nobody on its border can finish it — the second one is what pins the `besieged`
+clause). Determinism re-verified across separate processes.
+
+---
+
 ## Post Combat Termination Guard (#17 fix)
 
 **Date:** 2026-07-12.

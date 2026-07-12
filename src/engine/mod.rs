@@ -1461,7 +1461,46 @@ fn check_collapses(
             actor.get_metric("legitimacy") < 5.0
             && actor.get_metric("cohesion") < 8.0;
 
-        let in_danger = classic_collapse || internal_collapse;
+        // Path 3: conquest by exhaustion — no army left, no authority, saturated
+        // pressure, and an armed neighbour on the border still able to finish the job.
+        //
+        // Paths 1 and 2 both require low `cohesion`, and until the combat termination
+        // guard landed the *only* thing that pushed cohesion down was the defender's
+        // per-fight `cohesion_loss` — including in fights against an army that no
+        // longer existed. Mortality was therefore a by-product of that defect: remove
+        // the phantom fights and cohesion recovers (nothing pushes it back), leaving a
+        // defenceless actor immortal — legitimacy 0, external_pressure 100, no army,
+        // and alive forever. See docs/investigation_combat_self_destruction.md.
+        //
+        // The besieged clause is what makes this a *conquest* condition rather than a
+        // blanket one. In the no-player world `legitimacy → 0` and
+        // `external_pressure → 100` for nearly every actor, so those two gates alone
+        // discriminate nothing: without the clause this predicate kills 12 of Rome's
+        // actors and both protagonists (byzantium at median tick 41, milan at 71) in
+        // 20/20 runs. With it, mortality lands back on the actors that a hostile border
+        // was actually grinding down.
+        //
+        // `MIN_DEFENSIBLE_MILITARY` on both sides is the same belligerence test the
+        // combat guard uses: you die to a neighbour that could still fight you, and only
+        // once you no longer can.
+        let besieged = actor.neighbors.iter().any(|n| {
+            n.distance == 1
+                && world
+                    .actors
+                    .get(&n.id)
+                    .map(|nb| {
+                        nb.get_metric("military_size")
+                            >= crate::engine::interactions::MIN_DEFENSIBLE_MILITARY
+                    })
+                    .unwrap_or(false)
+        });
+        let conquest_collapse =
+            actor.get_metric("military_size") < crate::engine::interactions::MIN_DEFENSIBLE_MILITARY
+            && actor.get_metric("legitimacy") < 10.0
+            && actor.get_metric("external_pressure") > 85.0
+            && besieged;
+
+        let in_danger = classic_collapse || internal_collapse || conquest_collapse;
 
         if in_danger {
             // Increment warning counter

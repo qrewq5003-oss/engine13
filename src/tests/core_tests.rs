@@ -620,6 +620,74 @@ fn test_combat_still_happens_against_a_real_army() {
     );
 }
 
+/// Puts byzantium in the exhaustion state — no army, no legitimacy, saturated external
+/// pressure — and holds it there. Cohesion is kept deliberately *high*, so neither of
+/// the two older collapse paths (both require low cohesion) can be what kills it.
+///
+/// `with_ottomans` controls the only thing that should matter: whether an armed actor
+/// is present on the border to finish the job. The ottomans are byzantium's sole
+/// distance-1 neighbour, so removing them removes the siege. (Leaving them in with a
+/// zeroed army would not work: their auto_delta re-arms them by +0.5 within the same
+/// tick, before `check_collapses` runs.)
+///
+/// Returns whether byzantium was still alive after `rounds` ticks.
+fn byzantium_survives_exhaustion(with_ottomans: bool, rounds: u32) -> bool {
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    for actor in &scenario.actors {
+        let keep = actor.id == "byzantium" || (with_ottomans && actor.id == "ottomans");
+        if keep {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    // Past any minimum_survival_ticks guarantee.
+    world.tick = 120;
+
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    for _ in 0..rounds {
+        // Re-assert the exhaustion state each tick: auto_deltas and events would
+        // otherwise drift the very metrics under test.
+        if let Some(byz) = world.actors.get_mut("byzantium") {
+            byz.set_metric("military_size", 0.0);
+            byz.set_metric("legitimacy", 0.0);
+            byz.set_metric("external_pressure", 100.0);
+            byz.set_metric("cohesion", 90.0);
+        }
+        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    }
+
+    world.actors.contains_key("byzantium")
+}
+
+#[test]
+fn test_exhausted_actor_dies_to_an_armed_neighbour() {
+    // No army, no legitimacy, saturated pressure, and an armed enemy on the border.
+    assert!(
+        !byzantium_survives_exhaustion(true, 12),
+        "byzantium had no army, no legitimacy, pressure 100 and an armed ottoman \
+         neighbour on its only distance-1 border, and still did not fall"
+    );
+}
+
+#[test]
+fn test_exhausted_actor_survives_when_no_one_can_finish_it() {
+    // The same exhaustion state, with nobody on the border able to finish it.
+    //
+    // This is the clause that keeps the path a *conquest* condition rather than a
+    // blanket one, and it is not a hypothetical: in the no-player world legitimacy
+    // decays to 0 and external_pressure saturates at 100 for nearly every actor, so
+    // those two gates discriminate nothing. Measured without this clause, the predicate
+    // killed 12 of Rome's actors and *both* protagonists — byzantium at median tick 41,
+    // milan at 71 — in 20/20 runs.
+    assert!(
+        byzantium_survives_exhaustion(false, 12),
+        "byzantium died with nobody on its border able to finish it — the conquest \
+         collapse path has degenerated into a blanket predicate"
+    );
+}
+
 #[test]
 fn test_cultural_displacement_progress_accumulates() {
     // Verify cultural displacement progress accumulates when there's a big power gap
