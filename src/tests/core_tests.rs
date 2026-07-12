@@ -51,6 +51,20 @@ fn test_parse_scoped_bare_metric_resolves_to_actor() {
 }
 
 #[test]
+fn test_parse_scoped_self_prefix_resolves_to_target_actor() {
+    // Random events name their target actor as `self.`. This used to be rewritten
+    // to "venice.population", which `parse` reads as a Global key — so conditions
+    // read 0.0 and effects were swallowed.
+    match MetricRef::parse_scoped("self.population", Some("venice")) {
+        MetricRef::Actor { actor_id, metric } => {
+            assert_eq!(actor_id, "venice");
+            assert_eq!(metric, "population");
+        }
+        other => panic!("Expected Actor variant, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_scoped_bare_metric_without_actor_stays_global() {
     match MetricRef::parse_scoped("federation_progress", None) {
         MetricRef::Global { key } => assert_eq!(key, "federation_progress"),
