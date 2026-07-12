@@ -6,6 +6,92 @@
 
 ---
 
+## Post Combat Termination Guard (#17 fix)
+
+**Date:** 2026-07-12.
+**Change:** `src/engine/interactions.rs` — one guard in `calculate_military_interaction`:
+a fight is not started if the defender's `military_size` is below
+`MIN_DEFENSIBLE_MILITARY` (0.01). The loss formula, the probability formula and the
+`effective_military` divisor are **untouched**.
+
+Closes the defect diagnosed in
+[`investigation_combat_self_destruction.md`](investigation_combat_self_destruction.md):
+combat had no termination condition, so an army that had already been destroyed stayed
+a legal target forever, and the attacker kept paying 5–15% of its own military per
+fight to storm an empty field. 81–95% of *all* fights in the project's baselines were
+these.
+
+The threshold is not a new invented number: `0.01` is the same constant
+`src/bin/combat_probe.rs` already used to classify "fight against an already-empty
+army", and the probe now imports it from the engine. The set of fights the guard
+removes is therefore exactly the set the investigation measured. (It has to be an
+epsilon rather than `== 0.0`: losses are multiplicative, `mil * (1 - loss)`, so a
+beaten army decays asymptotically and never lands on exactly zero.)
+
+### Result (seed 42, 300 ticks, no-player, `combat_probe`)
+
+| Scenario | Fights before → after | Phantom fights before → after | Attacker's own military destroyed in them |
+|---|---|---|---|
+| `constantinople_1430` | 37 → **2** | 35 → **0** | 244.90 → **0** |
+| `rome_375` | 67 → **15** | 52 → **0** | 88.65 → **0** |
+| `milan_1477` | 623 → **34** | 585 → **0** | 259.96 → **0** |
+
+The winners stop destroying themselves: the Ottomans finish at **304.69** instead of
+**54.88**, and in `milan_1477` armies exist at all at the end (venice 54.50, genoa
+42.00, naples 29.50, milan 13.50 — previously all but three actors sat at 0.00).
+
+### Victory condition: unaffected, measured, not argued
+
+`ottomans.military_size < 40` (PR #14) was the obvious thing to break. Scripted
+`balanced`, 300 ticks, seeds 42/1/7/13/99: **victory on all five seeds, at exactly the
+same ticks as before — 110 / 91 / 134 / 88 / 97.** Not "within the spread": identical.
+
+This is the orthogonality claimed by the investigation, now demonstrated. In scripted
+mode Byzantium is continuously armed (+5.5/tick), so its `military_size` never falls
+below the threshold, and **the guard never fires at all**. Phantom fights are a
+property of the no-player world — which is precisely where the balance baselines are
+built.
+
+60 tests green.
+
+### The consequence that matters: actor mortality was a product of the defect
+
+**This is a real behavioral regression and it is not cosmetic.** Collapse rates in the
+no-player world:
+
+| Scenario | Collapses before | Collapses after |
+|---|---|---|
+| `rome_375` | ostrogoths 99/100 runs, ostrogoth_kingdom 89, armenia 82 | **late_sassanids 1, sassanids 1** |
+| `constantinople_1430` | 4% of runs | **0** |
+
+Both collapse paths in `check_collapses` (`engine/mod.rs`) require **low cohesion** —
+`legitimacy<10 && cohesion<15 && external_pressure>85`, or `legitimacy<5 && cohesion<8`.
+The only thing that pushed cohesion down was `cohesion_loss = 10–20`, applied to the
+defender **on every fight** — including every phantom one. Remove the phantom fights and
+nothing drives cohesion down any more.
+
+Traced on the ostrogoths (`rome_375`, seed 42) with the guard active: military `0.00`
+from tick 41, legitimacy `0.00` from tick 101, external_pressure saturated at `100` —
+and cohesion **recovers to 82** (`calculate_diplomatic_interaction` pushes it up, and
+nothing pushes back). Two of the three collapse gates are wide open; cohesion alone
+holds the actor alive. The same mechanism now keeps **byzantium** — the protagonist —
+alive at `military_size 0.00` in the 300-tick no-player probe, where it used to die.
+
+So a defenceless actor is now **immortal**, which is the opposite failure of the one
+this PR fixes, and it lives in a different place: the collapse condition, not the combat
+loop. The pre-fix mortality was real in the sense that actors did die — but it was
+produced by armies that did not exist being ground down by battles that were not
+happening.
+
+**Not fixed here, deliberately.** Restoring mortality by a mechanism that isn't a
+phantom battle (re-tune the collapse gate so an actor with no army, no legitimacy and
+saturated pressure dies regardless of cohesion — or give a defenceless neighbour a real
+end via conquest/vassalage) is a separate balance change with its own baseline. It is
+tracked as "Пересчёт смертности (guard/conquest)" in
+[`ENGINE13_INFRASTRUCTURE_TASKS.md`](../ENGINE13_INFRASTRUCTURE_TASKS.md).
+
+---
+
 ## Post Constantinople Military-Flow Caps (task 5, level 1 fix)
 
 **Date:** 2026-07-11, **recalibrated 2026-07-12** (task 6, rebased onto `main` after #19/#20).

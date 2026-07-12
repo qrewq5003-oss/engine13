@@ -87,6 +87,18 @@ pub fn affinity(a: &crate::core::Actor, b: &crate::core::Actor) -> f64 {
     (base + modifier).clamp(0.0, 1.0)
 }
 
+/// Below this `military_size` a defender has nothing left to fight with, and a
+/// "battle" against it is a phantom: the attacker still pays the full 5–15% loss
+/// for storming an empty field.
+///
+/// Combat losses are multiplicative (`mil * (1 - loss)`), so a beaten army never
+/// reaches exactly `0.0` — it decays asymptotically. An `== 0.0` test would never
+/// fire; the cut-off has to be an epsilon. This is the same threshold
+/// `src/bin/combat_probe.rs` uses to classify "fight against an already-empty
+/// army", so the set of fights this guard removes is exactly the set the
+/// investigation measured (81–95% of all fights).
+pub const MIN_DEFENSIBLE_MILITARY: f64 = 0.01;
+
 /// Effective military strength accounting for force projection through neighbors
 pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
     let active_neighbors = neighbors.len().max(1);
@@ -368,6 +380,22 @@ fn calculate_military_interaction(
     } else {
         (actor_b_id.to_string(), actor_a_id.to_string(), eff_mil_b, eff_mil_a)
     };
+
+    // Termination condition: a side with no army left is not a belligerent.
+    // Without this the fight has no end — `military_mod` (+0.15) is *always* true
+    // against an empty army, so the attacker keeps rolling every time the cooldown
+    // expires and keeps paying 5–15% per fight, destroying itself on a battlefield
+    // the enemy left long ago. Checked on the defender: an actor with no military
+    // has an `effective_military` of 0 (the divisor is `.max(1.0)`, never zero), so
+    // it is always the one assigned the defender role above.
+    let defender_military = world
+        .actors
+        .get(&defender_id)
+        .map(|a| a.get_metric("military_size"))
+        .unwrap_or(0.0);
+    if defender_military < MIN_DEFENSIBLE_MILITARY {
+        return;
+    }
 
     // Check cooldown
     let cooldown_key = format!("{}_vs_{}", attacker_id, defender_id);

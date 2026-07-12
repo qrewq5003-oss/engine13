@@ -131,7 +131,9 @@ fn main() {
 
     // The core measurement: fights where the defender had no army left to fight
     // with. The attacker still pays 5-15% of its own military for each of these.
-    const EMPTY: f64 = 0.01;
+    // Same constant the engine's termination guard uses, so this count stays the
+    // measurement of what that guard removes rather than drifting from it.
+    const EMPTY: f64 = engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY;
     let zombie: Vec<_> = conflicts.iter().filter(|(_, _, _, _, _, db, _)| *db < EMPTY).collect();
     let zombie_cost: f64 = zombie.iter().map(|(_, _, _, ab, aa, _, _)| ab - aa).sum();
     let first_zombie = zombie.first().map(|(t, ..)| *t);
