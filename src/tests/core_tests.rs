@@ -554,6 +554,72 @@ fn test_era_progression_fires() {
     assert_eq!(rome.era, crate::core::Era::EarlyMedieval, "Rome should advance to EarlyMedieval after tick with enough tags");
 }
 
+/// Builds a two-actor constantinople world (byzantium and ottomans are the only
+/// distance-1 pair in the scenario) and runs the interaction phase directly, so no
+/// auto_delta or random event can move `military_size` behind the test's back.
+/// Returns the ids of every military conflict that occurred.
+fn run_combat_only(byzantium_military: f64, rounds: u32) -> Vec<String> {
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    for actor in &scenario.actors {
+        if actor.id == "byzantium" || actor.id == "ottomans" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+        }
+    }
+    world
+        .actors
+        .get_mut("byzantium")
+        .unwrap()
+        .set_metric("military_size", byzantium_military);
+
+    let mut event_log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+
+    // Past the 3-tick stabilization window; each round advances the tick so the
+    // 5-tick combat cooldown cannot be what suppresses the fight.
+    for i in 0..rounds {
+        world.tick = 10 + i * 6;
+        crate::engine::interactions::calculate_interactions(
+            &mut world,
+            &scenario,
+            &mut event_log,
+            &mut rng,
+        );
+    }
+
+    event_log
+        .events
+        .iter()
+        .map(|e| e.id.clone())
+        .filter(|id| id.starts_with("military_conflict_"))
+        .collect()
+}
+
+#[test]
+fn test_no_combat_against_an_army_that_no_longer_exists() {
+    // The #17 defect: a destroyed army stayed a legal target forever, and the attacker
+    // paid 5-15% of its own military per fight to storm an empty field. 81-95% of all
+    // fights in the no-player baselines were these.
+    let conflicts = run_combat_only(0.0, 40);
+    assert!(
+        conflicts.is_empty(),
+        "the ottomans attacked a byzantium with no army {} times: {:?}",
+        conflicts.len(),
+        conflicts
+    );
+}
+
+#[test]
+fn test_combat_still_happens_against_a_real_army() {
+    // The other half of the guard: it must not be so eager that it disables combat.
+    // A defender that can still fight is still attacked.
+    let conflicts = run_combat_only(50.0, 40);
+    assert!(
+        !conflicts.is_empty(),
+        "no fight occurred against a byzantium with a real army — the guard is suppressing real combat"
+    );
+}
+
 #[test]
 fn test_cultural_displacement_progress_accumulates() {
     // Verify cultural displacement progress accumulates when there's a big power gap
