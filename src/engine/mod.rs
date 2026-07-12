@@ -229,6 +229,12 @@ pub fn tick(
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
+    // Phase 1b: Sustained external pressure erodes cohesion. Sits after the content
+    // auto_deltas (so it erodes the tick's settled value) and before phase_interactions
+    // (so a combat cohesion_loss of the same tick lands on top of the eroded value, not
+    // under it). An added phase, not a reordering of existing ones.
+    phase_pressure_erosion(world);
+
     // Phase 2: Region rank bonuses (fixed deltas, legitimacy floor)
     phase_region_ranks(world, scenario);
 
@@ -320,6 +326,14 @@ fn check_auto_delta_condition_scoped(world: &WorldState, cond: &crate::core::Del
         crate::core::ComparisonOperator::GreaterOrEqual => value >= cond.value,
         crate::core::ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
     }
+}
+
+// ============================================================================
+// Phase 1b: Pressure erosion
+// ============================================================================
+
+fn phase_pressure_erosion(world: &mut WorldState) {
+    interactions::apply_pressure_erosion(world);
 }
 
 // ============================================================================
@@ -1888,6 +1902,10 @@ mod tests {
         // Weak actor sitting inside the danger band, strong healthy neighbour.
         world.actors.insert("small".into(), vassalage_actor("small", 10.0, 78.0, 18.0, 22.0, &["big"]));
         world.actors.insert("big".into(), vassalage_actor("big", 100.0, 30.0, 60.0, 60.0, &["small"]));
+        // The band's pressure member is a sustained *state*, not an instant window: it
+        // reads the counter that `apply_pressure_erosion` maintains, and these tests
+        // drive `check_vassalage` directly, so seed it.
+        world.pressure_ticks.insert("small".into(), interactions::PRESSURE_TICKS_REQUIRED);
         let mut log = EventLog::new();
 
         // Needs 3 consecutive ticks in band before forming.
@@ -1927,6 +1945,7 @@ mod tests {
         world.actors.insert("lord".into(), vassalage_actor("lord", 200.0, 30.0, 60.0, 60.0, &["v"]));
         // "v" is already a vassal of a healthy "lord", so it stays bound.
         world.vassalages.push(crate::core::Vassalage { vassal_id: "v".into(), overlord_id: "lord".into(), formed_tick: 0 });
+        world.pressure_ticks.insert("small".into(), interactions::PRESSURE_TICKS_REQUIRED);
         let mut log = EventLog::new();
 
         for _ in 0..3 {
@@ -1961,9 +1980,11 @@ mod tests {
         // metrics together), not merely one slipped metric.
         world.actors.get_mut("small").unwrap().set_metric("military_size", 5.0);
         world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "big".into(), formed_tick: 0 });
-        // Only external_pressure in band — legitimacy/cohesion still healthy: must NOT revolt.
-        let big = world.actors.get_mut("big").unwrap();
-        big.set_metric("external_pressure", 75.0);
+        // Only the pressure member satisfied — legitimacy/cohesion still healthy: must
+        // NOT revolt. (Pressure is now a sustained state, so this is the counter, not a
+        // metric window.)
+        world.actors.get_mut("big").unwrap().set_metric("external_pressure", 75.0);
+        world.pressure_ticks.insert("big".into(), interactions::PRESSURE_TICKS_REQUIRED);
         interactions::check_vassalage(&mut world, &mut log);
         assert_eq!(world.vassalages.len(), 1, "single slipped metric must not free the vassal");
         // Now drive legitimacy and cohesion into band too → full band → revolt.

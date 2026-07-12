@@ -93,6 +93,12 @@ pub struct WorldState {
     /// vassal after 3 consecutive ticks in the band.
     #[serde(default)]
     pub vassalage_warning_ticks: HashMap<String, u32>,
+    /// Sustained-pressure counter — consecutive ticks an actor has held
+    /// `external_pressure >= PRESSURE_THRESHOLD`. Drives `phase_pressure_erosion`
+    /// and the pressure member of the vassalage band, which is a *state* (pressure
+    /// held N ticks), not an instantaneous window.
+    #[serde(default)]
+    pub pressure_ticks: HashMap<String, u32>,
     pub milestone_events_fired: Vec<String>,
     pub milestone_condition_ticks: HashMap<String, u32>, // Tracks how many consecutive ticks a milestone condition has been met
     /// Global scenario metrics (e.g. federation_progress). Family metrics live in family_state.
@@ -168,6 +174,7 @@ impl WorldState {
             alliances: Vec::new(),
             vassalages: Vec::new(),
             vassalage_warning_ticks: HashMap::new(),
+            pressure_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             global_metrics: HashMap::new(),
@@ -210,6 +217,7 @@ impl WorldState {
             alliances: Vec::new(),
             vassalages: Vec::new(),
             vassalage_warning_ticks: HashMap::new(),
+            pressure_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),
             milestone_condition_ticks: HashMap::new(),
             global_metrics: HashMap::new(),

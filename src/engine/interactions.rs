@@ -781,15 +781,90 @@ fn calculate_cultural_interaction(
 // Vassalage
 // ============================================================================
 
+/// External pressure at or above which an actor counts as "under pressure" for both
+/// `apply_pressure_erosion` and the pressure member of the vassalage band.
+pub const PRESSURE_THRESHOLD: f64 = 70.0;
+
+/// Consecutive ticks of sustained pressure required before it starts eroding cohesion
+/// (and before the pressure member of the vassalage band opens). Derived from the
+/// measured 70→85 transit (5/8/1.5 ticks, max 16): N=10 means the trigger answers to a
+/// *sustained* state, not to a spike passing through.
+pub const PRESSURE_TICKS_REQUIRED: u32 = 10;
+
+/// Floor that pressure erosion drives cohesion towards — the midpoint of the band's own
+/// cohesion window (15–30). Pressure alone can therefore never push cohesion into the
+/// `classic_collapse` gate (`cohesion < 15`): submission is the outcome of pressure,
+/// death is the outcome of violence.
+pub const COHESION_FLOOR: f64 = 22.5;
+
+/// Per-tick fraction of the distance to `COHESION_FLOOR` removed by sustained pressure.
+/// Sized so the resulting equilibrium (`COHESION_FLOOR + drift/r`) lands inside the
+/// band's cohesion window against the worst measured natural drift (+1.53/tick).
+pub const EROSION_RATE: f64 = 0.25;
+
+/// Sustained pressure erodes cohesion (see `engine::phase_pressure_erosion`).
+///
+/// Cohesion is the one band metric with no downward force left in the engine: it was
+/// only ever pushed down by a defender's `cohesion_loss` in combat, and the phantom-fight
+/// guard legitimately removed most of those fights. Without this law the third band gate
+/// hangs on a metric that nothing can lower, and the band is unreachable by construction.
+///
+/// The law makes pressure the *cause* of weakness instead of its co-occupant: hold
+/// `external_pressure >= PRESSURE_THRESHOLD` for `PRESSURE_TICKS_REQUIRED` consecutive
+/// ticks and cohesion decays towards `COHESION_FLOOR`, proportionally to the distance
+/// remaining. Self-limiting: the pull is zero at the floor and `max(0.0, ..)` keeps it
+/// from *healing* an actor already below it. Combat is still free to push cohesion under
+/// the floor — erosion simply stops helping, it never subtracts upwards.
+///
+/// Skips actors that are already vassals: submission is the *answer* to pressure, so a
+/// vassal that kept eroding would make vassalage a death sentence with a title rather
+/// than an alternative to disintegration.
+///
+/// Consumes no RNG.
+pub fn apply_pressure_erosion(world: &mut WorldState) {
+    let vassal_ids: std::collections::HashSet<String> =
+        world.vassalages.iter().map(|v| v.vassal_id.clone()).collect();
+
+    for (actor_id, actor) in world.actors.iter_mut() {
+        if actor.get_metric("external_pressure") < PRESSURE_THRESHOLD {
+            world.pressure_ticks.remove(actor_id);
+            continue;
+        }
+        let counter = world.pressure_ticks.entry(actor_id.clone()).or_insert(0);
+        *counter += 1;
+        if *counter < PRESSURE_TICKS_REQUIRED || vassal_ids.contains(actor_id) {
+            continue;
+        }
+        let coh = actor.get_metric("cohesion");
+        let erosion = EROSION_RATE * (coh - COHESION_FLOOR).max(0.0);
+        if erosion > 0.0 {
+            actor.add_metric("cohesion", -erosion);
+        }
+    }
+}
+
 /// The vassalage danger band — an actor that is seriously pressured but not yet
-/// collapsing. Deliberately sits strictly *above* the collapse thresholds
-/// (`legitimacy < 10`, `cohesion < 15`, `external_pressure > 85`): an actor in this
+/// collapsing. The `legitimacy` (10–25) and `cohesion` (15–30) members sit strictly
+/// *above* the collapse thresholds (`legitimacy < 10`, `cohesion < 15`): an actor in this
 /// band is a candidate to submit to a stronger neighbour rather than disintegrate.
-fn in_vassalage_band(actor: &crate::core::Actor) -> bool {
-    let ep = actor.get_metric("external_pressure");
+///
+/// The pressure member is a **state, not an instantaneous window**: pressure held at
+/// `PRESSURE_THRESHOLD` for `PRESSURE_TICKS_REQUIRED` consecutive ticks. The old
+/// `70..=85` window could not work — `external_pressure` is a fast early variable that
+/// crosses it in 1.5–8 ticks and then saturates at 100, so it had left the window ~60
+/// ticks before `legitimacy` ever entered its own. There is deliberately no ceiling:
+/// once pressure is the *cause* of the weakness (`apply_pressure_erosion`), `ep > 85` is
+/// no longer a disqualification from submitting — it is the reason for it.
+fn in_vassalage_band(
+    actor: &crate::core::Actor,
+    pressure_ticks: &std::collections::HashMap<String, u32>,
+) -> bool {
     let leg = actor.get_metric("legitimacy");
     let coh = actor.get_metric("cohesion");
-    (70.0..=85.0).contains(&ep) && (10.0..=25.0).contains(&leg) && (15.0..=30.0).contains(&coh)
+    let under_pressure = pressure_ticks
+        .get(&actor.id)
+        .is_some_and(|t| *t >= PRESSURE_TICKS_REQUIRED);
+    under_pressure && (10.0..=25.0).contains(&leg) && (15.0..=30.0).contains(&coh)
 }
 
 /// Vassalage formation, dissolution (revolt) and cleanup. Runs parallel to
@@ -800,7 +875,8 @@ fn in_vassalage_band(actor: &crate::core::Actor) -> bool {
 /// 2. Dissolve (revolt) where the vassal's military has caught up to the overlord's
 ///    (`vassal_mil >= overlord_mil * 0.8`, the `cultural_power` comparison shape) OR
 ///    the overlord has itself entered the full vassalage band (`in_vassalage_band`:
-///    external_pressure 70–85 AND legitimacy 10–25 AND cohesion 15–30).
+///    pressure sustained for `PRESSURE_TICKS_REQUIRED` ticks AND legitimacy 10–25 AND
+///    cohesion 15–30).
 /// 3. Form new relationships for actors that have spent 3 consecutive ticks in the
 ///    band, submitting to the neighbour projecting the most military pressure.
 ///
@@ -832,7 +908,9 @@ pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
         // (external_pressure 70–85, legitimacy 10–25, cohesion 15–30), i.e. the
         // overlord has become as weak as something that would itself submit — not a
         // single slipped metric.
-        let overlord_in_band = overlord.map(in_vassalage_band).unwrap_or(false);
+        let overlord_in_band = overlord
+            .map(|o| in_vassalage_band(o, &world.pressure_ticks))
+            .unwrap_or(false);
 
         let vassal_strong_enough = vassal_mil >= overlord_mil * 0.8;
         if vassal_strong_enough || overlord_in_band {
@@ -875,7 +953,11 @@ pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
 
     for actor_id in &actor_ids {
         // Update the band counter for every actor each tick.
-        let in_band = world.actors.get(actor_id).map(in_vassalage_band).unwrap_or(false);
+        let in_band = world
+            .actors
+            .get(actor_id)
+            .map(|a| in_vassalage_band(a, &world.pressure_ticks))
+            .unwrap_or(false);
         if !in_band {
             world.vassalage_warning_ticks.remove(actor_id);
             continue;
