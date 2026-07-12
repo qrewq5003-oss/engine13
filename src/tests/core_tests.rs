@@ -770,6 +770,85 @@ fn test_validate_dependencies_valid_rules_ok() {
 }
 
 #[test]
+fn test_validate_scenario_rejects_actor_relative_key_without_actor_prefix() {
+    // The shape behind every metric-scoping bug in this project (#19, #20, and the
+    // narrative key_metrics): an actor-relative key written without its `actor:` prefix.
+    // `MetricRef::parse` resolves it to a Global key nothing reads or writes, so the
+    // condition reads 0.0 and the effect goes nowhere — silently, forever.
+    let mut scenario = registry::load_by_id("constantinople_1430").unwrap();
+    assert!(
+        registry::validate_scenario(&scenario).is_ok(),
+        "baseline constantinople_1430 should be valid"
+    );
+
+    scenario
+        .narrative_config
+        .key_metrics
+        .push("byzantium.legitimacy".to_string());
+
+    let errors = registry::validate_scenario(&scenario)
+        .expect_err("a Global key containing '.' must be rejected at load");
+    assert!(
+        errors.iter().any(|e| e.contains("byzantium.legitimacy")),
+        "validation should name the offending key, got: {:?}",
+        errors
+    );
+
+    // The other shape: a bare actor id used where a metric was meant.
+    let mut scenario = registry::load_by_id("constantinople_1430").unwrap();
+    scenario.narrative_config.key_metrics.push("ottomans".to_string());
+    let errors = registry::validate_scenario(&scenario)
+        .expect_err("a Global key that is an actor id must be rejected at load");
+    assert!(
+        errors.iter().any(|e| e.contains("ottomans")),
+        "validation should name the offending key, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_narrative_key_metrics_actually_resolve() {
+    // The chronicler's prompt is built from `narrative_config.key_metrics`, and until
+    // this fix 13 of the 16 keys across the three scenarios resolved to 0.0: the content
+    // wrote actor-relative keys without the `actor:` prefix, and `llm/mod.rs` re-derived
+    // the parse rules by hand and looked the *prefixed* string up in the target map.
+    // Nothing read these values back, so nothing ever complained.
+    for scenario_id in ["constantinople_1430", "milan_1477"] {
+        let scenario = registry::load_by_id(scenario_id).unwrap();
+        let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+        for actor in &scenario.actors {
+            if !actor.is_successor_template {
+                world.actors.insert(actor.id.clone(), actor.clone());
+            }
+        }
+
+        let event_log = crate::engine::EventLog::new();
+        let snapshot = crate::llm::build_snapshot(&world, &scenario, &event_log);
+
+        let mut checked = 0;
+        for key in &scenario.narrative_config.key_metrics {
+            let value = snapshot.key_metrics.get(key).copied().unwrap_or(0.0);
+            // Every actor-scoped key in these two scenarios starts non-zero
+            // (legitimacy, cohesion, external_pressure, military_size).
+            if key.starts_with("actor:") {
+                checked += 1;
+                assert!(
+                    value > 0.0,
+                    "{scenario_id}: key_metric '{key}' resolved to {value} — \
+                     the chronicler is being handed a dead metric"
+                );
+            }
+        }
+        // Without this the test passes vacuously if the prefixes are ever dropped again —
+        // which is precisely the regression it exists to catch.
+        assert!(
+            checked >= 4,
+            "{scenario_id}: expected at least 4 actor-scoped key_metrics, checked {checked}"
+        );
+    }
+}
+
+#[test]
 fn test_validate_scenario_catches_missing_threshold_centrally() {
     use crate::core::DependencyMode;
     // D4: threshold validation is centralized in the load choke point

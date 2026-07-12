@@ -267,10 +267,10 @@ pub fn load_constantinople_1430() -> Scenario {
         narrative_config: crate::core::NarrativeConfig {
             key_metrics: vec![
                 "federation_progress".to_string(),
-                "byzantium.external_pressure".to_string(),
-                "byzantium.legitimacy".to_string(),
-                "byzantium.cohesion".to_string(),
-                "ottomans.military_size".to_string(),
+                "actor:byzantium.external_pressure".to_string(),
+                "actor:byzantium.legitimacy".to_string(),
+                "actor:byzantium.cohesion".to_string(),
+                "actor:ottomans.military_size".to_string(),
             ],
             narrative_axes: vec![
                 "survival vs surrender".to_string(),
