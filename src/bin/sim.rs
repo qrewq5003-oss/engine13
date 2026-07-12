@@ -1081,7 +1081,7 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
                 }
                 let cost = scenario.patron_actions.iter()
                     .find(|a| a.id == *action_id)
-                    .and_then(|a| a.cost.get("actor:milan.treasury"))
+                    .and_then(|a| a.cost.get(&engine13::core::MetricRef::literal("actor:milan.treasury")))
                     .map(|c| -c) // cost values are negative deltas
                     .unwrap_or(f64::MAX);
                 if cost > surplus {

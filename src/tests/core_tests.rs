@@ -4,11 +4,10 @@ use rand::SeedableRng;
 
 #[test]
 fn test_metric_ref_parse_actor() {
-    let mr = MetricRef::parse("actor:venice.treasury");
-    match mr {
+    match MetricRef::parse("actor:venice.treasury").unwrap() {
         MetricRef::Actor { actor_id, metric } => {
-            assert_eq!(actor_id, "venice");
-            assert_eq!(metric, "treasury");
+            assert_eq!(actor_id.as_str(), "venice");
+            assert_eq!(metric.as_str(), "treasury");
         }
         _ => panic!("Expected Actor variant"),
     }
@@ -16,78 +15,112 @@ fn test_metric_ref_parse_actor() {
 
 #[test]
 fn test_metric_ref_parse_family() {
-    let mr = MetricRef::parse("family:family_influence");
-    match mr {
-        MetricRef::Family { key } => {
-            assert_eq!(key, "family_influence");
-        }
+    match MetricRef::parse("family:family_influence").unwrap() {
+        MetricRef::Family { key } => assert_eq!(key.as_str(), "family_influence"),
         _ => panic!("Expected Family variant"),
     }
 }
 
 #[test]
 fn test_metric_ref_parse_global() {
-    let mr = MetricRef::parse("global:federation_progress");
-    match mr {
-        MetricRef::Global { key } => {
-            assert_eq!(key, "federation_progress");
-        }
+    match MetricRef::parse("global:federation_progress").unwrap() {
+        MetricRef::Global { key } => assert_eq!(key.as_str(), "federation_progress"),
         _ => panic!("Expected Global variant"),
     }
 }
 
+/// The phantom-global shape — the single defect behind #19, #20 and the narrative
+/// `key_metrics` — is no longer *representable*. It used to parse happily into a
+/// `Global` ref at a key nothing reads or writes, and stay silent forever.
 #[test]
-fn test_parse_scoped_bare_metric_resolves_to_actor() {
+fn test_dotted_unprefixed_key_is_rejected() {
+    assert!(MetricRef::parse("rome.cohesion").is_err());
+    assert!(MetricRef::parse("venice.legitimacy").is_err());
+    // A bare `actor:` key with no metric used to degrade to a Global too.
+    assert!(MetricRef::parse("actor:rome").is_err());
+    // And a prefix cannot be smuggled into a bare metric name.
+    assert!(crate::core::MetricName::new("global:x").is_err());
+    assert!(crate::core::MetricName::new("rome.cohesion").is_err());
+}
+
+/// Serialization is the canonical string, not a tagged enum. `WorldState` embeds
+/// `MetricDisplay` and `GenerationMechanics`, so these keys travel inside the save
+/// file and the frontend payload; a tagged enum would break both.
+#[test]
+fn test_metric_ref_serializes_as_canonical_string() {
+    let r = MetricRef::literal("actor:rome.cohesion");
+    assert_eq!(serde_json::to_string(&r).unwrap(), "\"actor:rome.cohesion\"");
+    assert_eq!(r.to_string(), "actor:rome.cohesion");
+
+    // A bare global key round-trips to its canonical, prefixed form.
+    let g = MetricRef::literal("federation_progress");
+    assert_eq!(serde_json::to_string(&g).unwrap(), "\"global:federation_progress\"");
+
+    // ...and deserializing either spelling yields the same ref.
+    let from_bare: MetricRef = serde_json::from_str("\"federation_progress\"").unwrap();
+    let from_canon: MetricRef = serde_json::from_str("\"global:federation_progress\"").unwrap();
+    assert_eq!(from_bare, from_canon);
+
+    // A malformed key fails at deserialization, not later.
+    assert!(serde_json::from_str::<MetricRef>("\"rome.cohesion\"").is_err());
+}
+
+#[test]
+fn test_resolve_at_load_bare_metric_resolves_to_actor() {
     // The regression this guards: a bare key next to an actor context used to be
-    // concatenated into "rome.cohesion", which `parse` reads as a Global key that
+    // concatenated into "rome.cohesion", which `parse` read as a Global key that
     // nothing else touches, so the delta never reached the actor.
-    match MetricRef::parse_scoped("cohesion", Some("rome")) {
+    match crate::core::resolve_at_load("cohesion", Some("rome")).unwrap() {
         MetricRef::Actor { actor_id, metric } => {
-            assert_eq!(actor_id, "rome");
-            assert_eq!(metric, "cohesion");
+            assert_eq!(actor_id.as_str(), "rome");
+            assert_eq!(metric.as_str(), "cohesion");
         }
         other => panic!("Expected Actor variant, got {:?}", other),
     }
 }
 
+/// `self.` names the *runtime* target of a random event, which does not exist at
+/// load — the target is chosen by an RNG draw during the tick. It therefore stays a
+/// template until it is bound, and the type says so.
 #[test]
-fn test_parse_scoped_self_prefix_resolves_to_target_actor() {
-    // Random events name their target actor as `self.`. This used to be rewritten
-    // to "venice.population", which `parse` reads as a Global key — so conditions
-    // read 0.0 and effects were swallowed.
-    match MetricRef::parse_scoped("self.population", Some("venice")) {
+fn test_relative_metric_ref_self_binds_to_target() {
+    let r = crate::core::RelativeMetricRef::literal("self.population");
+    match r.resolve("venice").unwrap() {
         MetricRef::Actor { actor_id, metric } => {
-            assert_eq!(actor_id, "venice");
-            assert_eq!(metric, "population");
+            assert_eq!(actor_id.as_str(), "venice");
+            assert_eq!(metric.as_str(), "population");
         }
         other => panic!("Expected Actor variant, got {:?}", other),
     }
+    // An absolute key ignores the target.
+    let abs = crate::core::RelativeMetricRef::literal("actor:ottomans.military_size");
+    assert_eq!(abs.resolve("venice").unwrap(), MetricRef::literal("actor:ottomans.military_size"));
 }
 
 #[test]
-fn test_parse_scoped_bare_metric_without_actor_stays_global() {
-    match MetricRef::parse_scoped("federation_progress", None) {
-        MetricRef::Global { key } => assert_eq!(key, "federation_progress"),
+fn test_resolve_at_load_bare_metric_without_actor_stays_global() {
+    match crate::core::resolve_at_load("federation_progress", None).unwrap() {
+        MetricRef::Global { key } => assert_eq!(key.as_str(), "federation_progress"),
         other => panic!("Expected Global variant, got {:?}", other),
     }
 }
 
 #[test]
-fn test_parse_scoped_explicit_prefix_wins_over_actor_scope() {
+fn test_resolve_at_load_explicit_prefix_wins_over_actor_scope() {
     // An actor-scoped auto_delta may still gate on a global or another actor.
-    match MetricRef::parse_scoped("global:federation_progress", Some("byzantium")) {
-        MetricRef::Global { key } => assert_eq!(key, "federation_progress"),
+    match crate::core::resolve_at_load("global:federation_progress", Some("byzantium")).unwrap() {
+        MetricRef::Global { key } => assert_eq!(key.as_str(), "federation_progress"),
         other => panic!("Expected Global variant, got {:?}", other),
     }
-    match MetricRef::parse_scoped("actor:ottomans.military_size", Some("byzantium")) {
+    match crate::core::resolve_at_load("actor:ottomans.military_size", Some("byzantium")).unwrap() {
         MetricRef::Actor { actor_id, metric } => {
-            assert_eq!(actor_id, "ottomans");
-            assert_eq!(metric, "military_size");
+            assert_eq!(actor_id.as_str(), "ottomans");
+            assert_eq!(metric.as_str(), "military_size");
         }
         other => panic!("Expected Actor variant, got {:?}", other),
     }
-    match MetricRef::parse_scoped("family:family_influence", Some("rome")) {
-        MetricRef::Family { key } => assert_eq!(key, "family_influence"),
+    match crate::core::resolve_at_load("family:family_influence", Some("rome")).unwrap() {
+        MetricRef::Family { key } => assert_eq!(key.as_str(), "family_influence"),
         other => panic!("Expected Family variant, got {:?}", other),
     }
 }
@@ -105,9 +138,9 @@ fn test_metric_ref_apply_actor_treasury() {
         }
     }
 
-    let before = MetricRef::parse("actor:venice.treasury").get(&world);
-    MetricRef::parse("actor:venice.treasury").apply(&mut world, -100.0);
-    let after = MetricRef::parse("actor:venice.treasury").get(&world);
+    let before = MetricRef::literal("actor:venice.treasury").get(&world);
+    MetricRef::literal("actor:venice.treasury").apply(&mut world, -100.0);
+    let after = MetricRef::literal("actor:venice.treasury").get(&world);
 
     // Treasury can go negative
     assert_eq!(after, before - 100.0);
@@ -128,8 +161,8 @@ fn test_metric_ref_apply_actor_treasury_negative() {
         }
     }
 
-    MetricRef::parse("actor:venice.treasury").apply(&mut world, -100.0);
-    let after = MetricRef::parse("actor:venice.treasury").get(&world);
+    MetricRef::literal("actor:venice.treasury").apply(&mut world, -100.0);
+    let after = MetricRef::literal("actor:venice.treasury").get(&world);
 
     // Treasury can go negative (debts)
     assert_eq!(after, -50.0);
@@ -141,8 +174,8 @@ fn test_metric_ref_apply_global_clamped() {
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
     
     // Global metrics should clamp to 0-100
-    MetricRef::parse("federation_progress").apply(&mut world, 150.0);
-    let value = MetricRef::parse("federation_progress").get(&world);
+    MetricRef::literal("federation_progress").apply(&mut world, 150.0);
+    let value = MetricRef::literal("federation_progress").get(&world);
     
     assert_eq!(value, 100.0);
 }
@@ -161,8 +194,8 @@ fn test_metric_ref_apply_legitimacy_clamped() {
     }
     
     // Legitimacy should clamp to 0-100
-    MetricRef::parse("venice.legitimacy").apply(&mut world, 200.0);
-    let value = MetricRef::parse("venice.legitimacy").get(&world);
+    MetricRef::literal("actor:venice.legitimacy").apply(&mut world, 200.0);
+    let value = MetricRef::literal("actor:venice.legitimacy").get(&world);
     
     assert!(value <= 100.0);
     assert_eq!(value, 100.0);
@@ -183,8 +216,8 @@ fn test_metric_ref_apply_military_size_min_zero() {
         }
     }
     
-    MetricRef::parse("venice.military_size").apply(&mut world, -50.0);
-    let value = MetricRef::parse("venice.military_size").get(&world);
+    MetricRef::literal("actor:venice.military_size").apply(&mut world, -50.0);
+    let value = MetricRef::literal("actor:venice.military_size").get(&world);
 
     // military_size should not go below 0
     assert_eq!(value, 0.0);
@@ -227,7 +260,7 @@ fn test_global_metrics_display_configured() {
     assert!(!scenario.global_metrics_display.is_empty(), "Constantinople should have global metrics display");
     
     let fed_display = scenario.global_metrics_display.iter()
-        .find(|m| m.metric.contains("federation_progress"));
+        .find(|m| m.metric.to_string().contains("federation_progress"));
     assert!(fed_display.is_some(), "Should have federation_progress display config");
     
     let fed_display = fed_display.unwrap();
@@ -494,7 +527,7 @@ fn test_actor_tags_populated_after_load() {
 
     // Check that trade_networks has metrics_modifier (economic tags retain modifiers)
     let trade = rome.actor_tags.get("trade_networks").unwrap();
-    assert!(trade.metrics_modifier.contains_key("economic_output"), "trade_networks should modify economic_output");
+    assert!(trade.metrics_modifier.contains_key(&crate::core::MetricName::new("economic_output").unwrap()), "trade_networks should modify economic_output");
 }
 
 #[test]
@@ -729,8 +762,8 @@ fn test_cultural_displacement_progress_accumulates() {
 fn dep_rule(id: &str, mode: crate::core::DependencyMode, threshold: Option<f64>) -> crate::core::DependencyRule {
     crate::core::DependencyRule {
         id: id.to_string(),
-        from: "legitimacy".to_string(),
-        to: "cohesion".to_string(),
+        from: crate::core::MetricName::new("legitimacy").unwrap(),
+        to: crate::core::MetricName::new("cohesion").unwrap(),
         coefficient: 1.0,
         threshold,
         mode,
@@ -773,35 +806,43 @@ fn test_validate_dependencies_valid_rules_ok() {
 fn test_validate_scenario_rejects_actor_relative_key_without_actor_prefix() {
     // The shape behind every metric-scoping bug in this project (#19, #20, and the
     // narrative key_metrics): an actor-relative key written without its `actor:` prefix.
-    // `MetricRef::parse` resolves it to a Global key nothing reads or writes, so the
-    // condition reads 0.0 and the effect goes nowhere — silently, forever.
+    //
+    // It is no longer *constructible*: `key_metrics` is `Vec<MetricRef>`, and a
+    // dotted bare key cannot become a `MetricRef` at all — the guard moved from a
+    // late `validate_scenario` pass into the type (see
+    // `test_dotted_unprefixed_key_is_rejected`). What `validate_scenario` still owns
+    // is the half a type cannot know: whether the actor a key names exists here.
     let mut scenario = registry::load_by_id("constantinople_1430").unwrap();
     assert!(
         registry::validate_scenario(&scenario).is_ok(),
         "baseline constantinople_1430 should be valid"
     );
 
+    // A well-formed global key that is really an actor id — a shape the type accepts
+    // and only the scenario's actor list can reject.
     scenario
         .narrative_config
         .key_metrics
-        .push("byzantium.legitimacy".to_string());
-
-    let errors = registry::validate_scenario(&scenario)
-        .expect_err("a Global key containing '.' must be rejected at load");
-    assert!(
-        errors.iter().any(|e| e.contains("byzantium.legitimacy")),
-        "validation should name the offending key, got: {:?}",
-        errors
-    );
-
-    // The other shape: a bare actor id used where a metric was meant.
-    let mut scenario = registry::load_by_id("constantinople_1430").unwrap();
-    scenario.narrative_config.key_metrics.push("ottomans".to_string());
+        .push(MetricRef::literal("ottomans"));
     let errors = registry::validate_scenario(&scenario)
         .expect_err("a Global key that is an actor id must be rejected at load");
     assert!(
         errors.iter().any(|e| e.contains("ottomans")),
         "validation should name the offending key, got: {:?}",
+        errors
+    );
+
+    // An `actor:` key naming an actor that does not exist in this scenario.
+    let mut scenario = registry::load_by_id("constantinople_1430").unwrap();
+    scenario
+        .narrative_config
+        .key_metrics
+        .push(MetricRef::literal("actor:atlantis.cohesion"));
+    let errors = registry::validate_scenario(&scenario)
+        .expect_err("an unknown actor id must be rejected at load");
+    assert!(
+        errors.iter().any(|e| e.contains("atlantis")),
+        "validation should name the unknown actor, got: {:?}",
         errors
     );
 }
@@ -827,10 +868,10 @@ fn test_narrative_key_metrics_actually_resolve() {
 
         let mut checked = 0;
         for key in &scenario.narrative_config.key_metrics {
-            let value = snapshot.key_metrics.get(key).copied().unwrap_or(0.0);
+            let value = snapshot.key_metrics.get(&key.to_string()).copied().unwrap_or(0.0);
             // Every actor-scoped key in these two scenarios starts non-zero
             // (legitimacy, cohesion, external_pressure, military_size).
-            if key.starts_with("actor:") {
+            if matches!(key, MetricRef::Actor { .. }) {
                 checked += 1;
                 assert!(
                     value > 0.0,
@@ -875,4 +916,71 @@ fn test_validate_scenario_catches_missing_threshold_centrally() {
         "central validation should name the offending rule, got: {:?}",
         errors
     );
+}
+
+// ============================================================================
+// Задача 13: a malformed metric key must fail at TOML load, not at a later pass
+// ============================================================================
+
+#[derive(Debug, serde::Deserialize)]
+struct AutoDeltasFileForTest {
+    #[allow(dead_code)]
+    auto_deltas: Vec<crate::core::AutoDelta>,
+}
+
+/// A corrupted key is rejected by `Deserialize` — i.e. the scenario **does not
+/// load at all** — rather than loading fine and failing a separate
+/// `validate_scenario` pass afterwards (or, as before this task, loading fine and
+/// silently reading 0.0 forever).
+#[test]
+fn test_malformed_metric_key_fails_at_toml_deserialization() {
+    // Valid: a bare key next to an actor_id is actor-relative.
+    let ok = r#"
+[[auto_deltas]]
+metric = "cohesion"
+base = -0.1
+noise = 0.0
+actor_id = "rome"
+"#;
+    assert!(toml::from_str::<AutoDeltasFileForTest>(ok).is_ok());
+
+    // The phantom shape: a dotted, unprefixed key. This is the exact string that
+    // silently created a global nothing reads or writes (#19, #20).
+    let phantom = r#"
+[[auto_deltas]]
+metric = "rome.cohesion"
+base = -0.1
+noise = 0.0
+actor_id = "rome"
+"#;
+    let err = toml::from_str::<AutoDeltasFileForTest>(phantom)
+        .expect_err("a dotted unprefixed key must not deserialize");
+    assert!(
+        err.to_string().contains("rome.cohesion"),
+        "the TOML error must name the offending key, got: {err}"
+    );
+
+    // A truncated actor key used to degrade into a Global too.
+    let truncated = r#"
+[[auto_deltas]]
+metric = "actor:rome"
+base = -0.1
+noise = 0.0
+"#;
+    assert!(toml::from_str::<AutoDeltasFileForTest>(truncated).is_err());
+
+    // A nested condition key is checked just as hard as the top-level one.
+    let bad_condition = r#"
+[[auto_deltas]]
+metric = "cohesion"
+base = -0.1
+noise = 0.0
+actor_id = "rome"
+[[auto_deltas.conditions]]
+metric = "rome.legitimacy"
+operator = "less"
+value = 30.0
+delta = -0.2
+"#;
+    assert!(toml::from_str::<AutoDeltasFileForTest>(bad_condition).is_err());
 }

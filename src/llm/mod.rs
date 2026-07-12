@@ -254,8 +254,8 @@ pub fn build_snapshot(
         // ("family:family_influence" in family_state.metrics, "global:federation_progress"
         // in global_metrics), while MetricRef strips the prefix before storing. Every
         // family: and global: key in the chronicler's prompt was therefore 0.0.
-        let value = crate::core::MetricRef::parse(metric_key).get(world);
-        key_metrics.insert(metric_key.clone(), value);
+        let value = metric_key.get(world);
+        key_metrics.insert(metric_key.to_string(), value);
     }
     
     // Narrative axes and tone tags from config

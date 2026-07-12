@@ -195,7 +195,7 @@ pub fn apply_interaction_rule(
             Some(a) => a,
             None => return,
         };
-        let val = actor.get_metric(&cond.metric);
+        let val = actor.get_metric(cond.metric.as_str());
         let passes = cond.operator.evaluate(val, cond.value);
         if !passes {
             return;
@@ -210,7 +210,7 @@ pub fn apply_interaction_rule(
             ConditionActor::Target => target_id.to_string(),
         };
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            actor.add_metric(&effect.metric, effect.delta);
+            actor.add_metric(effect.metric.as_str(), effect.delta);
             total_abs_delta += effect.delta.abs();
         }
     }

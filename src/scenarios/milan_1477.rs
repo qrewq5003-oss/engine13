@@ -223,11 +223,11 @@ pub fn load_milan_1477() -> Scenario {
         max_random_events_per_tick: 3,
         narrative_config: crate::core::NarrativeConfig {
             key_metrics: vec![
-                "actor:milan.legitimacy".to_string(),
-                "actor:milan.cohesion".to_string(),
-                "actor:milan.external_pressure".to_string(),
-                "actor:naples.external_pressure".to_string(),
-                "actor:naples.cohesion".to_string(),
+                crate::core::MetricRef::literal("actor:milan.legitimacy"),
+                crate::core::MetricRef::literal("actor:milan.cohesion"),
+                crate::core::MetricRef::literal("actor:milan.external_pressure"),
+                crate::core::MetricRef::literal("actor:naples.external_pressure"),
+                crate::core::MetricRef::literal("actor:naples.cohesion"),
             ],
             narrative_axes: vec![
                 "legitimacy vs force".to_string(),
@@ -850,7 +850,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "lombardy".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "actor:milan.legitimacy".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:milan.legitimacy"),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 75.0,
@@ -864,7 +864,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "veneto".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "actor:venice.economic_output".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:venice.economic_output"),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 90.0,
@@ -942,7 +942,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
     vec![
         StatusIndicator {
             label: "Регентство в Милане".to_string(),
-            metric: "actor:milan.legitimacy".to_string(),
+            metric: crate::core::MetricRef::literal("actor:milan.legitimacy"),
             invert: false,
             thresholds: vec![
                 (0.0, "на грани распада".to_string()),
@@ -953,7 +953,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Неаполь".to_string(),
-            metric: "actor:naples.external_pressure".to_string(),
+            metric: crate::core::MetricRef::literal("actor:naples.external_pressure"),
             invert: true,
             thresholds: vec![
                 (0.0, "спокоен".to_string()),
@@ -963,7 +963,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Баронская фронда".to_string(),
-            metric: "actor:naples.cohesion".to_string(),
+            metric: crate::core::MetricRef::literal("actor:naples.cohesion"),
             invert: true,
             thresholds: vec![
                 (0.0, "под контролем".to_string()),
@@ -975,7 +975,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
 }
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {
-    use crate::core::{Condition, EventTarget, RandomEvent};
+    use crate::core::{EventTarget, RandomEvent};
     use std::collections::HashMap;
 
     let mut events = Vec::new();
@@ -1009,8 +1009,22 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor(actor_id.to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                (format!("actor:{}.legitimacy", actor_id), *legitimacy_gain),
-                (format!("actor:{}.treasury", actor_id), -*treasury_cost),
+                // Built through the constructor, not `format!`: a hand-built key is
+                // exactly how an actor-relative metric loses its `actor:` prefix.
+                (
+                    crate::core::RelativeMetricRef::Absolute(
+                        crate::core::MetricRef::actor(actor_id, "legitimacy")
+                            .expect("scenario metric key"),
+                    ),
+                    *legitimacy_gain,
+                ),
+                (
+                    crate::core::RelativeMetricRef::Absolute(
+                        crate::core::MetricRef::actor(actor_id, "treasury")
+                            .expect("scenario metric key"),
+                    ),
+                    -*treasury_cost,
+                ),
             ]),
             llm_context: llm_context.to_string(),
             one_time: false,
@@ -1024,8 +1038,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         target: EventTarget::Actor("milan".to_string()),
         conditions: vec![],
         effects: HashMap::from([
-            ("actor:milan.legitimacy".to_string(), 10.0),
-            ("actor:milan.treasury".to_string(), -30.0),
+            (crate::core::RelativeMetricRef::literal("actor:milan.legitimacy"), 10.0),
+            (crate::core::RelativeMetricRef::literal("actor:milan.treasury"), -30.0),
         ]),
         llm_context: "Донато Браманте прибывает в Милан — начало новой архитектурной школы при дворе Сфорца".to_string(),
         one_time: true,
@@ -1037,8 +1051,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         target: EventTarget::Actor("florence".to_string()),
         conditions: vec![],
         effects: HashMap::from([
-            ("actor:florence.legitimacy".to_string(), 10.0),
-            ("actor:florence.treasury".to_string(), -25.0),
+            (crate::core::RelativeMetricRef::literal("actor:florence.legitimacy"), 10.0),
+            (crate::core::RelativeMetricRef::literal("actor:florence.treasury"), -25.0),
         ]),
         llm_context: "Марсилио Фичино и Платоновская академия расцветают под покровительством Медичи".to_string(),
         one_time: true,
@@ -1050,8 +1064,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         target: EventTarget::Actor("mantua".to_string()),
         conditions: vec![],
         effects: HashMap::from([
-            ("actor:mantua.legitimacy".to_string(), 12.0),
-            ("actor:mantua.treasury".to_string(), -15.0),
+            (crate::core::RelativeMetricRef::literal("actor:mantua.legitimacy"), 12.0),
+            (crate::core::RelativeMetricRef::literal("actor:mantua.treasury"), -15.0),
         ]),
         llm_context: "Андреа Мантенья завершает фрески Camera degli Sposi для Гонзага — небольшой двор Мантуи прославлен по всей Италии".to_string(),
         one_time: true,
@@ -1063,8 +1077,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         target: EventTarget::Actor("ferrara".to_string()),
         conditions: vec![],
         effects: HashMap::from([
-            ("actor:ferrara.legitimacy".to_string(), 10.0),
-            ("actor:ferrara.treasury".to_string(), -20.0),
+            (crate::core::RelativeMetricRef::literal("actor:ferrara.legitimacy"), 10.0),
+            (crate::core::RelativeMetricRef::literal("actor:ferrara.treasury"), -20.0),
         ]),
         llm_context: "Феррарский университет и двор Эсте привлекают гуманистов со всей Италии — Эрколе I укрепляет культурный престиж герцогства".to_string(),
         one_time: true,
@@ -1076,9 +1090,9 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         target: EventTarget::Actor("urbino".to_string()),
         conditions: vec![],
         effects: HashMap::from([
-            ("actor:urbino.legitimacy".to_string(), 14.0),
-            ("actor:urbino.military_quality".to_string(), 5.0),
-            ("actor:urbino.treasury".to_string(), -25.0),
+            (crate::core::RelativeMetricRef::literal("actor:urbino.legitimacy"), 14.0),
+            (crate::core::RelativeMetricRef::literal("actor:urbino.military_quality"), 5.0),
+            (crate::core::RelativeMetricRef::literal("actor:urbino.treasury"), -25.0),
         ]),
         llm_context: "Федерико да Монтефельтро завершает урбинский студиоло и собирает одну из богатейших библиотек Италии — кондотьер, ставший образцом гуманистического государя".to_string(),
         one_time: true,
@@ -1124,21 +1138,21 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         probability: 0.9,
         target: EventTarget::Actor("milan".to_string()),
         conditions: vec![
-            Condition {
-                metric: "actor:milan.military_size".to_string(),
+            crate::core::RelativeCondition {
+                metric: crate::core::RelativeMetricRef::literal("actor:milan.military_size"),
                 operator: ComparisonOperator::GreaterOrEqual,
                 value: 50.0,
             },
         ],
         effects: HashMap::from([
-            ("actor:milan.external_pressure".to_string(), 20.0),
-            ("actor:milan.legitimacy".to_string(), -12.0),
-            ("actor:milan.cohesion".to_string(), -8.0),
-            ("actor:venice.legitimacy".to_string(), 6.0),
-            ("actor:florence.legitimacy".to_string(), 6.0),
-            ("actor:naples.legitimacy".to_string(), 6.0),
-            ("actor:sicily.legitimacy".to_string(), 6.0),
-            ("actor:papacy.legitimacy".to_string(), 6.0),
+            (crate::core::RelativeMetricRef::literal("actor:milan.external_pressure"), 20.0),
+            (crate::core::RelativeMetricRef::literal("actor:milan.legitimacy"), -12.0),
+            (crate::core::RelativeMetricRef::literal("actor:milan.cohesion"), -8.0),
+            (crate::core::RelativeMetricRef::literal("actor:venice.legitimacy"), 6.0),
+            (crate::core::RelativeMetricRef::literal("actor:florence.legitimacy"), 6.0),
+            (crate::core::RelativeMetricRef::literal("actor:naples.legitimacy"), 6.0),
+            (crate::core::RelativeMetricRef::literal("actor:sicily.legitimacy"), 6.0),
+            (crate::core::RelativeMetricRef::literal("actor:papacy.legitimacy"), 6.0),
         ]),
         llm_context: "Венеция, Флоренция, Неаполь, Сицилия и Папская область заключают лигу против растущей мощи Милана — призрак 1454 года, теперь направленный против самого Милана".to_string(),
         one_time: true,
