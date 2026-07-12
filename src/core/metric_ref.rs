@@ -52,17 +52,29 @@ impl MetricRef {
     /// - explicit `global:` / `family:` / `actor:` prefix → honoured as written,
     ///   even when `actor_id` is set (an auto_delta scoped to an actor may still
     ///   read a global gate)
+    /// - `self.metric` → that metric on `actor_id` (random events name their
+    ///   target actor this way)
     /// - bare `metric` → that metric on `actor_id`; global when `actor_id` is None
     pub fn parse_scoped(s: &str, actor_id: Option<&str>) -> Self {
-        match actor_id {
-            // A bare key (no explicit prefix, no dot) is actor-relative.
-            // Dotted-but-unprefixed keys are left to `parse` rather than guessed at.
-            Some(aid) if !s.contains(':') && !s.contains('.') => MetricRef::Actor {
+        let Some(aid) = actor_id else {
+            return Self::parse(s);
+        };
+        // `self.` names the actor the caller is resolving against.
+        if let Some(metric) = s.strip_prefix("self.") {
+            return MetricRef::Actor {
+                actor_id: aid.to_string(),
+                metric: metric.to_string(),
+            };
+        }
+        // A bare key (no explicit prefix, no dot) is actor-relative.
+        // Dotted-but-unprefixed keys are left to `parse` rather than guessed at.
+        if !s.contains(':') && !s.contains('.') {
+            return MetricRef::Actor {
                 actor_id: aid.to_string(),
                 metric: s.to_string(),
-            },
-            _ => Self::parse(s),
+            };
         }
+        Self::parse(s)
     }
 
     /// Get the metric value from world_state

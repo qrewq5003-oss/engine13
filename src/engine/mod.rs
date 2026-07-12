@@ -455,8 +455,7 @@ fn phase_random_events(
         // Check conditions for each target
         for target_id in &target_ids {
             let conditions_met = event.conditions.iter().all(|cond| {
-                let metric = cond.metric.replace("self.", &format!("{}.", target_id));
-                let value = crate::core::MetricRef::parse(&metric).get(world);
+                let value = MetricRef::parse_scoped(&cond.metric, Some(target_id)).get(world);
                 cond.operator.evaluate(value, cond.value)
             });
 
@@ -466,8 +465,7 @@ fn phase_random_events(
 
             // Apply effects
             for (metric, delta) in &event.effects {
-                let resolved = metric.replace("self.", &format!("{}.", target_id));
-                crate::core::MetricRef::parse(&resolved).apply(world, *delta);
+                MetricRef::parse_scoped(metric, Some(target_id)).apply(world, *delta);
             }
 
             // Record event

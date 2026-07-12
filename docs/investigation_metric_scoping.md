@@ -1,7 +1,7 @@
 # Actor-scoped metric strings silently resolve to `global:`
 
-**Status:** PR #1 (auto_deltas, sites 1–3) — this document.
-PR #2 (common_events `self.*`, sites 4–5) — follows after this merges.
+**Status:** PR #1 (auto_deltas, sites 1–3) — merged (`09337fc`).
+PR #2 (common_events `self.*`, sites 4–5) — see "Sites 4–5" below.
 
 ---
 
@@ -130,6 +130,110 @@ Determinism is unchanged (this path is deterministic arithmetic): same seed →
 byte-identical output across separate processes, all three scenarios, seeds
 42/1/7.
 
+---
+
+# Sites 4–5 — `self.*` in random events (PR #2)
+
+Random events name their target actor as `self.`, resolved by
+`metric.replace("self.", &format!("{}.", target_id))` — which yields
+`"venice.population"`, i.e. the same phantom `Global`. Conditions read `0.0`;
+effects are swallowed. Both sites now call `MetricRef::parse_scoped`, which
+grows a `self.` arm; the string `replace` is gone.
+
+An audit of every metric string in all three scenarios' *own* `random_events`
+found **zero** bare keys (all carry an explicit `actor:`/`global:`/`family:`
+prefix), so the bare→actor rule cannot capture a string that was meant to be
+global. Only `common_events` uses `self.`.
+
+## What was actually broken — *not* "11 dormant events"
+
+The natural assumption is that the 11 common events never fired. Measured, the
+truth splits in two, because a condition reading `0.0` is not simply false:
+
+- **A `>` gate is never satisfied** (`0.0 > 50` is false) → the event **never fires**:
+  `plague`, `desertion`, `mercenary_influx`, `trade_boom`.
+- **A `<` gate is *always* satisfied** (`0.0 < 30` is true, always) → the event is
+  **degenerate**: it fires at full probability against *any* target, regardless of
+  that actor's real state, and then its effects vanish into the phantom global:
+  `famine`, `court_conspiracy`, `popular_uprising`, `charismatic_preacher`.
+- Three events are unconditional anyway (`earthquake`, `piracy`, `flood`): they
+  fired, but their effects were swallowed too.
+
+So the chronicle has been narrating *"a popular uprising shook the capital"* for
+an actor at cohesion 80, while nothing whatsoever happened mechanically. Fires
+per event, summed over seeds 42/1/7 × 200 ticks:
+
+| Event | Gate | const. before → after | rome before → after | milan before → after |
+|---|---|---|---|---|
+| `plague` | `pop > 500`, `coh < 60` | 0 → **0** | 0 → **8** | 0 → **1** |
+| `desertion` | `mil > 50`, `treas < 200` | 0 → **3** | 0 → 0 | 0 → 0 |
+| `mercenary_influx` | `treas > 300` | 0 → **20** | 0 → **8** | 0 → **23** |
+| `trade_boom` | `eco > 40` | 0 → **54** | 0 → **40** | 0 → **70** |
+| `famine` | `eco < 30` | 74 → **0** | 57 → **0** | 75 → **0** |
+| `court_conspiracy` | `leg < 60` | 61 → 38 | 60 → 68 | 73 → 21 |
+| `popular_uprising` | `coh < 30`, `leg < 40` | 49 → 3 | 46 → 1 | 57 → **0** |
+| `charismatic_preacher` | `coh < 40` | 28 → **0** | 27 → 1 | 21 → 10 |
+| `earthquake` / `flood` / `piracy` | (none) | fired; effects now land | | |
+
+The four `> `-gated events wake up. The `<`-gated ones stop firing indiscriminately
+and start tracking real actor state — `famine` (`economic_output < 30`) drops to
+zero on all three scenarios because no actor's economy actually falls that far;
+it had been firing ~70×/run purely on the `0.0` read. `desertion` stays at 0 in
+rome/milan and `plague` at 0 in constantinople for genuine reasons (treasury never
+dips below 200; population never exceeds 500 while cohesion < 60), not broken ones.
+
+## Measured effect (PR #2)
+
+Baseline "before" = `main` **after PR #1**. All three scenarios change, as expected
+— common events are shared by all of them.
+
+**Batch, 100 runs × 50 ticks, no-player:**
+
+| Scenario | random events (avg) | other |
+|---|---|---|
+| `constantinople_1430` | 73.4 → **67.3** | — |
+| `milan_1477` | 67.8 → **59.8** | — |
+| `rome_375` | 30.7 → **25.5** | military_size 336.8 → **343.6**, cohesion 71.5 → **72.5**, legitimacy 41.0 → **39.2**, family_influence 0.7 → **0.4** |
+
+Total event volume drops (the degenerate always-on `famine`/`preacher` fires
+outweigh the four newly-woken events), while Rome's military ends *higher* —
+`mercenary_influx` (+30 military) and `trade_boom` (+80 treasury) now actually pay out.
+
+**Single seed, 200 ticks:** byzantium survival, generation transitions and
+foreground shifts are unchanged; military conflicts move slightly (milan seed 42:
+449 → 439). Constantinople's `federation_progress` shifts within its existing
+range (seed 42 max 15.2 → 10.0; seed 7 max 7.8 → 12.2).
+
+**Victory regression check.** The constantinople victory gate
+(`ottomans.military_size < 40`, PR #14) was calibrated in a world where these
+events were inert, so it is the obvious thing to break. Scripted `balanced`,
+300 ticks — **still wins on all five seeds**, at ticks 65 / 55 / 54 / 59 / 48
+(was 53 / 54 / 51 / 49 / 59). Within the existing seed-to-seed spread.
+
+## Determinism (D3 re-check)
+
+Unlike the auto_delta path (deterministic arithmetic), this is RNG-consuming code,
+and these 11 events had **never** competed for RNG draws before — so every
+"byte-identical" result in the project's history (C1–D5) was obtained in a world
+where they structurally could not fire.
+
+Re-audited for new nondeterminism of the D3 class (unsorted `HashMap` iteration
+feeding an RNG draw):
+
+- `foreground_ids` (event target selection, `choose(rng)`) is **already sorted** —
+  the D3 fix is present and is what makes target choice reproducible.
+- `event.effects` is a `HashMap`, and its iteration order *does* vary per process
+  (`RandomState` is seeded per process). It is **safe**: the loop consumes no RNG,
+  and a `HashMap`'s keys are unique, so each effect writes a distinct metric —
+  application is commutative. No RNG draw depends on the order.
+- `apply_treasury` / `apply_actor_tags` iterate `world.actors` unsorted, but mutate
+  each actor independently and draw no RNG.
+
+Verified empirically rather than by argument: **5 separate processes × 3 scenarios
+× seeds 42/1/7 = 45 runs, byte-identical output hashes per (scenario, seed)**.
+Separate processes matter — `RandomState` is per-process, so an in-process repeat
+cannot detect this class of bug. Determinism holds.
+
 ## Open question (not addressed here)
 
 Five sites of one pattern in a single codebase is not a coincidence — it is a
@@ -143,5 +247,12 @@ the same class of bug can be reintroduced without touching `MetricRef` at all.
 Worth deciding later, deliberately: **should metric keys be constructed through a
 type-safe builder rather than by string concatenation**, so that "actor-relative
 key without the `actor:` prefix" becomes unrepresentable instead of being caught
-one instance per session? `parse_scoped` closes the five known sites but does not
-make the class of bug impossible — a new subsystem can still `format!` its own key.
+one instance per session? `parse_scoped` closes the six known sites but does not
+make the class of bug impossible — a new subsystem can still `format!` its own key,
+and `llm/mod.rs` still re-derives the parse rules by hand rather than calling
+`MetricRef`.
+
+Two cheap, non-structural guards worth considering in the meantime (neither is in
+these PRs): have `validate_scenario` **reject** a `Global` ref whose key contains a
+`.` or matches a known actor id (every one of these bugs produced exactly such a
+key), and make `llm/mod.rs` call `MetricRef::parse` instead of its hand-rolled copy.
