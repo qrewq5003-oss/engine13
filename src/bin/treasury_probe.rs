@@ -30,7 +30,15 @@
 //!      200 (`desertion`'s gate), the first tick each becomes true, and how many times
 //!      each flips. A gate that never flips is a constant, not a gate — that is the
 //!      whole quantitative claim of §3 of the task, and this is what tests it.
-//!   5. `military_size` MINIMUM per run, for the separate job of re-measuring whether
+//!   5. THE `POWER_CAP` WINDOW (second pass). `Actor::power_projection` reads treasury
+//!      as `min(treasury / 500, 1) * 0.20`, so the stock moves relevance scoring only
+//!      **below 500** and is a constant above it. Measured: ticks spent below the cap,
+//!      crossings in each direction (is it a threshold or a one-way door?), the stock's
+//!      value at every actual Background/Foreground transition, and a counterfactual —
+//!      would this actor's own `condition_power` / `low_power` verdict change if every
+//!      treasury in the world were saturated? A zero divergence count is proof, not
+//!      inference, that the stock cannot have moved that actor's relevance.
+//!   6. `military_size` MINIMUM per run, for the separate job of re-measuring whether
 //!      "ottomans ground to 0.00 in 27/30" still holds after PR #32 (task 18 changed
 //!      the scenario and re-measured other aggregates, not this one).
 //!
@@ -70,17 +78,97 @@ use std::collections::HashMap;
 const MERCENARY_GATE: f64 = 300.0;
 const DESERTION_GATE: f64 = 200.0;
 
+/// `Actor::power_projection`'s treasury cap (`core/actor.rs:173`). Treasury enters
+/// relevance scoring as `min(treasury / 500, 1) * 0.20`, so **below** this value the
+/// stock moves `power_projection` and above it contributes a constant 0.20. This is
+/// the live window the stock has left after the two common-event gates saturate, and
+/// measuring it is the whole point of the second pass.
+const POWER_CAP: f64 = 500.0;
+const W_MIL: f64 = 0.45;
+const W_QUALITY: f64 = 0.35;
+const W_TREASURY: f64 = 0.20;
+
 /// `apply_treasury`'s two coefficients (`engine/mod.rs:647-648`). Duplicated for the
 /// reconstruction in (2) above; the residual in (3) is what proves the duplication
 /// is faithful — a wrong constant here would show up as a constant nonzero residual.
 const INCOME_COEFF: f64 = 0.001;
 const UPKEEP_PER_UNIT: f64 = 0.8;
 
-/// Constantinople scripted priority lists, copied verbatim from
+/// `power_projection` recomputed here rather than called, so the same function can be
+/// evaluated **counterfactually** — with every actor's treasury term forced to its
+/// saturated value. Verified against `Actor::power_projection` by construction: same
+/// weights, same normalisations, same clamps (`core/actor.rs:171-188`).
+fn power_projection(mil: f64, quality: f64, treasury: f64, max_mil: f64, saturate: bool) -> f64 {
+    let mil_norm = if max_mil > 0.0 { (mil / max_mil).clamp(0.0, 1.0) } else { 0.0 };
+    let quality_norm = (quality / 100.0).clamp(0.0, 1.0);
+    let treasury_norm = if saturate {
+        1.0
+    } else {
+        (treasury / POWER_CAP).clamp(0.0, 1.0)
+    };
+    (mil_norm * W_MIL + quality_norm * W_QUALITY + treasury_norm * W_TREASURY) * 100.0
+}
+
+/// Scripted priority lists, copied verbatim from
 /// `sim.rs::ScriptedStrategy::priority_actions`. Kept as a copy rather than shared:
 /// `sim.rs` is a binary, its strategy enum is private to it, and making it public
 /// would be an engine-visible change in a task whose acceptance is byte-identical sim.
-fn priority_actions(strategy: &str) -> Vec<&'static str> {
+fn priority_actions(scenario_id: &str, strategy: &str) -> Vec<&'static str> {
+    if scenario_id == "rome_375" {
+        return match strategy {
+            "influence" | "influence_heavy" => vec![
+                "build_reputation",
+                "support_city",
+                "fund_defense",
+                "back_administration",
+                "expand_network",
+                "educate_family",
+                "invest_wealth",
+                "gather_information",
+                "lay_low",
+            ],
+            "wealth" | "wealth_heavy" => vec![
+                "lay_low",
+                "invest_wealth",
+                "gather_information",
+                "expand_network",
+                "educate_family",
+                "support_city",
+                "back_administration",
+                "build_reputation",
+                "fund_defense",
+            ],
+            _ => vec![
+                "expand_network",
+                "build_reputation",
+                "support_city",
+                "back_administration",
+                "fund_defense",
+                "lay_low",
+                "invest_wealth",
+                "gather_information",
+                "educate_family",
+            ],
+        };
+    }
+    if scenario_id == "milan_1477" {
+        return vec![
+            "milan_raise_troops",
+            "milan_pressure_genoa",
+            "incite_baronial_revolt",
+            "milan_hire_condottieri",
+            "milan_hire_urbino_condottieri",
+            "milan_lease_genoese_fleet",
+            "milan_banking_deal_florence",
+            "milan_bribe_curia",
+            "milan_court_patronage",
+            "milan_diplomacy_ferrara",
+            "milan_marriage_venice",
+            "milan_marriage_naples",
+            "call_papal_arbitration",
+            "milan_savoy_alliance",
+        ];
+    }
     match strategy {
         "diplomacy" | "diplomatic" => vec![
             "venice_diplomacy",
@@ -137,6 +225,16 @@ struct ActorTrace {
     mil_min: f64,
     mil_final: f64,
     spawned: bool,
+    // --- POWER_CAP window (second pass) --------------------------------------
+    below_cap: u32,
+    first_below_cap: Option<u32>,
+    first_at_cap: Option<u32>,
+    cap_up: u32,
+    cap_down: u32,
+    prev_at_cap: Option<bool>,
+    /// actor-ticks where the actor's own `condition_power` / `low_power` verdict
+    /// differs between the real world and the treasury-saturated counterfactual
+    cf_divergent: u32,
 }
 
 impl ActorTrace {
@@ -163,6 +261,13 @@ impl ActorTrace {
             mil_min: f64::MAX,
             mil_final: 0.0,
             spawned,
+            below_cap: 0,
+            first_below_cap: None,
+            first_at_cap: None,
+            cap_up: 0,
+            cap_down: 0,
+            prev_at_cap: None,
+            cf_divergent: 0,
         }
     }
 }
@@ -222,10 +327,24 @@ fn run(
         narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
-    let priorities = priority_actions(strategy);
+    let priorities = priority_actions(scenario_id, strategy);
     let mut victory_tick = None;
     let mut byz_dead_tick = None;
     let mut ticks_run = 0u32;
+    let mut deaths_seen = 0u32;
+    let mut prev_status: HashMap<String, bool> = state
+        .world_state
+        .as_ref()
+        .unwrap()
+        .actors
+        .iter()
+        .map(|(id, a)| {
+            (
+                id.clone(),
+                a.narrative_status == engine13::core::NarrativeStatus::Foreground,
+            )
+        })
+        .collect();
 
     for _ in 0..ticks {
         // --- player actions, replicating sim.rs::run_scripted's non-Milan path ----
@@ -240,16 +359,80 @@ fn run(
                 .unwrap()
                 .actions_per_tick;
             let mut applied = 0u32;
-            for action_id in &priorities {
-                if applied >= per_tick {
-                    break;
+            if scenario_id == "milan_1477" {
+                // Milan's disciplined strategy, replicated from sim.rs: raise_troops
+                // gets first claim on treasury, everything else only from the surplus
+                // above its own gate.
+                const RAISE_TROOPS_GATE: f64 = 70.0;
+                let treasury_before = state
+                    .world_state
+                    .as_ref()
+                    .unwrap()
+                    .actors
+                    .get("milan")
+                    .map(|a| a.get_metric("treasury"))
+                    .unwrap_or(0.0);
+                if treasury_before > RAISE_TROOPS_GATE {
+                    let input = PlayerActionInput {
+                        action_id: "milan_raise_troops".to_string(),
+                        target_actor_id: None,
+                    };
+                    if apply_player_action(&mut state, &input).is_ok() {
+                        applied += 1;
+                    }
                 }
-                let input = PlayerActionInput {
-                    action_id: action_id.to_string(),
-                    target_actor_id: None,
-                };
-                if apply_player_action(&mut state, &input).is_ok() {
-                    applied += 1;
+                for action_id in priorities.iter().filter(|id| **id != "milan_raise_troops") {
+                    if applied >= per_tick {
+                        break;
+                    }
+                    let treasury_now = state
+                        .world_state
+                        .as_ref()
+                        .unwrap()
+                        .actors
+                        .get("milan")
+                        .map(|a| a.get_metric("treasury"))
+                        .unwrap_or(0.0);
+                    let surplus = treasury_now - RAISE_TROOPS_GATE;
+                    if surplus <= 0.0 {
+                        break;
+                    }
+                    let cost = state
+                        .current_scenario
+                        .as_ref()
+                        .unwrap()
+                        .patron_actions
+                        .iter()
+                        .find(|a| a.id == *action_id)
+                        .and_then(|a| {
+                            a.cost
+                                .get(&engine13::core::MetricRef::literal("actor:milan.treasury"))
+                        })
+                        .map(|c| -c)
+                        .unwrap_or(f64::MAX);
+                    if cost > surplus {
+                        continue;
+                    }
+                    let input = PlayerActionInput {
+                        action_id: action_id.to_string(),
+                        target_actor_id: None,
+                    };
+                    if apply_player_action(&mut state, &input).is_ok() {
+                        applied += 1;
+                    }
+                }
+            } else {
+                for action_id in &priorities {
+                    if applied >= per_tick {
+                        break;
+                    }
+                    let input = PlayerActionInput {
+                        action_id: action_id.to_string(),
+                        target_actor_id: None,
+                    };
+                    if apply_player_action(&mut state, &input).is_ok() {
+                        applied += 1;
+                    }
                 }
             }
         }
@@ -277,6 +460,36 @@ fn run(
 
         let world = state.world_state.as_ref().unwrap();
         let now = world.tick;
+
+        // --- relevance scoring, real and treasury-saturated ----------------------
+        // `check_relevance_thresholds` runs in phase 6 and nothing writes `treasury`
+        // or `military_size` after phase 3, so the post-tick state this reads is the
+        // state it scored on — except on a tick where an actor collapsed (phase 7),
+        // which changes both `max_military_size` and `world.actors.len()`. Those ticks
+        // are flagged in the output rather than silently averaged in.
+        let max_mil = world
+            .actors
+            .values()
+            .map(|a| a.get_metric("military_size"))
+            .fold(1.0_f64, f64::max);
+        let n_actors = world.actors.len().max(1) as f64;
+        let (mut sum_pp, mut sum_pp_cf, mut below_cap_now) = (0.0, 0.0, 0u32);
+        for a in world.actors.values() {
+            let (m, q, t) = (
+                a.get_metric("military_size"),
+                a.get_metric("military_quality"),
+                a.get_metric("treasury"),
+            );
+            sum_pp += power_projection(m, q, t, max_mil, false);
+            sum_pp_cf += power_projection(m, q, t, max_mil, true);
+            if t < POWER_CAP {
+                below_cap_now += 1;
+            }
+        }
+        let avg_pp = sum_pp / n_actors;
+        let avg_pp_cf = sum_pp_cf / n_actors;
+        let died_this_tick = world.dead_actor_ids.len() as u32 != deaths_seen;
+        deaths_seen = world.dead_actor_ids.len() as u32;
 
         for (id, a) in &world.actors {
             let tr = a.get_metric("treasury");
@@ -330,6 +543,87 @@ fn run(
             }
             e.prev_above = Some(above);
             e.prev_below = Some(below);
+
+            // --- POWER_CAP window: is the stock still moving power_projection? ----
+            let at_cap = tr >= POWER_CAP;
+            if !at_cap {
+                e.below_cap += 1;
+                if e.first_below_cap.is_none() {
+                    e.first_below_cap = Some(now);
+                }
+            } else if e.first_at_cap.is_none() {
+                e.first_at_cap = Some(now);
+            }
+            if let Some(prev) = e.prev_at_cap {
+                if prev != at_cap {
+                    if at_cap {
+                        e.cap_up += 1;
+                    } else {
+                        e.cap_down += 1;
+                    }
+                }
+            }
+            e.prev_at_cap = Some(at_cap);
+
+            // --- counterfactual: would this actor's relevance verdict change if
+            // every treasury were saturated? `condition_power` for a background
+            // actor, `low_power` for a foreground one — the only two places the
+            // stock enters relevance at all.
+            let pp = power_projection(
+                a.get_metric("military_size"),
+                a.get_metric("military_quality"),
+                tr,
+                max_mil,
+                false,
+            );
+            let pp_cf = power_projection(
+                a.get_metric("military_size"),
+                a.get_metric("military_quality"),
+                tr,
+                max_mil,
+                true,
+            );
+            let background = a.narrative_status == engine13::core::NarrativeStatus::Background;
+            let verdict = if background {
+                pp > avg_pp * 0.7
+            } else {
+                pp < avg_pp * 0.4
+            };
+            let verdict_cf = if background {
+                pp_cf > avg_pp_cf * 0.7
+            } else {
+                pp_cf < avg_pp_cf * 0.4
+            };
+            if verdict != verdict_cf {
+                e.cf_divergent += 1;
+                println!(
+                    "CFDIV\t{}\t{}\t{}\tbackground={}\ttreasury={:.2}\tat_cap={}\tpp={:.2}\tavg={:.2}\tpp_cf={:.2}\tavg_cf={:.2}\treal={}\tcf={}\tdeath_tick={}",
+                    seed, id, now, background, tr, at_cap, pp, avg_pp, pp_cf, avg_pp_cf,
+                    verdict, verdict_cf, died_this_tick
+                );
+            }
+
+            // --- every actual status transition, with the stock at that moment ----
+            let was = prev_status.get(id).copied();
+            let is_fg = a.narrative_status == engine13::core::NarrativeStatus::Foreground;
+            if was.is_some_and(|w| w != is_fg) {
+                println!(
+                    "STATUS\t{}\t{}\t{}\t{}\ttreasury={:.2}\tat_cap={}\tbelow_cap_actors={}\tpp={:.2}\tavg70={:.2}\tcond_power={}\tcond_power_cf={}\tdeath_tick={}",
+                    seed,
+                    id,
+                    now,
+                    if is_fg { "promoted" } else { "demoted" },
+                    tr,
+                    at_cap,
+                    below_cap_now,
+                    pp,
+                    avg_pp * 0.7,
+                    pp > avg_pp * 0.7,
+                    pp_cf > avg_pp_cf * 0.7,
+                    died_this_tick
+                );
+            }
+            prev_status.insert(id.clone(), is_fg);
 
             if trace_actor == Some(id.as_str()) {
                 println!(
@@ -419,7 +713,7 @@ fn main() {
             let observed = t.final_v - t.start.unwrap_or(0.0);
             let predicted = t.income_sum - t.expense_sum + t.action_sum;
             println!(
-                "ACTOR\t{}\t{}\tstart={}\tfinal={:.2}\tpeak={:.2}\ttrough={:.2}\tincome={:.2}\texpense={:.2}\taction={:+.2}\tresidual={:+.2}\tobserved_delta={:.2}\tcheck={:+.4}\tticks={}\tabove300={}\tbelow200={}\tfirst_above300={}\tfirst_below200={}\tflips300={}\tflips200={}\tmil_min={:.2}\tmil_final={:.2}\tspawned={}",
+                "ACTOR\t{}\t{}\tstart={}\tfinal={:.2}\tpeak={:.2}\ttrough={:.2}\tincome={:.2}\texpense={:.2}\taction={:+.2}\tresidual={:+.2}\tobserved_delta={:.2}\tcheck={:+.4}\tticks={}\tabove300={}\tbelow200={}\tfirst_above300={}\tfirst_below200={}\tflips300={}\tflips200={}\tmil_min={:.2}\tmil_final={:.2}\tspawned={}\tbelow500={}\tfirst_below500={}\tfirst_at500={}\tcap_up={}\tcap_down={}\tcf_divergent={}",
                 seed,
                 id,
                 t.start.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".into()),
@@ -442,6 +736,12 @@ fn main() {
                 if t.mil_min == f64::MAX { 0.0 } else { t.mil_min },
                 t.mil_final,
                 t.spawned,
+                t.below_cap,
+                t.first_below_cap.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
+                t.first_at_cap.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
+                t.cap_up,
+                t.cap_down,
+                t.cf_divergent,
             );
         }
 
