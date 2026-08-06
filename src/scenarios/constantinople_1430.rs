@@ -209,7 +209,7 @@ pub fn load_constantinople_1430() -> Scenario {
         player_actor_id: None,
         status_indicators: create_status_indicators(),
         global_metric_weights: HashMap::from([
-            ("global:federation_progress".to_string(), HashMap::from([
+            (crate::core::MetricRef::literal("global:federation_progress"), HashMap::from([
                 ("venice".to_string(), 2.0),
                 ("genoa".to_string(), 1.5),
                 ("milan".to_string(), 1.0),
@@ -226,7 +226,7 @@ pub fn load_constantinople_1430() -> Scenario {
         generation_length: None,
         actions_per_tick: 3,
         victory_condition: Some(crate::core::VictoryCondition {
-            metric: "global:federation_progress".to_string(),
+            metric: crate::core::MetricRef::literal("global:federation_progress"),
             threshold: 80.0,
             title: "Федерация Севера основана".to_string(),
             description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
@@ -242,7 +242,7 @@ pub fn load_constantinople_1430() -> Scenario {
             // not ACHIEVABILITY — see docs/sim_baseline.md and the PR description.
             additional_conditions: vec![
                 crate::core::Condition {
-                    metric: "actor:ottomans.military_size".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:ottomans.military_size"),
                     operator: crate::core::ComparisonOperator::Less,
                     value: 40.0,
                 },
@@ -251,7 +251,7 @@ pub fn load_constantinople_1430() -> Scenario {
         }),
         global_metrics_display: vec![
             crate::core::MetricDisplay {
-                metric: "global:federation_progress".to_string(),
+                metric: crate::core::MetricRef::literal("global:federation_progress"),
                 label: "Прогресс федерации".to_string(),
                 panel_title: "Федерация".to_string(),
                 thresholds: vec![
@@ -266,11 +266,11 @@ pub fn load_constantinople_1430() -> Scenario {
         max_random_events_per_tick: 3,
         narrative_config: crate::core::NarrativeConfig {
             key_metrics: vec![
-                "federation_progress".to_string(),
-                "actor:byzantium.external_pressure".to_string(),
-                "actor:byzantium.legitimacy".to_string(),
-                "actor:byzantium.cohesion".to_string(),
-                "actor:ottomans.military_size".to_string(),
+                crate::core::MetricRef::literal("global:federation_progress"),
+                crate::core::MetricRef::literal("actor:byzantium.external_pressure"),
+                crate::core::MetricRef::literal("actor:byzantium.legitimacy"),
+                crate::core::MetricRef::literal("actor:byzantium.cohesion"),
+                crate::core::MetricRef::literal("actor:ottomans.military_size"),
             ],
             narrative_axes: vec![
                 "survival vs surrender".to_string(),
@@ -721,7 +721,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "anatolia".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "actor:ottomans.military_size".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:ottomans.military_size"),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 250.0,
@@ -736,7 +736,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "veneto".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "actor:venice.economic_output".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:venice.economic_output"),
                     actor_id: None,
                     operator: ComparisonOperator::Greater,
                     value: 85.0,
@@ -816,7 +816,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
     vec![
         StatusIndicator {
             label: "Константинополь".to_string(),
-            metric: "actor:byzantium.external_pressure".to_string(),
+            metric: crate::core::MetricRef::literal("actor:byzantium.external_pressure"),
             invert: true,
             thresholds: vec![
                 (0.0, "держится".to_string()),
@@ -826,7 +826,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Федерация".to_string(),
-            metric: "global:federation_progress".to_string(),
+            metric: crate::core::MetricRef::literal("global:federation_progress"),
             invert: false,
             thresholds: vec![
                 (0.0, "не сформирована".to_string()),
@@ -837,7 +837,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Османская угроза".to_string(),
-            metric: "actor:ottomans.military_size".to_string(),
+            metric: crate::core::MetricRef::literal("actor:ottomans.military_size"),
             invert: true,
             thresholds: vec![
                 (0.0, "сдержана".to_string()),
@@ -849,7 +849,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
 }
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {
-    use crate::core::{Condition, EventTarget, ComparisonOperator, RandomEvent};
+    use crate::core::{EventTarget, ComparisonOperator, RandomEvent};
     use std::collections::HashMap;
 
     vec![
@@ -859,8 +859,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("papacy".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("global:federation_progress".to_string(), -8.0),
-                ("actor:papacy.legitimacy".to_string(), -5.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), -8.0),
+                (crate::core::RelativeMetricRef::literal("actor:papacy.legitimacy"), -5.0),
             ]),
             llm_context: "Смерть кардинала сорвала переговоры о федерации".to_string(),
             one_time: false,
@@ -870,11 +870,11 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.08,
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![
-                Condition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:byzantium.external_pressure"), operator: ComparisonOperator::Greater, value: 60.0 },
             ],
             effects: HashMap::from([
-                ("actor:byzantium.legitimacy".to_string(), -8.0),
-                ("actor:byzantium.treasury".to_string(), -150.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.legitimacy"), -8.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.treasury"), -150.0),
             ]),
             llm_context: "Османское посольство потребовало унизительной дани".to_string(),
             one_time: false,
@@ -885,8 +885,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("genoa".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("actor:genoa.treasury".to_string(), 200.0),
-                ("global:federation_progress".to_string(), 3.0),
+                (crate::core::RelativeMetricRef::literal("actor:genoa.treasury"), 200.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), 3.0),
             ]),
             llm_context: "Генуэзские банкиры выделили займ на укрепление союза".to_string(),
             one_time: false,
@@ -896,12 +896,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![
-                Condition { metric: "actor:byzantium.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:byzantium.external_pressure"), operator: ComparisonOperator::Greater, value: 70.0 },
             ],
             effects: HashMap::from([
-                ("actor:byzantium.cohesion".to_string(), -8.0),
-                ("actor:byzantium.legitimacy".to_string(), -5.0),
-                ("global:federation_progress".to_string(), 2.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.cohesion"), -8.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.legitimacy"), -5.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), 2.0),
             ]),
             llm_context: "Греческие учёные и философы бегут на Запад, унося с собой знания".to_string(),
             one_time: false,
@@ -912,9 +912,9 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("byzantium".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("actor:byzantium.legitimacy".to_string(), 5.0),
-                ("actor:ottomans.external_pressure".to_string(), -3.0),
-                ("global:federation_progress".to_string(), 4.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.legitimacy"), 5.0),
+                (crate::core::RelativeMetricRef::literal("actor:ottomans.external_pressure"), -3.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), 4.0),
             ]),
             llm_context: "Пойманный османский шпион доказал угрозу — союзники насторожились".to_string(),
             one_time: false,
@@ -924,12 +924,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.05,
             target: EventTarget::Actor("papacy".to_string()),
             conditions: vec![
-                Condition { metric: "actor:papacy.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:papacy.legitimacy"), operator: ComparisonOperator::Greater, value: 60.0 },
             ],
             effects: HashMap::from([
-                ("global:federation_progress".to_string(), 10.0),
-                ("actor:papacy.treasury".to_string(), -200.0),
-                ("actor:hungary.military_size".to_string(), 20.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), 10.0),
+                (crate::core::RelativeMetricRef::literal("actor:papacy.treasury"), -200.0),
+                (crate::core::RelativeMetricRef::literal("actor:hungary.military_size"), 20.0),
             ]),
             llm_context: "Папа призвал к новому крестовому походу против турок".to_string(),
             one_time: true,
@@ -940,9 +940,9 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("venice".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("actor:venice.military_size".to_string(), -25.0),
-                ("actor:venice.treasury".to_string(), -100.0),
-                ("global:federation_progress".to_string(), -5.0),
+                (crate::core::RelativeMetricRef::literal("actor:venice.military_size"), -25.0),
+                (crate::core::RelativeMetricRef::literal("actor:venice.treasury"), -100.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), -5.0),
             ]),
             llm_context: "Буря разметала венецианский флот в Эгейском море".to_string(),
             one_time: false,
@@ -952,12 +952,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.08,
             target: EventTarget::Actor("ottomans".to_string()),
             conditions: vec![
-                Condition { metric: "actor:ottomans.military_size".to_string(), operator: ComparisonOperator::Greater, value: 150.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:ottomans.military_size"), operator: ComparisonOperator::Greater, value: 150.0 },
             ],
             effects: HashMap::from([
-                ("actor:byzantium.external_pressure".to_string(), 10.0),
-                ("actor:byzantium.cohesion".to_string(), -8.0),
-                ("global:federation_progress".to_string(), 5.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.external_pressure"), 10.0),
+                (crate::core::RelativeMetricRef::literal("actor:byzantium.cohesion"), -8.0),
+                (crate::core::RelativeMetricRef::literal("global:federation_progress"), 5.0),
             ]),
             llm_context: "Открытые угрозы Мехмеда в адрес Константинополя встревожили Европу".to_string(),
             one_time: false,

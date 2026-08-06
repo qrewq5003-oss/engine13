@@ -9,7 +9,7 @@
 //! These tests are content checks only — they load scenarios through the
 //! normal registry and inspect config, they do not modify `engine/`.
 
-use engine13::core::{ComparisonOperator, EventConditionType, MetricRef, Scenario};
+use engine13::core::{ComparisonOperator, EventConditionType, MetricName, MetricRef, Scenario};
 use engine13::scenarios::registry;
 use std::process::Command;
 
@@ -31,7 +31,7 @@ fn tags_touching_guarded_metrics_do_not_spread() {
         for tag in &scenario.tag_definitions {
             let touches_guarded = GUARDED_METRICS
                 .iter()
-                .any(|m| tag.metrics_modifier.contains_key(*m));
+                .any(|m| tag.metrics_modifier.contains_key(&MetricName::new(m).unwrap()));
             if touches_guarded && tag.spread_chance != 0.0 {
                 failures.push(format!(
                     "{id}: tag '{}' modifies a guarded metric {:?} but spread_chance = {} (must be 0.0)",
@@ -72,36 +72,23 @@ fn tags_touching_guarded_metrics_do_not_spread() {
 /// `family_rises`, `family_falls`, and the anatolia/veneto/lombardy rank
 /// conditions) are covered here and must resolve cleanly.
 
-/// Return a violation reason if a split `metric` + `actor_id` condition cannot
-/// be resolved to a real metric by the engine, mirroring `eval_metric_condition`.
-fn metric_condition_violation(metric: &str, actor_id: &Option<String>) -> Option<String> {
-    match actor_id {
-        Some(_) => {
-            if metric.contains(':') {
-                Some(format!(
-                    "actor_id is set but metric '{metric}' embeds a scope prefix - \
-                     use a bare metric name (e.g. 'legitimacy') together with actor_id"
-                ))
-            } else {
-                None
-            }
-        }
-        None => match MetricRef::parse(metric) {
-            // Explicit global:/family: scope, or a well-formed actor:id.metric string.
-            MetricRef::Family { .. } => None,
-            MetricRef::Actor { .. } => None,
-            MetricRef::Global { .. } => {
-                if metric.starts_with("global:") {
-                    None
-                } else {
-                    Some(format!(
-                        "metric '{metric}' has no actor_id and no explicit scope prefix - \
-                         it resolves to global:{metric} and silently reads 0.0, so this \
-                         condition can never fire"
-                    ))
-                }
-            }
-        },
+/// Return a violation reason if a split `metric` + `actor_id` condition did not
+/// fold into the address the content meant.
+///
+/// Most of what this used to check is now impossible to express: a bare metric
+/// with no `actor_id` and no prefix, a scope prefix *next to* an `actor_id`, a
+/// dotted phantom key — none of them can become a `MetricRef` at all, so they
+/// fail at load rather than reaching this test. What is still worth pinning is the
+/// fold itself: an `actor_id`-scoped condition must have resolved onto *that*
+/// actor, not somewhere else.
+fn metric_condition_violation(metric: &MetricRef, actor_id: &Option<String>) -> Option<String> {
+    let Some(aid) = actor_id else { return None };
+    match metric {
+        MetricRef::Actor { actor_id: resolved, .. } if resolved.as_str() == aid => None,
+        other => Some(format!(
+            "actor_id is '{aid}' but the key resolved to '{other}' - the load-time \
+             scope fold did not bind this condition to its actor"
+        )),
     }
 }
 
@@ -144,8 +131,8 @@ fn protagonist_actor_id(scenario: &Scenario) -> Option<String> {
         return Some(id.clone());
     }
     let vc = scenario.victory_condition.as_ref()?;
-    if let MetricRef::Actor { actor_id, .. } = MetricRef::parse(&vc.metric) {
-        return Some(actor_id);
+    if let MetricRef::Actor { actor_id, .. } = &vc.metric {
+        return Some(actor_id.to_string());
     }
     // Additional conditions may name either the protagonist (a survival gate,
     // e.g. `external_pressure < N`) or an *antagonist* (a suppression gate, e.g.
@@ -153,11 +140,11 @@ fn protagonist_actor_id(scenario: &Scenario) -> Option<String> {
     // the protagonist's military *shrinking*, so a `Less`/`LessOrEqual` bound on
     // `military_size` names the enemy — skip it, don't mistake it for the hero.
     for cond in &vc.additional_conditions {
-        if let MetricRef::Actor { actor_id, metric } = MetricRef::parse(&cond.metric) {
-            let is_antagonist_suppression = metric == "military_size"
+        if let MetricRef::Actor { actor_id, metric } = &cond.metric {
+            let is_antagonist_suppression = metric.as_str() == "military_size"
                 && matches!(cond.operator, ComparisonOperator::Less | ComparisonOperator::LessOrEqual);
             if !is_antagonist_suppression {
-                return Some(actor_id);
+                return Some(actor_id.to_string());
             }
         }
     }
@@ -167,8 +154,8 @@ fn protagonist_actor_id(scenario: &Scenario) -> Option<String> {
     // gauge (lower-is-better, e.g. external_pressure) marks the at-risk actor.
     for ind in &scenario.status_indicators {
         if ind.invert {
-            if let MetricRef::Actor { actor_id, .. } = MetricRef::parse(&ind.metric) {
-                return Some(actor_id);
+            if let MetricRef::Actor { actor_id, .. } = &ind.metric {
+                return Some(actor_id.to_string());
             }
         }
     }
@@ -191,7 +178,8 @@ fn scenario_has_military_size_growth_lever_for_protagonist() {
             ));
             continue;
         };
-        let key = format!("actor:{protagonist}.military_size");
+        // Built through the constructor, not `format!` — the very hazard this task exists to remove.
+        let key = MetricRef::actor(&protagonist, "military_size").expect("protagonist key");
         let has_lever = scenario
             .universal_actions
             .iter()
@@ -248,6 +236,178 @@ fn scripted_strategy_applies_actions_for_every_scenario() {
     assert!(
         failures.is_empty(),
         "Scripted-strategy dead-action finding(s):\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Bug class 5 (Задача 12 §22.5, closed by Задача 13): **metric names had no
+/// allowlist anywhere except `dependencies.toml`.**
+///
+/// `MetricName` now guarantees the *shape* of a bare key (no prefix, no dot), but
+/// a type cannot know which names the engine actually recognises. Nothing stopped
+/// content from writing `auto_deltas`, an action effect, a tag modifier or a rank
+/// bonus against an invented name — a typo (`legitimicy`), or an engine-internal
+/// metric a future mechanic owns. Either lands in `actor.metrics` as a brand-new
+/// key that no formula reads and no clamp bounds, and stays silent forever: the
+/// same failure mode as the phantom global, one level down.
+///
+/// This walks every metric key the three scenarios write or read and asserts its
+/// bare name is one the engine knows.
+const ENGINE_ACTOR_METRICS: &[&str] = &[
+    // Clamped and driven by the engine (`clamp_metrics`, `interactions.rs`).
+    "population",
+    "military_size",
+    "military_quality",
+    "economic_output",
+    "cohesion",
+    "legitimacy",
+    "external_pressure",
+    "treasury",
+    // Written by `check_vassalage` (Задача A), read by milan's victory milestone.
+    "expansion_count",
+];
+
+/// Family metrics are stored unprefixed; content may spell either form.
+const ENGINE_FAMILY_METRICS: &[&str] = &[
+    "influence",
+    "knowledge",
+    "wealth",
+    "connections",
+    "family_influence",
+    "family_knowledge",
+    "family_wealth",
+    "family_connections",
+    // milan writes these two through patron actions while having no family_state at
+    // all, so they land nowhere. Dead content, not a name error — see the Задача 13
+    // writeup; kept here so this test fails on *unknown* names, not on that.
+    "family_cohesion",
+    "family_legitimacy",
+];
+
+const ENGINE_GLOBAL_METRICS: &[&str] = &["federation_progress"];
+
+/// **Known-inert, deliberately not fixed here. Do not extend this list.**
+///
+/// `constantinople_1430/auto_deltas.toml` opens with five blocks that omit
+/// `actor_id`, under a comment that reads *"actor_id omitted = None = applies to
+/// all"*. The engine has no such mechanism: with no actor context a bare key is a
+/// **global**, so those blocks write `population` / `military_size` / `cohesion` /
+/// `legitimacy` / `external_pressure` into `world.global_metrics`, where nothing
+/// reads them. Constantinople's actors get no base drift on any of the five, and
+/// have not for the whole history of the project — the ninth instance of the
+/// metric-scoping class, and the one no guard could see because the *shape* of the
+/// key is perfectly legal.
+///
+/// It is listed rather than fixed because fixing it turns five dead auto_deltas on
+/// in a scenario whose balance is calibrated with them off (Задача 6): a balance
+/// change, and Задача 13's only acceptance criterion is byte-identical output.
+/// Tracked as a separate finding.
+const KNOWN_INERT_GLOBAL_NAMES: &[(&str, &str)] = &[
+    ("constantinople_1430", "population"),
+    ("constantinople_1430", "military_size"),
+    ("constantinople_1430", "cohesion"),
+    ("constantinople_1430", "legitimacy"),
+    ("constantinople_1430", "external_pressure"),
+    ("constantinople_1430", "treasury"),
+    ("constantinople_1430", "economic_output"),
+];
+
+fn check_name(scenario_id: &str, r: &MetricRef, ctx: &str, failures: &mut Vec<String>) {
+    let (allowed, name, kind) = match r {
+        MetricRef::Actor { metric, .. } => (ENGINE_ACTOR_METRICS, metric.as_str(), "actor"),
+        MetricRef::Family { key } => (ENGINE_FAMILY_METRICS, key.as_str(), "family"),
+        MetricRef::Global { key } => (ENGINE_GLOBAL_METRICS, key.as_str(), "global"),
+    };
+    if kind == "global" && KNOWN_INERT_GLOBAL_NAMES.contains(&(scenario_id, name)) {
+        return;
+    }
+    if !allowed.contains(&name) {
+        failures.push(format!(
+            "{ctx}: unknown {kind} metric name '{name}' — the engine reads no such metric, \
+             so this key is inert (a typo, or a metric only the engine should own)"
+        ));
+    }
+}
+
+fn check_bare_name(name: &MetricName, ctx: &str, failures: &mut Vec<String>) {
+    if !ENGINE_ACTOR_METRICS.contains(&name.as_str()) {
+        failures.push(format!(
+            "{ctx}: unknown actor metric name '{name}' — the engine reads no such metric"
+        ));
+    }
+}
+
+#[test]
+fn content_only_names_metrics_the_engine_knows() {
+    let mut failures = Vec::new();
+    for &id in SCENARIO_IDS {
+        let s = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+
+        for (i, d) in s.auto_deltas.iter().enumerate() {
+            check_name(id, &d.metric, &format!("{id}: auto_delta[{i}]"), &mut failures);
+            for c in &d.conditions {
+                check_name(id, &c.metric, &format!("{id}: auto_delta[{i}].condition"), &mut failures);
+            }
+            for r in &d.ratio_conditions {
+                check_name(id, &r.metric_a, &format!("{id}: auto_delta[{i}].ratio_a"), &mut failures);
+                check_name(id, &r.metric_b, &format!("{id}: auto_delta[{i}].ratio_b"), &mut failures);
+            }
+        }
+
+        for a in s.patron_actions.iter().chain(s.universal_actions.iter()) {
+            for m in a.effects.keys().chain(a.cost.keys()) {
+                check_name(id, m, &format!("{id}: action '{}'", a.id), &mut failures);
+            }
+        }
+
+        for m in &s.milestone_events {
+            if let Some(r) = m.condition.metric_ref() {
+                check_name(id, r, &format!("{id}: milestone '{}'", m.id), &mut failures);
+            }
+            if let Some(cfg) = &m.spawn_actor {
+                for k in cfg.initial_metrics.keys() {
+                    check_bare_name(k, &format!("{id}: spawn '{}'", cfg.actor_id), &mut failures);
+                }
+            }
+        }
+        for rc in &s.rank_conditions {
+            if let Some(r) = rc.condition.metric_ref() {
+                check_name(id, r, &format!("{id}: rank '{}'", rc.region_id), &mut failures);
+            }
+        }
+
+        for t in &s.tag_definitions {
+            for k in t.metrics_modifier.keys() {
+                check_bare_name(k, &format!("{id}: tag '{}'", t.id), &mut failures);
+            }
+        }
+        for rb in &s.rank_bonuses {
+            for e in &rb.effects {
+                check_bare_name(&e.metric, &format!("{id}: rank_bonus"), &mut failures);
+            }
+        }
+        for d in &s.dependencies {
+            check_bare_name(&d.from, &format!("{id}: dependency '{}'.from", d.id), &mut failures);
+            check_bare_name(&d.to, &format!("{id}: dependency '{}'.to", d.id), &mut failures);
+        }
+
+        for ind in &s.status_indicators {
+            check_name(id, &ind.metric, &format!("{id}: status_indicator"), &mut failures);
+        }
+        for m in &s.narrative_config.key_metrics {
+            check_name(id, m, &format!("{id}: narrative key_metric"), &mut failures);
+        }
+        if let Some(vc) = &s.victory_condition {
+            check_name(id, &vc.metric, &format!("{id}: victory_condition"), &mut failures);
+            for c in &vc.additional_conditions {
+                check_name(id, &c.metric, &format!("{id}: victory additional_condition"), &mut failures);
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Content names {} metric(s) the engine does not read:\n{}",
+        failures.len(),
         failures.join("\n")
     );
 }

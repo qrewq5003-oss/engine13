@@ -6,6 +6,8 @@ pub mod world;
 
 pub use actor::*;
 pub use event::*;
-pub use metric_ref::MetricRef;
+pub use metric_ref::{
+    resolve_at_load, ActorId, MetricKeyError, MetricName, MetricRef, RelativeMetricRef,
+};
 pub use scenario::*;
 pub use world::*;

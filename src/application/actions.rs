@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{ComparisonOperator, Condition, MetricRef, PatronAction, Scenario, WorldState};
+use crate::core::{ComparisonOperator, Condition, PatronAction, Scenario, WorldState};
 use crate::AppState;
 
 /// Reason why an action is unavailable - runtime check result
@@ -63,16 +63,13 @@ pub fn apply_player_action(
     // Apply cost
     let mut applied_costs = HashMap::new();
     for (metric, cost) in &action.cost {
-        let metric_ref = MetricRef::parse(metric);
-        metric_ref.apply(world_state, *cost);
-        applied_costs.insert(metric.clone(), *cost);
+        metric.apply(world_state, *cost);
+        applied_costs.insert(metric.to_string(), *cost);
     }
 
     // Apply effects with global metric weights from scenario
     let mut applied_effects = HashMap::new();
     for (metric, effect) in &action.effects {
-        let metric_ref = MetricRef::parse(metric);
-        
         // Get weight from scenario.global_metric_weights
         let weight = scenario.global_metric_weights
             .get(metric)
@@ -84,8 +81,8 @@ pub fn apply_player_action(
             .unwrap_or(1.0);
         
         let weighted_effect = effect * weight;
-        metric_ref.apply(world_state, weighted_effect);
-        applied_effects.insert(metric.clone(), weighted_effect);
+        metric.apply(world_state, weighted_effect);
+        applied_effects.insert(metric.to_string(), weighted_effect);
     }
 
     // Record event - use first foreground actor or default
@@ -120,8 +117,7 @@ fn is_action_available(action: &PatronAction, world_state: &WorldState) -> bool 
     match &action.available_if {
         crate::core::ActionCondition::Always => true,
         crate::core::ActionCondition::Metric { metric, operator, value } => {
-            let metric_ref = MetricRef::parse(metric);
-            let current = metric_ref.get(world_state);
+            let current = metric.get(world_state);
             compare_value(current, operator, value)
         }
     }
@@ -149,9 +145,10 @@ fn describe_condition(cond: &Condition) -> String {
     };
     
     // Extract resource name from metric (e.g., "actor:venice.treasury" -> "Venice treasury")
-    let resource = metric
+    let key = metric.to_string();
+    let resource = key
         .strip_prefix("actor:")
-        .unwrap_or(metric)
+        .unwrap_or(&key)
         .replace(['.', '_'], " ");
     
     // Capitalize first letter
@@ -189,8 +186,7 @@ pub fn list_actions_with_availability(
             match &action.available_if {
                 crate::core::ActionCondition::Always => {}
                 crate::core::ActionCondition::Metric { metric, operator, value } => {
-                    let metric_ref = MetricRef::parse(metric.as_str());
-                    let current = metric_ref.get(world_state);
+                    let current = metric.get(world_state);
                     if !compare_value(current, operator, value) {
                         available = false;
                         unavailable_reason = Some(UnavailableReason::ConditionNotMet {
@@ -208,13 +204,14 @@ pub fn list_actions_with_availability(
         // Check action costs
         if available {
             for (metric, cost) in &action.cost {
-                let metric_ref = MetricRef::parse(metric.as_str());
-                let current = metric_ref.get(world_state);
+                let current = metric.get(world_state);
                 if current < cost.abs() && *cost < 0.0 {
                     available = false;
-                    let resource = metric
+                    // Human-readable resource name for the UI ("venice treasury").
+                    let key = metric.to_string();
+                    let resource = key
                         .strip_prefix("actor:")
-                        .unwrap_or(metric.as_str())
+                        .unwrap_or(&key)
                         .replace(['.', '_'], " ");
                     unavailable_reason = Some(UnavailableReason::InsufficientCost {
                         required: cost.abs(),

@@ -55,9 +55,13 @@ pub struct Successor {
 }
 
 /// Actor tag with metrics modifier and spread mechanics
+///
+/// `metrics_modifier` mirrors `TagDefinition::metrics_modifier` — bare metric
+/// names on the actor carrying the tag. `MetricName` serializes as a plain string,
+/// so the save format is unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActorTag {
-    pub metrics_modifier: HashMap<String, i32>,
+    pub metrics_modifier: HashMap<crate::core::MetricName, i32>,
     pub spreads_via: Vec<TagSpreadType>,
 }
 

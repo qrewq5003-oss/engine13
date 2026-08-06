@@ -476,11 +476,8 @@ pub fn compute_status_indicators(
     world_state: &WorldState,
     scenario: &Scenario,
 ) -> Vec<StatusIndicatorState> {
-    use crate::core::MetricRef;
-
     scenario.status_indicators.iter().map(|indicator| {
-        let metric_ref = MetricRef::parse(&indicator.metric);
-        let value = metric_ref.get(world_state);
+        let value = indicator.metric.get(world_state);
 
         // Find current status text - last threshold where value >= threshold
         let mut status_text = indicator.thresholds.first()

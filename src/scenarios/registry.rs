@@ -44,24 +44,20 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
 
     // Check auto_deltas
     for delta in &scenario.auto_deltas {
-        if let MetricRef::Actor { ref actor_id, .. } = MetricRef::parse(&delta.metric) {
-            if !actor_ids.contains(actor_id.as_str()) {
-                errors.push(format!("auto_delta: unknown actor_id '{}'", actor_id));
-            }
-        }
+        check_actor_exists(&delta.metric, &actor_ids, "auto_delta", &mut errors);
         for cond in &delta.conditions {
-            validate_metric_ref(&cond.metric, &actor_ids, "auto_delta.condition", &mut errors);
+            check_actor_exists(&cond.metric, &actor_ids, "auto_delta.condition", &mut errors);
         }
         for ratio in &delta.ratio_conditions {
-            validate_metric_ref(&ratio.metric_a, &actor_ids, "ratio_condition.metric_a", &mut errors);
-            validate_metric_ref(&ratio.metric_b, &actor_ids, "ratio_condition.metric_b", &mut errors);
+            check_actor_exists(&ratio.metric_a, &actor_ids, "ratio_condition.metric_a", &mut errors);
+            check_actor_exists(&ratio.metric_b, &actor_ids, "ratio_condition.metric_b", &mut errors);
         }
     }
 
     // Check milestone effects
     for milestone in &scenario.milestone_events {
-        for metric in milestone.condition.to_metric_strings().iter() {
-            validate_metric_ref(metric, &actor_ids, &format!("milestone '{}'", milestone.id), &mut errors);
+        if let Some(metric) = milestone.condition.metric_ref() {
+            check_actor_exists(metric, &actor_ids, &format!("milestone '{}'", milestone.id), &mut errors);
         }
         // An `actor_state` condition names an actor, not a metric. Its actor id had
         // never been validated at all: it used to be routed through the metric check,
@@ -84,20 +80,20 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
             }
         }
         for metric in action.effects.keys().chain(action.cost.keys()) {
-            validate_metric_ref(metric, &actor_ids, &format!("action '{}'", action.id), &mut errors);
+            check_actor_exists(metric, &actor_ids, &format!("action '{}'", action.id), &mut errors);
         }
     }
 
     // Check status_indicators
     for indicator in &scenario.status_indicators {
-        validate_metric_ref(&indicator.metric, &actor_ids, &format!("status_indicator '{}'", indicator.label), &mut errors);
+        check_actor_exists(&indicator.metric, &actor_ids, &format!("status_indicator '{}'", indicator.label), &mut errors);
     }
 
     // Check narrative key_metrics. These feed the chronicler's prompt and were never
     // validated, which is why 13 of the 16 keys across the three scenarios had been
     // resolving to 0.0 unnoticed.
     for metric in &scenario.narrative_config.key_metrics {
-        validate_metric_ref(metric, &actor_ids, "narrative_config.key_metrics", &mut errors);
+        check_actor_exists(metric, &actor_ids, "narrative_config.key_metrics", &mut errors);
     }
 
     // Check dependency thresholds. Centralized here so every scenario routed
@@ -115,28 +111,22 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
     }
 }
 
-fn validate_metric_ref(metric: &str, actor_ids: &HashSet<&str>, context: &str, errors: &mut Vec<String>) {
-    match MetricRef::parse(metric) {
-        MetricRef::Actor { ref actor_id, .. } => {
+/// Referential-integrity check for a metric key.
+///
+/// The *shape* of a key is no longer checked here — `MetricRef` cannot be built
+/// from a malformed string at all, so a dotted global key (the shape behind every
+/// metric-scoping bug in this project's history: #19, #20, narrative `key_metrics`)
+/// now fails at load, in `Deserialize`. What is left is the half a type cannot do: whether the actor a key names
+/// exists in *this* scenario. Shape is guaranteed by `MetricRef` itself.
+fn check_actor_exists(metric: &MetricRef, actor_ids: &HashSet<&str>, context: &str, errors: &mut Vec<String>) {
+    match metric {
+        MetricRef::Actor { actor_id, .. } => {
             if !actor_ids.contains(actor_id.as_str()) {
                 errors.push(format!("{}: unknown actor_id '{}' in metric '{}'", context, actor_id, metric));
             }
         }
-        // A `Global` ref that carries a `.` or names an actor is an actor-relative key
-        // that lost its `actor:` prefix. `MetricRef::parse` resolves it to a global key
-        // nothing reads or writes, so the condition reads 0.0 and the effect goes
-        // nowhere — silently, forever. Every metric-scoping bug in this project's history
-        // (#19, #20, and the narrative key_metrics) produced exactly such a key, and each
-        // was found one instance per session, by hand. This is the load-time choke point
-        // that makes the shape unrepresentable in content.
-        MetricRef::Global { ref key } => {
-            if key.contains('.') {
-                errors.push(format!(
-                    "{}: metric '{}' resolves to a GLOBAL key containing '.', which no \
-                     subsystem reads or writes — did you mean 'actor:{}'?",
-                    context, metric, key
-                ));
-            } else if actor_ids.contains(key.as_str()) {
+        MetricRef::Global { key } => {
+            if actor_ids.contains(key.as_str()) {
                 errors.push(format!(
                     "{}: metric '{}' resolves to a GLOBAL key that is an actor id — \
                      an actor-relative key is missing its 'actor:' prefix",

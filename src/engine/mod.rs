@@ -83,7 +83,7 @@ pub fn validate_dependencies(
 /// Sequential mutation semantics - each rule reads the current state
 /// of the actor (already modified by previous rules).
 fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
-    let from_val = actor.get_metric(&rule.from);
+    let from_val = actor.get_metric(rule.from.as_str());
     // Non-Linear modes require `threshold`. `validate_dependency_thresholds` runs
     // centrally at load (`load_by_id` -> `validate_scenario`) for every scenario,
     // plus per-scenario in `validate_dependencies`, so `None` is unreachable for
@@ -114,7 +114,7 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
         DependencyMode::Linear => from_val * rule.coefficient,
     };
     if delta != 0.0 {
-        actor.add_metric(&rule.to, delta);
+        actor.add_metric(rule.to.as_str(), delta);
     }
 }
 
@@ -277,16 +277,15 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         // Check conditions
         let mut delta = auto_delta.base;
         for cond in &auto_delta.conditions {
-            if check_auto_delta_condition_scoped(world, cond, auto_delta.actor_id.as_deref()) {
+            if check_auto_delta_condition(world, cond) {
                 delta += cond.delta;
             }
         }
 
         // Check ratio conditions
         for ratio_cond in &auto_delta.ratio_conditions {
-            let actor_id = auto_delta.actor_id.as_deref();
-            let val_a = MetricRef::parse_scoped(&ratio_cond.metric_a, actor_id).get(world);
-            let val_b = MetricRef::parse_scoped(&ratio_cond.metric_b, actor_id).get(world);
+            let val_a = ratio_cond.metric_a.get(world);
+            let val_b = ratio_cond.metric_b.get(world);
 
             if val_b == 0.0 {
                 continue;
@@ -305,14 +304,14 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         let final_delta = delta + noise;
 
         // Apply via MetricRef - scope to actor if actor_id is set
-        MetricRef::parse_scoped(&auto_delta.metric, auto_delta.actor_id.as_deref())
-            .apply(world, final_delta);
+        auto_delta.metric.apply(world, final_delta);
     }
 }
 
-/// Check auto_delta condition against world state, scoped to actor when actor_id is set
-fn check_auto_delta_condition_scoped(world: &WorldState, cond: &crate::core::DeltaCondition, actor_id: Option<&str>) -> bool {
-    let value = MetricRef::parse_scoped(&cond.metric, actor_id).get(world);
+/// Check auto_delta condition against world state. The key already carries its
+/// scope — it was resolved against the block's `actor_id` at load.
+fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
+    let value = cond.metric.get(world);
     match cond.operator {
         crate::core::ComparisonOperator::Less => value < cond.value,
         crate::core::ComparisonOperator::LessOrEqual => value <= cond.value,
@@ -335,12 +334,12 @@ fn phase_region_ranks(world: &mut WorldState, scenario: &Scenario) {
                 for effect in &rule.effects {
                     if let Some(floor) = effect.floor {
                         // floor: apply as min(), don't change if already above
-                        let current = actor.get_metric(&effect.metric);
+                        let current = actor.get_metric(effect.metric.as_str());
                         if current < floor {
-                            actor.set_metric(&effect.metric, floor);
+                            actor.set_metric(effect.metric.as_str(), floor);
                         }
                     } else {
-                        actor.add_metric(&effect.metric, effect.delta);
+                        actor.add_metric(effect.metric.as_str(), effect.delta);
                     }
                 }
             }
@@ -455,7 +454,10 @@ fn phase_random_events(
         // Check conditions for each target
         for target_id in &target_ids {
             let conditions_met = event.conditions.iter().all(|cond| {
-                let value = MetricRef::parse_scoped(&cond.metric, Some(target_id)).get(world);
+                let value = cond.metric
+                    .resolve(target_id)
+                    .expect("event target actor id")
+                    .get(world);
                 cond.operator.evaluate(value, cond.value)
             });
 
@@ -465,7 +467,10 @@ fn phase_random_events(
 
             // Apply effects
             for (metric, delta) in &event.effects {
-                MetricRef::parse_scoped(metric, Some(target_id)).apply(world, *delta);
+                metric
+                    .resolve(target_id)
+                    .expect("event target actor id")
+                    .apply(world, *delta);
             }
 
             // Record event
@@ -573,12 +578,12 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
 
     if let Some(ref vc) = scenario.victory_condition {
         if world.tick >= vc.minimum_tick {
-            let value = crate::core::MetricRef::parse(&vc.metric).get(world);
+            let value = vc.metric.get(world);
             let main_condition = value >= vc.threshold;
 
             // Check additional conditions
             let additional_ok = vc.additional_conditions.iter().all(|cond| {
-                let metric_value = crate::core::MetricRef::parse(&cond.metric).get(world);
+                let metric_value = cond.metric.get(world);
                 cond.operator.evaluate(metric_value, cond.value)
             });
 
@@ -659,8 +664,8 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
             for actor_tag in actor.actor_tags.values() {
                 for (metric, modifier) in &actor_tag.metrics_modifier {
-                    let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
-                    actor.metrics.insert(metric.clone(), current + *modifier as f64);
+                    let current = actor.metrics.get(metric.as_str()).copied().unwrap_or(0.0);
+                    actor.metrics.insert(metric.as_str().to_string(), current + *modifier as f64);
                 }
             }
             // Note: No clamping here - clamp_metrics is called on step 5
@@ -801,38 +806,39 @@ fn compare(value: f64, operator: &ComparisonOperator, target: &f64) -> bool {
     }
 }
 
-/// Resolve a split `metric` + `actor_id` metric condition to a bool.
+/// Evaluate a milestone / rank metric condition.
 ///
-/// Single resolution path shared by `check_event_condition` (milestones) and
-/// `check_rank_conditions` (rank changes), brought in line with how
-/// `check_victory_condition` resolves metrics through `MetricRef`:
+/// The key is already a `MetricRef` — resolved against its sibling `actor_id` at
+/// load, not re-parsed here. What still needs the `actor_id` is the one thing the
+/// key cannot express:
 ///
-/// - `actor_id = Some(id)`: actor-scoped lookup. Preserves the original
-///   semantics exactly — a missing actor makes the condition false (rather than
-///   reading a default 0.0), so every already-working actor condition is
-///   byte-identical.
-/// - `actor_id = None`: the `metric` string carries its own scope, resolved via
-///   `MetricRef::parse` (`global:`/`family:`/`actor:` prefixes, plain → global).
-///   Previously an unscoped condition was unconditionally `false`, which
-///   silently killed every `global:`/`family:`-scoped milestone and rank
-///   condition — unlike `victory_condition`, which already resolved these.
+/// **An actor-scoped condition on an actor that is not in the world is `false`,
+/// not `0.0`.** Actors are *removed* from `world.actors` on collapse
+/// (`world.actors.remove(&actor_id)`), and three live conditions across the three
+/// scenarios are `less`-gated on exactly such actors — `rome_splits`
+/// (`rome.cohesion < 30`, and `rome` is the actor that splits), the `rome_city`
+/// rank condition (`rome.legitimacy < 20`), and constantinople's mamluk spawn
+/// (`ottomans.cohesion < 40`, and the ottomans reach 0.00 military in most runs).
+/// Reading a dead actor's metric as the `0.0` default would satisfy every one of
+/// them, forever, from the tick the actor dies. `try_get` returns `None` for an
+/// absent actor, which is what keeps that from happening.
+///
+/// An unscoped condition (`actor_id = None`) carries its scope in the key itself
+/// and keeps the `0.0` default, exactly as before.
 fn eval_metric_condition(
     world: &WorldState,
-    metric: &str,
+    metric: &MetricRef,
     actor_id: &Option<String>,
     operator: &ComparisonOperator,
     value: f64,
 ) -> bool {
-    let metric_ref = match actor_id {
-        Some(aid) => {
-            if !world.actors.contains_key(aid) {
-                return false;
-            }
-            MetricRef::Actor { actor_id: aid.clone(), metric: metric.to_string() }
-        }
-        None => MetricRef::parse(metric),
-    };
-    compare(metric_ref.get(world), operator, &value)
+    if actor_id.is_some() {
+        let Some(current) = metric.try_get(world) else {
+            return false; // the actor is not in the world
+        };
+        return compare(current, operator, &value);
+    }
+    compare(metric.get(world), operator, &value)
 }
 
 fn check_milestone_events(
@@ -905,7 +911,9 @@ fn check_milestone_events(
                         era: scenario.era.clone(),
                         narrative_status: NarrativeStatus::Background,
                         tags: vec![],
-                        metrics: cfg.initial_metrics.clone(),
+                        metrics: cfg.initial_metrics.iter()
+                            .map(|(k, v)| (k.as_str().to_string(), *v))
+                            .collect(),
                         scenario_metrics: HashMap::new(),
                         // Neighbor edges from config. `get_neighbor_pairs` treats
                         // an edge as bidirectional (it dedups sorted pairs), so
@@ -1370,7 +1378,7 @@ fn check_generation_transfer(
         if patriarch_age < age {
             return false;
         }
-        let metric_value = crate::core::MetricRef::parse(&metric).get(world);
+        let metric_value = metric.get(world);
         operator.evaluate(metric_value, value)
     });
 
@@ -1712,6 +1720,11 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
 
+    /// Resolve a content key exactly as load does: against its sibling `actor_id`.
+    fn mr(metric: &str, actor_id: Option<&str>) -> MetricRef {
+        crate::core::resolve_at_load(metric, actor_id).expect("test metric key")
+    }
+
     #[test]
     fn test_tick_advances_time() {
         let mut world = WorldState::new("test".to_string(), 375);
@@ -1793,22 +1806,22 @@ mod tests {
             .insert("ottomans".into(), vassalage_actor("ottomans", 260.0, 30.0, 60.0, 60.0, &[]));
 
         // global: scope with actor_id = None — was unconditionally false before the fix.
-        assert!(eval_metric_condition(&world, "global:federation_progress", &None, &ComparisonOperator::Greater, 60.0));
-        assert!(!eval_metric_condition(&world, "global:federation_progress", &None, &ComparisonOperator::Greater, 95.0));
+        assert!(eval_metric_condition(&world, &mr("global:federation_progress", None), &None, &ComparisonOperator::Greater, 60.0));
+        assert!(!eval_metric_condition(&world, &mr("global:federation_progress", None), &None, &ComparisonOperator::Greater, 95.0));
 
         // family: scope with actor_id = None.
-        assert!(eval_metric_condition(&world, "family:influence", &None, &ComparisonOperator::Greater, 70.0));
-        assert!(!eval_metric_condition(&world, "family:influence", &None, &ComparisonOperator::Less, 70.0));
+        assert!(eval_metric_condition(&world, &mr("family:influence", None), &None, &ComparisonOperator::Greater, 70.0));
+        assert!(!eval_metric_condition(&world, &mr("family:influence", None), &None, &ComparisonOperator::Less, 70.0));
 
         // actor:id.metric embedded in the metric string (rank-condition style, actor_id = None).
-        assert!(eval_metric_condition(&world, "actor:ottomans.military_size", &None, &ComparisonOperator::Greater, 250.0));
+        assert!(eval_metric_condition(&world, &mr("actor:ottomans.military_size", None), &None, &ComparisonOperator::Greater, 250.0));
 
         // Split actor-scoped form (actor_id = Some) still works unchanged.
-        assert!(eval_metric_condition(&world, "military_size", &Some("ottomans".to_string()), &ComparisonOperator::Greater, 250.0));
+        assert!(eval_metric_condition(&world, &mr("military_size", Some("ottomans")), &Some("ottomans".to_string()), &ComparisonOperator::Greater, 250.0));
 
         // Missing actor in the split form stays false — NOT a 0.0 comparison.
         // (a `less` check must not newly fire just because the actor is absent).
-        assert!(!eval_metric_condition(&world, "military_size", &Some("nonexistent".to_string()), &ComparisonOperator::Less, 999.0));
+        assert!(!eval_metric_condition(&world, &mr("military_size", Some("nonexistent")), &Some("nonexistent".to_string()), &ComparisonOperator::Less, 999.0));
     }
 
     #[test]
@@ -1824,7 +1837,7 @@ mod tests {
         // constantinople_1430 `outcome_fell_federation`: global:federation_progress >= 80.
         let global_cond = EventCondition {
             condition_type: EventConditionType::Metric {
-                metric: "global:federation_progress".to_string(),
+                metric: MetricRef::literal("global:federation_progress"),
                 actor_id: None,
                 operator: ComparisonOperator::GreaterOrEqual,
                 value: 80.0,
@@ -1836,7 +1849,7 @@ mod tests {
         // rome_375 `family_falls`: family:family_influence below a floor.
         let family_cond = EventCondition {
             condition_type: EventConditionType::Metric {
-                metric: "family:family_influence".to_string(),
+                metric: MetricRef::literal("family:family_influence"),
                 actor_id: None,
                 operator: ComparisonOperator::Less,
                 value: 25.0,

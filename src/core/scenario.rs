@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::actor::{Actor, Era, Neighbor, RegionRank, TagSpreadType};
+use super::metric_ref::{resolve_at_load, MetricName, MetricRef, RelativeMetricRef};
 
 /// Dependency rule mode - determines how the dependency affects the target metric
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,9 +24,9 @@ pub struct DependencyRule {
     /// Identifier for logging and debugging (e.g., "legitimacy_to_cohesion")
     pub id: String,
     /// Source metric name
-    pub from: String,
+    pub from: MetricName,
     /// Target metric name
-    pub to: String,
+    pub to: MetricName,
     /// Coefficient for delta calculation
     pub coefficient: f64,
     /// Threshold value (required for Deficit/Excess/Bonus modes, None for Linear)
@@ -49,8 +50,10 @@ pub enum ConditionActor {
 pub struct InteractionCondition {
     /// Which actor to check
     pub actor: ConditionActor,
-    /// Metric to check
-    pub metric: String,
+    /// Metric to check — a bare name. The actor is `self.actor` (source/target of
+    /// the rule), not the string, so a scope prefix here has never meant anything
+    /// and used to read a silent 0.0. `MetricName` now rejects it at load.
+    pub metric: MetricName,
     /// Comparison operator (snake_case: "less", "less_or_equal", "greater", "greater_or_equal", "equal")
     pub operator: ComparisonOperator,
     /// Threshold value
@@ -62,8 +65,8 @@ pub struct InteractionCondition {
 pub struct InteractionEffect {
     /// Which actor receives the effect
     pub actor: ConditionActor,
-    /// Metric to modify
-    pub metric: String,
+    /// Metric to modify — a bare name; the actor is `self.actor`.
+    pub metric: MetricName,
     /// Flat delta to apply
     pub delta: f64,
 }
@@ -96,8 +99,8 @@ pub struct InteractionRule {
 /// Rank bonus effect — either a flat delta or a floor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankBonusEffect {
-    /// Metric to modify
-    pub metric: String,
+    /// Metric to modify — a bare name; the actor is the one holding the rank.
+    pub metric: MetricName,
     /// Flat delta to apply (ignored if floor is set)
     #[serde(default)]
     pub delta: f64,
@@ -125,7 +128,8 @@ fn default_spread_chance() -> f64 { 0.3 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagDefinition {
     pub id: String,
-    pub metrics_modifier: HashMap<String, i32>,
+    /// Bare metric names; the actor is the one carrying the tag.
+    pub metrics_modifier: HashMap<MetricName, i32>,
     pub spreads_via: Vec<TagSpreadType>,
     #[serde(default = "default_spread_cooldown")]
     pub spread_cooldown_ticks: u32,
@@ -157,7 +161,7 @@ pub struct EraDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
     /// Key metrics to include in factual block
-    pub key_metrics: Vec<String>,
+    pub key_metrics: Vec<MetricRef>,
     /// Narrative axes for framing (e.g., "stability vs ambition", "tradition vs innovation")
     pub narrative_axes: Vec<String>,
     /// Tone tags for chronicler style (e.g., "formal", "epic", "intimate")
@@ -192,8 +196,10 @@ pub struct Scenario {
     pub player_actor_id: Option<String>,
     /// Status indicators for UI display
     pub status_indicators: Vec<StatusIndicator>,
-    /// Global metric weights by source actor: metric_name -> {source_actor -> weight}
-    pub global_metric_weights: HashMap<String, HashMap<String, f64>>,
+    /// Global metric weights by source actor: metric -> {source_actor -> weight}.
+    /// Keyed by the same type as `PatronAction.effects` so the lookup cannot miss
+    /// through a string mismatch (a miss silently applies weight 1.0).
+    pub global_metric_weights: HashMap<MetricRef, HashMap<String, f64>>,
     /// Feature flags for UI
     pub features: ScenarioFeatures,
     /// Base probability for land military conflicts (0.0-1.0)
@@ -241,7 +247,7 @@ pub struct Scenario {
 /// Metric display configuration for UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricDisplay {
-    pub metric: String,
+    pub metric: MetricRef,
     pub label: String,
     pub panel_title: String,
     pub thresholds: Vec<MetricThreshold>,
@@ -257,7 +263,7 @@ pub struct MetricThreshold {
 /// Victory condition for scenario completion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VictoryCondition {
-    pub metric: String,
+    pub metric: MetricRef,
     pub threshold: f64,
     pub title: String,
     pub description: String,
@@ -270,7 +276,7 @@ pub struct VictoryCondition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusIndicator {
     pub label: String,
-    pub metric: String,
+    pub metric: MetricRef,
     pub invert: bool,
     pub thresholds: Vec<(f64, String)>,
 }
@@ -283,10 +289,23 @@ pub struct ScenarioFeatures {
     pub patron_actions: bool,
 }
 
-/// Condition for random event triggering
+/// A condition on an *absolute* metric key.
+///
+/// Used by `victory_condition.additional_conditions`. Until this refactor the same
+/// struct also carried `random_events.conditions`, whose keys are `self.`-relative
+/// to a target actor chosen at runtime — one struct with two incompatible parsing
+/// semantics. That is now [`RelativeCondition`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Condition {
-    pub metric: String,
+    pub metric: MetricRef,
+    pub operator: ComparisonOperator,
+    pub value: f64,
+}
+
+/// A condition on a key that may be `self.`-relative to the event's target actor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelativeCondition {
+    pub metric: RelativeMetricRef,
     pub operator: ComparisonOperator,
     pub value: f64,
 }
@@ -306,29 +325,36 @@ pub struct RandomEvent {
     pub id: String,
     pub probability: f64,
     pub target: EventTarget,
-    pub conditions: Vec<Condition>,
-    pub effects: HashMap<String, f64>,
+    pub conditions: Vec<RelativeCondition>,
+    pub effects: HashMap<RelativeMetricRef, f64>,
     pub llm_context: String,
     pub one_time: bool,
 }
 
-/// Autonomous delta configuration for metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Autonomous delta configuration for metrics.
+///
+/// Its metric keys are written *relative to `actor_id`* — a bare `cohesion` next
+/// to `actor_id = "rome"` means Rome's cohesion. That scope lives in a **sibling
+/// field**, which serde's per-field `deserialize_with` cannot see, so the whole
+/// struct is read through a shadow type (below) and every key is resolved **once,
+/// at load**. The tick loop then applies a `MetricRef` directly — the per-tick
+/// re-parsing that produced sites 1–3 of the metric-scoping class is gone.
+#[derive(Debug, Clone, Serialize)]
 pub struct AutoDelta {
-    pub metric: String,
+    pub metric: MetricRef,
     pub base: f64,
-    #[serde(default)]
     pub conditions: Vec<DeltaCondition>,
-    #[serde(default)]
     pub ratio_conditions: Vec<DeltaConditionRatio>,
     pub noise: f64,
+    /// Load-time scope for the keys above. The engine no longer reads it: by the
+    /// time a tick runs it is already baked into every `MetricRef` in this block.
     pub actor_id: Option<String>,
 }
 
 /// Condition for auto delta modification
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DeltaCondition {
-    pub metric: String,
+    pub metric: MetricRef,
     pub operator: ComparisonOperator,
     pub value: f64,
     pub delta: f64,
@@ -336,13 +362,85 @@ pub struct DeltaCondition {
 
 /// Ratio-based condition for auto delta modification
 /// Applies additional delta if ratio between two metrics meets threshold
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DeltaConditionRatio {
-    pub metric_a: String,  // numerator
-    pub metric_b: String,  // denominator
-    pub ratio: f64,        // threshold ratio
+    pub metric_a: MetricRef,  // numerator
+    pub metric_b: MetricRef,  // denominator
+    pub ratio: f64,           // threshold ratio
     pub operator: ComparisonOperator,
-    pub delta: f64,        // additional delta if condition met
+    pub delta: f64,           // additional delta if condition met
+}
+
+// --- Shadow types: the raw TOML shape, before `actor_id` is folded into the keys ---
+
+#[derive(Deserialize)]
+struct AutoDeltaRaw {
+    metric: String,
+    base: f64,
+    #[serde(default)]
+    conditions: Vec<DeltaConditionRaw>,
+    #[serde(default)]
+    ratio_conditions: Vec<DeltaConditionRatioRaw>,
+    noise: f64,
+    actor_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeltaConditionRaw {
+    metric: String,
+    operator: ComparisonOperator,
+    value: f64,
+    delta: f64,
+}
+
+#[derive(Deserialize)]
+struct DeltaConditionRatioRaw {
+    metric_a: String,
+    metric_b: String,
+    ratio: f64,
+    operator: ComparisonOperator,
+    delta: f64,
+}
+
+impl<'de> Deserialize<'de> for AutoDelta {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let raw = AutoDeltaRaw::deserialize(deserializer)?;
+        let scope = raw.actor_id.as_deref();
+        let resolve = |s: &str| resolve_at_load(s, scope).map_err(D::Error::custom);
+
+        Ok(AutoDelta {
+            metric: resolve(&raw.metric)?,
+            base: raw.base,
+            conditions: raw
+                .conditions
+                .into_iter()
+                .map(|c| {
+                    Ok(DeltaCondition {
+                        metric: resolve(&c.metric)?,
+                        operator: c.operator,
+                        value: c.value,
+                        delta: c.delta,
+                    })
+                })
+                .collect::<Result<Vec<_>, D::Error>>()?,
+            ratio_conditions: raw
+                .ratio_conditions
+                .into_iter()
+                .map(|r| {
+                    Ok(DeltaConditionRatio {
+                        metric_a: resolve(&r.metric_a)?,
+                        metric_b: resolve(&r.metric_b)?,
+                        ratio: r.ratio,
+                        operator: r.operator,
+                        delta: r.delta,
+                    })
+                })
+                .collect::<Result<Vec<_>, D::Error>>()?,
+            noise: raw.noise,
+            actor_id: raw.actor_id,
+        })
+    }
 }
 
 /// Comparison operator for conditions
@@ -375,8 +473,8 @@ pub struct PatronAction {
     pub name: String,
     pub source_actor_id: Option<String>,
     pub available_if: ActionCondition,
-    pub effects: HashMap<String, f64>,
-    pub cost: HashMap<String, f64>,
+    pub effects: HashMap<MetricRef, f64>,
+    pub cost: HashMap<MetricRef, f64>,
 }
 
 /// Condition for action availability
@@ -384,7 +482,7 @@ pub struct PatronAction {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionCondition {
     Always,
-    Metric { metric: String, operator: ComparisonOperator, value: f64 },
+    Metric { metric: MetricRef, operator: ComparisonOperator, value: f64 },
 }
 
 /// Milestone event that changes narrative
@@ -405,7 +503,8 @@ pub struct MilestoneEvent {
 pub struct SpawnActorConfig {
     pub actor_id: String,
     pub label: String,
-    pub initial_metrics: HashMap<String, f64>,
+    /// Bare metric names; the actor is the one being spawned.
+    pub initial_metrics: HashMap<MetricName, f64>,
     pub lat: f64,
     pub lng: f64,
     pub color: String,
@@ -436,11 +535,11 @@ impl EventCondition {
     /// against the metric rules. That was harmless while the metric check ignored
     /// global-shaped keys, and became a false positive the moment it stopped ignoring
     /// them. Use [`actor_state_actor_id`](Self::actor_state_actor_id) for that field.
-    pub fn to_metric_strings(&self) -> Vec<String> {
+    pub fn metric_ref(&self) -> Option<&MetricRef> {
         match &self.condition_type {
-            EventConditionType::Metric { metric, .. } => vec![metric.clone()],
-            EventConditionType::ActorState { .. } => vec![],
-            EventConditionType::Tick { .. } => vec![],
+            EventConditionType::Metric { metric, .. } => Some(metric),
+            EventConditionType::ActorState { .. } => None,
+            EventConditionType::Tick { .. } => None,
         }
     }
 
@@ -454,9 +553,36 @@ impl EventCondition {
 }
 
 /// Type of event condition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Metric` pairs a key with a sibling `actor_id`, exactly like `AutoDelta`, and is
+/// resolved the same way — once, at load, through the shadow type below. The
+/// `actor_id` is **kept** after resolution because it carries a second meaning the
+/// key cannot: an actor-scoped condition on an actor that is *not in the world*
+/// (never spawned, or removed on collapse) is **false**, not `0.0`. See
+/// `eval_metric_condition`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventConditionType {
+    Metric {
+        metric: MetricRef,
+        actor_id: Option<String>,
+        operator: ComparisonOperator,
+        value: f64,
+    },
+    ActorState {
+        actor_id: String,
+        state: ActorState,
+    },
+    Tick {
+        tick: u32,
+    },
+}
+
+/// Shadow type: the raw TOML shape of an event condition, before `actor_id` is
+/// folded into the metric key.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum EventConditionTypeRaw {
     Metric {
         metric: String,
         actor_id: Option<String>,
@@ -470,6 +596,23 @@ pub enum EventConditionType {
     Tick {
         tick: u32,
     },
+}
+
+impl<'de> Deserialize<'de> for EventConditionType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        Ok(match EventConditionTypeRaw::deserialize(deserializer)? {
+            EventConditionTypeRaw::Metric { metric, actor_id, operator, value } => {
+                let metric = resolve_at_load(&metric, actor_id.as_deref())
+                    .map_err(D::Error::custom)?;
+                EventConditionType::Metric { metric, actor_id, operator, value }
+            }
+            EventConditionTypeRaw::ActorState { actor_id, state } => {
+                EventConditionType::ActorState { actor_id, state }
+            }
+            EventConditionTypeRaw::Tick { tick } => EventConditionType::Tick { tick },
+        })
+    }
 }
 
 /// Actor state for conditions
@@ -528,7 +671,7 @@ pub struct GenerationMechanics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EarlyTransfer {
     pub age: u32,
-    pub condition_metric: String,
+    pub condition_metric: MetricRef,
     pub condition_operator: ComparisonOperator,
     pub condition_value: f64,
 }

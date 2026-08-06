@@ -301,7 +301,6 @@ fn test_federation_progress_grows_with_actions() {
 #[test]
 fn test_scripted_actions_improve_outcome_vs_no_actions() {
     // Test that scripted actions improve outcome vs no-action baseline
-    use crate::core::MetricRef;
     use crate::engine::{tick, EventLog};
     use rand::SeedableRng;
 
@@ -350,7 +349,7 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
                 let is_available = match &action.available_if {
                     crate::core::ActionCondition::Always => true,
                     crate::core::ActionCondition::Metric { metric, operator, value } => {
-                        let current = MetricRef::parse(metric).get(&world_scripted);
+                        let current = metric.get(&world_scripted);
                         match operator {
                             crate::core::ComparisonOperator::Less => current < *value,
                             crate::core::ComparisonOperator::LessOrEqual => current <= *value,
@@ -362,10 +361,10 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
                 };
                 if is_available {
                     for (metric, effect) in &action.effects {
-                        MetricRef::parse(metric).apply(&mut world_scripted, *effect);
+                        metric.apply(&mut world_scripted, *effect);
                     }
                     for (metric, cost) in &action.cost {
-                        MetricRef::parse(metric).apply(&mut world_scripted, *cost);
+                        metric.apply(&mut world_scripted, *cost);
                     }
                 }
             }
@@ -392,7 +391,6 @@ fn test_scripted_actions_improve_outcome_vs_no_actions() {
 #[test]
 fn test_scripted_victory_achievable() {
     // Test that scripted victory is achievable within 40 ticks
-    use crate::core::MetricRef;
     use crate::engine::{tick, EventLog};
     use rand::SeedableRng;
 
@@ -421,7 +419,7 @@ fn test_scripted_victory_achievable() {
                 let is_available = match &action.available_if {
                     crate::core::ActionCondition::Always => true,
                     crate::core::ActionCondition::Metric { metric, operator, value } => {
-                        let current = MetricRef::parse(metric).get(&world);
+                        let current = metric.get(&world);
                         match operator {
                             crate::core::ComparisonOperator::Less => current < *value,
                             crate::core::ComparisonOperator::LessOrEqual => current <= *value,
@@ -433,10 +431,10 @@ fn test_scripted_victory_achievable() {
                 };
                 if is_available {
                     for (metric, effect) in &action.effects {
-                        MetricRef::parse(metric).apply(&mut world, *effect);
+                        metric.apply(&mut world, *effect);
                     }
                     for (metric, cost) in &action.cost {
-                        MetricRef::parse(metric).apply(&mut world, *cost);
+                        metric.apply(&mut world, *cost);
                     }
                 }
             }

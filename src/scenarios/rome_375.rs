@@ -195,7 +195,7 @@ pub fn load_rome_375() -> Scenario {
         generation_length: Some(33),
         actions_per_tick: 2,
         victory_condition: Some(crate::core::VictoryCondition {
-            metric: "family:influence".to_string(),
+            metric: crate::core::MetricRef::literal("family:influence"),
             threshold: 90.0,
             title: "Семья достигла величия".to_string(),
             description: "Ди Милано стали опорой угасающей империи.".to_string(),
@@ -213,12 +213,12 @@ pub fn load_rome_375() -> Scenario {
         max_random_events_per_tick: 2,
         narrative_config: crate::core::NarrativeConfig {
             key_metrics: vec![
-                "family:family_influence".to_string(),
-                "family:family_knowledge".to_string(),
-                "family:family_wealth".to_string(),
-                "family:family_connections".to_string(),
-                "actor:rome.legitimacy".to_string(),
-                "actor:rome.cohesion".to_string(),
+                crate::core::MetricRef::literal("family:family_influence"),
+                crate::core::MetricRef::literal("family:family_knowledge"),
+                crate::core::MetricRef::literal("family:family_wealth"),
+                crate::core::MetricRef::literal("family:family_connections"),
+                crate::core::MetricRef::literal("actor:rome.legitimacy"),
+                crate::core::MetricRef::literal("actor:rome.cohesion"),
             ],
             narrative_axes: vec![
                 "stability vs ambition".to_string(),
@@ -1215,71 +1215,71 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
     vec![
         // Actor auto-deltas for Rome
         AutoDelta {
-            metric: "population".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "population").expect("scenario metric key"),
             base: 0.3,
             conditions: vec![
-                DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.5 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "economic_output").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 20.0, delta: -0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "external_pressure").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 0.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "military_size".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "military_size").expect("scenario metric key"),
             base: -0.2,
             conditions: vec![
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -1.0 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 0.0, delta: -1.0 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "external_pressure").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.3 },
             ],
             ratio_conditions: vec![],
             noise: 0.3,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "military_quality".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "military_quality").expect("scenario metric key"),
             base: -0.1,
             conditions: vec![
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Greater, value: 200.0, delta: 0.2 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 200.0, delta: 0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "external_pressure").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.3 },
             ],
             ratio_conditions: vec![],
             noise: 0.2,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "economic_output".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "economic_output").expect("scenario metric key"),
             base: 0.1,
             conditions: vec![
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.4 },
-                DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Less, value: 25.0, delta: -0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 0.0, delta: -0.4 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 25.0, delta: -0.5 },
             ],
             ratio_conditions: vec![],
             noise: 0.4,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "cohesion".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"),
             base: -0.3,
             conditions: vec![
-                DeltaCondition { metric: "legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: 0.1 },
-                DeltaCondition { metric: "economic_output".to_string(), operator: ComparisonOperator::Less, value: 20.0, delta: -0.4 },
-                DeltaCondition { metric: "external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "legitimacy").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 70.0, delta: 0.1 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "economic_output").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 20.0, delta: -0.4 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "external_pressure").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 60.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "legitimacy".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "legitimacy").expect("scenario metric key"),
             base: -0.1,
             conditions: vec![
-                DeltaCondition { metric: "cohesion".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
-                DeltaCondition { metric: "treasury".to_string(), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
-                DeltaCondition { metric: "military_size".to_string(), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::actor("rome", "military_size").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
                 // Knowledge → legitimacy bridge (soft support role, not victory path)
-                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
@@ -1288,20 +1288,20 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         // Rome external pressure from barbarians
         // Pressure grows slower if Rome maintains military parity
         AutoDelta {
-            metric: "actor:rome.external_pressure".to_string(),
+            metric: crate::core::MetricRef::literal("actor:rome.external_pressure"),
             base: 2.0,
             conditions: vec![],
             ratio_conditions: vec![
                 DeltaConditionRatio {
-                    metric_a: "actor:rome.military_size".to_string(),
-                    metric_b: "actor:visigoths.military_size".to_string(),
+                    metric_a: crate::core::MetricRef::literal("actor:rome.military_size"),
+                    metric_b: crate::core::MetricRef::literal("actor:visigoths.military_size"),
                     ratio: 0.8, // Rome should maintain parity
                     operator: ComparisonOperator::Greater,
                     delta: -1.8,
                 },
                 DeltaConditionRatio {
-                    metric_a: "actor:rome.military_size".to_string(),
-                    metric_b: "actor:huns.military_size".to_string(),
+                    metric_a: crate::core::MetricRef::literal("actor:rome.military_size"),
+                    metric_b: crate::core::MetricRef::literal("actor:huns.military_size"),
                     ratio: 0.5,
                     operator: ComparisonOperator::Greater,
                     delta: -1.0,
@@ -1312,45 +1312,45 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Family auto-deltas (passive changes per tick)
         AutoDelta {
-            metric: "family:family_influence".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_influence"),
             base: -0.5, // passive decay
             conditions: vec![
-                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 30.0, delta: 0.3 },
-                DeltaCondition { metric: "family:family_wealth".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.2 },
-                DeltaCondition { metric: "actor:rome.legitimacy".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
-                DeltaCondition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_connections"), operator: ComparisonOperator::Greater, value: 30.0, delta: 0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_wealth"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.legitimacy"), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.1 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.cohesion"), operator: ComparisonOperator::Less, value: 30.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family:family_knowledge".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_knowledge"),
             base: 0.2, // always grows
             conditions: vec![
-                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.05,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family:family_wealth".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_wealth"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 20.0, delta: 0.5 },
-                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
-                DeltaCondition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_connections"), operator: ComparisonOperator::Greater, value: 20.0, delta: 0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_connections"), operator: ComparisonOperator::Less, value: 5.0, delta: -0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.economic_output"), operator: ComparisonOperator::Greater, value: 60.0, delta: 0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family:family_connections".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_connections"),
             base: -0.3, // need to maintain
             conditions: vec![
-                DeltaCondition { metric: "actor:rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.external_pressure"), operator: ComparisonOperator::Greater, value: 70.0, delta: -0.2 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
@@ -1358,31 +1358,31 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Rome → Family: when Rome struggles, family suffers
         AutoDelta {
-            metric: "family:family_connections".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_connections"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.cohesion"), operator: ComparisonOperator::Less, value: 40.0, delta: -1.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family:family_wealth".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_wealth"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "actor:rome.external_pressure".to_string(), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
-                DeltaCondition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.external_pressure"), operator: ComparisonOperator::Greater, value: 60.0, delta: -1.0 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.economic_output"), operator: ComparisonOperator::Less, value: 35.0, delta: -1.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: None,
         },
         AutoDelta {
-            metric: "family:family_influence".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_influence"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "actor:rome.legitimacy".to_string(), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("actor:rome.legitimacy"), operator: ComparisonOperator::Less, value: 40.0, delta: -2.0 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1390,30 +1390,30 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
         },
         // Family → Rome: when family thrives, Rome benefits
         AutoDelta {
-            metric: "legitimacy".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "legitimacy").expect("scenario metric key"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family:family_influence".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_influence"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "cohesion".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family:family_connections".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_connections"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.5 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
             actor_id: Some("rome".to_string()),
         },
         AutoDelta {
-            metric: "economic_output".to_string(),
+            metric: crate::core::MetricRef::actor("rome", "economic_output").expect("scenario metric key"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: "family:family_knowledge".to_string(), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
@@ -1432,7 +1432,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "family_rises".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "family:family_influence".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_influence"),
                     actor_id: None,
                     operator: ComparisonOperator::GreaterOrEqual,
                     value: 60.0,
@@ -1449,7 +1449,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "rome_splits".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "cohesion".to_string(),
+                    metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"),
                     actor_id: Some("rome".to_string()),
                     operator: ComparisonOperator::Less,
                     value: 30.0,
@@ -1466,7 +1466,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "adrianople".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "external_pressure".to_string(),
+                    metric: crate::core::MetricRef::actor("rome", "external_pressure").expect("scenario metric key"),
                     actor_id: Some("rome".to_string()),
                     operator: ComparisonOperator::Greater,
                     value: 85.0,
@@ -1483,7 +1483,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "huns_visible".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "military_size".to_string(),
+                    metric: crate::core::MetricRef::actor("huns", "military_size").expect("scenario metric key"),
                     actor_id: Some("huns".to_string()),
                     operator: ComparisonOperator::Greater,
                     value: 200.0,
@@ -1500,7 +1500,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             id: "family_falls".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "family:family_influence".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_influence"),
                     actor_id: None,
                     operator: ComparisonOperator::Less,
                     value: 5.0,
@@ -1527,7 +1527,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "steppe".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "military_size".to_string(),
+                    metric: crate::core::MetricRef::actor("huns", "military_size").expect("scenario metric key"),
                     actor_id: Some("huns".to_string()),
                     operator: ComparisonOperator::Greater,
                     value: 150.0,
@@ -1541,7 +1541,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "steppe".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "military_size".to_string(),
+                    metric: crate::core::MetricRef::actor("huns", "military_size").expect("scenario metric key"),
                     actor_id: Some("huns".to_string()),
                     operator: ComparisonOperator::Greater,
                     value: 300.0,
@@ -1556,7 +1556,7 @@ fn create_rank_conditions() -> Vec<RankCondition> {
             region_id: "rome_city".to_string(),
             condition: EventCondition {
                 condition_type: EventConditionType::Metric {
-                    metric: "legitimacy".to_string(),
+                    metric: crate::core::MetricRef::actor("rome", "legitimacy").expect("scenario metric key"),
                     actor_id: Some("rome".to_string()),
                     operator: ComparisonOperator::Less,
                     value: 20.0,
@@ -1607,7 +1607,7 @@ fn create_generation_mechanics() -> GenerationMechanics {
         ],
         early_transfer: Some(crate::core::EarlyTransfer {
             age: 65,
-            condition_metric: "actor:rome.external_pressure".to_string(),
+            condition_metric: crate::core::MetricRef::literal("actor:rome.external_pressure"),
             condition_operator: crate::core::ComparisonOperator::Greater,
             condition_value: 70.0,
         }),
@@ -1665,7 +1665,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
     vec![
         StatusIndicator {
             label: "Западная Империя".to_string(),
-            metric: "actor:rome.external_pressure".to_string(),
+            metric: crate::core::MetricRef::literal("actor:rome.external_pressure"),
             invert: true,
             thresholds: vec![
                 (0.0, "стабильна".to_string()),
@@ -1675,7 +1675,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Натиск варваров".to_string(),
-            metric: "actor:visigoths.military_size".to_string(),
+            metric: crate::core::MetricRef::literal("actor:visigoths.military_size"),
             invert: true,
             thresholds: vec![
                 (0.0, "слабый".to_string()),
@@ -1685,7 +1685,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
         },
         StatusIndicator {
             label: "Семья Ди Милано".to_string(),
-            metric: "family:family_influence".to_string(),
+            metric: crate::core::MetricRef::literal("family:family_influence"),
             invert: false,
             thresholds: vec![
                 (0.0, "незначительна".to_string()),
@@ -1791,7 +1791,7 @@ mod tests {
 
 
 fn create_random_events() -> Vec<crate::core::RandomEvent> {
-    use crate::core::{Condition, EventTarget, ComparisonOperator, RandomEvent};
+    use crate::core::{EventTarget, ComparisonOperator, RandomEvent};
     use std::collections::HashMap;
 
     vec![
@@ -1801,8 +1801,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("family:influence".to_string(), -10.0),
-                ("actor:rome.legitimacy".to_string(), -5.0),
+                (crate::core::RelativeMetricRef::literal("family:influence"), -10.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), -5.0),
             ]),
             llm_context: "Предательство легата ослабило позиции семьи при дворе".to_string(),
             one_time: false,
@@ -1812,12 +1812,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.10,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "actor:visigoths.military_size".to_string(), operator: ComparisonOperator::Greater, value: 80.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:visigoths.military_size"), operator: ComparisonOperator::Greater, value: 80.0 },
             ],
             effects: HashMap::from([
-                ("actor:rome.cohesion".to_string(), -10.0),
-                ("actor:rome.economic_output".to_string(), -8.0),
-                ("actor:rome.external_pressure".to_string(), 5.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.cohesion"), -10.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.economic_output"), -8.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.external_pressure"), 5.0),
             ]),
             llm_context: "Варварский набег разорил приграничные провинции".to_string(),
             one_time: false,
@@ -1828,8 +1828,8 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("actor:rome.legitimacy".to_string(), 8.0),
-                ("family:influence".to_string(), 5.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), 8.0),
+                (crate::core::RelativeMetricRef::literal("family:influence"), 5.0),
             ]),
             llm_context: "Пророчество оракула укрепило авторитет власти".to_string(),
             one_time: true,
@@ -1839,12 +1839,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.07,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "family:wealth".to_string(), operator: ComparisonOperator::Greater, value: 200.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("family:wealth"), operator: ComparisonOperator::Greater, value: 200.0 },
             ],
             effects: HashMap::from([
-                ("family:influence".to_string(), 8.0),
-                ("family:wealth".to_string(), -100.0),
-                ("actor:rome.legitimacy".to_string(), 3.0),
+                (crate::core::RelativeMetricRef::literal("family:influence"), 8.0),
+                (crate::core::RelativeMetricRef::literal("family:wealth"), -100.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), 3.0),
             ]),
             llm_context: "Подкуп сенаторов укрепил позиции семьи в Риме".to_string(),
             one_time: false,
@@ -1854,12 +1854,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.05,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "actor:rome.cohesion".to_string(), operator: ComparisonOperator::Less, value: 40.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:rome.cohesion"), operator: ComparisonOperator::Less, value: 40.0 },
             ],
             effects: HashMap::from([
-                ("actor:rome.cohesion".to_string(), -12.0),
-                ("actor:rome.legitimacy".to_string(), -8.0),
-                ("family:influence".to_string(), -5.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.cohesion"), -12.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), -8.0),
+                (crate::core::RelativeMetricRef::literal("family:influence"), -5.0),
             ]),
             llm_context: "Восстание гладиаторов обнажило слабость императорской власти".to_string(),
             one_time: false,
@@ -1869,12 +1869,12 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "actor:rome.economic_output".to_string(), operator: ComparisonOperator::Greater, value: 30.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:rome.economic_output"), operator: ComparisonOperator::Greater, value: 30.0 },
             ],
             effects: HashMap::from([
-                ("family:wealth".to_string(), 120.0),
-                ("family:connections".to_string(), 5.0),
-                ("actor:rome.economic_output".to_string(), 3.0),
+                (crate::core::RelativeMetricRef::literal("family:wealth"), 120.0),
+                (crate::core::RelativeMetricRef::literal("family:connections"), 5.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.economic_output"), 3.0),
             ]),
             llm_context: "Богатый торговый караван с Востока принёс редкие товары и новые связи".to_string(),
             one_time: false,
@@ -1884,13 +1884,13 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.06,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                Condition { metric: "actor:rome.military_size".to_string(), operator: ComparisonOperator::Greater, value: 100.0 },
-                Condition { metric: "actor:rome.treasury".to_string(), operator: ComparisonOperator::Less, value: 150.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:rome.military_size"), operator: ComparisonOperator::Greater, value: 100.0 },
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("actor:rome.treasury"), operator: ComparisonOperator::Less, value: 150.0 },
             ],
             effects: HashMap::from([
-                ("actor:rome.military_size".to_string(), -30.0),
-                ("actor:rome.legitimacy".to_string(), -12.0),
-                ("actor:rome.cohesion".to_string(), -8.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.military_size"), -30.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), -12.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.cohesion"), -8.0),
             ]),
             llm_context: "Мятеж легионов потряс Рим — солдаты требуют жалования".to_string(),
             one_time: false,
@@ -1901,9 +1901,9 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![],
             effects: HashMap::from([
-                ("actor:rome.cohesion".to_string(), 12.0),
-                ("family:influence".to_string(), 8.0),
-                ("actor:rome.legitimacy".to_string(), 6.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.cohesion"), 12.0),
+                (crate::core::RelativeMetricRef::literal("family:influence"), 8.0),
+                (crate::core::RelativeMetricRef::literal("actor:rome.legitimacy"), 6.0),
             ]),
             llm_context: "Знамение богов укрепило веру народа в предназначение Рима".to_string(),
             one_time: true,
