@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::core::{
-    Actor, ActorTag, AutoDelta, BorderType, ComparisonOperator, DeltaCondition, DependencyRule,
-    EraDefinition, EventCondition, EventConditionType, GenerationMechanics, MapConfig,
-    MilestoneEvent, Neighbor, PatronAction, RankBonusRule, RankCondition, RankResult, Scenario,
-    Successor, TagDefinition,
+    canonical_family_key, Actor, ActorTag, AutoDelta, BorderType, ComparisonOperator,
+    DeltaCondition, DependencyRule, EraDefinition, EventCondition, EventConditionType,
+    GenerationMechanics, MapConfig, MilestoneEvent, Neighbor, PatronAction, RankBonusRule,
+    RankCondition, RankResult, Scenario, Successor, TagDefinition,
 };
 
 /// Dependencies file structure for TOML deserialization
@@ -1587,11 +1587,22 @@ fn create_rank_conditions() -> Vec<RankCondition> {
 // ============================================================================
 
 fn create_generation_mechanics() -> GenerationMechanics {
-    let mut inheritance_coefficients = HashMap::new();
-    inheritance_coefficients.insert("family:family_influence".to_string(), 0.85);
-    inheritance_coefficients.insert("family:family_knowledge".to_string(), 1.0);
-    inheritance_coefficients.insert("family:family_wealth".to_string(), 1.0);
-    inheritance_coefficients.insert("family:family_connections".to_string(), 0.8);
+    // `check_generation_transfer` looks these up by the *runtime* key, and
+    // `family_state.metrics` is keyed canonically (`influence`, …) because every
+    // seeding path goes through `normalize_family_metrics`. Spelled raw, these
+    // four keys matched nothing and `.unwrap_or(0.7)` stood in for all of them.
+    // Built through `canonical_family_key` rather than written out canonically by
+    // hand: the same rule as the seeding path, so the two spaces cannot drift
+    // apart again.
+    let inheritance_coefficients: HashMap<String, f64> = [
+        ("family:family_influence", 0.85),
+        ("family:family_knowledge", 1.0),
+        ("family:family_wealth", 1.0),
+        ("family:family_connections", 0.8),
+    ]
+    .into_iter()
+    .map(|(key, coefficient)| (canonical_family_key(key).to_string(), coefficient))
+    .collect();
 
     GenerationMechanics {
         tick_span: 1,
