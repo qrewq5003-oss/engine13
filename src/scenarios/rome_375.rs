@@ -1328,6 +1328,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: crate::core::MetricRef::literal("family:family_knowledge"),
             base: 0.2, // always grows
             conditions: vec![
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.05,
@@ -1412,7 +1413,6 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: crate::core::MetricRef::actor("rome", "economic_output").expect("scenario metric key"),
             base: 0.0,
             conditions: vec![
-                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
             ],
             ratio_conditions: vec![],
             noise: 0.0,
