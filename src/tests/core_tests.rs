@@ -421,11 +421,60 @@ fn test_initial_family_metrics_loaded() {
 
     let family_state = world_state.family_state.as_ref().unwrap();
 
-    // Check that initial metrics are loaded
-    assert!(family_state.metrics.contains_key("family:family_influence"), "Should have family_influence");
-    assert!(family_state.metrics.contains_key("family:family_knowledge"), "Should have family_knowledge");
-    assert!(family_state.metrics.contains_key("family:family_wealth"), "Should have family_wealth");
-    assert!(family_state.metrics.contains_key("family:family_connections"), "Should have family_connections");
+    // Keys are seeded in canonical runtime form — the same space `sim.rs` seeds
+    // and the only one `MetricRef::Family` reads. Before this was fixed the app's
+    // fresh start kept the raw content keys ("family:family_influence"), so `get`
+    // read 0.0 and `apply` opened a second entry beside the stale one (§5.H).
+    for key in ["influence", "knowledge", "wealth", "connections"] {
+        assert!(family_state.metrics.contains_key(key), "Should have canonical key {key}");
+    }
+
+    // No raw content key survives, and there is no doubled key space.
+    assert!(
+        !family_state.metrics.keys().any(|k| k.starts_with("family:") || k.starts_with("family_")),
+        "No raw content keys should remain: {:?}",
+        family_state.metrics.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        family_state.metrics.len(),
+        4,
+        "Exactly four family metrics, not eight: {:?}",
+        family_state.metrics.keys().collect::<Vec<_>>()
+    );
+
+    // The read path actually resolves them — the property the raw keys broke.
+    for key in ["family:family_influence", "family:influence"] {
+        assert!(
+            crate::core::MetricRef::parse(key).unwrap().try_get(world_state).is_some(),
+            "MetricRef::Family::try_get should resolve {key}"
+        );
+    }
+}
+
+/// The key space must stay closed under ticking, not just at seed time.
+///
+/// This is the half of §5.H that a tick-0 check cannot see: with raw seeded keys
+/// `apply` used to `or_insert` a *second*, canonical entry beside each stale one,
+/// so the map grew to eight. Only the key set is asserted — a fresh app start is
+/// clock-seeded (`WorldState::new`), so the values are not reproducible run to run.
+#[test]
+fn test_family_metric_keys_stay_canonical_after_ticks() {
+    let mut state = crate::AppState::default();
+    let db = crate::db::Db::open_in_memory().unwrap();
+
+    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    for _ in 0..40 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+    }
+
+    let family_state = state.world_state.as_ref().unwrap().family_state.as_ref().unwrap();
+    let mut keys: Vec<&str> = family_state.metrics.keys().map(|k| k.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["connections", "influence", "knowledge", "wealth"],
+        "Ticking must not open a second key space beside the seeded one"
+    );
 }
 
 #[test]

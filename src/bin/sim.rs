@@ -101,18 +101,8 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
 
-        // Normalize keys: strip "family:" prefix then "family_" prefix (MetricRef expects just "knowledge", "wealth", etc.)
-        let mut normalized_metrics = HashMap::new();
-        for (key, value) in initial_metrics {
-            // First strip "family:" prefix if present
-            let key1 = key.strip_prefix("family:").unwrap_or(key);
-            // Then strip "family_" prefix if present (MetricRef does this internally)
-            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
-            normalized_metrics.insert(normalized_key.to_string(), *value);
-        }
-
         world.family_state = Some(engine13::core::FamilyState {
-            metrics: normalized_metrics,
+            metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });
@@ -170,15 +160,8 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32) {
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
 
-        let mut normalized_metrics = HashMap::new();
-        for (key, value) in initial_metrics {
-            let key1 = key.strip_prefix("family:").unwrap_or(key);
-            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
-            normalized_metrics.insert(normalized_key.to_string(), *value);
-        }
-
         world.family_state = Some(engine13::core::FamilyState {
-            metrics: normalized_metrics,
+            metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });
@@ -401,15 +384,8 @@ fn run_narrative_pack(scenario_id: &str) {
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
 
-        let mut normalized_metrics = HashMap::new();
-        for (key, value) in initial_metrics {
-            let key1 = key.strip_prefix("family:").unwrap_or(key);
-            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
-            normalized_metrics.insert(normalized_key.to_string(), *value);
-        }
-
         world.family_state = Some(engine13::core::FamilyState {
-            metrics: normalized_metrics,
+            metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });
@@ -610,7 +586,7 @@ fn run_batch(scenario_id: &str, ticks: u32) {
                 .unwrap_or(40) as u32;
 
             world.family_state = Some(engine13::core::FamilyState {
-                metrics: initial_metrics.clone(),
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
                 patriarch_age,
                 generation_count: 0,
             });
@@ -920,18 +896,8 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
 
-        // Normalize keys: strip "family:" prefix then "family_" prefix (MetricRef expects just "knowledge", "wealth", etc.)
-        let mut normalized_metrics = HashMap::new();
-        for (key, value) in initial_metrics {
-            // First strip "family:" prefix if present
-            let key1 = key.strip_prefix("family:").unwrap_or(key);
-            // Then strip "family_" prefix if present (MetricRef does this internally)
-            let normalized_key = key1.strip_prefix("family_").unwrap_or(key1);
-            normalized_metrics.insert(normalized_key.to_string(), *value);
-        }
-
         world.family_state = Some(engine13::core::FamilyState {
-            metrics: normalized_metrics,
+            metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });

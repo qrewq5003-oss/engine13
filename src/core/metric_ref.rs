@@ -245,8 +245,13 @@ impl MetricRef {
 
     /// Family metrics are stored unprefixed; content may write either
     /// `family:influence` or `family:family_influence`.
+    ///
+    /// By the time a `MetricName` exists the `family:` scope prefix is already
+    /// gone (`parse` strips it), so only `family_` is left to remove. Delegates
+    /// to [`canonical_family_key`] so the runtime read path and the seeding path
+    /// cannot drift apart again.
     fn family_key(key: &MetricName) -> &str {
-        key.as_str().strip_prefix("family_").unwrap_or(key.as_str())
+        canonical_family_key(key.as_str())
     }
 
     /// Apply a delta to the metric in world_state
@@ -281,6 +286,38 @@ impl MetricRef {
             }
         }
     }
+}
+
+/// Canonical runtime form of a family-metric key, from a *raw content* key.
+///
+/// Content writes family metrics under any of `family:family_influence`,
+/// `family:influence` or `family_influence`; runtime stores them unprefixed
+/// (`influence`), which is what [`MetricRef::Family`] reads. This is the
+/// superset of [`MetricRef::family_key`]: it takes the key before `parse` has
+/// removed the `family:` scope, so it strips the scope prefix first and the
+/// `family_` name prefix second.
+///
+/// Seeding `family_state.metrics` with anything but this form is the defect
+/// behind §5.H — `get` misses the raw key and reads `0.0`, and `apply` then
+/// opens a *second*, canonical entry beside the stale one.
+pub fn canonical_family_key(key: &str) -> &str {
+    let key = key.strip_prefix("family:").unwrap_or(key);
+    key.strip_prefix("family_").unwrap_or(key)
+}
+
+/// Normalize a whole raw `initial_family_metrics` map for seeding
+/// `FamilyState::metrics`.
+///
+/// Every path that seeds family state must go through here — the simulator's
+/// run modes and the application's fresh-scenario start alike. The two diverging
+/// key spaces *were* the defect, so the cure is one function with several
+/// callers, not a hand-written `strip_prefix` pair per site.
+pub fn normalize_family_metrics(
+    raw: &std::collections::HashMap<String, f64>,
+) -> std::collections::HashMap<String, f64> {
+    raw.iter()
+        .map(|(key, value)| (canonical_family_key(key).to_string(), *value))
+        .collect()
 }
 
 impl fmt::Display for MetricRef {
