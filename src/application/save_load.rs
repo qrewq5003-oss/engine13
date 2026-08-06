@@ -144,7 +144,7 @@ pub fn load_scenario(
             .unwrap_or(40) as u32;
 
         world_state.family_state = Some(crate::core::FamilyState {
-            metrics: initial_metrics.clone(),
+            metrics: crate::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });

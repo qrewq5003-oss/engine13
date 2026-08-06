@@ -7,7 +7,8 @@ pub mod world;
 pub use actor::*;
 pub use event::*;
 pub use metric_ref::{
-    resolve_at_load, ActorId, MetricKeyError, MetricName, MetricRef, RelativeMetricRef,
+    canonical_family_key, normalize_family_metrics, resolve_at_load, ActorId, MetricKeyError,
+    MetricName, MetricRef, RelativeMetricRef,
 };
 pub use scenario::*;
 pub use world::*;
