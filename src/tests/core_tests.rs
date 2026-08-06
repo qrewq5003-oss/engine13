@@ -384,16 +384,24 @@ fn test_generation_transfer_applies_inheritance() {
         }
     }
     
-    // Set family_state with patriarch_age at end age
+    // Set family_state with patriarch_age at end age.
+    //
+    // Seeded through `normalize_family_metrics`, exactly like every production
+    // path, so the key is the canonical `influence`. Seeded raw this test used to
+    // pass for the wrong reason: the raw key happened to match the equally raw key
+    // in `inheritance_coefficients`, which the runtime never produces (§5.G).
     let gen = scenario.generation_mechanics.as_ref().unwrap();
+    let influence_key = crate::core::canonical_family_key("family:family_influence");
     world.family_state = Some(crate::core::FamilyState {
-        metrics: [("family:family_influence".to_string(), 60.0)].into(),
+        metrics: crate::core::normalize_family_metrics(
+            &[("family:family_influence".to_string(), 60.0)].into(),
+        ),
         patriarch_age: gen.patriarch_end_age,
         generation_count: 0,
     });
-    
-    let initial_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
-    
+
+    let initial_influence = world.family_state.as_ref().unwrap().metrics.get(influence_key).copied().unwrap_or(0.0);
+
     // Run tick - should trigger generation transfer
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
@@ -401,10 +409,82 @@ fn test_generation_transfer_applies_inheritance() {
     // Check patriarch_age reset to start age
     assert_eq!(world.family_state.as_ref().unwrap().patriarch_age, gen.patriarch_start_age, "Patriarch age should reset");
     
-    // Check family_influence reduced by inheritance coefficient (0.85)
-    let final_influence = world.family_state.as_ref().unwrap().metrics.get("family:family_influence").copied().unwrap_or(0.0);
+    // Check family_influence reduced by rome's authored inheritance coefficient
+    // (0.85) — not by the engine's `.unwrap_or(0.7)` fallback.
+    //
+    // Tolerance widened from 0.1: under the raw key this test used to read an entry
+    // nothing but the generation transfer ever touched, so the result was exactly
+    // `60.0 * 0.85`. The canonical key is live — other phases of the same tick write
+    // it too (measured drift here: +0.14). Still 9.0 away from the fallback's 42.0.
+    let final_influence = world.family_state.as_ref().unwrap().metrics.get(influence_key).copied().unwrap_or(0.0);
     let expected = initial_influence * 0.85;
-    assert!((final_influence - expected).abs() < 0.1, "Family influence should be reduced by inheritance coefficient");
+    assert!((final_influence - expected).abs() < 1.0, "Family influence should be reduced by inheritance coefficient");
+}
+
+/// Every one of rome's four coefficients must reach the runtime, not just the one
+/// the test above happens to seed.
+///
+/// The defect this guards was invisible per-metric: all four keys were spelled in
+/// a space the runtime never produces, so `.unwrap_or(0.7)` covered for all four
+/// at once and nothing looked wrong locally. `knowledge` and `wealth` are the
+/// load-bearing cases — authored at `1.0`, meaning *not lost between patriarchs*,
+/// and silently decaying 30% per generation instead.
+#[test]
+fn test_generation_transfer_uses_every_authored_coefficient() {
+    let scenario = registry::load_by_id("rome_375").unwrap();
+    let gen = scenario.generation_mechanics.as_ref().unwrap();
+
+    // Authored intent, by content key — resolved to runtime keys the same way the
+    // scenario builds the map and the same way family state is seeded.
+    let authored: [(&str, f64); 4] = [
+        ("family:family_influence", 0.85),
+        ("family:family_knowledge", 1.0),
+        ("family:family_wealth", 1.0),
+        ("family:family_connections", 0.8),
+    ];
+
+    const START: f64 = 60.0;
+    // The canonical keys are live keys: other phases of the same tick write them
+    // too, so the post-tick value is the inherited value plus a little drift
+    // (measured: -0.24..+0.45 at this seed). Well inside this, and 9.0 away from
+    // what the `.unwrap_or(0.7)` fallback would give even in the closest case
+    // (influence: 51.0 vs 42.0).
+    const TOLERANCE: f64 = 1.0;
+
+    let seed: std::collections::HashMap<String, f64> = authored
+        .iter()
+        .map(|(key, _)| ((*key).to_string(), START))
+        .collect();
+
+    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut event_log = crate::engine::EventLog::new();
+    for actor in &scenario.actors {
+        if actor.id == "rome" {
+            world.actors.insert(actor.id.clone(), actor.clone());
+            break;
+        }
+    }
+    world.family_state = Some(crate::core::FamilyState {
+        metrics: crate::core::normalize_family_metrics(&seed),
+        patriarch_age: gen.patriarch_end_age,
+        generation_count: 0,
+    });
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+
+    let metrics = &world.family_state.as_ref().unwrap().metrics;
+    for (content_key, coefficient) in authored {
+        let runtime_key = crate::core::canonical_family_key(content_key);
+        let actual = metrics.get(runtime_key).copied().unwrap_or(0.0);
+        let expected = START * coefficient;
+        assert!(
+            (actual - expected).abs() < TOLERANCE,
+            "{content_key}: expected {expected} (authored coefficient {coefficient}), got {actual} \
+             — {:.2} would be the engine's .unwrap_or(0.7) fallback",
+            START * 0.7
+        );
+    }
 }
 
 #[test]
