@@ -1279,6 +1279,7 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
                 DeltaCondition { metric: crate::core::MetricRef::actor("rome", "treasury").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 0.0, delta: -0.3 },
                 DeltaCondition { metric: crate::core::MetricRef::actor("rome", "military_size").expect("scenario metric key"), operator: ComparisonOperator::Less, value: 10.0, delta: -0.2 },
                 // Knowledge → legitimacy bridge (soft support role, not victory path)
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.1,
@@ -1327,7 +1328,6 @@ fn create_auto_deltas() -> Vec<AutoDelta> {
             metric: crate::core::MetricRef::literal("family:family_knowledge"),
             base: 0.2, // always grows
             conditions: vec![
-                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
             ],
             ratio_conditions: vec![],
             noise: 0.05,
