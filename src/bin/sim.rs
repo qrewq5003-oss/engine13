@@ -631,7 +631,17 @@ fn run_batch(scenario_id: &str, ticks: u32) {
         if let Some(t) = stats.collapse_tick { collapses.push(t); }
         if let Some(t) = stats.victory_tick { victories.push(t); }
         events_per_run.push(stats.random_events_fired);
-        
+
+        // Collected for every scenario, not just rome: задача 18 tests a threshold
+        // stated per actor ("an actor collapses that never collapsed in baseline"),
+        // and constantinople never emitted the list. Rome's own copy below is left
+        // exactly where it was, so rome's output stays byte-identical.
+        if scenario_id != "rome_375" {
+            for dead_actor in &world.dead_actors {
+                collapsed_actors_all.push(dead_actor.id.clone());
+            }
+        }
+
         // Rome-specific stats
         if scenario_id == "rome_375" {
             if let Some(rome) = world.actors.get("rome") {
@@ -676,6 +686,28 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     if !victories.is_empty() {
         println!("Victory achieved: {} runs ({:.0}%)", victories.len(), victory_pct);
         println!("  median victory tick: {}", median_victory);
+    }
+
+    // Per-actor collapse frequencies. Rome prints its own copy inside the
+    // rome-specific block below, so it is excluded here and its output is
+    // unchanged — it is the byte-for-byte control for задача 18.
+    //
+    // Reporting only: this reads stats the batch already collected. Задача 18
+    // needs per-actor frequencies to test its rejection threshold ("an actor
+    // collapses that never collapsed in baseline"), and no run mode emitted them.
+    if scenario_id != "rome_375" && !collapsed_actors_all.is_empty() {
+        let mut actor_counts: HashMap<String, u32> = HashMap::new();
+        for actor_id in &collapsed_actors_all {
+            *actor_counts.entry(actor_id.clone()).or_insert(0) += 1;
+        }
+        let mut sorted_actors: Vec<_> = actor_counts.iter().collect();
+        sorted_actors.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+        println!();
+        println!("Collapsed actors (runs out of 100):");
+        for (actor_id, count) in sorted_actors {
+            println!("  - {}: {}", actor_id, count);
+        }
     }
 
     // Rome-specific summary
