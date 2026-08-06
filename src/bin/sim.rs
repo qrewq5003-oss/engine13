@@ -567,6 +567,8 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     let mut generation_transitions_per_run: Vec<u32> = vec![];
     let mut foreground_shifts_per_run: Vec<u32> = vec![];
     let mut collapsed_actors_all: Vec<String> = vec![];
+    #[allow(clippy::type_complexity)]
+    let mut actor_finals: HashMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> = HashMap::new();
 
     for seed in 0..100u64 {
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -642,6 +644,18 @@ fn run_batch(scenario_id: &str, ticks: u32) {
             }
         }
 
+        // Per-actor final metrics, same reason: задача 18's acceptance criterion
+        // asks for their distributions and no run mode emitted them.
+        if scenario_id != "rome_375" {
+            for actor in world.actors.values() {
+                let e = actor_finals.entry(actor.id.clone()).or_default();
+                e.0.push(actor.get_metric("military_size"));
+                e.1.push(actor.get_metric("cohesion"));
+                e.2.push(actor.get_metric("legitimacy"));
+                e.3.push(actor.get_metric("external_pressure"));
+            }
+        }
+
         // Rome-specific stats
         if scenario_id == "rome_375" {
             if let Some(rome) = world.actors.get("rome") {
@@ -707,6 +721,21 @@ fn run_batch(scenario_id: &str, ticks: u32) {
         println!("Collapsed actors (runs out of 100):");
         for (actor_id, count) in sorted_actors {
             println!("  - {}: {}", actor_id, count);
+        }
+    }
+
+    if scenario_id != "rome_375" && !actor_finals.is_empty() {
+        let mean = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;
+        let mut names: Vec<&String> = actor_finals.keys().collect();
+        names.sort();
+        println!();
+        println!("Final metrics per actor (mean over surviving runs): mil / coh / leg / ep");
+        for name in names {
+            let m = &actor_finals[name];
+            println!(
+                "  - {:<12} {:>7.1} {:>7.1} {:>7.1} {:>7.1}   (n={})",
+                name, mean(&m.0), mean(&m.1), mean(&m.2), mean(&m.3), m.0.len()
+            );
         }
     }
 

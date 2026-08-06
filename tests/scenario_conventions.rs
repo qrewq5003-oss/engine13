@@ -295,32 +295,29 @@ const ENGINE_FAMILY_METRICS: &[&str] = &[
 
 const ENGINE_GLOBAL_METRICS: &[&str] = &["federation_progress"];
 
-/// **Known-inert, deliberately not fixed here. Do not extend this list.**
+/// Empty, and that is the point: it once carried the ninth site.
 ///
-/// `constantinople_1430/auto_deltas.toml` opens with five blocks that omit
-/// `actor_id`, under a comment that reads *"actor_id omitted = None = applies to
-/// all"*. The engine has no such mechanism: with no actor context a bare key is a
-/// **global**, so those blocks write `population` / `military_size` / `cohesion` /
-/// `legitimacy` / `external_pressure` into `world.global_metrics`, where nothing
-/// reads them. Constantinople's actors get no base drift on any of the five, and
-/// have not for the whole history of the project — the ninth instance of the
-/// metric-scoping class, and the one no guard could see because the *shape* of the
-/// key is perfectly legal.
+/// `constantinople_1430/auto_deltas.toml` used to open with five blocks that
+/// omitted `actor_id`, under a comment reading *"actor_id omitted = None =
+/// applies to all"*. The engine has no such mechanism: with no actor context a
+/// bare key is a **global**, so those blocks wrote `population` / `military_size`
+/// / `cohesion` / `legitimacy` / `external_pressure` into `world.global_metrics`,
+/// where nothing read them — and their conditions read the same dead globals,
+/// which is why `treasury` and `economic_output` were listed too. Constantinople's
+/// actors got no base drift on any of the five, for the whole history of the
+/// project.
 ///
-/// It is listed rather than fixed because fixing it turns five dead auto_deltas on
-/// in a scenario whose balance is calibrated with them off (Задача 6): a balance
-/// change, and Задача 13's only acceptance criterion is byte-identical output.
-/// Tracked as a separate finding.
-const KNOWN_INERT_GLOBAL_NAMES: &[(&str, &str)] = &[
-    ("constantinople_1430", "population"),
-    ("constantinople_1430", "military_size"),
-    ("constantinople_1430", "cohesion"),
-    ("constantinople_1430", "legitimacy"),
-    ("constantinople_1430", "external_pressure"),
-    ("constantinople_1430", "treasury"),
-    ("constantinople_1430", "economic_output"),
-];
-
+/// Задача 13 listed them instead of fixing them: reviving five dead auto_deltas
+/// changes the balance of a scenario calibrated with them off (Задача 6), and that
+/// task's only acceptance criterion was byte-identical output. **Задача 18 closed
+/// it by deletion, not revival** — reviving would add a mechanic rather than fix a
+/// bug, and the `external_pressure` block (`+5.0` per tick to any actor below 20
+/// military) collides with `classic_collapse` by construction. See задача 18 in
+/// `ENGINE13_INFRASTRUCTURE_TASKS.md`.
+///
+/// Keep it empty. An entry here means content is writing a global the engine does
+/// not read — the exact shape this guard exists to catch.
+const KNOWN_INERT_GLOBAL_NAMES: &[(&str, &str)] = &[];
 fn check_name(scenario_id: &str, r: &MetricRef, ctx: &str, failures: &mut Vec<String>) {
     let (allowed, name, kind) = match r {
         MetricRef::Actor { metric, .. } => (ENGINE_ACTOR_METRICS, metric.as_str(), "actor"),

@@ -1,76 +1,21 @@
 # ============================================================
-# Global actor deltas (actor_id omitted = None = applies to all)
+# Здесь были пять блоков без `actor_id` (задача 18, удалены).
 # ============================================================
-
-[[auto_deltas]]
-metric = "population"
-base = 0.2
-noise = 0.1
-[[auto_deltas.conditions]]
-metric = "economic_output"
-operator = "less"
-value = 20.0
-delta = -0.3
-[[auto_deltas.conditions]]
-metric = "external_pressure"
-operator = "greater"
-value = 70.0
-delta = -0.2
-
-[[auto_deltas]]
-metric = "military_size"
-base = 0.3
-noise = 0.2
-[[auto_deltas.conditions]]
-metric = "treasury"
-operator = "less"
-value = 50.0
-delta = -0.5
-[[auto_deltas.conditions]]
-metric = "external_pressure"
-operator = "greater"
-value = 60.0
-delta = 0.4
-
-[[auto_deltas]]
-metric = "cohesion"
-base = -0.1
-noise = 0.15
-[[auto_deltas.conditions]]
-metric = "legitimacy"
-operator = "greater"
-value = 70.0
-delta = 0.2
-[[auto_deltas.conditions]]
-metric = "external_pressure"
-operator = "greater"
-value = 70.0
-delta = -0.3
-
-[[auto_deltas]]
-metric = "legitimacy"
-base = 0.0
-noise = 0.1
-[[auto_deltas.conditions]]
-metric = "cohesion"
-operator = "greater"
-value = 60.0
-delta = 0.1
-[[auto_deltas.conditions]]
-metric = "treasury"
-operator = "less"
-value = 0.0
-delta = -0.2
-
-[[auto_deltas]]
-metric = "external_pressure"
-base = 0.0
-noise = 0.3
-[[auto_deltas.conditions]]
-metric = "military_size"
-operator = "less"
-value = 20.0
-delta = 5.0
+#
+# Они писали population / military_size / cohesion / legitimacy /
+# external_pressure в `world.global_metrics` — под комментарием
+# «actor_id omitted = None = applies to all». Такого механизма в движке
+# нет: без актор-контекста голое имя разрешается в глобал, и эти пять
+# глобалов не читает ничто. Акторы Константинополя не получали базового
+# дрейфа ни по одной из пяти метрик за всю историю проекта.
+#
+# Удалены, а не оживлены: оживление — добавление механики, а не починка,
+# и сценарий откалиброван (задача 6) без них. Разбор — задача 18 в
+# ENGINE13_INFRASTRUCTURE_TASKS.md и docs/investigation_typed_metric_keys.md.
+#
+# Блок, задающий метрику БЕЗ явного префикса и БЕЗ actor_id, — дефектен
+# по построению: он пишет в глобал, которого никто не читает. Конвенционный
+# тест tests/scenario_conventions.rs такой блок роняет.
 
 # ============================================================
 # Ottoman military growth
