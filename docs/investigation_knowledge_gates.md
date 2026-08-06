@@ -70,6 +70,34 @@
 | `c82fa60` | `knowledge > 50` → `family_knowledge +0.1` | 110 |
 | `8500b78` | `knowledge > 40` → `rome.economic_output +0.3` | 0 |
 
+Коммиты живут в ветке `investigate/knowledge-gates`. **Ветка сохраняется намеренно и удалению не подлежит** — в `main` перенесены только базовый коммит и этот документ, а контрфакты остаются воспроизводимым свидетельством метода (прецедент — `40f509b`, задача 11).
+
+#### Как воспроизвести без доступа к ветке
+
+Адресация хешами работает, только пока ветка на месте, поэтому сам дифф приведён здесь. Каждый контрфакт — **удаление ровно одной строки** в `src/scenarios/rome_375.rs`, внутри `create_auto_deltas()`; больше ничего не меняется ни в одном файле. Номера строк — по состоянию `main` на `773f0c3`.
+
+**Контрфакт A** (`fa53a3d`) — правило `metric: MetricRef::actor("rome", "legitimacy")`, строка **1282**. Удалить:
+
+```rust
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.1 },
+```
+
+**Контрфакт B** (`c82fa60`) — правило `metric: MetricRef::literal("family:family_knowledge")`, строка **1331**. Удалить:
+
+```rust
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 50.0, delta: 0.1 },
+```
+
+**Контрфакт C** (`8500b78`) — правило `metric: MetricRef::actor("rome", "economic_output")`, строка **1416**. Удалить:
+
+```rust
+                DeltaCondition { metric: crate::core::MetricRef::literal("family:family_knowledge"), operator: ComparisonOperator::Greater, value: 40.0, delta: 0.3 },
+```
+
+Три строки различаются **только** парой `value` / `delta` — `40.0/0.1`, `50.0/0.1`, `40.0/0.3`, — поэтому и указано, в каком правиле каждая лежит: по тексту строки они неразличимы, по паре чисел различимы однозначно.
+
+Применять по одной за раз, от чистого состояния; после каждой — `cargo build --release --bin knowledge_gates_probe` и `knowledge_gates_probe 300`, сравнивая потиковый вывод с базовым прогоном. Базовый прогон воспроизводится на нетронутом дереве той же командой, а его корректность проверяется флагом `--validate` (§2.1).
+
 ### 2.3. Ячейки
 
 `rome_375 300 scripted wealth` — единственная, доживающая до порогов при ненулевых метриках (задача 16 §3). Других по критерию «`knowledge` переходит 40 в границах прогона» нет: в одиночных прогонах все family-метрики держатся на `0.0`, `scripted balanced` и `influence` кончаются победой на тике 31, batch не выходит за 50 тиков.
