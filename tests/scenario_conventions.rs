@@ -277,9 +277,18 @@ const ENGINE_FAMILY_METRICS: &[&str] = &[
     "family_knowledge",
     "family_wealth",
     "family_connections",
-    // milan writes these two through patron actions while having no family_state at
-    // all, so they land nowhere. Dead content, not a name error — see the Задача 13
-    // writeup; kept here so this test fails on *unknown* names, not on that.
+    // rome writes these two through its universal actions `support_stability` and
+    // `raise_taxes` (`rome_375/actions.toml`), and rome *does* have family_state, so
+    // they land: `MetricRef::Family::apply` opens them with `or_insert` in the
+    // Consequences/Free modes where those actions are offered. They are simply
+    // metrics that no inheritance coefficient and no reader knows about — not a name
+    // error. Kept here so this test fails on *unknown* names, not on these.
+    //
+    // An earlier note here credited them to milan and called them dead content; both
+    // halves were wrong (milan has no family reference at all), and that
+    // misattribution is what let §5.G count the runtime key space as four keys
+    // instead of six. See `docs/investigation_typed_metric_keys.md` §5.G, the
+    // задача 15 clarification block.
     "family_cohesion",
     "family_legitimacy",
 ];
