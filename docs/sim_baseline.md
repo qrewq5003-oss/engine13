@@ -168,6 +168,25 @@ tracked as "Пересчёт смертности (guard/conquest)" in
 
 ## Post Constantinople Military-Flow Caps (task 5, level 1 fix)
 
+> ⚠ **Stale as of PR #32 — the numbers below describe a scenario file that no longer
+> exists.** This section was measured at PR #21, i.e. *before* #22 (combat termination
+> guard), #23 (conquest-by-exhaustion collapse path), #24–#27 and #32 (deletion of the
+> five dead `auto_deltas`). Re-measured on today's `main` with the **same matrix**
+> (3 strategies × seeds 42/1/7/13/99/3/21/55/77/88 × 300 ticks, scripted): victories are
+> **21/30**, not 27/30 — balanced 10/10, military 8/10, diplomacy 3/10 — and byzantium
+> now **dies in 8 of the 30 runs**, which this section does not report at all. Task 18's
+> headline (100 % → 96.7 %) is *not* in conflict: it used a different matrix (30 seeds of
+> one strategy), and balanced is indeed 10/10 here.
+>
+> Also re-measured: the bimodality claim under "Victory threshold" below no longer means
+> what it says. The ottoman `military_size` minimum **while the actor is alive** is
+> **53.11–160.92** across all 30 runs and never approaches 40; victory fires because the
+> ottomans *collapse*, after which `MetricRef::get` returns `0.0` for an absent actor.
+>
+> Numbers and method: [`investigation_treasury_flow.md`](investigation_treasury_flow.md)
+> §4 and §12. Nothing below is rewritten — this note is additive, and the original text
+> stands as what was measured when it was measured.
+
 **Date:** 2026-07-11, **recalibrated 2026-07-12** (task 6, rebased onto `main` after #19/#20).
 **Change:** `constantinople_1430/auto_deltas.toml` only — two new/extended auto_deltas.
 No engine change, no action change, no victory-threshold change.
