@@ -1,7 +1,7 @@
 //! Budget probe for infrastructure task 20 (`apply_treasury` — a budget with no
 //! budget constraint), stage 1.
 //!
-//! Two jobs, both read-only.
+//! Three jobs, all read-only.
 //!
 //! ## 1. `inventory` — the container walk demanded by §5 п.1 of the statement
 //!
@@ -42,9 +42,19 @@
 //! Read-only: drives `tick()` and reads metrics. No engine symbol is modified.
 //!
 //! Usage:
+//! ## 3. `upheaval` — the counterfactual task 19 did not run
+//!
+//! `check_actor_upheaval` (`engine/mod.rs:1173–1194`) trips when ANY of eight metrics moved
+//! by more than 30 across a 5-tick window. Seven of the eight are bounded; `treasury` is not.
+//! This mode reports how often the predicate is true *only* because of treasury, and — second
+//! pass — what it would decide if treasury were fed through `[0, 500]`, the window
+//! `power_projection` already declares for the same stock.
+//!
+//! Usage:
 //! ```bash
 //! cargo run --release --bin budget_probe -- inventory
 //! cargo run --release --bin budget_probe -- solvency <scenario> <ticks> <seeds>
+//! cargo run --release --bin budget_probe -- upheaval <scenario> <ticks> <seeds>
 //! ```
 
 use engine13::core::{
@@ -506,8 +516,27 @@ const UPHEAVAL_METRICS: [&str; 8] = [
     "cohesion", "legitimacy", "external_pressure", "treasury",
 ];
 
+/// Second-pass counterfactual: the predicate with treasury fed through the window the
+/// *other* relevance reader already declares for it — `power_projection` treats the
+/// stock as `(treasury / 500).clamp(0, 1)`, i.e. as constant outside `[0, 500]`. This
+/// column answers what `check_actor_upheaval` would decide if it used the same window
+/// instead of comparing a raw unbounded stock against a threshold calibrated for
+/// `0..100` metrics.
+const TREASURY_WINDOW: (f64, f64) = (0.0, 500.0);
+
+/// Per-actor accumulator for `upheaval` mode.
+#[derive(Default)]
+struct UpheavalAcc {
+    ticks: u32,
+    upheaval: u32,
+    only_treasury: u32,
+    windowed: u32,
+    win_only_treasury: u32,
+    spans: Vec<f64>,
+}
+
 fn upheaval(scenario_id: &str, ticks: u32, seeds: &[u64]) {
-    println!("actor\tseed\tticks\tupheaval\tonly_treasury\tonly_treas%\ttreas_span_med");
+    println!("actor\tseed\tticks\tupheaval\tonly_treasury\tonly_treas%\twindowed\twin_only_treas\ttreas_span_med");
     for &seed in seeds {
         let scenario = registry::load_by_id(scenario_id).expect("scenario");
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -518,8 +547,7 @@ fn upheaval(scenario_id: &str, ticks: u32, seeds: &[u64]) {
         }
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
         let mut log = EventLog::default();
-        // actor -> (ticks, upheaval, only_treasury, spans)
-        let mut acc: BTreeMap<String, (u32, u32, u32, Vec<f64>)> = BTreeMap::new();
+        let mut acc: BTreeMap<String, UpheavalAcc> = BTreeMap::new();
 
         for _ in 0..ticks {
             let ids: Vec<String> = world.actors.keys().cloned().collect();
@@ -529,14 +557,25 @@ fn upheaval(scenario_id: &str, ticks: u32, seeds: &[u64]) {
                 }
                 let mut any = false;
                 let mut any_wo_treasury = false;
+                let mut any_windowed = false;
                 let mut span_treasury = 0.0;
                 for m in UPHEAVAL_METRICS {
                     let key = format!("{}:{}", aid, m);
                     if let Some(h) = world.metric_history.get(&key) {
                         if h.len() >= 2 {
-                            let d = (h.back().copied().unwrap_or(0.0) - h.front().copied().unwrap_or(0.0)).abs();
+                            let front = h.front().copied().unwrap_or(0.0);
+                            let back = h.back().copied().unwrap_or(0.0);
+                            let d = (back - front).abs();
                             if m == "treasury" {
                                 span_treasury = d;
+                                // same span, but through `power_projection`'s own window
+                                let fw = front.clamp(TREASURY_WINDOW.0, TREASURY_WINDOW.1);
+                                let bw = back.clamp(TREASURY_WINDOW.0, TREASURY_WINDOW.1);
+                                if (bw - fw).abs() > 30.0 {
+                                    any_windowed = true;
+                                }
+                            } else if d > 30.0 {
+                                any_windowed = true;
                             }
                             if d > 30.0 {
                                 any = true;
@@ -547,28 +586,35 @@ fn upheaval(scenario_id: &str, ticks: u32, seeds: &[u64]) {
                         }
                     }
                 }
-                let e = acc.entry(aid).or_insert((0, 0, 0, Vec::new()));
-                e.0 += 1;
+                let e = acc.entry(aid).or_default();
+                e.ticks += 1;
                 if any {
-                    e.1 += 1;
+                    e.upheaval += 1;
                 }
                 if any && !any_wo_treasury {
-                    e.2 += 1;
+                    e.only_treasury += 1;
                 }
-                e.3.push(span_treasury);
+                if any_windowed {
+                    e.windowed += 1;
+                }
+                if any_windowed && !any_wo_treasury {
+                    e.win_only_treasury += 1;
+                }
+                e.spans.push(span_treasury);
             }
             tick(&mut world, &scenario, &mut log, &mut rng);
         }
 
-        for (aid, (t, up, only, spans)) in &acc {
-            let mut s = spans.clone();
+        for (aid, a) in &acc {
+            let (t, up, only, win, win_only) = (&a.ticks, &a.upheaval, &a.only_treasury, &a.windowed, &a.win_only_treasury);
+            let mut s = a.spans.clone();
             s.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let med = if s.is_empty() { 0.0 } else { s[s.len() / 2] };
             println!(
-                "{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}",
+                "{}\t{}\t{}\t{}\t{}\t{:.1}\t{}\t{}\t{:.1}",
                 aid, seed, t, up, only,
                 if *up > 0 { 100.0 * *only as f64 / *up as f64 } else { 0.0 },
-                med
+                win, win_only, med
             );
         }
     }
