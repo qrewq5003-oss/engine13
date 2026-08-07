@@ -620,11 +620,120 @@ fn upheaval(scenario_id: &str, ticks: u32, seeds: &[u64]) {
     }
 }
 
+// ===========================================================================
+// d3 mode — counterfactual for the relative-threshold variant
+// ===========================================================================
+//
+// (D₂) replaced the *value* with a clamped one; (D₃) replaces the *threshold* with a
+// scaled one: a metric trips when `|Δ| > max(30, k·|level at window start|)`. The `30`
+// floor keeps the rule identical to today's on any metric whose level is small enough
+// that `k·level < 30`, so the five `0..100` metrics are untouched for `k <= 0.3`.
+//
+// `k = 0.30` is derived, not picked: `30` on a `0..100` scale IS 30% of that metric's
+// own range, so 30% of an unbounded metric's own level is the same statement carried to
+// a metric that has no fixed range. The sweep below exists to show the answer is not an
+// artefact of that particular number.
+//
+// Only the treasury row is scaled here — the same scope (D₂) had, so that the measured
+// difference is the rule's shape and not the rule's reach.
+fn d3(scenario_id: &str, ticks: u32, seeds: &[u64], ks: &[f64]) {
+    print!("actor\tseed\tticks\traw\twindowed");
+    for k in ks {
+        print!("\tk={}", k);
+    }
+    println!();
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        let mut log = EventLog::default();
+        // actor -> (ticks, raw, windowed, per-k counts)
+        let mut acc: BTreeMap<String, (u32, u32, u32, Vec<u32>)> = BTreeMap::new();
+
+        for _ in 0..ticks {
+            let ids: Vec<String> = world.actors.keys().cloned().collect();
+            for aid in ids {
+                if world.dead_actor_ids.contains(&aid) {
+                    continue;
+                }
+                let mut raw = false;
+                let mut win = false;
+                let mut rel = vec![false; ks.len()];
+                for m in UPHEAVAL_METRICS {
+                    let key = format!("{}:{}", aid, m);
+                    if let Some(h) = world.metric_history.get(&key) {
+                        if h.len() >= 2 {
+                            let front = h.front().copied().unwrap_or(0.0);
+                            let back = h.back().copied().unwrap_or(0.0);
+                            let d = (back - front).abs();
+                            if m == "treasury" {
+                                if d > 30.0 {
+                                    raw = true;
+                                }
+                                let fw = front.clamp(TREASURY_WINDOW.0, TREASURY_WINDOW.1);
+                                let bw = back.clamp(TREASURY_WINDOW.0, TREASURY_WINDOW.1);
+                                if (bw - fw).abs() > 30.0 {
+                                    win = true;
+                                }
+                                for (i, k) in ks.iter().enumerate() {
+                                    if d > 30.0_f64.max(k * front.abs()) {
+                                        rel[i] = true;
+                                    }
+                                }
+                            } else if d > 30.0 {
+                                raw = true;
+                                win = true;
+                                for r in rel.iter_mut() {
+                                    *r = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                let e = acc.entry(aid).or_insert((0, 0, 0, vec![0; ks.len()]));
+                e.0 += 1;
+                if raw {
+                    e.1 += 1;
+                }
+                if win {
+                    e.2 += 1;
+                }
+                for (i, r) in rel.iter().enumerate() {
+                    if *r {
+                        e.3[i] += 1;
+                    }
+                }
+            }
+            tick(&mut world, &scenario, &mut log, &mut rng);
+        }
+
+        for (aid, (t, raw, win, rel)) in &acc {
+            print!("{}\t{}\t{}\t{}\t{}", aid, seed, t, raw, win);
+            for r in rel {
+                print!("\t{}", r);
+            }
+            println!();
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
     match mode {
         "inventory" => inventory(),
+        "d3" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args.get(4).map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect()).unwrap_or_else(|| vec![42]);
+            let ks: Vec<f64> = args.get(5).map(|s| s.split(',').map(|x| x.parse().expect("k")).collect()).unwrap_or_else(|| vec![0.1, 0.2, 0.3, 0.5]);
+            d3(scenario, ticks, &seeds, &ks);
+        }
         "upheaval" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");

@@ -1171,20 +1171,6 @@ fn check_relevance_thresholds(
 }
 
 /// Check if an actor has had a metric change of >30 in the last 5 ticks
-///
-/// The `30` is an absolute figure on a metric's own scale. Seven of the eight metrics
-/// below live on a bounded scale — five are clamped to `0..100`, `population` and
-/// `military_size` to `>= 0` and drift slowly — so on those `30` means "a large move".
-/// `treasury` is the exception: it is unbounded by design and integrates a flow that
-/// never reads it back, so a solvent actor moves it by 600–2000 per five-tick window and
-/// an insolvent one by as much downward. Compared raw, it made this predicate a constant:
-/// 96–98% of the actor-ticks where it fired, it fired *only* because of treasury.
-///
-/// So treasury is read through [`crate::core::actor::TREASURY_NORM_CAP`] — the window
-/// `power_projection` already declares for the same stock — and outside that window it
-/// contributes nothing, exactly as it contributes a constant to the other relevance
-/// reader. The other seven metrics are untouched. Task 20 (D₂); measurement in
-/// `docs/investigation_treasury_budget.md`.
 fn check_actor_upheaval(world: &WorldState, actor_id: &str) -> bool {
     // Check all metrics for this actor
     let metrics_to_check = [
@@ -1196,12 +1182,8 @@ fn check_actor_upheaval(world: &WorldState, actor_id: &str) -> bool {
         let key = format!("{}:{}", actor_id, metric);
         if let Some(history) = world.metric_history.get(&key) {
             if history.len() >= 2 {
-                let mut oldest = history.front().copied().unwrap_or(0.0);
-                let mut newest = history.back().copied().unwrap_or(0.0);
-                if *metric == "treasury" {
-                    oldest = oldest.clamp(0.0, crate::core::actor::TREASURY_NORM_CAP);
-                    newest = newest.clamp(0.0, crate::core::actor::TREASURY_NORM_CAP);
-                }
+                let oldest = history.front().copied().unwrap_or(0.0);
+                let newest = history.back().copied().unwrap_or(0.0);
                 if (newest - oldest).abs() > 30.0 {
                     return true;
                 }
