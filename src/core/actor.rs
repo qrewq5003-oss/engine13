@@ -1,6 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 
+/// The window the engine reads `treasury` through wherever the metric feeds a
+/// *decision*.
+///
+/// `treasury` is the only unbounded metric in the model: `clamp_metrics` deliberately
+/// leaves it alone ("treasury can be negative"), and `apply_treasury` integrates a flow
+/// that never reads the stock back, so it diverges monotonically — tens of thousands up
+/// for a solvent actor, tens of thousands down for an insolvent one. A consumer that
+/// compares it against a fixed number therefore has to say what it means outside the
+/// range where the number is meaningful.
+///
+/// `power_projection` said it first (`treasury >= 500 counts as full contribution`);
+/// this constant is that same statement, hoisted so the second consumer —
+/// `engine::check_actor_upheaval` — reads the stock through the *same* window instead of
+/// declaring a second, silent one. Task 20 (D₂): see `docs/investigation_treasury_budget.md`.
+pub const TREASURY_NORM_CAP: f64 = 500.0;
+
 /// Default metric values for all actors
 pub fn default_metrics() -> HashMap<String, f64> {
     [
@@ -169,7 +185,6 @@ impl Actor {
     /// Calculate derived power_projection metric
     /// Normalized relative to max military_size among living actors
     pub fn power_projection(&self, era_modifier: f64, max_military_size: f64) -> f64 {
-        const TREASURY_NORM_CAP: f64 = 500.0; // treasury >= 500 counts as full contribution
 
         let military_size_norm = if max_military_size > 0.0 {
             (self.get_metric("military_size") / max_military_size).clamp(0.0, 1.0)
