@@ -322,7 +322,12 @@ fn walk_common_events(out: &mut Vec<Hit>) {
     }
 }
 
-fn inventory() {
+/// Task 22 needs the same walk for four metrics instead of one, so the filter that
+/// used to be hard-coded to `treasury` became a parameter. The walk itself is unchanged
+/// and still knows nothing about which metric is interesting — only the printing is
+/// filtered, which is what keeps the census (printed in full) usable as the completeness
+/// check for a hand-made enumeration.
+fn inventory_for(filter: &str) {
     println!("# Поля Scenario, закрытые обходом ({} шт.)", SCENARIO_FIELDS_WALKED.len());
     for (f, how) in SCENARIO_FIELDS_WALKED {
         println!("FIELD\t{}\t{}", f, how);
@@ -345,17 +350,17 @@ fn inventory() {
         println!("CENSUS\t{}\t{}\t{}", sc, key, n);
     }
 
-    println!("\n# Сайты, относящиеся к treasury");
+    println!("\n# Сайты, относящиеся к {}", filter);
     for h in &hits {
-        if h.key.contains("treasury") {
+        if h.key.contains(filter) {
             println!("HIT\t{}\t{}\t{}\t{}\t{}\t{}", h.scenario, h.container, h.site, h.key, h.role, h.detail);
         }
     }
 
-    println!("\n# Итог по контейнерам (только treasury)");
+    println!("\n# Итог по контейнерам (только {})", filter);
     let mut per: BTreeMap<(String, String, &str), u32> = BTreeMap::new();
     for h in &hits {
-        if h.key.contains("treasury") {
+        if h.key.contains(filter) {
             *per.entry((h.scenario.clone(), h.container.clone(), h.role)).or_insert(0) += 1;
         }
     }
@@ -1021,11 +1026,343 @@ fn decisive(scenario_id: &str, ticks: u32, seeds: &[u64], popfix: f64) {
     }
 }
 
+// ===========================================================================
+// attractor mode — task 22 stage 1, steps 2 and 4
+// ===========================================================================
+//
+// Two things no existing mode can express, which is why this one exists rather than a
+// parameter on `popsink` (§4 of the task-22 statement demands the justification):
+//
+// 1. **Occupancy of a metric PAIR, not of one metric.** `popsink` follows `population`
+//    only. Task 22 asks for the share of the run each actor spends in the absorbing
+//    state, and for the second candidate cycle `cohesion↔legitimacy` — a pair no probe
+//    mode has ever read. Occupancy also needs *returns* (exits from the state), which
+//    `popsink` does not count.
+// 2. **Scripted play.** Every probe mode drives `tick()` with no player. `sim`'s scripted
+//    loop lives in a *binary* crate (`src/bin/sim.rs`), so it cannot be imported; and
+//    `sim`'s own scripted output prints only the player actor's core metrics, never
+//    `population` and never the other 24 actors. The loop below therefore replicates it
+//    from the same library entry points sim uses (`apply_player_action`, `AppState`) with
+//    the same priority lists and the same Milan reserve discipline, and reports enough
+//    aggregates (`victory`, `raise_troops`) to be cross-checked against `sim` — the
+//    discipline task 19 imposed on any replication.
+//
+// Read-only with respect to the engine: no engine symbol is modified, actions go through
+// the same application-layer path the UI uses.
+const CONST_BALANCED: &[&str] = &[
+    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_naval_support",
+    "genoa_mercenaries", "milan_condottieri", "venice_trade_deal", "genoa_galata_garrison",
+];
+const CONST_DIPLOMACY: &[&str] = &[
+    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_trade_deal",
+    "genoa_galata_garrison", "venice_naval_support", "genoa_mercenaries", "milan_condottieri",
+];
+const CONST_MILITARY: &[&str] = &[
+    "venice_naval_support", "genoa_mercenaries", "milan_condottieri", "genoa_galata_garrison",
+    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_trade_deal",
+];
+const ROME_BALANCED: &[&str] = &[
+    "expand_network", "build_reputation", "support_city", "back_administration",
+    "fund_defense", "lay_low", "invest_wealth", "gather_information", "educate_family",
+];
+const ROME_WEALTH: &[&str] = &[
+    "lay_low", "invest_wealth", "gather_information", "expand_network", "educate_family",
+    "support_city", "back_administration", "build_reputation", "fund_defense",
+];
+const MILAN_AGGRESSIVE: &[&str] = &[
+    "milan_raise_troops", "milan_pressure_genoa", "incite_baronial_revolt",
+    "milan_hire_condottieri", "milan_hire_urbino_condottieri", "milan_lease_genoese_fleet",
+    "milan_banking_deal_florence", "milan_bribe_curia", "milan_court_patronage",
+    "milan_diplomacy_ferrara", "milan_marriage_venice", "milan_marriage_naples",
+    "call_papal_arbitration", "milan_savoy_alliance",
+];
+
+fn priority_list(scenario_id: &str, strategy: &str) -> &'static [&'static str] {
+    match (scenario_id, strategy) {
+        ("rome_375", "wealth") => ROME_WEALTH,
+        ("rome_375", _) => ROME_BALANCED,
+        ("milan_1477", _) => MILAN_AGGRESSIVE,
+        (_, "diplomacy") => CONST_DIPLOMACY,
+        (_, "military") => CONST_MILITARY,
+        (_, _) => CONST_BALANCED,
+    }
+}
+
+#[derive(Default)]
+struct AttrAcc {
+    ticks: u32,
+    pop_first: f64,
+    eo_first: f64,
+    seen: bool,
+    pop_zero: u32,
+    pop_zero_first: i64,
+    pop_returns: u32,
+    prev_pop_zero: Option<bool>,
+    eo_below_50: u32,
+    eo_zero: u32,
+    eo_recover_at: i64,
+    both_zero: u32,
+    income_zero: u32,
+    mutual: u32,
+    mutual_first: i64,
+    mutual_returns: u32,
+    prev_mutual: Option<bool>,
+    coh_lt25: u32,
+    coh_lt15: u32,
+    cl_both_zero: u32,
+    tag_eo: i32,
+    rank: String,
+}
+
+fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tpop0\teo0\trank\ttag_eo\tpop0%\tpop_zero_at\tpop_ret\teo<50%\teo=0%\teo_rec_at\tboth0%\tinc0%\tmutual%\tmut_at\tmut_ret\tcoh<25%\tcoh<15%\tcl00%");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        // Same init as `sim::run_scripted`, for both modes, so that the only difference
+        // between them is the presence of player actions.
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let mut acc: BTreeMap<String, AttrAcc> = BTreeMap::new();
+        let mut raise_troops = 0u32;
+        let mut applied_total = 0u32;
+        let mut victory_tick: i64 = -1;
+
+        for t in 0..ticks {
+            // --- observation, before actions and before the tick ---------------
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let pop = a.get_metric("population");
+                    let eo = a.get_metric("economic_output");
+                    let coh = a.get_metric("cohesion");
+                    let leg = a.get_metric("legitimacy");
+                    let income = eo * pop * 0.001;
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.pop_first = pop;
+                        e.eo_first = eo;
+                        e.pop_zero_first = -1;
+                        e.mutual_first = -1;
+                        e.eo_recover_at = -1;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.tag_eo = a
+                            .actor_tags
+                            .values()
+                            .filter_map(|t| {
+                                t.metrics_modifier
+                                    .iter()
+                                    .find(|(k, _)| k.as_str() == "economic_output")
+                                    .map(|(_, v)| *v)
+                            })
+                            .sum();
+                    }
+                    e.ticks += 1;
+                    let pz = pop == 0.0;
+                    if pz {
+                        e.pop_zero += 1;
+                        if e.pop_zero_first < 0 {
+                            e.pop_zero_first = t as i64;
+                        }
+                    }
+                    if let Some(p) = e.prev_pop_zero {
+                        if p && !pz {
+                            e.pop_returns += 1;
+                        }
+                    }
+                    e.prev_pop_zero = Some(pz);
+                    if eo < 50.0 {
+                        e.eo_below_50 += 1;
+                    } else if e.eo_below_50 > 0 && e.eo_recover_at < 0 {
+                        e.eo_recover_at = t as i64;
+                    }
+                    if eo == 0.0 {
+                        e.eo_zero += 1;
+                    }
+                    if pz && eo == 0.0 {
+                        e.both_zero += 1;
+                    }
+                    if income == 0.0 {
+                        e.income_zero += 1;
+                    }
+                    // second cycle: both edges of cohesion<->legitimacy are `deficit`
+                    // below 50, so the mutually-negative region is coh<50 AND leg<50
+                    let mu = coh < 50.0 && leg < 50.0;
+                    if mu {
+                        e.mutual += 1;
+                        if e.mutual_first < 0 {
+                            e.mutual_first = t as i64;
+                        }
+                    }
+                    if let Some(p) = e.prev_mutual {
+                        if p && !mu {
+                            e.mutual_returns += 1;
+                        }
+                    }
+                    e.prev_mutual = Some(mu);
+                    if coh < 25.0 {
+                        e.coh_lt25 += 1;
+                    }
+                    if coh < 15.0 {
+                        e.coh_lt15 += 1;
+                    }
+                    if coh == 0.0 && leg == 0.0 {
+                        e.cl_both_zero += 1;
+                    }
+                }
+            }
+
+            // --- player actions, replicating sim::run_scripted -----------------
+            if let Some(strat) = strategy {
+                let list = priority_list(scenario_id, strat);
+                let per_tick = state.current_scenario.as_ref().unwrap().actions_per_tick;
+                let mut applied = 0u32;
+                if scenario_id == "milan_1477" {
+                    const RAISE_TROOPS_GATE: f64 = 70.0;
+                    let treasury_before = state
+                        .world_state
+                        .as_ref()
+                        .unwrap()
+                        .actors
+                        .get("milan")
+                        .map(|a| a.get_metric("treasury"))
+                        .unwrap_or(0.0);
+                    if treasury_before > RAISE_TROOPS_GATE {
+                        let input = PlayerActionInput {
+                            action_id: "milan_raise_troops".to_string(),
+                            target_actor_id: None,
+                        };
+                        if apply_player_action(&mut state, &input).is_ok() {
+                            applied += 1;
+                            raise_troops += 1;
+                        }
+                    }
+                    for action_id in list.iter().filter(|id| **id != "milan_raise_troops") {
+                        if applied >= per_tick {
+                            break;
+                        }
+                        let treasury_now = state
+                            .world_state
+                            .as_ref()
+                            .unwrap()
+                            .actors
+                            .get("milan")
+                            .map(|a| a.get_metric("treasury"))
+                            .unwrap_or(0.0);
+                        let surplus = treasury_now - RAISE_TROOPS_GATE;
+                        if surplus <= 0.0 {
+                            break;
+                        }
+                        let cost = state
+                            .current_scenario
+                            .as_ref()
+                            .unwrap()
+                            .patron_actions
+                            .iter()
+                            .find(|a| a.id == *action_id)
+                            .and_then(|a| a.cost.get(&MetricRef::literal("actor:milan.treasury")))
+                            .map(|c| -c)
+                            .unwrap_or(f64::MAX);
+                        if cost > surplus {
+                            continue;
+                        }
+                        let input = PlayerActionInput {
+                            action_id: action_id.to_string(),
+                            target_actor_id: None,
+                        };
+                        if apply_player_action(&mut state, &input).is_ok() {
+                            applied += 1;
+                        }
+                    }
+                } else {
+                    for action_id in list.iter() {
+                        if applied >= per_tick {
+                            break;
+                        }
+                        let input = PlayerActionInput {
+                            action_id: action_id.to_string(),
+                            target_actor_id: None,
+                        };
+                        if apply_player_action(&mut state, &input).is_ok() {
+                            applied += 1;
+                        }
+                    }
+                }
+                applied_total += applied;
+            }
+
+            let world_state = state.world_state.as_mut().unwrap();
+            let scenario_ref = state.current_scenario.as_ref().unwrap();
+            let rng = state.rng.as_mut().unwrap();
+            tick(world_state, scenario_ref, &mut state.event_log, rng);
+            // `sim` stops the run on victory; this probe keeps observing, so the
+            // victory tick is recorded instead of used as a stopping rule (the
+            // difference is named in the document, not hidden).
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+        }
+
+        let mode = strategy.unwrap_or("noplayer");
+        for (aid, e) in &acc {
+            let n = e.ticks as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{:.0}\t{:.1}\t{}\t{:+}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}",
+                aid, seed, mode, e.ticks, e.pop_first, e.eo_first, e.rank, e.tag_eo,
+                100.0 * e.pop_zero as f64 / n, e.pop_zero_first, e.pop_returns,
+                100.0 * e.eo_below_50 as f64 / n, 100.0 * e.eo_zero as f64 / n, e.eo_recover_at,
+                100.0 * e.both_zero as f64 / n, 100.0 * e.income_zero as f64 / n,
+                100.0 * e.mutual as f64 / n, e.mutual_first, e.mutual_returns,
+                100.0 * e.coh_lt25 as f64 / n, 100.0 * e.coh_lt15 as f64 / n,
+                100.0 * e.cl_both_zero as f64 / n
+            );
+        }
+        let world = state.world_state.as_ref().unwrap();
+        println!(
+            "#XCHECK\tseed={}\tmode={}\tvictory={}\tvictory_tick={}\ttick={}\tactions={}\traise_troops={}",
+            seed, mode, world.victory_achieved, victory_tick, world.tick, applied_total, raise_troops
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
     match mode {
-        "inventory" => inventory(),
+        "inventory" => inventory_for(args.get(2).map(|s| s.as_str()).unwrap_or("treasury")),
         "popsink" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
@@ -1069,6 +1406,16 @@ fn main() {
                 .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
                 .unwrap_or_else(|| vec![42]);
             solvency(scenario, ticks, &seeds);
+        }
+        "attractor" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            attractor(scenario, ticks, &seeds, strategy);
         }
         other => panic!("unknown mode: {}", other),
     }
