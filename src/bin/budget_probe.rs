@@ -722,11 +722,329 @@ fn d3(scenario_id: &str, ticks: u32, seeds: &[u64], ks: &[f64]) {
     }
 }
 
+// ===========================================================================
+// popsink mode — task 21 stage 1, step 1
+// ===========================================================================
+//
+// Task 21 asks whether three actors are born with `population = 0` and whether
+// anything writes the key afterwards — the second half being the part §2 п.1 refuses
+// to take on trust ("without it, «income is identically zero» is plausible but not
+// proven": `add_metric` creates a missing key).
+//
+// So this mode reports, per actor per run, the *lifecycle* of `population`:
+//   `key0`      — was the key present in `metrics` at the actor's first observed tick
+//                 (distinguishes "absent" from "present and zero" — the postановка's
+//                 own formulation had to be corrected on exactly this point);
+//   `pop0`      — its value there;
+//   `zero_at`   — the first tick at which it is `0.0` (`-1` = never);
+//   `zero%`     — share of observed ticks at zero;
+//   `inc0%`     — share of ticks where `apply_treasury`'s income term is exactly zero;
+//   `dep1/dep2` — the per-tick population delta the two population-writing dependency
+//                 rules would produce at that tick (`economic_output_to_population`,
+//                 deficit ×20 below 50; `low_economic_output_to_population_decay`,
+//                 deficit ×100 below 15), summed over the run. These are the only two
+//                 population writers in any scenario container; the only *positive*
+//                 writer in the whole project is the migration interaction
+//                 (`interactions.rs:683`), which needs a neighbour pair.
+//   `pairs`     — number of neighbour pairs the actor participates in, i.e. whether
+//                 that positive writer can reach it at all.
+//
+// Read-only: drives `tick()` and reads metrics. No engine symbol is modified.
+struct PopAcc {
+    ticks: u32,
+    key_at_first: bool,
+    pop_first: f64,
+    zero_at: i64,
+    zero_ticks: u32,
+    income_zero_ticks: u32,
+    dep1_sum: f64,
+    dep2_sum: f64,
+    pairs_first: usize,
+    income_sum: f64,
+    expense_sum: f64,
+}
+
+fn popsink(scenario_id: &str, ticks: u32, seeds: &[u64]) {
+    println!("actor\tseed\tticks\tkey0\tpop0\tzero_at\tzero%\tinc0%\tdep1_sum\tdep2_sum\tpairs\tinc_sum\texp_sum");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        let mut log = EventLog::default();
+        let mut acc: BTreeMap<String, PopAcc> = BTreeMap::new();
+
+        for t in 0..ticks {
+            // Neighbour-pair reachability: a pair exists if EITHER side lists the other
+            // (`interactions.rs::get_neighbor_pairs` dedups sorted pairs), so count both
+            // directions against actors that actually exist in the world.
+            let mut pair_count: BTreeMap<String, usize> = BTreeMap::new();
+            for (aid, a) in world.actors.iter() {
+                for n in &a.neighbors {
+                    if world.actors.contains_key(&n.id) {
+                        *pair_count.entry(aid.clone()).or_insert(0) += 1;
+                        *pair_count.entry(n.id.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+            for (aid, a) in world.actors.iter() {
+                if world.dead_actor_ids.contains(aid) {
+                    continue;
+                }
+                let pop = a.get_metric("population");
+                let eo = a.get_metric("economic_output");
+                let mil = a.get_metric("military_size");
+                let income = eo * pop * 0.001;
+                let expense = mil * 0.8;
+                let dep1 = if eo < 50.0 { -((50.0 - eo) * 20.0) } else { 0.0 };
+                let dep2 = if eo < 15.0 { -((15.0 - eo) * 100.0) } else { 0.0 };
+                let e = acc.entry(aid.clone()).or_insert_with(|| PopAcc {
+                    ticks: 0,
+                    key_at_first: a.metrics.contains_key("population"),
+                    pop_first: pop,
+                    zero_at: -1,
+                    zero_ticks: 0,
+                    income_zero_ticks: 0,
+                    dep1_sum: 0.0,
+                    dep2_sum: 0.0,
+                    pairs_first: pair_count.get(aid).copied().unwrap_or(0),
+                    income_sum: 0.0,
+                    expense_sum: 0.0,
+                });
+                e.ticks += 1;
+                if pop == 0.0 {
+                    e.zero_ticks += 1;
+                    if e.zero_at < 0 {
+                        e.zero_at = t as i64;
+                    }
+                }
+                if income == 0.0 {
+                    e.income_zero_ticks += 1;
+                }
+                e.dep1_sum += dep1;
+                e.dep2_sum += dep2;
+                e.income_sum += income;
+                e.expense_sum += expense;
+            }
+            tick(&mut world, &scenario, &mut log, &mut rng);
+        }
+
+        for (aid, e) in &acc {
+            println!(
+                "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{}\t{:.0}\t{:.0}",
+                aid, seed, e.ticks, e.key_at_first, e.pop_first, e.zero_at,
+                100.0 * e.zero_ticks as f64 / e.ticks as f64,
+                100.0 * e.income_zero_ticks as f64 / e.ticks as f64,
+                e.dep1_sum, e.dep2_sum, e.pairs_first, e.income_sum, e.expense_sum
+            );
+        }
+    }
+}
+
+// ===========================================================================
+// decisive mode — task 21 stage 1, step 4 (the equilibrium calculation)
+// ===========================================================================
+//
+// §34 of `investigation_treasury_budget.md` counted "decisive flips" with temporary
+// engine instrumentation that was deliberately not committed: ticks where the upheaval
+// predicate decides the relevance verdict, i.e. where neither `condition_power` nor
+// `condition_contact` holds. Task 21 §2 п.4 needs that number back, plus the same number
+// under a counterfactual in which the zero-population actors are solvent.
+//
+// The verdict is replicated here from `check_relevance_thresholds`
+// (`engine/mod.rs:1024–1106`) rather than re-instrumented in the engine:
+//   power   = power_projection > 0.7 × mean(power_projection over all actors)
+//   contact = some Foreground actor lists this actor as a neighbour with distance ≤ 2
+//   upheaval= any of the eight metrics moved > 30 across the 5-tick history window
+//             OR cohesion < 25 OR legitimacy < 20
+// `decisive` = upheaval && !power && !contact. Both the tick count and the number of
+// transitions of that series are reported, because §22 and §34 of the task-20 document
+// disagree by one for rome (19 vs 20) and the postановка demands that be reconciled.
+//
+// `popfix > 0` is the counterfactual: before every tick, any live actor whose
+// `population` is ≤ 0 gets `population = popfix`. The engine is not touched; the probe
+// mutates world state, which is exactly what a counterfactual is. `popfix = 0` = baseline.
+#[derive(Default)]
+struct DecAcc {
+    ticks: u32,
+    power: u32,
+    contact: u32,
+    upheaval: u32,
+    decisive: u32,
+    decisive_treasury_only: u32,
+    dec_transitions: u32,
+    prev_decisive: Option<bool>,
+    verdict: u32,
+}
+
+fn decisive(scenario_id: &str, ticks: u32, seeds: &[u64], popfix: f64) {
+    println!("actor\tseed\tticks\tpower\tcontact\tupheaval\tverdict\tdecisive\tdec_treas_only\tdec_flips");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        let mut log = EventLog::default();
+        let mut acc: BTreeMap<String, DecAcc> = BTreeMap::new();
+
+        for _ in 0..ticks {
+            // Two counterfactuals, and the difference between them turned out to be the
+            // result: `popfix > 0` is a FLOOR (restore the metric whenever the engine has
+            // annihilated it), `popfix < 0` is a PEG at `|popfix|` (hold it there every
+            // tick, i.e. what an actor with a stable population would look like). The
+            // floor leaves a sawtooth — the `economic_output_to_population` deficit rule
+            // re-annihilates the metric within a tick or two — so income is intermittent;
+            // the peg makes income constant. Same "give them population" intent, opposite
+            // answers about whether task 20's defect survives.
+            if popfix != 0.0 {
+                let ids: Vec<String> = world.actors.keys().cloned().collect();
+                for id in ids {
+                    if world.dead_actor_ids.contains(&id) {
+                        continue;
+                    }
+                    if let Some(a) = world.actors.get_mut(&id) {
+                        if popfix > 0.0 {
+                            if a.get_metric("population") <= 0.0 {
+                                a.set_metric("population", popfix);
+                            }
+                        } else if a.get_metric("population") < -popfix {
+                            a.set_metric("population", -popfix);
+                        }
+                    }
+                }
+            }
+
+            let max_mil = world
+                .actors
+                .values()
+                .map(|a| a.get_metric("military_size"))
+                .fold(1.0_f64, f64::max);
+            let avg_pp: f64 = world
+                .actors
+                .values()
+                .map(|a| a.power_projection(1.0, max_mil))
+                .sum::<f64>()
+                / world.actors.len().max(1) as f64;
+            let fg: Vec<String> = world
+                .actors
+                .iter()
+                .filter(|(_, a)| a.narrative_status == engine13::core::NarrativeStatus::Foreground)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            let ids: Vec<String> = world.actors.keys().cloned().collect();
+            for aid in ids {
+                if world.dead_actor_ids.contains(&aid) {
+                    continue;
+                }
+                let actor = match world.actors.get(&aid) {
+                    Some(a) => a,
+                    None => continue,
+                };
+                let power = actor.power_projection(1.0, max_mil) > avg_pp * 0.7;
+                let contact = fg.iter().filter(|f| **f != aid).any(|f| {
+                    world
+                        .actors
+                        .get(f)
+                        .map(|n| n.neighbors.iter().any(|x| x.id == aid && x.distance <= 2))
+                        .unwrap_or(false)
+                });
+
+                let mut moved = false;
+                let mut moved_wo_treasury = false;
+                for m in UPHEAVAL_METRICS {
+                    if let Some(h) = world.metric_history.get(&format!("{}:{}", aid, m)) {
+                        if h.len() >= 2 {
+                            let d = (h.back().copied().unwrap_or(0.0)
+                                - h.front().copied().unwrap_or(0.0))
+                            .abs();
+                            if d > 30.0 {
+                                moved = true;
+                                if m != "treasury" {
+                                    moved_wo_treasury = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                let upheaval = moved
+                    || actor.get_metric("cohesion") < 25.0
+                    || actor.get_metric("legitimacy") < 20.0;
+                let soft = actor.get_metric("cohesion") < 25.0 || actor.get_metric("legitimacy") < 20.0;
+                let dec = upheaval && !power && !contact;
+
+                let e = acc.entry(aid.clone()).or_default();
+                e.ticks += 1;
+                if power {
+                    e.power += 1;
+                }
+                if contact {
+                    e.contact += 1;
+                }
+                if upheaval {
+                    e.upheaval += 1;
+                }
+                if power || contact || upheaval {
+                    e.verdict += 1;
+                }
+                if dec {
+                    e.decisive += 1;
+                    if moved && !moved_wo_treasury && !soft {
+                        e.decisive_treasury_only += 1;
+                    }
+                }
+                if let Some(p) = e.prev_decisive {
+                    if p != dec {
+                        e.dec_transitions += 1;
+                    }
+                }
+                e.prev_decisive = Some(dec);
+            }
+            tick(&mut world, &scenario, &mut log, &mut rng);
+        }
+
+        for (aid, e) in &acc {
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, e.ticks, e.power, e.contact, e.upheaval, e.verdict,
+                e.decisive, e.decisive_treasury_only, e.dec_transitions
+            );
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
     match mode {
         "inventory" => inventory(),
+        "popsink" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            popsink(scenario, ticks, &seeds);
+        }
+        "decisive" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let popfix: f64 = args.get(5).map(|s| s.parse().expect("popfix")).unwrap_or(0.0);
+            decisive(scenario, ticks, &seeds, popfix);
+        }
         "d3" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
