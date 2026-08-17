@@ -34,6 +34,18 @@ pub fn validate_dependency_thresholds(rules: &[DependencyRule]) -> Result<(), Ve
                 }
             }
         }
+        // `DeficitProportional` divides by the threshold, so `Some(0.0)` — which every
+        // other mode accepts as an ordinary comparison point — would be a silent
+        // infinity here. Rejected at load rather than guarded in the hot path, so the
+        // hot path keeps exactly one branch per mode.
+        if matches!(rule.mode, DependencyMode::DeficitProportional)
+            && matches!(rule.threshold, Some(t) if t <= 0.0)
+        {
+            errors.push(format!(
+                "dependency rule '{}': mode DeficitProportional requires threshold > 0 (got {:?})",
+                rule.id, rule.threshold
+            ));
+        }
     }
     if errors.is_empty() {
         Ok(())
@@ -112,6 +124,19 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
             _ => 0.0,
         },
         DependencyMode::Linear => from_val * rule.coefficient,
+        // Priced on the *target's* stock, not on the source's units — see
+        // `DependencyMode::DeficitProportional`. `threshold > 0` is a load-time
+        // invariant (`validate_dependency_thresholds`), so the division is safe;
+        // the `_ => 0.0` arm stays the no-op for an unvalidated scenario, exactly
+        // as for the other three modes.
+        DependencyMode::DeficitProportional => match rule.threshold {
+            Some(threshold) if threshold > 0.0 && from_val < threshold => {
+                -(actor.get_metric(rule.to.as_str()) * rule.coefficient
+                    * (threshold - from_val)
+                    / threshold)
+            }
+            _ => 0.0,
+        },
     };
     if delta != 0.0 {
         actor.add_metric(rule.to.as_str(), delta);

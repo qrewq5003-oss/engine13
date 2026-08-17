@@ -89,13 +89,20 @@ coefficient = 0.00005
 threshold = 3000.0
 mode = "bonus"
 
+# Task 22 (D): normalized by the target's own stock. `coefficient` is now the share
+# of population lost per tick at full deficit (eo = 0), not an absolute head count.
+# k1 = c1 * threshold / P* = 20 * 50 / 8000 = 0.125, where P* = 8000 is `rome` — the
+# largest actor in the project and the only actor at the top of the 10^3..10^4 band the
+# old absolute coefficient was sound for. At eo = 48 this reproduces rome's old loss of
+# 40/tick exactly; at pop = 50 it costs byzantium 3.1 instead of 500.
+# See docs/investigation_eo_population_attractor.md §12.
 [[dependencies]]
 id = "economic_output_to_population"
 from = "economic_output"
 to = "population"
-coefficient = 20.0
+coefficient = 0.125
 threshold = 50.0
-mode = "deficit"
+mode = "deficit_proportional"
 
 [[dependencies]]
 id = "external_pressure_legitimacy_to_cohesion_bonus"
@@ -121,10 +128,13 @@ coefficient = 0.5
 threshold = 20.0
 mode = "deficit"
 
+# Task 22 (D), second half of the same sink. k2 = c2 * threshold / P* = 100 * 15 / 8000
+# = 0.1875, which also preserves the 1 : 1.5 strength ratio the two rules already had at
+# full collapse in all three scenarios (20*50 : 100*15 and 4*50 : 20*15).
 [[dependencies]]
 id = "low_economic_output_to_population_decay"
 from = "economic_output"
 to = "population"
-coefficient = 100.0
+coefficient = 0.1875
 threshold = 15.0
-mode = "deficit"
+mode = "deficit_proportional"
