@@ -16,6 +16,33 @@ pub enum DependencyMode {
     Bonus,
     /// Linear: delta = from * coefficient, no threshold
     Linear,
+    /// Penalty when from < threshold, sized as a *share of the target's own stock*
+    /// rather than as an absolute amount:
+    ///
+    /// ```text
+    /// delta = -to * coefficient * (threshold - from) / threshold
+    /// ```
+    ///
+    /// `Deficit` prices the penalty in the units of the *source* metric, which only
+    /// works when every actor's `to` metric lives on one scale. Task 22 measured what
+    /// happens when it does not: `population` spans `15…8000` across the three
+    /// scenarios while `economic_output_to_population` charges a flat
+    /// `20 * (50 - eo)`, so the same rule costs `rome` 0.5 % of its people per tick and
+    /// costs `byzantium` ten times everything it has — 25 living actors of 41 are
+    /// zeroed, 18 of them on tick 1. No absolute coefficient can be both meaningful at
+    /// `8000` and survivable at `50` (`docs/investigation_eo_population_attractor.md`
+    /// §4.1 closes that interval).
+    ///
+    /// This mode removes the unit mismatch instead of re-picking the number: the
+    /// deficit `(threshold - from) / threshold` is dimensionless, so `coefficient` is
+    /// the share of the stock lost per tick at *full* deficit and the rule reads the
+    /// same at every scale. It is a strictly stronger contract than `Deficit`: for
+    /// `coefficient < 1` the target can never be driven negative or to zero in one
+    /// tick, at any scale, by construction.
+    ///
+    /// Requires `threshold > 0` (it is the normalizer) — enforced at load by
+    /// `engine::validate_dependency_thresholds`.
+    DeficitProportional,
 }
 
 /// Dependency rule configuration

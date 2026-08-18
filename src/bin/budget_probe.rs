@@ -58,8 +58,8 @@
 //! ```
 
 use engine13::core::{
-    ActionCondition, ComparisonOperator, EventConditionType, MetricRef, RelativeMetricRef, Scenario,
-    WorldState,
+    ActionCondition, ComparisonOperator, DependencyMode, DependencyRule, EventConditionType,
+    MetricRef, RelativeMetricRef, Scenario, WorldState,
 };
 use engine13::engine::{tick, EventLog};
 use engine13::scenarios::registry;
@@ -1077,6 +1077,35 @@ const MILAN_AGGRESSIVE: &[&str] = &[
     "call_papal_arbitration", "milan_savoy_alliance",
 ];
 
+/// Price the population-writing dependency rules of a scenario on one actor's state,
+/// using whatever mode and coefficients that scenario actually carries.
+///
+/// Read from the loaded `Scenario` rather than from constants mirrored in this file, so
+/// the flow decomposition is valid for the absolute rule and the normalized one alike —
+/// which is the only way a before/after comparison of "what else moves `population`"
+/// means anything. Mirrors `engine::apply_dependency_rule`, including the sequential
+/// semantics: the second rule sees the stock the first one already reduced.
+fn price_population_rules(rules: &[DependencyRule], pop: f64, eo: f64) -> f64 {
+    let mut stock = pop;
+    for rule in rules.iter().filter(|r| r.to.as_str() == "population") {
+        let from_val = if rule.from.as_str() == "economic_output" { eo } else { continue };
+        let d = match rule.threshold {
+            Some(t) if from_val < t => (t - from_val, t),
+            _ => continue,
+        };
+        let delta = match rule.mode {
+            DependencyMode::Deficit => -(d.0 * rule.coefficient),
+            DependencyMode::DeficitProportional => -(stock * rule.coefficient * d.0 / d.1),
+            _ => continue,
+        };
+        // the engine clamps `population` to `0..MAX` once per tick, so a rule that
+        // overshoots the stock cannot charge more than the stock — pricing it without
+        // the clamp would credit the absolute rule with losses it never took
+        stock = (stock + delta).max(0.0);
+    }
+    pop - stock
+}
+
 fn priority_list(scenario_id: &str, strategy: &str) -> &'static [&'static str] {
     match (scenario_id, strategy) {
         ("rome_375", "wealth") => ROME_WEALTH,
@@ -1112,13 +1141,60 @@ struct AttrAcc {
     cl_both_zero: u32,
     tag_eo: i32,
     rank: String,
+    // --- stage 2 (task 22): scale-aware occupancy ------------------------------
+    //
+    // `pop_zero` counts `population == 0.0` exactly, which is the right measure for
+    // the *absolute* sink: it overshoots the stock and the `0..MAX` clamp lands the
+    // actor precisely on zero. Under a sink normalized by the stock the same measure
+    // becomes vacuous by construction — geometric decay never reaches zero — so a
+    // variant (D) would "pass" the occupancy criterion while leaving actors at
+    // `population = 1e-9`, i.e. still economically dead (income is
+    // `eo · pop · 0.001`, `mod.rs:647`). These three columns are what makes the
+    // criterion honest across both forms of the rule:
+    //   `pop_lt1`   — absolute floor; the smallest starting population in the project
+    //                 is 15 (`urbino`), so below 1 is dead on any reading;
+    //   `pop_lt10`  — relative floor, scale-free: below 10 % of the actor's own start;
+    //   `pop_final` — where the trajectory actually ended.
+    pop_lt1: u32,
+    pop_lt10pct: u32,
+    pop_last: f64,
+    // --- stage 2 (task 22): the integrated deficit, which is what (D) is priced on ---
+    //
+    // Under the normalized form the per-tick loss fraction is `k₁·d₁ + k₂·d₂` with
+    // `d₁ = max(0, 50−eo)/50` and `d₂ = max(0, 15−eo)/15`, so the retained share over a
+    // whole run is `Π(1−k₁d₁ₜ)(1−k₂d₂ₜ)`. Summing `d₁`/`d₂` along the *baseline*
+    // trajectory therefore prices any candidate `k` **without running the modified
+    // engine** — the "equilibrium calculation before code" the statement demands, and
+    // the same discipline §4.1 used to close variant (A).
+    //
+    // It is a prediction, not an identity: `population` feeds `economic_output` back
+    // through `population_to_economic_output` (threshold 3000 / 500), so for an actor
+    // whose population crosses that threshold the baseline `eo` path is not the path
+    // under (D). For every actor in the attractor the threshold is far out of reach,
+    // which is why the prediction is worth making — and it is checked against the run.
+    d1_sum: f64,
+    d2_sum: f64,
+    // --- stage 2 (task 22): who actually moves `population` -----------------------
+    //
+    // The integrated deficit prices the *dependency rule*. It does not price anything
+    // else, and stage 1 §2.2 found four other channels (migration `-1 %` source /
+    // `+0.5 %` receiver, the successor split, one rome `auto_delta`, three shared
+    // random events). Comparing the rule's own loss against the actual per-tick change
+    // separates them without touching the engine: `other_flow` is everything the rule
+    // did not do. Approximate by construction — the observation is taken at the top of
+    // the tick, so the rule is priced on the population it sees there rather than on
+    // the value it sees mid-tick, and every non-rule channel is lumped together.
+    rule_loss: f64,
+    other_flow: f64,
+    prev_pop: Option<f64>,
+    pending_rule_loss: f64,
 }
 
 fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
     use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
-    println!("actor\tseed\tmode\tticks\tpop0\teo0\trank\ttag_eo\tpop0%\tpop_zero_at\tpop_ret\teo<50%\teo=0%\teo_rec_at\tboth0%\tinc0%\tmutual%\tmut_at\tmut_ret\tcoh<25%\tcoh<15%\tcl00%");
+    println!("actor\tseed\tmode\tticks\tpop0\teo0\trank\ttag_eo\tpop0%\tpop_zero_at\tpop_ret\teo<50%\teo=0%\teo_rec_at\tboth0%\tinc0%\tmutual%\tmut_at\tmut_ret\tcoh<25%\tcoh<15%\tcl00%\tpop<1%\tpop<10%p0\tpopF\td1sum\td2sum\trule_loss\tother_flow");
     for &seed in seeds {
         let scenario = registry::load_by_id(scenario_id).expect("scenario");
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -1152,10 +1228,29 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
+        // priced from the loaded scenario, so the decomposition is valid in both worlds
+        let pop_rules: Vec<DependencyRule> = state
+            .current_scenario
+            .as_ref()
+            .unwrap()
+            .dependencies
+            .clone();
         let mut acc: BTreeMap<String, AttrAcc> = BTreeMap::new();
         let mut raise_troops = 0u32;
         let mut applied_total = 0u32;
         let mut victory_tick: i64 = -1;
+        // --- stage 2 (task 22): the three ratified guards, measured in the same run ---
+        // `sim` stops a run on victory *or* on the protagonist's death; this probe runs
+        // to the horizon, so a death recorded after the victory tick is not the death
+        // `sim`'s 8/30 counted. Both the tick and the victory tick are therefore printed
+        // and the "death" statistic is computed as death-before-victory downstream.
+        let protagonist = match scenario_id {
+            "constantinople_1430" => "byzantium",
+            "rome_375" => "rome",
+            _ => "milan",
+        };
+        let mut prot_dead_tick: i64 = -1;
+        let mut italy_unified: i64 = -1;
 
         for t in 0..ticks {
             // --- observation, before actions and before the tick ---------------
@@ -1204,6 +1299,26 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
                         }
                     }
                     e.prev_pop_zero = Some(pz);
+                    if pop < 1.0 {
+                        e.pop_lt1 += 1;
+                    }
+                    if pop < 0.1 * e.pop_first {
+                        e.pop_lt10pct += 1;
+                    }
+                    e.pop_last = pop;
+                    let d1 = (50.0 - eo).max(0.0) / 50.0;
+                    let d2 = (15.0 - eo).max(0.0) / 15.0;
+                    e.d1_sum += d1;
+                    e.d2_sum += d2;
+                    if let Some(prev) = e.prev_pop {
+                        // charged against the *previous* tick, whose eo produced it
+                        let charged = e.pending_rule_loss;
+                        e.rule_loss += charged;
+                        e.other_flow += (pop - prev) + charged;
+                    }
+                    e.prev_pop = Some(pop);
+                    let _ = (d1, d2);
+                    e.pending_rule_loss = price_population_rules(&pop_rules, pop, eo);
                     if eo < 50.0 {
                         e.eo_below_50 += 1;
                     } else if e.eo_below_50 > 0 && e.eo_recover_at < 0 {
@@ -1334,26 +1449,54 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
                 victory_tick = (t + 1) as i64;
             }
+            if prot_dead_tick < 0
+                && state
+                    .world_state
+                    .as_ref()
+                    .unwrap()
+                    .dead_actor_ids
+                    .iter()
+                    .any(|id| id == protagonist)
+            {
+                prot_dead_tick = (t + 1) as i64;
+            }
+            if italy_unified < 0
+                && state
+                    .event_log
+                    .events
+                    .iter()
+                    .any(|e| e.id == "italy_unified")
+            {
+                italy_unified = (t + 1) as i64;
+            }
         }
 
         let mode = strategy.unwrap_or("noplayer");
         for (aid, e) in &acc {
             let n = e.ticks as f64;
             println!(
-                "{}\t{}\t{}\t{}\t{:.0}\t{:.1}\t{}\t{:+}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}",
+                "{}\t{}\t{}\t{}\t{:.0}\t{:.1}\t{}\t{:+}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.3}\t{:.3}\t{:.3}\t{:.1}\t{:+.1}",
                 aid, seed, mode, e.ticks, e.pop_first, e.eo_first, e.rank, e.tag_eo,
                 100.0 * e.pop_zero as f64 / n, e.pop_zero_first, e.pop_returns,
                 100.0 * e.eo_below_50 as f64 / n, 100.0 * e.eo_zero as f64 / n, e.eo_recover_at,
                 100.0 * e.both_zero as f64 / n, 100.0 * e.income_zero as f64 / n,
                 100.0 * e.mutual as f64 / n, e.mutual_first, e.mutual_returns,
                 100.0 * e.coh_lt25 as f64 / n, 100.0 * e.coh_lt15 as f64 / n,
-                100.0 * e.cl_both_zero as f64 / n
+                100.0 * e.cl_both_zero as f64 / n,
+                100.0 * e.pop_lt1 as f64 / n, 100.0 * e.pop_lt10pct as f64 / n, e.pop_last,
+                e.d1_sum, e.d2_sum, e.rule_loss, e.other_flow
             );
         }
         let world = state.world_state.as_ref().unwrap();
+        let generations = world
+            .family_state
+            .as_ref()
+            .map(|f| f.generation_count)
+            .unwrap_or(0);
         println!(
-            "#XCHECK\tseed={}\tmode={}\tvictory={}\tvictory_tick={}\ttick={}\tactions={}\traise_troops={}",
-            seed, mode, world.victory_achieved, victory_tick, world.tick, applied_total, raise_troops
+            "#XCHECK\tseed={}\tmode={}\tvictory={}\tvictory_tick={}\ttick={}\tactions={}\traise_troops={}\tprot={}\tprot_dead_tick={}\tgenerations={}\titaly_unified={}",
+            seed, mode, world.victory_achieved, victory_tick, world.tick, applied_total,
+            raise_troops, protagonist, prot_dead_tick, generations, italy_unified
         );
     }
 }
