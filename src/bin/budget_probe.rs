@@ -1117,6 +1117,100 @@ fn priority_list(scenario_id: &str, strategy: &str) -> &'static [&'static str] {
     }
 }
 
+/// The scripted-player step of `sim::run_scripted`, lifted verbatim out of
+/// [`attractor`] so that it and [`popevents`] cannot drift apart in the one place a
+/// probe is easiest to get subtly wrong. Returns the actions applied this tick and
+/// how many of them were `milan_raise_troops` — the two counters both modes
+/// cross-check against `sim`.
+fn scripted_step(
+    state: &mut engine13::commands::AppState,
+    scenario_id: &str,
+    strategy: Option<&str>,
+) -> (u32, u32) {
+    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+
+    let strat = match strategy {
+        Some(s) => s,
+        None => return (0, 0),
+    };
+    let mut raise_troops = 0u32;
+    let list = priority_list(scenario_id, strat);
+    let per_tick = state.current_scenario.as_ref().unwrap().actions_per_tick;
+    let mut applied = 0u32;
+    if scenario_id == "milan_1477" {
+        const RAISE_TROOPS_GATE: f64 = 70.0;
+        let treasury_before = state
+            .world_state
+            .as_ref()
+            .unwrap()
+            .actors
+            .get("milan")
+            .map(|a| a.get_metric("treasury"))
+            .unwrap_or(0.0);
+        if treasury_before > RAISE_TROOPS_GATE {
+            let input = PlayerActionInput {
+                action_id: "milan_raise_troops".to_string(),
+                target_actor_id: None,
+            };
+            if apply_player_action(state, &input).is_ok() {
+                applied += 1;
+                raise_troops += 1;
+            }
+        }
+        for action_id in list.iter().filter(|id| **id != "milan_raise_troops") {
+            if applied >= per_tick {
+                break;
+            }
+            let treasury_now = state
+                .world_state
+                .as_ref()
+                .unwrap()
+                .actors
+                .get("milan")
+                .map(|a| a.get_metric("treasury"))
+                .unwrap_or(0.0);
+            let surplus = treasury_now - RAISE_TROOPS_GATE;
+            if surplus <= 0.0 {
+                break;
+            }
+            let cost = state
+                .current_scenario
+                .as_ref()
+                .unwrap()
+                .patron_actions
+                .iter()
+                .find(|a| a.id == *action_id)
+                .and_then(|a| a.cost.get(&MetricRef::literal("actor:milan.treasury")))
+                .map(|c| -c)
+                .unwrap_or(f64::MAX);
+            if cost > surplus {
+                continue;
+            }
+            let input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            if apply_player_action(state, &input).is_ok() {
+                applied += 1;
+            }
+        }
+    } else {
+        for action_id in list.iter() {
+            if applied >= per_tick {
+                break;
+            }
+            let input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            if apply_player_action(state, &input).is_ok() {
+                applied += 1;
+            }
+        }
+    }
+    (applied, raise_troops)
+}
+
 #[derive(Default)]
 struct AttrAcc {
     ticks: u32,
@@ -1191,7 +1285,6 @@ struct AttrAcc {
 }
 
 fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
-    use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
     println!("actor\tseed\tmode\tticks\tpop0\teo0\trank\ttag_eo\tpop0%\tpop_zero_at\tpop_ret\teo<50%\teo=0%\teo_rec_at\tboth0%\tinc0%\tmutual%\tmut_at\tmut_ret\tcoh<25%\tcoh<15%\tcl00%\tpop<1%\tpop<10%p0\tpopF\td1sum\td2sum\trule_loss\tother_flow");
@@ -1361,82 +1454,10 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             }
 
             // --- player actions, replicating sim::run_scripted -----------------
-            if let Some(strat) = strategy {
-                let list = priority_list(scenario_id, strat);
-                let per_tick = state.current_scenario.as_ref().unwrap().actions_per_tick;
-                let mut applied = 0u32;
-                if scenario_id == "milan_1477" {
-                    const RAISE_TROOPS_GATE: f64 = 70.0;
-                    let treasury_before = state
-                        .world_state
-                        .as_ref()
-                        .unwrap()
-                        .actors
-                        .get("milan")
-                        .map(|a| a.get_metric("treasury"))
-                        .unwrap_or(0.0);
-                    if treasury_before > RAISE_TROOPS_GATE {
-                        let input = PlayerActionInput {
-                            action_id: "milan_raise_troops".to_string(),
-                            target_actor_id: None,
-                        };
-                        if apply_player_action(&mut state, &input).is_ok() {
-                            applied += 1;
-                            raise_troops += 1;
-                        }
-                    }
-                    for action_id in list.iter().filter(|id| **id != "milan_raise_troops") {
-                        if applied >= per_tick {
-                            break;
-                        }
-                        let treasury_now = state
-                            .world_state
-                            .as_ref()
-                            .unwrap()
-                            .actors
-                            .get("milan")
-                            .map(|a| a.get_metric("treasury"))
-                            .unwrap_or(0.0);
-                        let surplus = treasury_now - RAISE_TROOPS_GATE;
-                        if surplus <= 0.0 {
-                            break;
-                        }
-                        let cost = state
-                            .current_scenario
-                            .as_ref()
-                            .unwrap()
-                            .patron_actions
-                            .iter()
-                            .find(|a| a.id == *action_id)
-                            .and_then(|a| a.cost.get(&MetricRef::literal("actor:milan.treasury")))
-                            .map(|c| -c)
-                            .unwrap_or(f64::MAX);
-                        if cost > surplus {
-                            continue;
-                        }
-                        let input = PlayerActionInput {
-                            action_id: action_id.to_string(),
-                            target_actor_id: None,
-                        };
-                        if apply_player_action(&mut state, &input).is_ok() {
-                            applied += 1;
-                        }
-                    }
-                } else {
-                    for action_id in list.iter() {
-                        if applied >= per_tick {
-                            break;
-                        }
-                        let input = PlayerActionInput {
-                            action_id: action_id.to_string(),
-                            target_actor_id: None,
-                        };
-                        if apply_player_action(&mut state, &input).is_ok() {
-                            applied += 1;
-                        }
-                    }
-                }
+            {
+                let (applied, rt) = scripted_step(&mut state, scenario_id, strategy);
                 applied_total += applied;
+                raise_troops += rt;
             }
 
             let world_state = state.world_state.as_mut().unwrap();
@@ -1501,6 +1522,312 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
     }
 }
 
+// ============================================================================
+// Task 23: `popevents` — the absolute `population` deltas in the shared random
+// event pool
+// ============================================================================
+
+/// The three shared events that write `population`, with their nominal deltas.
+/// Named here rather than read off `common_events()` on purpose: the point of the
+/// mode is to compare what the content *declares* against what the run *does*, so
+/// the declared side has to be stated independently. `assert_pool_matches_source`
+/// below checks the two against each other, so a change to `common.rs` breaks the
+/// probe loudly instead of silently re-deriving itself.
+const POP_EVENTS: &[(&str, f64)] = &[("plague", -25.0), ("famine", -20.0), ("flood", -15.0)];
+
+/// Fail loudly if `common_events()` stops matching [`POP_EVENTS`] — either because a
+/// delta changed, or because a fourth shared event started writing `population`.
+fn assert_pool_matches_source() {
+    let key = engine13::core::RelativeMetricRef::literal("self.population");
+    let mut found: Vec<(String, f64)> = Vec::new();
+    for ev in engine13::events::common_events() {
+        if let Some(d) = ev.effects.get(&key) {
+            found.push((ev.id.clone(), *d));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut declared: Vec<(String, f64)> =
+        POP_EVENTS.iter().map(|(i, d)| (i.to_string(), *d)).collect();
+    declared.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        found, declared,
+        "common_events() no longer matches POP_EVENTS — update the probe, not the run"
+    );
+}
+
+#[derive(Default)]
+struct PopEvAcc {
+    ticks: u32,
+    seen: bool,
+    pop_first: f64,
+    pop_last: f64,
+    rank: String,
+    // eligibility: `EventTarget::Any` draws only from `foreground_ids`
+    // (`engine/mod.rs:426`), so an actor that is never Foreground can never be hit,
+    // however true its gates are.
+    fg: u32,
+    // gate occupancy — the question the statement's §1 п.5 addition asks: is a gate
+    // that *looks* conditional in fact a constant along the whole run?
+    coh_lt60: u32,
+    eo_lt30: u32,
+    pop_gt500: u32,
+    plague_gate: u32, // pop > 500 AND coh < 60, i.e. the conjunction actually tested
+    // fires, counted off the event log — exact, not inferred: `phase_random_events`
+    // records one `Event` per successful application, after the effects are applied.
+    n_plague: u32,
+    n_famine: u32,
+    n_flood: u32,
+    ev_nominal: f64, // Σ |delta| over fires; an upper bound on what was applied
+    // ticks where the clamp could have bitten: the stock at the top of the tick was
+    // smaller than the nominal sink, so `(current + delta).max(0.0)` truncated it.
+    // Counted rather than corrected, so the size of the approximation is visible.
+    clip_ticks: u32,
+    // the rule's own price, on the same footing as task 22 §12.5, so that "which
+    // channel dominates" is a comparison and not an assertion
+    rule_loss: f64,
+    other_flow: f64,
+    prev_pop: Option<f64>,
+    pending_rule_loss: f64,
+    // содержательность: ticks where population fell and the events took more of it
+    // than the dependency rule did
+    down_ticks: u32,
+    ev_dom_ticks: u32,
+    rule_dom_ticks: u32,
+}
+
+/// Task 23 stage 1. Read-only: drives `tick()`, reads metrics and the event log.
+///
+/// Three things the existing modes structurally cannot report:
+///   1. **fires per event per actor**, taken off the event log rather than inferred
+///      from a population drop — `attractor`'s `other_flow` lumps the three events
+///      together with migration, the successor split and the rome `auto_delta`;
+///   2. **gate occupancy** (`coh < 60`, `eo < 30`, `pop > 500`, and the `plague`
+///      conjunction), which is what tells a real condition from a constant;
+///   3. **Foreground occupancy**, the eligibility gate that sits in front of all
+///      three events and appears in no scenario file.
+fn popevents(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    assert_pool_matches_source();
+
+    println!("actor\tseed\tmode\tticks\tpop0\tpopF\trank\tfg%\tcoh<60%\teo<30%\tpop>500%\tpl_gate%\tpl_n\tfa_n\tfl_n\tev_nom\tclip\trule_loss\tother_flow\tdown\tev_dom\trule_dom");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let pop_rules: Vec<DependencyRule> = state
+            .current_scenario
+            .as_ref()
+            .unwrap()
+            .dependencies
+            .clone();
+        let cap = state
+            .current_scenario
+            .as_ref()
+            .unwrap()
+            .max_random_events_per_tick;
+        let pool_size = engine13::events::common_events().len()
+            + state.current_scenario.as_ref().unwrap().random_events.len();
+
+        let mut acc: BTreeMap<String, PopEvAcc> = BTreeMap::new();
+        let mut fires_by_id: BTreeMap<String, u32> = BTreeMap::new();
+        let mut raise_troops = 0u32;
+        let mut victory_tick: i64 = -1;
+        let mut fg_total: u64 = 0;
+        let mut at_cap_ticks: u32 = 0;
+        let mut random_fires_total: u32 = 0;
+
+        // ids of everything the random-event phase can log, so that the per-tick
+        // fire count is taken over that pool only and not over milestones, rank
+        // changes, promotions and the rest of the log
+        let random_ids: std::collections::HashSet<String> = engine13::events::common_events()
+            .iter()
+            .map(|e| e.id.clone())
+            .chain(
+                state
+                    .current_scenario
+                    .as_ref()
+                    .unwrap()
+                    .random_events
+                    .iter()
+                    .map(|e| e.id.clone()),
+            )
+            .collect();
+
+        for t in 0..ticks {
+            // --- observation, top of tick, before actions ----------------------
+            let mut pop_before: BTreeMap<String, f64> = BTreeMap::new();
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let pop = a.get_metric("population");
+                    let eo = a.get_metric("economic_output");
+                    let coh = a.get_metric("cohesion");
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.pop_first = pop;
+                        e.rank = format!("{:?}", a.region_rank);
+                    }
+                    e.ticks += 1;
+                    if a.narrative_status == engine13::core::NarrativeStatus::Foreground {
+                        e.fg += 1;
+                        fg_total += 1;
+                    }
+                    if coh < 60.0 {
+                        e.coh_lt60 += 1;
+                    }
+                    if eo < 30.0 {
+                        e.eo_lt30 += 1;
+                    }
+                    if pop > 500.0 {
+                        e.pop_gt500 += 1;
+                    }
+                    if pop > 500.0 && coh < 60.0 {
+                        e.plague_gate += 1;
+                    }
+                    e.pop_last = pop;
+                    // charge the previous tick's rule price against the change that
+                    // tick produced — same convention as `attractor`, so the two
+                    // decompositions are comparable
+                    if let Some(prev) = e.prev_pop {
+                        let charged = e.pending_rule_loss;
+                        e.rule_loss += charged;
+                        e.other_flow += (pop - prev) + charged;
+                    }
+                    e.prev_pop = Some(pop);
+                    e.pending_rule_loss = price_population_rules(&pop_rules, pop, eo);
+                    pop_before.insert(aid.clone(), pop);
+                }
+            }
+
+            let (_applied, rt) = scripted_step(&mut state, scenario_id, strategy);
+            raise_troops += rt;
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // --- attribution, off the log --------------------------------------
+            let mut fired_here = 0u32;
+            let mut ev_this_tick: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                if random_ids.contains(&ev.id) {
+                    fired_here += 1;
+                    *fires_by_id.entry(ev.id.clone()).or_insert(0) += 1;
+                }
+                if let Some((_, delta)) = POP_EVENTS.iter().find(|(id, _)| *id == ev.id) {
+                    let e = acc.entry(ev.actor_id.clone()).or_default();
+                    match ev.id.as_str() {
+                        "plague" => e.n_plague += 1,
+                        "famine" => e.n_famine += 1,
+                        _ => e.n_flood += 1,
+                    }
+                    e.ev_nominal += -delta;
+                    *ev_this_tick.entry(ev.actor_id.clone()).or_insert(0.0) += -delta;
+                }
+            }
+            random_fires_total += fired_here;
+            if cap > 0 && fired_here >= cap {
+                at_cap_ticks += 1;
+            }
+
+            // --- содержательность: which channel took more, this tick -----------
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, before) in &pop_before {
+                    let after = match world.actors.get(aid) {
+                        Some(a) => a.get_metric("population"),
+                        None => continue,
+                    };
+                    let e = match acc.get_mut(aid) {
+                        Some(e) => e,
+                        None => continue,
+                    };
+                    let ev_nom = ev_this_tick.get(aid).copied().unwrap_or(0.0);
+                    if ev_nom > *before {
+                        e.clip_ticks += 1;
+                    }
+                    if after < *before {
+                        e.down_ticks += 1;
+                        let rule = e.pending_rule_loss;
+                        if ev_nom > 0.0 && ev_nom > rule {
+                            e.ev_dom_ticks += 1;
+                        } else if rule > 0.0 && rule >= ev_nom {
+                            e.rule_dom_ticks += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mode = strategy.unwrap_or("noplayer");
+        for (aid, e) in &acc {
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{:.0}\t{:.1}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}\t{:+.1}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.pop_first, e.pop_last, e.rank,
+                100.0 * e.fg as f64 / n,
+                100.0 * e.coh_lt60 as f64 / n,
+                100.0 * e.eo_lt30 as f64 / n,
+                100.0 * e.pop_gt500 as f64 / n,
+                100.0 * e.plague_gate as f64 / n,
+                e.n_plague, e.n_famine, e.n_flood, e.ev_nominal, e.clip_ticks,
+                e.rule_loss, e.other_flow, e.down_ticks, e.ev_dom_ticks, e.rule_dom_ticks
+            );
+        }
+        let live = acc.values().filter(|e| e.ticks > 0).count().max(1);
+        let pool: Vec<String> = fires_by_id
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        println!(
+            "#POOL\tseed={}\tmode={}\tpool_size={}\tcap={}\tfires={}\tat_cap_ticks={}\tmean_fg={:.2}\tvictory_tick={}\traise_troops={}\t{}",
+            seed, mode, pool_size, cap, random_fires_total, at_cap_ticks,
+            fg_total as f64 / ticks as f64, victory_tick, raise_troops,
+            pool.join(" ")
+        );
+        let _ = live;
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -1559,6 +1886,16 @@ fn main() {
                 .unwrap_or_else(|| vec![42]);
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             attractor(scenario, ticks, &seeds, strategy);
+        }
+        "popevents" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            popevents(scenario, ticks, &seeds, strategy);
         }
         other => panic!("unknown mode: {}", other),
     }
