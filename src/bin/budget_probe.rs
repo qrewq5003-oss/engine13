@@ -1828,6 +1828,381 @@ fn popevents(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
     }
 }
 
+// ============================================================================
+// Task 23 stage 1b: `decisive23` — is `flood` ever DECISIVE, method of task 19 п.4
+// ============================================================================
+//
+// Task 19 п.4 did not run a second simulation. It recomputed the *predicate* the
+// metric feeds, tick by tick, in a second saturated world, and counted the ticks on
+// which the **verdict** differed (`cf_divergent`). That is what makes "0" mean "no
+// effect" rather than "small effect": a second simulation would diverge through the
+// RNG stream (`interactions.rs:438` spends four extra draws only on a successful
+// combat roll, and that roll's probability is computed from metrics), so any
+// difference it showed would be uninterpretable.
+//
+// Applied here: the shadow world is the one in which `flood` never removed any
+// population. Per actor it is tracked as a *debt* — the population `flood` took,
+// carried forward — and the debt is fed into exactly the predicates `population`
+// can reach:
+//
+//   1. COLLAPSE — `check_collapses` (`mod.rs:1488–1495`) reads `legitimacy`,
+//      `cohesion` and `external_pressure` and nothing else, and it is the only
+//      writer of `dead_actor_ids` (`mod.rs:1588`). `population` cannot reach an
+//      actor's death in one step. The only indirect routes run through relevance
+//      (a Foreground actor can be drawn as an `EventTarget::Any` victim of events
+//      that do write cohesion), so measuring (2) closes (1) as well.
+//
+//   2. RELEVANCE — `check_actor_upheaval` (`mod.rs:1199`) reads `population`
+//      directly and trips on `|back − front| > 30` over the metric-history window.
+//      The shadow verdict adds back the `flood` losses that fall inside the same
+//      window. This is EXACT, not first-order: the history buffer is written in
+//      phase 8 and read in phase 6, so the buffer observed at the top of a tick is
+//      precisely the one that tick's phase 6 will read.
+//
+//   3. VICTORY — no scenario's victory condition reads `population`
+//      (constantinople: `global:federation_progress ≥ 80` ∧
+//      `actor:ottomans.military_size < 40`; rome: `family:influence ≥ 90`; milan:
+//      none). The reachable route is `population → income (eo·pop·0.001,
+//      mod.rs:672) → treasury → action availability → federation_progress`. So the
+//      shadow carries a treasury debt too, and every `available_if` gate that reads
+//      a `treasury` is evaluated in both worlds. Rome has **no** such gate — all
+//      nine of its gates read `family:*` — so for rome this channel is closed by
+//      construction, not by measurement.
+//
+// The treasury half is first-order: it credits back the income the missing
+// population would have earned, but not the second-order compounding (the restored
+// population would itself have been taxed by the proportional dependency rule and
+// by migration, and a richer treasury would have bought actions that change `eo`).
+// The direction is deliberate — the debt is accumulated from the NOMINAL `-15`,
+// i.e. the upper bound of what `flood` actually applied, so the counterfactual
+// over-states `flood`'s influence. A zero under an over-stated counterfactual is
+// the strong form of the result.
+
+#[derive(Default)]
+struct CfAcc {
+    ticks: u32,
+    seen: bool,
+    rank: String,
+    // debt: population `flood` removed, carried forward (nominal = upper bound)
+    flood_debt: f64,
+    all3_debt: f64,
+    // per-tick removals, aligned with `metric_history`'s 5-slot window
+    flood_hist: std::collections::VecDeque<f64>,
+    // foregone income: Σ eo · debt · 0.001
+    treas_debt: f64,
+    all3_treas_debt: f64,
+    // --- outcome class 2: relevance -----------------------------------------
+    up_pop_div: u32,   // the `population` sub-predicate alone flips
+    up_div: u32,       // the whole 8-metric predicate flips (the real verdict)
+    up_div_masked: u32,// ...of which: `coh < 25 || leg < 20` was already true anyway
+    up_div_live: u32,  // ...of which: nothing else made the verdict true — an UPPER
+                       //    bound on relevance decisions `flood` could have moved
+    up_true: u32,      // for context: how often the real predicate is true at all
+    // demotion does NOT go through `condition_upheaval`: `update_metric_history`
+    // (mod.rs:1252) drives `actor_upheaval_ticks` from `check_actor_upheaval`
+    // ALONE, without the `coh < 25 || leg < 20` disjuncts. So masking does not
+    // apply on that path and the counter needs its own shadow.
+    up_ticks_real: u32,
+    up_ticks_shadow: u32,
+    recent_div: u32,   // ticks where `counter < 10` — the demotion input — differs
+    // --- outcome class 3: victory -------------------------------------------
+    gate_div: u32,     // action-availability gate verdicts that flip
+    gate_evals: u32,
+    // --- outcome class 1: collapse ------------------------------------------
+    died_tick: i64,
+    fg_flips: u32,
+    prev_fg: Option<bool>,
+}
+
+/// Verdict of `check_actor_upheaval` for one actor, optionally with `population`'s
+/// window delta shifted by `pop_shift` (the shadow world). Mirrors `mod.rs:1199`
+/// exactly, including the `history.len() >= 2` guard and the metric list.
+fn upheaval_verdict(
+    world: &WorldState,
+    actor_id: &str,
+    pop_shift: f64,
+) -> (bool, bool) {
+    const METRICS: [&str; 8] = [
+        "population", "military_size", "military_quality", "economic_output",
+        "cohesion", "legitimacy", "external_pressure", "treasury",
+    ];
+    let mut any = false;
+    let mut pop_only = false;
+    for m in METRICS {
+        let key = format!("{}:{}", actor_id, m);
+        if let Some(h) = world.metric_history.get(&key) {
+            if h.len() >= 2 {
+                let oldest = h.front().copied().unwrap_or(0.0);
+                let newest = h.back().copied().unwrap_or(0.0);
+                let mut d = newest - oldest;
+                if m == "population" {
+                    d += pop_shift;
+                    pop_only = d.abs() > 30.0;
+                }
+                if d.abs() > 30.0 {
+                    any = true;
+                }
+            }
+        }
+    }
+    (any, pop_only)
+}
+
+fn decisive23(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    assert_pool_matches_source();
+
+    println!("actor\tseed\tmode\tticks\trank\tflood_debt\ttreas_debt\tup_true\tup_pop_div\tup_div\tup_masked\tup_live\tgate_evals\tgate_div\tfg_flips\tdied\trecent_div");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        // Every action-availability gate that reads a `treasury`, taken off the
+        // loaded scenario rather than hardcoded: (owner actor, operator, value, id).
+        //
+        // Restricted to actions the scripted player actually ATTEMPTS. A gate on an
+        // action outside the priority list is never evaluated by the run, so a
+        // divergence in it cannot reach any outcome — counting it would inflate the
+        // counterfactual with verdicts nobody reads. In `noplayer` mode no action is
+        // attempted at all, so this whole channel is closed by construction and the
+        // gate list is empty.
+        let mut treasury_gates: Vec<(String, ComparisonOperator, f64, String)> = Vec::new();
+        if let Some(strat) = strategy {
+            let attempted = priority_list(scenario_id, strat);
+            let sc = state.current_scenario.as_ref().unwrap();
+            for act in sc.patron_actions.iter().chain(sc.universal_actions.iter()) {
+                if !attempted.contains(&act.id.as_str()) {
+                    continue;
+                }
+                if let engine13::core::ActionCondition::Metric {
+                    metric: MetricRef::Actor { actor_id, metric: m },
+                    operator,
+                    value,
+                } = &act.available_if
+                {
+                    if m.as_str() == "treasury" {
+                        treasury_gates.push((
+                            actor_id.as_str().to_string(),
+                            operator.clone(),
+                            *value,
+                            act.id.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+        // Victory reachability: how close the run ever came to the condition, so a
+        // non-victory can be told apart from a near-miss without re-running it.
+        let (vic_thresh, vic_has) = match state.current_scenario.as_ref().unwrap().victory_condition {
+            Some(ref vc) => (vc.threshold, true),
+            None => (0.0, false),
+        };
+        let mut vic_metric_max = f64::NEG_INFINITY;
+        let mut vic_add_ok = 0u32;
+
+        let mut acc: BTreeMap<String, CfAcc> = BTreeMap::new();
+        let mut victory_tick: i64 = -1;
+        let mut collapses = 0u32;
+
+        for t in 0..ticks {
+            // ---- verdicts, taken where the engine takes them -------------------
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.died_tick = -1;
+                    }
+                    e.ticks += 1;
+
+                    // relevance: `back − front` misses the oldest slot's own delta,
+                    // so the window sum skips the first entry, exactly as the
+                    // history buffer does
+                    let win: f64 = e.flood_hist.iter().skip(1).sum();
+                    let (real, _) = upheaval_verdict(world, aid, 0.0);
+                    let (shadow, shadow_pop_only) = upheaval_verdict(world, aid, win);
+                    let (_, real_pop_only) = upheaval_verdict(world, aid, 0.0);
+                    if real {
+                        e.up_true += 1;
+                    }
+                    if real_pop_only != shadow_pop_only {
+                        e.up_pop_div += 1;
+                    }
+                    if real != shadow {
+                        e.up_div += 1;
+                        let masked = a.get_metric("cohesion") < 25.0
+                            || a.get_metric("legitimacy") < 20.0;
+                        if masked {
+                            e.up_div_masked += 1;
+                        } else {
+                            e.up_div_live += 1;
+                        }
+                    }
+                    // demotion path: two counters, driven by the bare predicate
+                    if real { e.up_ticks_real = 0; } else { e.up_ticks_real += 1; }
+                    if shadow { e.up_ticks_shadow = 0; } else { e.up_ticks_shadow += 1; }
+                    if (e.up_ticks_real < 10) != (e.up_ticks_shadow < 10) {
+                        e.recent_div += 1;
+                    }
+
+                    let fg = a.narrative_status
+                        == engine13::core::NarrativeStatus::Foreground;
+                    if let Some(p) = e.prev_fg {
+                        if p != fg {
+                            e.fg_flips += 1;
+                        }
+                    }
+                    e.prev_fg = Some(fg);
+                }
+
+                // victory channel: availability gates in both worlds, evaluated at
+                // the same point `apply_player_action` evaluates them
+                for (owner, op, value, _id) in &treasury_gates {
+                    if world.dead_actor_ids.contains(owner) {
+                        continue;
+                    }
+                    let tr = match world.actors.get(owner) {
+                        Some(a) => a.get_metric("treasury"),
+                        None => continue,
+                    };
+                    let debt = acc.get(owner).map(|e| e.treas_debt).unwrap_or(0.0);
+                    let e = acc.entry(owner.clone()).or_default();
+                    e.gate_evals += 1;
+                    if op.evaluate(tr, *value) != op.evaluate(tr + debt, *value) {
+                        e.gate_div += 1;
+                    }
+                }
+
+                if vic_has {
+                    if let Some(ref vc) = state.current_scenario.as_ref().unwrap().victory_condition {
+                        let v = vc.metric.get(world);
+                        if v > vic_metric_max {
+                            vic_metric_max = v;
+                        }
+                        if vc.additional_conditions.iter().all(|c| {
+                            c.operator.evaluate(c.metric.get(world), c.value)
+                        }) {
+                            vic_add_ok += 1;
+                        }
+                    }
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // ---- accrue the debt this tick created ----------------------------
+            let mut flood_here: BTreeMap<String, f64> = BTreeMap::new();
+            let mut all3_here: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                if let Some((_, delta)) = POP_EVENTS.iter().find(|(id, _)| *id == ev.id) {
+                    *all3_here.entry(ev.actor_id.clone()).or_insert(0.0) += -delta;
+                    if ev.id == "flood" {
+                        *flood_here.entry(ev.actor_id.clone()).or_insert(0.0) += -delta;
+                    }
+                }
+            }
+            {
+                let world = state.world_state.as_ref().unwrap();
+                let live: Vec<String> = world.actors.keys().cloned().collect();
+                for aid in live {
+                    let eo = world
+                        .actors
+                        .get(&aid)
+                        .map(|a| a.get_metric("economic_output"))
+                        .unwrap_or(0.0);
+                    let e = acc.entry(aid.clone()).or_default();
+                    // income foregone THIS tick is priced on the debt that existed
+                    // before this tick's flood, which is what `apply_treasury` saw
+                    e.treas_debt += eo * e.flood_debt * 0.001;
+                    e.all3_treas_debt += eo * e.all3_debt * 0.001;
+                    let f = flood_here.get(&aid).copied().unwrap_or(0.0);
+                    e.flood_debt += f;
+                    e.all3_debt += all3_here.get(&aid).copied().unwrap_or(0.0);
+                    e.flood_hist.push_back(f);
+                    while e.flood_hist.len() > 5 {
+                        e.flood_hist.pop_front();
+                    }
+                }
+                for (aid, e) in acc.iter_mut() {
+                    if e.died_tick < 0 && world.dead_actor_ids.contains(aid) {
+                        e.died_tick = (t + 1) as i64;
+                        collapses += 1;
+                    }
+                }
+            }
+        }
+
+        let mode = strategy.unwrap_or("noplayer");
+        let mut tot = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+        for (aid, e) in &acc {
+            tot.0 += e.up_pop_div;
+            tot.1 += e.up_div;
+            tot.2 += e.up_div_masked;
+            tot.3 += e.up_div_live;
+            tot.4 += e.gate_div;
+            tot.5 += e.gate_evals;
+            tot.6 += e.recent_div;
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{:.1}\t{:+.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.rank, e.flood_debt, e.treas_debt,
+                e.up_true, e.up_pop_div, e.up_div, e.up_div_masked, e.up_div_live,
+                e.gate_evals, e.gate_div, e.fg_flips, e.died_tick, e.recent_div
+            );
+        }
+        println!(
+            "#CF\tseed={}\tmode={}\tup_pop_div={}\tup_div={}\tup_masked={}\tup_live={}\trecent_div={}\tgate_div={}/{}\tcollapses={}\tvictory_tick={}\tgates={}\tvic_max={:.1}\tvic_thresh={:.1}\tvic_add_ok={}",
+            seed, mode, tot.0, tot.1, tot.2, tot.3, tot.6, tot.4, tot.5, collapses,
+            victory_tick, treasury_gates.len(),
+            if vic_metric_max.is_finite() { vic_metric_max } else { 0.0 },
+            vic_thresh, vic_add_ok
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -1896,6 +2271,16 @@ fn main() {
                 .unwrap_or_else(|| vec![42]);
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             popevents(scenario, ticks, &seeds, strategy);
+        }
+        "decisive23" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            decisive23(scenario, ticks, &seeds, strategy);
         }
         other => panic!("unknown mode: {}", other),
     }
