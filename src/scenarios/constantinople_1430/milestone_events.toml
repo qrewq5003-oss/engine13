@@ -146,7 +146,23 @@ label = "Валахия"
 lat = 44.4
 lng = 26.1
 color = "#5d4037"
-initial_metrics = { cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0 }
+# Задача 25, стадия 2, вариант (D₂): `military_quality` — единственный из четырёх
+# ключей, которых у этого спавна нет, чей интервал непуст и безопасен. Значение 50
+# не выбрано, а выведено тремя независимыми путями, сходящимися в одну точку:
+#   1. это объявленный движком ответ на вопрос «что имеет актор, у которого метрика
+#      не названа» — `core::actor::default_metrics()`; он существует и не применяется
+#      ни на одном пути входа в мир (`ensure_default_metrics` имеет ровно один вызов,
+#      и на нём инертен);
+#   2. это нижняя граница собственной полосы ранга C сценария (`trebizond` 50,
+#      `serbia` 55, `byzantium` 55) и минимум `military_quality` во всём сценарии —
+#      спавн не становится сильнее ни одного из уже откалиброванных акторов;
+#   3. это нижняя граница измеренного безопасного интервала [50, 65], а `military_quality`
+#      входит в `power_projection` и через неё удерживает актора в `Foreground`, то есть
+#      увеличивает разбавление общего пула — тот самый риск, который назван в §8.2.
+# Три остальных ключа НЕ дописываются намеренно: `external_pressure` работает только
+# при значении вне шкалы игры, `treasury` имеет практически пустой интервал, а
+# `population` открывает гейт `plague`. Разбор — docs/investigation_spawn_completeness.md.
+initial_metrics = { cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0, military_quality = 50.0 }
 
 [[milestone_events]]
 id = "poland_lithuania_intervenes"
@@ -163,7 +179,7 @@ label = "Польша-Литва"
 lat = 52.2
 lng = 21.0
 color = "#bf360c"
-initial_metrics = { cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0 }
+initial_metrics = { cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0, military_quality = 50.0 }
 
 [[milestone_events]]
 id = "mamluks_watch"
@@ -183,4 +199,4 @@ label = "Мамлюки"
 lat = 30.0
 lng = 31.2
 color = "#f9a825"
-initial_metrics = { cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0 }
+initial_metrics = { cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0, military_quality = 50.0 }

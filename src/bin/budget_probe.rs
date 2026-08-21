@@ -2203,6 +2203,2181 @@ fn decisive23(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
     }
 }
 
+
+// ============================================================================
+// Task 24: `cohevents` — the shared pool's effects on `cohesion` /
+// `economic_output`
+// ============================================================================
+//
+// Task 23 measured the same pool through a different channel (`population`) and
+// closed it with `(C)`. That verdict does not carry, and the reason is topological
+// rather than cautionary: `population` reached an actor's death only through
+// relevance, so a zero on the relevance path closed the collapse class with it.
+// `cohesion` is read by the collapse predicate **directly** — `classic_collapse`
+// (`legitimacy < 10 ∧ cohesion < 15 ∧ external_pressure > 85`) and
+// `internal_collapse` (`legitimacy < 5 ∧ cohesion < 8`), `mod.rs:1487–1495`. There is
+// no intermediate layer on which the verdict can zero itself out.
+//
+// Three structural differences from `popevents`, each of which changes what has to
+// be measured:
+//
+//   1. **The pool is not just the common pool.** Scenario `create_random_events()`
+//      write `cohesion` (constantinople 2, rome 4, milan 1) where they wrote
+//      `population` never. Every table below therefore carries both, separated.
+//   2. **The field of writers is dense** — 17/21/31 write sites for `cohesion` and
+//      31/49/29 for `economic_output`, against six for `population`. So the question
+//      is not "is this the main sink" but "does its contribution ever decide
+//      anything", and the flow decomposition has to name the other writers rather
+//      than lump them into a residual.
+//   3. **The pool reads its own output.** Three of the common gates stand on
+//      `cohesion` itself (`plague < 60`, `popular_uprising < 30`,
+//      `charismatic_preacher < 40`) and a fourth on `economic_output`
+//      (`trade_boom > 40`, `famine < 30`). The two positive events have opposite gate
+//      polarity — `charismatic_preacher` is negative feedback, `trade_boom` positive —
+//      so they are counted as two classes, never summed.
+//
+// Read-only: drives `tick()`, reads metrics and the event log. No engine symbol is
+// modified.
+
+/// The shared events that write `cohesion`, with their nominal deltas — declared
+/// here independently of `common.rs` for the same reason [`POP_EVENTS`] is, and
+/// checked against it by [`assert_pool_matches_source`].
+const COH_EVENTS: &[(&str, f64)] = &[
+    ("charismatic_preacher", 3.0),
+    ("court_conspiracy", -5.0),
+    ("desertion", -5.0),
+    ("earthquake", -15.0),
+    ("famine", -5.0),
+    ("flood", -5.0),
+    ("plague", -6.0),
+    ("popular_uprising", -8.0),
+];
+
+/// The shared events that write `economic_output`.
+const EO_EVENTS: &[(&str, f64)] = &[
+    ("earthquake", -10.0),
+    ("flood", -12.0),
+    ("piracy", -5.0),
+    ("plague", -5.0),
+    ("popular_uprising", -8.0),
+    ("trade_boom", 5.0),
+];
+
+/// Fail loudly if `common_events()` stops matching the declared writer set for
+/// `cohesion` / `economic_output` — a changed delta, a new writer, or a writer that
+/// stopped writing all break the run instead of silently re-deriving it.
+fn assert_pool_matches_metric(metric: &str, declared: &[(&str, f64)]) {
+    let key = engine13::core::RelativeMetricRef::literal(&format!("self.{}", metric));
+    let mut found: Vec<(String, f64)> = Vec::new();
+    for ev in engine13::events::common_events() {
+        if let Some(d) = ev.effects.get(&key) {
+            found.push((ev.id.clone(), *d));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut want: Vec<(String, f64)> = declared.iter().map(|(i, d)| (i.to_string(), *d)).collect();
+    want.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        found, want,
+        "common_events() no longer matches the declared writers of `{}` — update the probe, not the run",
+        metric
+    );
+}
+
+/// The whole random-event pool one scenario runs: the shared events first, then the
+/// scenario's own, with the flag that tells them apart. Built the same way
+/// `phase_random_events` builds it (`mod.rs:406–410`), so nothing can be in the run
+/// and missing here.
+fn pool_of(sc: &Scenario) -> Vec<(engine13::core::RandomEvent, bool)> {
+    engine13::events::common_events()
+        .into_iter()
+        .map(|e| (e, true))
+        .chain(sc.random_events.iter().cloned().map(|e| (e, false)))
+        .collect()
+}
+
+/// Which actor an event's write to `metric` actually lands on, and how much.
+///
+/// Not the same question as "which actor is the event's target": a scenario event
+/// addresses metrics absolutely (`actor:byzantium.cohesion`) and may in principle
+/// write to someone other than the actor it fired on. Resolved through the same
+/// `RelativeMetricRef::resolve` the engine uses (`mod.rs:492`), so the attribution is
+/// the engine's, not a re-reading of the key string.
+fn event_writes_to(
+    ev: &engine13::core::RandomEvent,
+    target_id: &str,
+    metric: &str,
+) -> Vec<(String, f64)> {
+    let mut out = Vec::new();
+    for (m, delta) in &ev.effects {
+        if let Ok(MetricRef::Actor { actor_id, metric: name }) = m.resolve(target_id) {
+            if name.as_str() == metric {
+                out.push((actor_id.as_str().to_string(), *delta));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Price the dependency phase on one actor's metric snapshot and report what it did
+/// to `target`.
+///
+/// Mirrors `engine::apply_dependency_rule` including the sequential semantics (each
+/// rule reads the state the previous rules already changed) and the absence of a
+/// clamp inside the phase — `clamp_metrics` runs later, in phase 5. Generic in the
+/// target metric because task 24 needs it for `cohesion` where task 22/23 needed it
+/// for `population`; the population version is kept as is so those numbers stay
+/// reproducible.
+fn price_dep_metric(
+    rules: &[DependencyRule],
+    metrics: &std::collections::HashMap<String, f64>,
+    target: &str,
+) -> f64 {
+    let before = metrics.get(target).copied().unwrap_or(0.0);
+    let mut m = metrics.clone();
+    for rule in rules {
+        let from_val = m.get(rule.from.as_str()).copied().unwrap_or(0.0);
+        let delta = match rule.mode {
+            DependencyMode::Deficit => match rule.threshold {
+                Some(t) if from_val < t => -((t - from_val) * rule.coefficient),
+                _ => 0.0,
+            },
+            DependencyMode::Excess => match rule.threshold {
+                Some(t) if from_val > t => -((from_val - t) * rule.coefficient),
+                _ => 0.0,
+            },
+            DependencyMode::Bonus => match rule.threshold {
+                Some(t) if from_val > t => (from_val - t) * rule.coefficient,
+                _ => 0.0,
+            },
+            DependencyMode::Linear => from_val * rule.coefficient,
+            DependencyMode::DeficitProportional => match rule.threshold {
+                Some(t) if t > 0.0 && from_val < t => {
+                    -(m.get(rule.to.as_str()).copied().unwrap_or(0.0)
+                        * rule.coefficient
+                        * (t - from_val)
+                        / t)
+                }
+                _ => 0.0,
+            },
+        };
+        if delta != 0.0 {
+            let cur = m.get(rule.to.as_str()).copied().unwrap_or(0.0);
+            m.insert(rule.to.as_str().to_string(), cur + delta);
+        }
+    }
+    m.get(target).copied().unwrap_or(0.0) - before
+}
+
+#[derive(Default, Clone)]
+struct GateAcc {
+    elig: u32,   // ticks the actor was eligible to be drawn at all
+    gate: u32,   // ticks every condition of the event held for this actor
+    fires: u32,  // times the event actually applied to this actor
+    coh: f64,    // Σ nominal cohesion written to this actor by this event
+    eo: f64,     // Σ nominal economic_output written
+}
+
+#[derive(Default)]
+struct CohEvAcc {
+    ticks: u32,
+    seen: bool,
+    rank: String,
+    sea: bool,
+    coh_first: f64,
+    coh_last: f64,
+    coh_min: f64,
+    eo_first: f64,
+    eo_last: f64,
+    fg: u32,
+    // danger-zone occupancy: the two thresholds the collapse predicate stands on,
+    // plus the three the pool's own gates stand on
+    coh_lt8: u32,
+    coh_lt15: u32,
+    coh_lt30: u32,
+    coh_lt40: u32,
+    coh_lt60: u32,
+    // Saturation. `cohesion` is clamped to `0..100` (`metric_ref.rs:267` at
+    // application, `mod.rs:707` again in phase 5), so an actor sitting on a boundary
+    // absorbs writes without moving. Without these two columns the flow
+    // decomposition below is uninterpretable: at the ceiling the pool's write is the
+    // only downward force in the world, and the residual column silently swallows
+    // the truncation that puts the actor back.
+    coh_eq100: u32,
+    coh_eq0: u32,
+    eo_eq100: u32,
+    eo_eq0: u32,
+    // signed sums — the statement forbids summing the two feedback classes together
+    coh_neg: f64,
+    coh_pos: f64,
+    eo_neg: f64,
+    eo_pos: f64,
+    // ...split by which pool the writer came from
+    coh_pool: f64,
+    coh_scen: f64,
+    // flow decomposition: total change over the run, the dependency phase's own
+    // price, and what is left for the remaining writers
+    coh_total: f64,
+    coh_dep: f64,
+    eo_total: f64,
+    eo_dep: f64,
+    prev_coh: Option<f64>,
+    prev_eo: Option<f64>,
+    pending_dep_coh: f64,
+    pending_dep_eo: f64,
+    // clamp: how often the nominal write could not land in full
+    clip_lo: u32,
+    clip_hi: u32,
+    died_tick: i64,
+}
+
+fn cohevents(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    assert_pool_matches_source();
+    assert_pool_matches_metric("cohesion", COH_EVENTS);
+    assert_pool_matches_metric("economic_output", EO_EVENTS);
+
+    println!("actor\tseed\tmode\tticks\trank\tsea\tcoh0\tcohF\tcohMin\teo0\teoF\tfg%\tcoh<8%\tcoh<15%\tcoh<30%\tcoh<40%\tcoh<60%\tcoh=100%\tcoh=0%\teo=100%\teo=0%\tev_coh-\tev_coh+\tev_coh_pool\tev_coh_scen\tev_eo-\tev_eo+\tcoh_total\tcoh_dep\tcoh_rest\teo_total\teo_dep\teo_rest\tclip_lo\tclip_hi\tdied");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let sc = state.current_scenario.as_ref().unwrap();
+        let rules: Vec<DependencyRule> = sc.dependencies.clone();
+        let cap = sc.max_random_events_per_tick;
+        let pool = pool_of(sc);
+        let pool_size = pool.len();
+        // `EventTarget::SeaActors` draws only from actors carrying one of these two
+        // tags (`mod.rs:415–418`) — the eligibility gate `piracy` stands behind, and
+        // it appears in no scenario file as a condition.
+        let sea_ids: std::collections::HashSet<String> = sc
+            .actors
+            .iter()
+            .filter(|a| {
+                a.tags.contains(&"maritime".to_string())
+                    || a.tags.contains(&"trade_empire".to_string())
+            })
+            .map(|a| a.id.clone())
+            .collect();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool
+            .iter()
+            .map(|(e, c)| (e.id.clone(), (e.clone(), *c)))
+            .collect();
+        // events that write either metric at all — the only ones the tables below
+        // need a row for
+        let writers: Vec<String> = pool
+            .iter()
+            .filter(|(e, _)| {
+                e.effects.keys().any(|m| {
+                    let s = m.to_string();
+                    s.ends_with(".cohesion") || s.ends_with(".economic_output")
+                })
+            })
+            .map(|(e, _)| e.id.clone())
+            .collect();
+
+        let mut acc: BTreeMap<String, CohEvAcc> = BTreeMap::new();
+        let mut gates: BTreeMap<(String, String), GateAcc> = BTreeMap::new();
+        let mut fires_by_id: BTreeMap<String, u32> = BTreeMap::new();
+        let mut raise_troops = 0u32;
+        let mut victory_tick: i64 = -1;
+        let mut at_cap_ticks = 0u32;
+        let mut random_fires_total = 0u32;
+        let mut collapses = 0u32;
+
+        for t in 0..ticks {
+            let mut coh_before: BTreeMap<String, f64> = BTreeMap::new();
+            let mut eo_before: BTreeMap<String, f64> = BTreeMap::new();
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let coh = a.get_metric("cohesion");
+                    let eo = a.get_metric("economic_output");
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.coh_first = coh;
+                        e.eo_first = eo;
+                        e.coh_min = coh;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.sea = sea_ids.contains(aid);
+                        e.died_tick = -1;
+                    }
+                    e.ticks += 1;
+                    let fg = a.narrative_status == engine13::core::NarrativeStatus::Foreground;
+                    if fg {
+                        e.fg += 1;
+                    }
+                    if coh < 8.0 { e.coh_lt8 += 1; }
+                    if coh < 15.0 { e.coh_lt15 += 1; }
+                    if coh < 30.0 { e.coh_lt30 += 1; }
+                    if coh < 40.0 { e.coh_lt40 += 1; }
+                    if coh < 60.0 { e.coh_lt60 += 1; }
+                    if coh >= 100.0 { e.coh_eq100 += 1; }
+                    if coh <= 0.0 { e.coh_eq0 += 1; }
+                    if eo >= 100.0 { e.eo_eq100 += 1; }
+                    if eo <= 0.0 { e.eo_eq0 += 1; }
+                    if coh < e.coh_min { e.coh_min = coh; }
+                    e.coh_last = coh;
+                    e.eo_last = eo;
+                    // charge the previous tick's dependency price against the change
+                    // that tick produced — same convention as `attractor`/`popevents`
+                    if let Some(prev) = e.prev_coh {
+                        e.coh_total += coh - prev;
+                        e.coh_dep += e.pending_dep_coh;
+                    }
+                    if let Some(prev) = e.prev_eo {
+                        e.eo_total += eo - prev;
+                        e.eo_dep += e.pending_dep_eo;
+                    }
+                    e.prev_coh = Some(coh);
+                    e.prev_eo = Some(eo);
+                    e.pending_dep_coh = price_dep_metric(&rules, &a.metrics, "cohesion");
+                    e.pending_dep_eo = price_dep_metric(&rules, &a.metrics, "economic_output");
+                    coh_before.insert(aid.clone(), coh);
+                    eo_before.insert(aid.clone(), eo);
+
+                    // --- gate occupancy, evaluated exactly where the engine does ---
+                    for id in &writers {
+                        let (ev, _) = &by_id[id];
+                        let eligible = match ev.target {
+                            engine13::core::EventTarget::Any => fg,
+                            engine13::core::EventTarget::All => fg,
+                            engine13::core::EventTarget::SeaActors => fg && sea_ids.contains(aid),
+                            engine13::core::EventTarget::Actor(ref want) => want == aid,
+                        };
+                        let g = gates.entry((aid.clone(), id.clone())).or_default();
+                        if eligible {
+                            g.elig += 1;
+                        }
+                        let met = ev.conditions.iter().all(|c| {
+                            let v = match c.metric.resolve(aid) {
+                                Ok(r) => r.get(world),
+                                Err(_) => return false,
+                            };
+                            c.operator.evaluate(v, c.value)
+                        });
+                        if met {
+                            g.gate += 1;
+                        }
+                    }
+                }
+            }
+
+            let (_applied, rt) = scripted_step(&mut state, scenario_id, strategy);
+            raise_troops += rt;
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // --- attribution off the log ---------------------------------------
+            let mut fired_here = 0u32;
+            let mut coh_this: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, is_common)) = by_id.get(&ev.id) else { continue };
+                fired_here += 1;
+                *fires_by_id.entry(ev.id.clone()).or_insert(0) += 1;
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "cohesion") {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if d < 0.0 { e.coh_neg += d } else { e.coh_pos += d }
+                    if *is_common { e.coh_pool += d } else { e.coh_scen += d }
+                    *coh_this.entry(aid.clone()).or_insert(0.0) += d;
+                    gates.entry((aid, ev.id.clone())).or_default().coh += d;
+                }
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "economic_output") {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if d < 0.0 { e.eo_neg += d } else { e.eo_pos += d }
+                    gates.entry((aid, ev.id.clone())).or_default().eo += d;
+                }
+                gates
+                    .entry((ev.actor_id.clone(), ev.id.clone()))
+                    .or_default()
+                    .fires += 1;
+            }
+            random_fires_total += fired_here;
+            if cap > 0 && fired_here >= cap {
+                at_cap_ticks += 1;
+            }
+
+            // --- clamp accounting ----------------------------------------------
+            // `cohesion` is clamped at the moment of application (`metric_ref.rs:267`,
+            // the `_ =>` arm) *and* again in phase 5, so a nominal write that would
+            // leave `0..100` cannot land in full. Counted, not corrected — the size of
+            // the approximation stays visible, as in task 23 §5.3.
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, before) in &coh_before {
+                    let Some(d) = coh_this.get(aid) else { continue };
+                    let Some(e) = acc.get_mut(aid) else { continue };
+                    if before + d < 0.0 {
+                        e.clip_lo += 1;
+                    }
+                    if before + d > 100.0 {
+                        e.clip_hi += 1;
+                    }
+                    let _ = world;
+                }
+                for (aid, e) in acc.iter_mut() {
+                    if e.died_tick < 0 && world.dead_actor_ids.contains(aid) {
+                        e.died_tick = (t + 1) as i64;
+                        collapses += 1;
+                    }
+                }
+            }
+            let _ = &eo_before;
+        }
+
+        let mode = strategy.unwrap_or("noplayer");
+        for (aid, e) in &acc {
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:+.1}\t{:.1}\t{:.1}\t{:.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.rank, e.sea,
+                e.coh_first, e.coh_last, e.coh_min, e.eo_first, e.eo_last,
+                100.0 * e.fg as f64 / n,
+                100.0 * e.coh_lt8 as f64 / n,
+                100.0 * e.coh_lt15 as f64 / n,
+                100.0 * e.coh_lt30 as f64 / n,
+                100.0 * e.coh_lt40 as f64 / n,
+                100.0 * e.coh_lt60 as f64 / n,
+                100.0 * e.coh_eq100 as f64 / n,
+                100.0 * e.coh_eq0 as f64 / n,
+                100.0 * e.eo_eq100 as f64 / n,
+                100.0 * e.eo_eq0 as f64 / n,
+                e.coh_neg, e.coh_pos, e.coh_pool, e.coh_scen,
+                e.eo_neg, e.eo_pos,
+                e.coh_total, e.coh_dep, e.coh_total - e.coh_dep - (e.coh_neg + e.coh_pos),
+                e.eo_total, e.eo_dep, e.eo_total - e.eo_dep - (e.eo_neg + e.eo_pos),
+                e.clip_lo, e.clip_hi, e.died_tick
+            );
+        }
+        for ((aid, evid), g) in &gates {
+            // An event can fire ON one actor and write TO another: constantinople's
+            // `mehmed_threatens` is gated on `ottomans.military_size > 150`, targets
+            // `ottomans`, and writes `byzantium.cohesion −8`. So a row is worth
+            // printing when EITHER role is non-empty — filtering on eligibility alone
+            // silently drops the write half of exactly the events this task is about.
+            if g.elig == 0 && g.fires == 0 && g.coh == 0.0 && g.eo == 0.0 {
+                continue;
+            }
+            let n = acc.get(aid).map(|e| e.ticks.max(1)).unwrap_or(1) as f64;
+            println!(
+                "#GATE\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{}\t{:+.1}\t{:+.1}",
+                aid, seed, mode, evid,
+                if by_id.get(evid).map(|(_, c)| *c).unwrap_or(false) { "pool" } else { "scen" },
+                100.0 * g.elig as f64 / n,
+                100.0 * g.gate as f64 / n,
+                g.fires, g.coh, g.eo
+            );
+        }
+        let fires: Vec<String> = fires_by_id
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        println!(
+            "#POOL\tseed={}\tmode={}\tpool_size={}\tcap={}\tfires={}\tat_cap_ticks={}\tvictory_tick={}\traise_troops={}\tcollapses={}\t{}",
+            seed, mode, pool_size, cap, random_fires_total, at_cap_ticks, victory_tick,
+            raise_troops, collapses, fires.join(" ")
+        );
+    }
+}
+
+// ============================================================================
+// Task 24 stage 1: `decisive24` — is the pool's `cohesion` write ever DECISIVE?
+// ============================================================================
+//
+// Method of task 19 п.4 / task 23 §14.1, carried over unchanged: **no second
+// simulation**. The RNG stream diverges from any change of state
+// (`interactions.rs:438` spends four extra draws only on a successful combat roll,
+// and that roll's probability is computed from metrics), so a second run's
+// differences would be uninterpretable. What is recomputed instead is the **verdict**
+// the metric feeds, tick by tick, in a shadow world.
+//
+// The shadow world here is the one in which random events never touched `cohesion`
+// (and, for the second half, never touched `economic_output`). Two things make this
+// harder than task 23's population debt, and both are handled explicitly:
+//
+//   1. **`cohesion` is clamped to `0..100`** — at application (`metric_ref.rs:267`)
+//      and again in phase 5. A carried-forward debt would therefore be wrong in both
+//      directions: it would credit the shadow with losses the real world's floor
+//      already absorbed, and it would let the shadow drift above 100 and never come
+//      back. So the shadow is carried as a **value with its own clamp**, advanced by
+//      the real world's non-event increment:
+//          S(t) = clamp( S(t−1) + [C(t) − C(t−1)] − δ_events(t), 0, 100 )
+//      The debt `S − C` is then an output of the model, not an input, and is bounded
+//      by construction.
+//
+//   2. **Collapse needs three consecutive dangerous ticks**, and the counter resets on
+//      the first non-dangerous one (`mod.rs:1538–1552`). A shadow verdict without its
+//      own counter would be simply wrong — the same trap task 23 hit on the demotion
+//      path, where `actor_upheaval_ticks` needed its own shadow. So the shadow keeps
+//      `collapse_warning_ticks` of its own, with the same reset rule and the same
+//      `minimum_survival_ticks` skip.
+//
+// Where the verdict is taken. `check_collapses` runs in phase 7. Nothing after it
+// writes `cohesion`, `legitimacy`, `external_pressure` or `military_size`
+// (`phase_vassalage` writes only `expansion_count`; `phase_record` writes only
+// `family_state`; `phase_advance` writes only the clock), so the metrics observed
+// **after** `tick()` returns are exactly the ones phase 7 read. The replication is
+// therefore exact, not first-order — and it is checked, not asserted: the replicated
+// *real* counter is compared against `world.collapse_warning_ticks` every tick and
+// `cw_mismatch` is printed.
+//
+// Two of three death channels read `cohesion`; the third does not:
+//   * `classic_collapse`  = `leg < 10 ∧ coh < 15 ∧ ep > 85`      — shadowed
+//   * `internal_collapse` = `leg < 5  ∧ coh < 8`                  — shadowed
+//   * `conquest_collapse` = `mil < MIN ∧ leg < 10 ∧ ep > 85 ∧ besieged` — identical in
+//     both worlds, and it is part of the same `in_danger` disjunction, so it can mask
+//     a shadowed difference. Counted separately (`cq_mask`) rather than ignored.
+//
+// The `economic_output` half has no edge into the collapse predicate at all (no
+// dependency rule writes `cohesion` from `economic_output`; the walk found four
+// writers of `cohesion` and none of them reads it). Its reachable channels are the
+// two task 23 already built machinery for — the relevance predicate, where both
+// metrics are among the eight, and `treasury` through `income = eo·pop·0.001` — so
+// both are carried here too rather than left unstated.
+
+#[derive(Default)]
+struct Cf24 {
+    ticks: u32,
+    seen: bool,
+    rank: String,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    // shadow values, each with its own clamp
+    s_coh: f64,
+    s_eo: f64,
+    p_coh: f64, // second shadow: common pool only, scenario events left in place
+    prev_coh: Option<f64>,
+    prev_eo: Option<f64>,
+    // debt series aligned with `metric_history`'s 5-slot window
+    coh_debt_hist: std::collections::VecDeque<f64>,
+    eo_debt_hist: std::collections::VecDeque<f64>,
+    treas_debt: f64,
+    // --- collapse ---------------------------------------------------------
+    real_ct: u32,
+    shad_ct: u32,
+    pool_ct: u32,
+    dng_true: u32,   // ticks the real `in_danger` held, for scale
+    s_dng: u32,      // ticks the shadow `in_danger` held — the "would it have died
+                     // anyway, later" question, answered as far as a shadow can
+    r_cls: u32,      // ticks each real path held, so a death can be attributed
+    r_int: u32,
+    r_cq: u32,
+    s_cls: u32,
+    s_int: u32,
+    died_path: &'static str, // which real path was true on the death tick
+    dng_div: u32,    // ticks the shadow `in_danger` differs
+    cq_mask: u32,    // ...of which the difference was masked by `conquest_collapse`
+    col_div: u32,    // ticks the collapse DECISION (counter ≥ 3) differs
+    died_tick: i64,
+    saved: u32,      // real collapse fired while the shadow counter was below 3
+    saved_pool: u32, // same, common pool only
+    // --- relevance --------------------------------------------------------
+    up_true: u32,
+    up_div: u32,
+    up_masked: u32,
+    up_live: u32,
+    cu_div: u32,     // full `condition_upheaval`, incl. the `coh < 25` disjunct
+    // --- vassalage band ---------------------------------------------------
+    band_div: u32,
+    // --- victory ----------------------------------------------------------
+    gate_evals: u32,
+    gate_div: u32,
+    cw_mismatch: u32,
+    // narrative-status flips actually observed, so a divergence in the INPUT of a
+    // relevance decision can be told apart from a decision that moved — the same
+    // discipline task 23 §14.2 used to close its demotion path
+    fg_flips: u32,
+    prev_fg: Option<bool>,
+}
+
+/// `check_actor_upheaval` (`mod.rs:1199`) with the window delta of any subset of the
+/// eight metrics shifted — the shadow world's history. Mirrors the engine exactly,
+/// including the `len() >= 2` guard and the metric list.
+///
+/// Separate from [`upheaval_verdict`] on purpose: that one is task 23's and its
+/// numbers are quoted in a published document, so it is left byte-identical.
+fn upheaval_verdict_multi(
+    world: &WorldState,
+    actor_id: &str,
+    shifts: &[(&str, f64)],
+) -> bool {
+    const METRICS: [&str; 8] = [
+        "population", "military_size", "military_quality", "economic_output",
+        "cohesion", "legitimacy", "external_pressure", "treasury",
+    ];
+    for m in METRICS {
+        let key = format!("{}:{}", actor_id, m);
+        if let Some(h) = world.metric_history.get(&key) {
+            if h.len() >= 2 {
+                let oldest = h.front().copied().unwrap_or(0.0);
+                let newest = h.back().copied().unwrap_or(0.0);
+                let mut d = newest - oldest;
+                if let Some((_, s)) = shifts.iter().find(|(k, _)| *k == m) {
+                    d += *s;
+                }
+                if d.abs() > 30.0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The engine's `in_danger` disjunction (`mod.rs:1487–1536`), evaluated on supplied
+/// values so the same code serves the real world and the shadow. Returns the three
+/// paths separately because the third one does not read `cohesion` and can therefore
+/// mask a shadowed difference.
+fn danger_paths(coh: f64, leg: f64, ep: f64, mil: f64, besieged: bool) -> (bool, bool, bool) {
+    let classic = leg < 10.0 && coh < 15.0 && ep > 85.0;
+    let internal = leg < 5.0 && coh < 8.0;
+    let conquest = mil < engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY
+        && leg < 10.0
+        && ep > 85.0
+        && besieged;
+    (classic, internal, conquest)
+}
+
+fn mode_label(strategy: Option<&str>) -> &str {
+    strategy.unwrap_or("noplayer")
+}
+
+fn decisive24(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    assert_pool_matches_source();
+    assert_pool_matches_metric("cohesion", COH_EVENTS);
+    assert_pool_matches_metric("economic_output", EO_EVENTS);
+
+    println!("actor\tseed\tmode\tticks\trank\tcoh_debt\teo_debt\ttreas_debt\tdng_true\ts_dng\tr_cls\tr_int\tr_cq\ts_cls\ts_int\tdng_div\tcq_mask\tcol_div\tsaved\tsaved_pool\tdied\tup_true\tup_div\tup_masked\tup_live\tcu_div\tband_div\tgate_evals\tgate_div\tcw_mism\tfg_flips");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+
+        // Same restriction as `decisive23`: only gates on actions the scripted player
+        // actually attempts. A gate nobody evaluates cannot reach an outcome.
+        let mut treasury_gates: Vec<(String, ComparisonOperator, f64, String)> = Vec::new();
+        if let Some(strat) = strategy {
+            let attempted = priority_list(scenario_id, strat);
+            for act in sc.patron_actions.iter().chain(sc.universal_actions.iter()) {
+                if !attempted.contains(&act.id.as_str()) {
+                    continue;
+                }
+                if let engine13::core::ActionCondition::Metric {
+                    metric: MetricRef::Actor { actor_id, metric: m },
+                    operator,
+                    value,
+                } = &act.available_if
+                {
+                    if m.as_str() == "treasury" {
+                        treasury_gates.push((
+                            actor_id.as_str().to_string(),
+                            operator.clone(),
+                            *value,
+                            act.id.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+        // cloned out of the scenario so the borrow ends here: the loop below needs
+        // `state` mutably for `tick()`
+        let victory = sc.victory_condition.clone();
+        let (vic_thresh, vic_has) = match victory {
+            Some(ref vc) => (vc.threshold, true),
+            None => (0.0, false),
+        };
+        let mut vic_metric_max = f64::NEG_INFINITY;
+        let mut vic_add_ok = 0u32;
+
+        let mut acc: BTreeMap<String, Cf24> = BTreeMap::new();
+        let mut victory_tick: i64 = -1;
+        let mut collapses = 0u32;
+
+        for t in 0..ticks {
+            // ---- seed the shadow from the world's own starting values ----------
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.neighbors = a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+                        e.s_coh = a.get_metric("cohesion");
+                        e.p_coh = a.get_metric("cohesion");
+                        e.s_eo = a.get_metric("economic_output");
+                        e.prev_coh = Some(a.get_metric("cohesion"));
+                        e.prev_eo = Some(a.get_metric("economic_output"));
+                        e.died_tick = -1;
+                    }
+                }
+                // victory reachability, same two columns as `decisive23`
+                if vic_has {
+                    if let Some(ref vc) = victory {
+                        let v = vc.metric.get(world);
+                        if v > vic_metric_max {
+                            vic_metric_max = v;
+                        }
+                        if vc
+                            .additional_conditions
+                            .iter()
+                            .all(|c| c.operator.evaluate(c.metric.get(world), c.value))
+                        {
+                            vic_add_ok += 1;
+                        }
+                    }
+                }
+                // victory channel: availability gates in both worlds
+                for (owner, op, value, _id) in &treasury_gates {
+                    if world.dead_actor_ids.contains(owner) {
+                        continue;
+                    }
+                    let Some(a) = world.actors.get(owner) else { continue };
+                    let tr = a.get_metric("treasury");
+                    let debt = acc.get(owner).map(|e| e.treas_debt).unwrap_or(0.0);
+                    let e = acc.entry(owner.clone()).or_default();
+                    e.gate_evals += 1;
+                    if op.evaluate(tr, *value) != op.evaluate(tr + debt, *value) {
+                        e.gate_div += 1;
+                    }
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // ---- what the events wrote this tick -------------------------------
+            let mut coh_ev: BTreeMap<String, f64> = BTreeMap::new();
+            let mut coh_ev_pool: BTreeMap<String, f64> = BTreeMap::new();
+            let mut eo_ev: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, is_common)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "cohesion") {
+                    *coh_ev.entry(aid.clone()).or_insert(0.0) += d;
+                    if *is_common {
+                        *coh_ev_pool.entry(aid).or_insert(0.0) += d;
+                    }
+                }
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "economic_output") {
+                    *eo_ev.entry(aid).or_insert(0.0) += d;
+                }
+            }
+
+            // ---- the verdict, on the values phase 7 actually read ---------------
+            let world = state.world_state.as_ref().unwrap();
+            let cur_tick = t; // `check_collapses` ran with `world.tick == t`
+            // an actor that died THIS tick is gone from `world.actors`; its metrics at
+            // the moment of the verdict survive in `dead_actors[].final_metrics`
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == cur_tick)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue; // spawned mid-tick: phase 7 of this tick did not see it
+                }
+
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let eo = m.get("economic_output").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let pop = m.get("population").copied().unwrap_or(0.0);
+
+                // --- advance the shadow values ---------------------------------
+                let d_coh = coh - e.prev_coh.unwrap_or(coh);
+                let d_eo = eo - e.prev_eo.unwrap_or(eo);
+                let ev_c = coh_ev.get(&aid).copied().unwrap_or(0.0);
+                let ev_cp = coh_ev_pool.get(&aid).copied().unwrap_or(0.0);
+                let ev_e = eo_ev.get(&aid).copied().unwrap_or(0.0);
+                e.s_coh = (e.s_coh + d_coh - ev_c).clamp(0.0, 100.0);
+                e.p_coh = (e.p_coh + d_coh - ev_cp).clamp(0.0, 100.0);
+                e.s_eo = (e.s_eo + d_eo - ev_e).clamp(0.0, 100.0);
+                e.prev_coh = Some(coh);
+                e.prev_eo = Some(eo);
+                e.ticks += 1;
+
+                // income the missing `economic_output` would have earned; priced on the
+                // debt that existed before this tick, which is what `apply_treasury` saw
+                e.treas_debt += (e.s_eo - eo) * pop * 0.001;
+
+                // debt series, aligned with the history slot phase 8 pushed this tick
+                e.coh_debt_hist.push_back(e.s_coh - coh);
+                while e.coh_debt_hist.len() > 5 { e.coh_debt_hist.pop_front(); }
+                e.eo_debt_hist.push_back(e.s_eo - eo);
+                while e.eo_debt_hist.len() > 5 { e.eo_debt_hist.pop_front(); }
+
+                // --- collapse verdict, both worlds ------------------------------
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if cur_tick < ms);
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    let (sc_, si, _) = danger_paths(e.s_coh, leg, ep, mil, besieged);
+                    let (pc, pi, _) = danger_paths(e.p_coh, leg, ep, mil, besieged);
+                    let real_d = rc || ri || rq;
+                    let shad_d = sc_ || si || rq;
+                    let pool_d = pc || pi || rq;
+                    if real_d { e.dng_true += 1; }
+                    if shad_d { e.s_dng += 1; }
+                    if rc { e.r_cls += 1; }
+                    if ri { e.r_int += 1; }
+                    if rq { e.r_cq += 1; }
+                    if sc_ { e.s_cls += 1; }
+                    if si { e.s_int += 1; }
+                    if real_d != shad_d { e.dng_div += 1; }
+                    // the cohesion-reading half differed but `conquest_collapse` held
+                    // the disjunction up anyway
+                    if (rc || ri) != (sc_ || si) && real_d == shad_d {
+                        e.cq_mask += 1;
+                    }
+                    if real_d { e.real_ct += 1 } else { e.real_ct = 0 }
+                    if shad_d { e.shad_ct += 1 } else { e.shad_ct = 0 }
+                    if pool_d { e.pool_ct += 1 } else { e.pool_ct = 0 }
+                    if (e.real_ct >= 3) != (e.shad_ct >= 3) { e.col_div += 1; }
+                    // cross-check the replication against the engine's own counter
+                    // The engine leaves the entry in place at 3 for an actor it has
+                    // just removed, so a plain comparison holds on the death tick too.
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct {
+                        e.cw_mismatch += 1;
+                    }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    collapses += 1;
+                    let besieged_d = e.neighbors.iter().any(|(nid, dist)| {
+                        *dist == 1
+                            && live_mil
+                                .get(nid)
+                                .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                                .unwrap_or(false)
+                    });
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged_d);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    if e.shad_ct < 3 { e.saved += 1; }
+                    if e.pool_ct < 3 { e.saved_pool += 1; }
+                    println!(
+                        "#DEATH\t{}\t{}\t{}\t{}\ttick={}\tpath={}\treal_ct={}\tshad_ct={}\tpool_ct={}\tcoh={:.2}\ts_coh={:.2}\tleg={:.2}\tep={:.2}\tmil={:.4}\tr_dng={}\ts_dng={}",
+                        aid, seed, mode_label(strategy), e.rank, t + 1, e.died_path,
+                        e.real_ct, e.shad_ct, e.pool_ct, coh, e.s_coh, leg, ep, mil,
+                        e.dng_true, e.s_dng
+                    );
+                }
+
+                // --- relevance --------------------------------------------------
+                // the shadow's window delta is `(C+D)_newest − (C+D)_oldest`, i.e. the
+                // real delta plus `D_newest − D_oldest`. `D` is carried cumulatively
+                // here (task 23 carried per-tick removals and summed them, which is
+                // the same quantity written differently).
+                let cw: f64 = e.coh_debt_hist.back().copied().unwrap_or(0.0)
+                    - e.coh_debt_hist.front().copied().unwrap_or(0.0);
+                let ew: f64 = e.eo_debt_hist.back().copied().unwrap_or(0.0)
+                    - e.eo_debt_hist.front().copied().unwrap_or(0.0);
+                let real_up = upheaval_verdict_multi(world, &aid, &[]);
+                let shad_up =
+                    upheaval_verdict_multi(world, &aid, &[("cohesion", cw), ("economic_output", ew)]);
+                if real_up { e.up_true += 1; }
+                if real_up != shad_up {
+                    e.up_div += 1;
+                    if coh < 25.0 || leg < 20.0 { e.up_masked += 1 } else { e.up_live += 1 }
+                }
+                let real_cu = real_up || coh < 25.0 || leg < 20.0;
+                let shad_cu = shad_up || e.s_coh < 25.0 || leg < 20.0;
+                if real_cu != shad_cu { e.cu_div += 1; }
+
+                let fg = world
+                    .actors
+                    .get(&aid)
+                    .map(|a| a.narrative_status == engine13::core::NarrativeStatus::Foreground)
+                    .unwrap_or(false);
+                if let Some(p) = e.prev_fg {
+                    if p != fg && alive {
+                        e.fg_flips += 1;
+                    }
+                }
+                e.prev_fg = Some(fg);
+
+                // --- vassalage band (the third consumer of `cohesion`) ----------
+                let band_r = (70.0..=85.0).contains(&ep)
+                    && (10.0..=25.0).contains(&leg)
+                    && (15.0..=30.0).contains(&coh);
+                let band_s = (70.0..=85.0).contains(&ep)
+                    && (10.0..=25.0).contains(&leg)
+                    && (15.0..=30.0).contains(&e.s_coh);
+                if band_r != band_s { e.band_div += 1; }
+            }
+        }
+
+        let mode = strategy.unwrap_or("noplayer");
+        let mut tot = [0u32; 12];
+        for (aid, e) in &acc {
+            tot[0] += e.dng_div;
+            tot[1] += e.cq_mask;
+            tot[2] += e.col_div;
+            tot[3] += e.saved;
+            tot[4] += e.up_div;
+            tot[5] += e.up_live;
+            tot[6] += e.cu_div;
+            tot[7] += e.band_div;
+            tot[8] += e.gate_div;
+            tot[9] += e.cw_mismatch;
+            tot[10] += e.saved_pool;
+            tot[11] += e.s_dng;
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{:+.2}\t{:+.2}\t{:+.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.rank,
+                e.s_coh - e.prev_coh.unwrap_or(0.0),
+                e.s_eo - e.prev_eo.unwrap_or(0.0),
+                e.treas_debt,
+                e.dng_true, e.s_dng, e.r_cls, e.r_int, e.r_cq, e.s_cls, e.s_int,
+                e.dng_div, e.cq_mask, e.col_div, e.saved, e.saved_pool,
+                e.died_tick,
+                e.up_true, e.up_div, e.up_masked, e.up_live, e.cu_div, e.band_div,
+                e.gate_evals, e.gate_div, e.cw_mismatch, e.fg_flips
+            );
+        }
+        println!(
+            "#CF24\tseed={}\tmode={}\tdng_div={}\tcq_mask={}\tcol_div={}\tsaved={}\tsaved_pool={}\ts_dng={}\tup_div={}\tup_live={}\tcu_div={}\tband_div={}\tgate_div={}\tcollapses={}\tvictory_tick={}\tvic_max={:.1}\tvic_thresh={:.1}\tvic_add_ok={}\tcw_mismatch={}",
+            seed, mode, tot[0], tot[1], tot[2], tot[3], tot[10], tot[11], tot[4], tot[5], tot[6], tot[7],
+            tot[8], collapses, victory_tick,
+            if vic_metric_max.is_finite() { vic_metric_max } else { 0.0 },
+            vic_thresh, vic_add_ok, tot[9]
+        );
+    }
+}
+
+
+// ===========================================================================
+// task 25 — spawn completeness: `spawnwalk` and `decisive25`
+// ===========================================================================
+//
+// Two modes, and the reason neither is a parameter on an existing one is the same
+// reason task 24 gave for `cohevents`: the question is about a container no mode
+// reads.
+//
+// * `spawnwalk` answers §1 п.1–п.3 of the statement — the FACT (which of the eight
+//   declared keys exist in the world, when they start existing and who created
+//   them), the EDGES (how many neighbour pairs each spawned actor takes part in,
+//   replicating `get_neighbor_pairs`, which is private), and the REACHABILITY of
+//   every writer (how many times each container writer actually landed on the
+//   actor). All three are measured in the world, not read off the TOML.
+//
+// * `decisive25` answers §1 п.5 — the counterfactual. It does NOT run a second
+//   simulation (§2 forbids it): it advances, alongside the real run, one shadow
+//   copy of each spawned actor per candidate variant, and recomputes the collapse
+//   verdict and the relevance verdict on the shadow values with their own
+//   `collapse_warning_ticks`.
+//
+// The shadow here is stronger than task 24's, and the reason is structural: the
+// three spawned actors of `constantinople_1430` have NO neighbours, hence take
+// part in no interaction, and `constantinople_1430` has no rank-C bonus and no
+// `auto_delta` addressed to them. Their entire trajectory is therefore produced by
+// four things — `apply_treasury`, the dependency phase, the random events that fire
+// on them, and the clamps — all four of which the probe can reproduce exactly. So
+// instead of a differential shadow ("real delta minus what the events wrote") the
+// probe runs a FULL replica and validates it against the engine every tick
+// (`rep_mismatch`). A variant shadow is the same replica with the missing keys
+// filled in. The one assumption that remains is named in the document: the firing
+// schedule of random events is taken from the real run, because a shadow cannot
+// re-roll RNG.
+
+/// The eight keys `default_metrics()` declares, with the values variant (C) would
+/// install. Asserted against the engine so a change there breaks the run.
+const DEFAULT_KEYS: &[(&str, f64)] = &[
+    ("cohesion", 50.0),
+    ("economic_output", 50.0),
+    ("external_pressure", 30.0),
+    ("legitimacy", 50.0),
+    ("military_quality", 50.0),
+    ("military_size", 50.0),
+    ("population", 1000.0),
+    ("treasury", 100.0),
+];
+
+fn assert_defaults_match_engine() {
+    let mut have: Vec<(String, f64)> = engine13::core::actor::default_metrics()
+        .into_iter()
+        .collect();
+    have.sort_by(|a, b| a.0.cmp(&b.0));
+    let want: Vec<(String, f64)> = DEFAULT_KEYS
+        .iter()
+        .map(|(k, v)| (k.to_string(), *v))
+        .collect();
+    assert_eq!(
+        have, want,
+        "core::actor::default_metrics() changed — update the probe, not the run"
+    );
+}
+
+/// `get_neighbor_pairs` (`interactions.rs:296`) is private; this is the same
+/// construction — an edge counts only if the other end is a LIVING actor, and the
+/// pair is deduplicated on the sorted key, so a one-sided edge still makes a pair.
+fn neighbor_pairs_of(world: &WorldState, aid: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(a) = world.actors.get(aid) {
+        for n in &a.neighbors {
+            if world.actors.contains_key(&n.id) {
+                out.push(n.id.clone());
+            }
+        }
+    }
+    for (other_id, other) in &world.actors {
+        if other_id == aid {
+            continue;
+        }
+        if other.neighbors.iter().any(|n| n.id == aid) && !out.contains(other_id) {
+            out.push(other_id.clone());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every `spawn_actor` config of a scenario, with the keys it does NOT name.
+fn spawn_configs(sc: &Scenario) -> Vec<(String, Vec<String>, Vec<String>, usize)> {
+    let mut out = Vec::new();
+    for me in &sc.milestone_events {
+        if let Some(cfg) = &me.spawn_actor {
+            let named: Vec<String> = {
+                let mut v: Vec<String> = cfg
+                    .initial_metrics
+                    .keys()
+                    .map(|k| k.as_str().to_string())
+                    .collect();
+                v.sort();
+                v
+            };
+            let missing: Vec<String> = DEFAULT_KEYS
+                .iter()
+                .map(|(k, _)| k.to_string())
+                .filter(|k| !named.contains(k))
+                .collect();
+            out.push((cfg.actor_id.clone(), named, missing, cfg.neighbors.len()));
+        }
+    }
+    out
+}
+
+#[derive(Default, Clone)]
+struct KeyAcc {
+    present_first: bool, // the key existed on the first tick the actor was observed
+    first_tick: i64,     // tick the key first existed at (−1: never)
+    val_first: f64,
+    val_last: f64,
+    ticks_present: u32,
+    ticks_zero: u32,
+    total: f64,   // Σ observed change
+    dep: f64,     // Σ priced dependency-phase contribution
+    ev: f64,      // Σ nominal random-event contribution
+    treas: f64,   // Σ `apply_treasury` contribution (treasury only)
+}
+
+#[derive(Default)]
+struct SpawnAcc {
+    seen: bool,
+    first_tick: i64,
+    died_tick: i64,
+    ticks: u32,
+    rank: String,
+    religion: String,
+    culture: String,
+    n_tags: usize,
+    n_actor_tags: usize,
+    n_on_collapse: usize,
+    min_surv: Option<u32>,
+    nbr_out: usize,
+    pair_ticks: u32,
+    partners: std::collections::BTreeSet<String>,
+    keys: BTreeMap<String, KeyAcc>,
+    prev: std::collections::HashMap<String, f64>,
+    // per-writer reachability: how many times each named container writer landed
+    writers: BTreeMap<String, u32>,
+}
+
+fn spawnwalk(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+    assert_defaults_match_engine();
+    assert_pool_matches_source();
+
+    // the container half, printed before the world half so the two can be crossed
+    {
+        let sc = registry::load_by_id(scenario_id).expect("scenario");
+        for (aid, named, missing, nbrs) in spawn_configs(&sc) {
+            println!(
+                "#SPAWNCFG\t{}\t{}\tnamed={}\tmissing={}\tneighbors={}",
+                scenario_id,
+                aid,
+                named.join("+"),
+                if missing.is_empty() { "-".to_string() } else { missing.join("+") },
+                nbrs
+            );
+        }
+    }
+
+    println!("actor\tseed\tmode\tfirst\tdied\tticks\trank\trelig\tcult\ttags\tatags\toncol\tminsurv\tnbr_out\tpair_ticks\tpartners\tmetric\tkey0\tkey_at\tv0\tvlast\tt_present\tt_zero\ttotal\tdep\tev\ttreas");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let sc = state.current_scenario.as_ref().unwrap();
+        let rules = sc.dependencies.clone();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let mut acc: BTreeMap<String, SpawnAcc> = BTreeMap::new();
+
+        for t in 0..ticks {
+            // snapshot before the tick: this is what the dependency phase reads for an
+            // actor untouched by phases 1–2 (proved separately for the three spawns)
+            let before: BTreeMap<String, std::collections::HashMap<String, f64>> = {
+                let w = state.world_state.as_ref().unwrap();
+                w.actors.iter().map(|(k, a)| (k.clone(), a.metrics.clone())).collect()
+            };
+            {
+                let w = state.world_state.as_ref().unwrap();
+                for (aid, a) in w.actors.iter() {
+                    if w.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.first_tick = t as i64;
+                        e.died_tick = -1;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.religion = format!("{:?}", a.religion);
+                        e.culture = format!("{:?}", a.culture);
+                        e.n_tags = a.tags.len();
+                        e.n_actor_tags = a.actor_tags.len();
+                        e.n_on_collapse = a.on_collapse.len();
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.nbr_out = a.neighbors.len();
+                        for (k, _) in DEFAULT_KEYS {
+                            let ka = e.keys.entry(k.to_string()).or_default();
+                            ka.present_first = a.metrics.contains_key(*k);
+                            ka.first_tick = if ka.present_first { t as i64 } else { -1 };
+                            ka.val_first = a.get_metric(k);
+                        }
+                        e.prev = a.metrics.clone();
+                    }
+                    let ps = neighbor_pairs_of(w, aid);
+                    if !ps.is_empty() {
+                        e.pair_ticks += 1;
+                        for p in ps {
+                            e.partners.insert(p);
+                        }
+                    }
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let ws = state.world_state.as_mut().unwrap();
+                let sr = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(ws, sr, &mut state.event_log, rng);
+            }
+
+            // what the events wrote this tick, per actor per metric, and to whom
+            let mut ev_writes: BTreeMap<(String, String), f64> = BTreeMap::new();
+            let mut ev_hits: BTreeMap<(String, String), u32> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _is_common)) = by_id.get(&ev.id) else { continue };
+                for (k, _) in DEFAULT_KEYS {
+                    for (aid, d) in event_writes_to(def, &ev.actor_id, k) {
+                        *ev_writes.entry((aid.clone(), k.to_string())).or_insert(0.0) += d;
+                        *ev_hits.entry((aid, format!("event:{}", def.id))).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            let w = state.world_state.as_ref().unwrap();
+            // an actor that died THIS tick is gone from `world.actors`; its metrics at
+            // the moment of the verdict survive in `dead_actors[].final_metrics`. Only
+            // this tick: after it the actor is out of the world and must stop
+            // contributing to every column, or a short-lived actor accumulates
+            // hundreds of posthumous ticks of nominal dependency price.
+            let just_dead: BTreeMap<String, std::collections::HashMap<String, f64>> = w
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == t)
+                .map(|d| (d.id.clone(), d.final_metrics.clone()))
+                .collect();
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = w.actors.contains_key(&aid) && !w.dead_actor_ids.contains(&aid);
+                let m: Option<std::collections::HashMap<String, f64>> = if alive {
+                    w.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).cloned()
+                };
+                let Some(m) = m else { continue };
+                let bef = before.get(&aid).cloned().unwrap_or_default();
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                }
+                e.ticks += 1;
+                for ((waid, wid), n) in ev_hits.iter() {
+                    if *waid == aid {
+                        *e.writers.entry(wid.clone()).or_insert(0) += n;
+                    }
+                }
+                for (k, _) in DEFAULT_KEYS {
+                    let present = m.contains_key(*k);
+                    let v = m.get(*k).copied().unwrap_or(0.0);
+                    let pv = e.prev.get(*k).copied().unwrap_or(0.0);
+                    let ka = e.keys.entry(k.to_string()).or_default();
+                    if present {
+                        if ka.first_tick < 0 {
+                            ka.first_tick = (t + 1) as i64;
+                        }
+                        ka.ticks_present += 1;
+                        if v == 0.0 {
+                            ka.ticks_zero += 1;
+                        }
+                    }
+                    ka.val_last = v;
+                    ka.total += v - pv;
+                    ka.dep += price_dep_metric(&rules, &bef, k);
+                    ka.ev += ev_writes.get(&(aid.clone(), k.to_string())).copied().unwrap_or(0.0);
+                    if *k == "treasury" {
+                        let eo = bef.get("economic_output").copied().unwrap_or(0.0);
+                        let pop = bef.get("population").copied().unwrap_or(0.0);
+                        let ms = bef.get("military_size").copied().unwrap_or(0.0);
+                        ka.treas += eo * pop * 0.001 - ms * 0.8;
+                    }
+                }
+                e.prev = m;
+            }
+        }
+
+        for (aid, e) in &acc {
+            for (k, _) in DEFAULT_KEYS {
+                let ka = e.keys.get(*k).cloned().unwrap_or_default();
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{}\t{}\t{:+.3}\t{:+.3}\t{:+.3}\t{:+.3}",
+                    aid, seed, mode_label(strategy), e.first_tick, e.died_tick, e.ticks,
+                    e.rank, e.religion, e.culture, e.n_tags, e.n_actor_tags, e.n_on_collapse,
+                    e.min_surv.map(|v| v as i64).unwrap_or(-1),
+                    e.nbr_out, e.pair_ticks,
+                    if e.partners.is_empty() { "-".to_string() } else { e.partners.iter().cloned().collect::<Vec<_>>().join("+") },
+                    k, ka.present_first, ka.first_tick, ka.val_first, ka.val_last,
+                    ka.ticks_present, ka.ticks_zero, ka.total, ka.dep, ka.ev, ka.treas
+                );
+            }
+            for (wid, n) in &e.writers {
+                println!("#WRITER\t{}\t{}\t{}\t{}\t{}", aid, seed, mode_label(strategy), wid, n);
+            }
+        }
+    }
+}
+
+/// One candidate filling of the missing keys. `None` means "leave the key exactly as
+/// the world has it" — which for the three spawns of `constantinople_1430` means
+/// "absent", i.e. read as `0.0`.
+#[derive(Clone, Debug)]
+struct Variant {
+    label: String,
+    fill: BTreeMap<String, f64>,
+}
+
+/// `C` — `ensure_default_metrics` (the engine's own declared answer, variant (C) of
+/// the fork). `A` — the `france` template of `milan_1477`, the project's only complete
+/// `spawn_actor` (variant (A)). Anything else is an explicit `key=value` list joined
+/// by `+`, with the short names `ep` / `pop` / `tr` / `mq`.
+fn parse_variant(spec: &str) -> Variant {
+    let mut fill = BTreeMap::new();
+    match spec {
+        "base" => {}
+        "C" => {
+            for (k, v) in DEFAULT_KEYS {
+                fill.insert(k.to_string(), *v);
+            }
+        }
+        "A" => {
+            fill.insert("population".into(), 800.0);
+            fill.insert("external_pressure".into(), 15.0);
+            fill.insert("treasury".into(), 500.0);
+            fill.insert("military_quality".into(), 65.0);
+        }
+        _ => {
+            for part in spec.split('+') {
+                let (k, v) = part.split_once('=').unwrap_or_else(|| panic!("bad variant `{}`", part));
+                let key = match k {
+                    "ep" => "external_pressure",
+                    "pop" => "population",
+                    "tr" => "treasury",
+                    "mq" => "military_quality",
+                    other => other,
+                };
+                fill.insert(key.to_string(), v.parse().unwrap_or_else(|_| panic!("bad value in `{}`", part)));
+            }
+        }
+    }
+    Variant { label: spec.to_string(), fill }
+}
+
+/// The dependency phase, applied in place to a metric map, with the engine's
+/// sequential semantics and the engine's "delta 0.0 does not create the key" rule
+/// (`apply_dependency_rule`, `mod.rs:141`). Unlike [`price_dep_metric`] this mutates,
+/// because the replica needs the state, not the price.
+fn apply_deps_in_place(rules: &[DependencyRule], m: &mut std::collections::HashMap<String, f64>) {
+    for rule in rules {
+        let from_val = m.get(rule.from.as_str()).copied().unwrap_or(0.0);
+        let delta = match rule.mode {
+            DependencyMode::Deficit => match rule.threshold {
+                Some(t) if from_val < t => -((t - from_val) * rule.coefficient),
+                _ => 0.0,
+            },
+            DependencyMode::Excess => match rule.threshold {
+                Some(t) if from_val > t => -((from_val - t) * rule.coefficient),
+                _ => 0.0,
+            },
+            DependencyMode::Bonus => match rule.threshold {
+                Some(t) if from_val > t => (from_val - t) * rule.coefficient,
+                _ => 0.0,
+            },
+            DependencyMode::Linear => from_val * rule.coefficient,
+            DependencyMode::DeficitProportional => match rule.threshold {
+                Some(t) if t > 0.0 && from_val < t => {
+                    -(m.get(rule.to.as_str()).copied().unwrap_or(0.0)
+                        * rule.coefficient
+                        * (t - from_val)
+                        / t)
+                }
+                _ => 0.0,
+            },
+        };
+        if delta != 0.0 {
+            // `add_metric` creates the key at 0.0 first — the reason `military_quality`
+            // and `treasury` exist at these actors at all
+            *m.entry(rule.to.as_str().to_string()).or_insert(0.0) += delta;
+        }
+    }
+}
+
+/// `MetricRef::apply`'s per-metric floor/clamp (`metric_ref.rs:261–271`), which is NOT
+/// the same as `clamp_metrics` — it runs at application time and it does create the key.
+fn apply_event_delta(m: &mut std::collections::HashMap<String, f64>, key: &str, delta: f64) {
+    let cur = m.get(key).copied().unwrap_or(0.0);
+    let new = match key {
+        "treasury" => cur + delta,
+        "economic_output" | "military_size" | "population" => (cur + delta).max(0.0),
+        _ => (cur + delta).clamp(0.0, 100.0),
+    };
+    m.insert(key.to_string(), new);
+}
+
+/// `clamp_metrics` (`mod.rs:705`): only clamps keys that already exist.
+fn clamp_in_place(m: &mut std::collections::HashMap<String, f64>) {
+    for k in ["legitimacy", "cohesion", "military_quality", "economic_output", "external_pressure"] {
+        if let Some(v) = m.get_mut(k) {
+            *v = v.clamp(0.0, 100.0);
+        }
+    }
+    for k in ["military_size", "population"] {
+        if let Some(v) = m.get_mut(k) {
+            *v = v.max(0.0);
+        }
+    }
+}
+
+/// `phase_region_ranks` (`mod.rs:353`), for the actor's own rank.
+fn apply_rank_bonuses(sc: &Scenario, rank: &engine13::core::RegionRank, m: &mut std::collections::HashMap<String, f64>) {
+    for rule in &sc.rank_bonuses {
+        if &rule.rank != rank {
+            continue;
+        }
+        for effect in &rule.effects {
+            let key = effect.metric.as_str();
+            if let Some(floor) = effect.floor {
+                let cur = m.get(key).copied().unwrap_or(0.0);
+                if cur < floor {
+                    m.insert(key.to_string(), floor);
+                }
+            } else {
+                *m.entry(key.to_string()).or_insert(0.0) += effect.delta;
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct Shadow {
+    m: std::collections::HashMap<String, f64>,
+    ct: u32,   // its own `collapse_warning_ticks`
+    dng: u32,  // ticks it was in danger
+    cls: u32,
+    int_: u32,
+    cq: u32,
+    dead: bool,
+    dead_tick: i64,
+    // relevance: its own history window for the eight metrics
+    hist: BTreeMap<String, std::collections::VecDeque<f64>>,
+    up_true: u32,
+    dec: u32,      // `upheaval ∧ ¬power ∧ ¬contact` — task 21's decisive tick
+    // How long a filled key survives its own sinks, and which gates it opens while
+    // it lasts — §1 п.4 of the statement asks for the interval in which the fix is
+    // neither inert nor fatal, and for `population` / `treasury` / `military_quality`
+    // that interval is bounded from ABOVE by the sink, not by a threshold.
+    z_pop: i64,    // first tick `population` is back at 0 (−1: never)
+    z_mq: i64,     // ...same for `military_quality`
+    z_tr300: i64,  // first tick `treasury` falls below the `mercenary_influx` gate
+    g_plague: u32, // ticks the `plague` gate `pop > 500` held
+    g_merc: u32,   // ticks the `mercenary_influx` gate `treasury > 300` held
+    g_desert: u32, // ticks the `desertion` gate `treasury < 200 ∧ military_size > 50` held
+    power_t: u32,  // ticks the relevance `power` conjunct held on shadow values
+}
+
+#[derive(Default)]
+struct Cf25 {
+    seen: bool,
+    rank: String,
+    min_surv: Option<u32>,
+    ticks: u32,
+    real_ct: u32,
+    real_dng: u32,
+    r_cls: u32,
+    r_int: u32,
+    r_cq: u32,
+    died_tick: i64,
+    died_path: &'static str,
+    up_true_r: u32,
+    dec_r: u32,
+    cw_mismatch: u32,
+    rep_mismatch: u32,
+    rep_maxdiff: f64,
+    ad_hits: u32, // auto_deltas addressed to this actor — must be 0 for the replica
+    shadows: Vec<Shadow>,
+}
+
+fn decisive25(
+    scenario_id: &str,
+    ticks: u32,
+    seeds: &[u64],
+    strategy: Option<&str>,
+    variants: &[Variant],
+) {
+    use engine13::commands::AppState;
+    assert_defaults_match_engine();
+    assert_pool_matches_source();
+    assert_pool_matches_metric("cohesion", COH_EVENTS);
+
+    let labels: Vec<String> = variants.iter().map(|v| v.label.clone()).collect();
+    println!("#VARIANTS\t{}", labels.join("\t"));
+    println!("actor\tseed\tmode\tticks\trank\tad_hits\trep_mism\trep_maxdiff\tcw_mism\tr_dng\tr_cls\tr_int\tr_cq\tdied\tdied_path\tup_true\tdec\tvariant\ts_dng\ts_cls\ts_int\ts_dead\ts_dead_tick\ts_up\ts_dec\ts_coh\ts_leg\ts_ep\ts_pop\ts_tr\ts_mq\tz_pop\tz_mq\tz_tr300\tg_plague\tg_merc\tg_desert\tpower_t");
+
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let spawn_ids: Vec<String> = spawn_configs(&scenario)
+            .into_iter()
+            .filter(|(_, _, missing, _)| !missing.is_empty())
+            .map(|(id, _, _, _)| id)
+            .collect();
+
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let sc = state.current_scenario.as_ref().unwrap();
+        let rules = sc.dependencies.clone();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        // which actors an `auto_delta` writes to — the replica claims none of the
+        // spawned actors is among them, and this is the check, not the claim
+        let ad_targets: Vec<String> = sc
+            .auto_deltas
+            .iter()
+            .filter_map(|ad| match &ad.metric {
+                MetricRef::Actor { actor_id, .. } => Some(actor_id.as_str().to_string()),
+                _ => None,
+            })
+            .collect();
+        let sc_clone = sc.clone();
+
+        let mut acc: BTreeMap<String, Cf25> = BTreeMap::new();
+        let mut victory_tick: i64 = -1;
+
+        for t in 0..ticks {
+            {
+                let w = state.world_state.as_ref().unwrap();
+                for aid in &spawn_ids {
+                    if !w.actors.contains_key(aid) || w.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let a = w.actors.get(aid).unwrap();
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.rank = format!("{:?}", a.region_rank);
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.died_tick = -1;
+                        e.ad_hits = ad_targets.iter().filter(|x| *x == aid).count() as u32;
+                        for v in variants {
+                            let mut m = a.metrics.clone();
+                            for (k, val) in &v.fill {
+                                m.entry(k.clone()).or_insert(*val);
+                            }
+                            e.shadows.push(Shadow {
+                                m,
+                                dead_tick: -1,
+                                z_pop: -1,
+                                z_mq: -1,
+                                z_tr300: -1,
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let ws = state.world_state.as_mut().unwrap();
+                let sr = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(ws, sr, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // every event write of this tick, resolved to (actor, metric, delta), in
+            // log order so the replica applies them in the engine's order
+            let mut ev_seq: Vec<(String, String, f64)> = Vec::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (k, _) in DEFAULT_KEYS {
+                    for (aid, d) in event_writes_to(def, &ev.actor_id, k) {
+                        ev_seq.push((aid, k.to_string(), d));
+                    }
+                }
+            }
+
+            let w = state.world_state.as_ref().unwrap();
+            let cur_tick = t;
+            let just_dead: BTreeMap<String, std::collections::HashMap<String, f64>> = w
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == cur_tick)
+                .map(|d| (d.id.clone(), d.final_metrics.clone()))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = w
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+            // `power` and `contact` of `check_relevance_thresholds` — identical in both
+            // worlds for these actors (no edges ⇒ `contact` false; `power_projection`
+            // reads `military_quality`, so the shadow gets its own value below)
+            let max_mil = w
+                .actors
+                .values()
+                .map(|a| a.get_metric("military_size"))
+                .fold(1.0_f64, f64::max);
+            let avg_pp: f64 = w
+                .actors
+                .values()
+                .map(|a| a.power_projection(1.0, max_mil))
+                .sum::<f64>()
+                / w.actors.len().max(1) as f64;
+            let fg: Vec<String> = w
+                .actors
+                .iter()
+                .filter(|(_, a)| a.narrative_status == engine13::core::NarrativeStatus::Foreground)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = w.actors.contains_key(&aid) && !w.dead_actor_ids.contains(&aid);
+                let real_m: Option<std::collections::HashMap<String, f64>> = if alive {
+                    w.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).cloned()
+                };
+                let Some(real_m) = real_m else { continue };
+                let rank = w.actors.get(&aid).map(|a| a.region_rank.clone());
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                e.ticks += 1;
+
+                let coh = real_m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = real_m.get("legitimacy").copied().unwrap_or(0.0);
+                let ep = real_m.get("external_pressure").copied().unwrap_or(0.0);
+                let mil = real_m.get("military_size").copied().unwrap_or(0.0);
+
+                // no edges ⇒ never besieged; computed anyway so the column is measured
+                let besieged = w
+                    .actors
+                    .get(&aid)
+                    .map(|a| {
+                        a.neighbors.iter().any(|n| {
+                            n.distance == 1
+                                && live_mil
+                                    .get(&n.id)
+                                    .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+                let skip = matches!(e.min_surv, Some(ms) if cur_tick < ms);
+
+                // ---- real verdict --------------------------------------------
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    if rc { e.r_cls += 1 }
+                    if ri { e.r_int += 1 }
+                    if rq { e.r_cq += 1 }
+                    let d = rc || ri || rq;
+                    if d { e.real_dng += 1; e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = w.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                }
+                let real_up = upheaval_verdict_multi(w, &aid, &[]);
+                let real_soft = coh < 25.0 || leg < 20.0;
+                let real_power = w
+                    .actors
+                    .get(&aid)
+                    .map(|a| a.power_projection(1.0, max_mil) > avg_pp * 0.7)
+                    .unwrap_or(false);
+                let real_contact = fg.iter().filter(|f| **f != aid).any(|f| {
+                    w.actors
+                        .get(f)
+                        .map(|n| n.neighbors.iter().any(|x| x.id == aid && x.distance <= 2))
+                        .unwrap_or(false)
+                });
+                if real_up || real_soft { e.up_true_r += 1; }
+                if (real_up || real_soft) && !real_power && !real_contact { e.dec_r += 1; }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                }
+
+                // ---- advance every shadow ------------------------------------
+                for (vi, v) in variants.iter().enumerate() {
+                    let sh = &mut e.shadows[vi];
+                    if sh.dead {
+                        continue;
+                    }
+                    // 1. apply_treasury (phase 1)
+                    let inc = sh.m.get("economic_output").copied().unwrap_or(0.0)
+                        * sh.m.get("population").copied().unwrap_or(0.0)
+                        * 0.001;
+                    let exp = sh.m.get("military_size").copied().unwrap_or(0.0) * 0.8;
+                    *sh.m.entry("treasury".to_string()).or_insert(0.0) += inc - exp;
+                    // 2. rank bonuses (phase 2)
+                    if let Some(ref r) = rank {
+                        apply_rank_bonuses(&sc_clone, r, &mut sh.m);
+                    }
+                    // 3. dependency phase (phase 3); no interactions — no edges
+                    apply_deps_in_place(&rules, &mut sh.m);
+                    // 4. random events (phase 3b), same firing schedule as the real run
+                    for (t_aid, key, d) in &ev_seq {
+                        if t_aid == &aid {
+                            apply_event_delta(&mut sh.m, key, *d);
+                        }
+                    }
+                    // 5. clamps (phase 5)
+                    clamp_in_place(&mut sh.m);
+
+                    // replica check: variant `base` must reproduce the engine exactly
+                    if v.fill.is_empty() {
+                        let mut maxd = 0.0_f64;
+                        for (k, _) in DEFAULT_KEYS {
+                            let a = sh.m.get(*k).copied().unwrap_or(0.0);
+                            let b = real_m.get(*k).copied().unwrap_or(0.0);
+                            maxd = maxd.max((a - b).abs());
+                        }
+                        if maxd > 1e-9 { e.rep_mismatch += 1; }
+                        if maxd > e.rep_maxdiff { e.rep_maxdiff = maxd; }
+                    }
+
+                    let s_coh = sh.m.get("cohesion").copied().unwrap_or(0.0);
+                    let s_leg = sh.m.get("legitimacy").copied().unwrap_or(0.0);
+                    let s_ep = sh.m.get("external_pressure").copied().unwrap_or(0.0);
+                    let s_mil = sh.m.get("military_size").copied().unwrap_or(0.0);
+                    if !skip {
+                        let (sc_, si, sq) = danger_paths(s_coh, s_leg, s_ep, s_mil, besieged);
+                        if sc_ { sh.cls += 1 }
+                        if si { sh.int_ += 1 }
+                        if sq { sh.cq += 1 }
+                        let d = sc_ || si || sq;
+                        if d { sh.dng += 1; sh.ct += 1 } else { sh.ct = 0 }
+                        if sh.ct >= 3 && !sh.dead {
+                            sh.dead = true;
+                            sh.dead_tick = (t + 1) as i64;
+                        }
+                    }
+                    // relevance on the shadow's own five-slot history
+                    for (k, _) in DEFAULT_KEYS {
+                        let h = sh.hist.entry(k.to_string()).or_default();
+                        h.push_back(sh.m.get(*k).copied().unwrap_or(0.0));
+                        while h.len() > 5 { h.pop_front(); }
+                    }
+                    let mut moved = false;
+                    for (k, _) in DEFAULT_KEYS {
+                        if let Some(h) = sh.hist.get(*k) {
+                            if h.len() >= 2 {
+                                let d = h.back().copied().unwrap_or(0.0) - h.front().copied().unwrap_or(0.0);
+                                if d.abs() > 30.0 { moved = true; }
+                            }
+                        }
+                    }
+                    let s_up = moved || s_coh < 25.0 || s_leg < 20.0;
+                    if s_up { sh.up_true += 1; }
+                    // `power` recomputed with the shadow's `military_quality`, which is
+                    // 0.35 of `power_projection` (`core/actor.rs:179`) and the reason
+                    // task 21 §4 could not price variant (A) without measuring
+                    // `power_projection` (`core/actor.rs:171`), reproduced on the
+                    // shadow's own values: `military_quality` carries 0.35 of it and
+                    // `treasury` another 0.20 through a 500-cap, so TWO of the four
+                    // missing keys move this verdict — the point task 21 §4 left as an
+                    // estimate.
+                    let s_pp = {
+                        let ms = if max_mil > 0.0 { (s_mil / max_mil).clamp(0.0, 1.0) } else { 0.0 };
+                        let mq = (sh.m.get("military_quality").copied().unwrap_or(0.0) / 100.0).clamp(0.0, 1.0);
+                        let tr = (sh.m.get("treasury").copied().unwrap_or(0.0) / 500.0).clamp(0.0, 1.0);
+                        (ms * 0.45 + mq * 0.35 + tr * 0.20) * 100.0
+                    };
+                    let s_power = s_pp > avg_pp * 0.7;
+                    if s_power { sh.power_t += 1; }
+                    if s_up && !s_power && !real_contact { sh.dec += 1; }
+
+                    // how long each filled key lasts, and what it opens meanwhile
+                    let s_pop = sh.m.get("population").copied().unwrap_or(0.0);
+                    let s_tr = sh.m.get("treasury").copied().unwrap_or(0.0);
+                    let s_mq = sh.m.get("military_quality").copied().unwrap_or(0.0);
+                    if sh.z_pop < 0 && v.fill.contains_key("population") && s_pop <= 1e-9 {
+                        sh.z_pop = (t + 1) as i64;
+                    }
+                    if sh.z_mq < 0 && v.fill.contains_key("military_quality") && s_mq <= 1e-9 {
+                        sh.z_mq = (t + 1) as i64;
+                    }
+                    if sh.z_tr300 < 0 && v.fill.contains_key("treasury") && s_tr <= 300.0 {
+                        sh.z_tr300 = (t + 1) as i64;
+                    }
+                    if s_pop > 500.0 { sh.g_plague += 1; }
+                    if s_tr > 300.0 { sh.g_merc += 1; }
+                    if s_tr < 200.0 && s_mil > 50.0 { sh.g_desert += 1; }
+                }
+
+                if !alive {
+                    // the real actor is gone; its shadows keep running only until the
+                    // horizon, but nothing else in the world observes them
+                    for sh in e.shadows.iter_mut() {
+                        if !sh.dead {
+                            // leave alive: that IS the counterfactual answer
+                        }
+                    }
+                }
+            }
+        }
+
+        for (aid, e) in &acc {
+            for (vi, v) in variants.iter().enumerate() {
+                let sh = &e.shadows[vi];
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2e}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.1}\t{:.1}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    aid, seed, mode_label(strategy), e.ticks, e.rank, e.ad_hits,
+                    e.rep_mismatch, e.rep_maxdiff, e.cw_mismatch,
+                    e.real_dng, e.r_cls, e.r_int, e.r_cq, e.died_tick, e.died_path,
+                    e.up_true_r, e.dec_r,
+                    v.label, sh.dng, sh.cls, sh.int_, sh.dead, sh.dead_tick, sh.up_true, sh.dec,
+                    sh.m.get("cohesion").copied().unwrap_or(0.0),
+                    sh.m.get("legitimacy").copied().unwrap_or(0.0),
+                    sh.m.get("external_pressure").copied().unwrap_or(0.0),
+                    sh.m.get("population").copied().unwrap_or(0.0),
+                    sh.m.get("treasury").copied().unwrap_or(0.0),
+                    sh.m.get("military_quality").copied().unwrap_or(0.0),
+                    sh.z_pop, sh.z_mq, sh.z_tr300,
+                    sh.g_plague, sh.g_merc, sh.g_desert, sh.power_t,
+                );
+            }
+        }
+        println!("#CF25\tseed={}\tmode={}\tvictory_tick={}", seed, mode_label(strategy), victory_tick);
+    }
+}
+
+
+/// `poolcut` — how much of the pool has to be taken away before a death stops
+/// happening.
+///
+/// Task 24's counterfactual is the single point `α = 1` (remove the pool entirely);
+/// it saves 99 of 243. The number §7 of task 25 needs is different: the fix under
+/// discussion does not remove the pool, it *dilutes* it — three actors that die at
+/// ticks 40 / 275 / … would live to 300, `EventTarget::Any` divides the same number of
+/// draws over more actors, and everyone else's share falls by a measurable percentage.
+/// So the question is the MARGIN: at which α does each death start being prevented?
+///
+/// Same shadow as `decisive24` (real delta minus what the pool wrote, own clamp, own
+/// `collapse_warning_ticks`, cross-checked against the engine), evaluated at several α
+/// at once. `α = 1` must reproduce `decisive24` exactly — that is the mode's own test.
+#[derive(Default, Clone)]
+struct PcShadow {
+    coh: f64,
+    ct: u32,
+}
+
+#[derive(Default)]
+struct PcAcc {
+    seen: bool,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    prev_coh: Option<f64>,
+    real_ct: u32,
+    cw_mismatch: u32,
+    died: bool,
+    sh: Vec<PcShadow>,
+}
+
+fn poolcut(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>, alphas: &[f64]) {
+    use engine13::commands::AppState;
+    assert_pool_matches_source();
+    assert_pool_matches_metric("cohesion", COH_EVENTS);
+
+    println!("#ALPHAS\t{}", alphas.iter().map(|a| format!("{}", a)).collect::<Vec<_>>().join("\t"));
+    println!("actor\tseed\tmode\tdied_tick\tdied_path\talpha\tsaved\tcw_mism");
+
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let mut acc: BTreeMap<String, PcAcc> = BTreeMap::new();
+
+        for t in 0..ticks {
+            {
+                let w = state.world_state.as_ref().unwrap();
+                for (aid, a) in w.actors.iter() {
+                    if w.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.neighbors = a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+                        e.prev_coh = Some(a.get_metric("cohesion"));
+                        e.sh = alphas
+                            .iter()
+                            .map(|_| PcShadow { coh: a.get_metric("cohesion"), ..Default::default() })
+                            .collect();
+                    }
+                }
+            }
+            let (_a, _r) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let ws = state.world_state.as_mut().unwrap();
+                let sr = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(ws, sr, &mut state.event_log, rng);
+            }
+            let mut coh_pool: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, is_common)) = by_id.get(&ev.id) else { continue };
+                if !*is_common {
+                    continue;
+                }
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "cohesion") {
+                    *coh_pool.entry(aid).or_insert(0.0) += d;
+                }
+            }
+            let w = state.world_state.as_ref().unwrap();
+            let just_dead: BTreeMap<String, std::collections::HashMap<String, f64>> = w
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == t)
+                .map(|d| (d.id.clone(), d.final_metrics.clone()))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = w
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = w.actors.contains_key(&aid) && !w.dead_actor_ids.contains(&aid);
+                let m = if alive {
+                    w.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).cloned()
+                };
+                let Some(m) = m else { continue };
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen || e.died {
+                    continue;
+                }
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let d_coh = coh - e.prev_coh.unwrap_or(coh);
+                e.prev_coh = Some(coh);
+                let ev_c = coh_pool.get(&aid).copied().unwrap_or(0.0);
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if t < ms);
+                let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                if !skip {
+                    if rc || ri || rq { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = w.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                }
+                for (ai, alpha) in alphas.iter().enumerate() {
+                    let s = &mut e.sh[ai];
+                    s.coh = (s.coh + d_coh - alpha * ev_c).clamp(0.0, 100.0);
+                    if !skip {
+                        let (sc_, si, _) = danger_paths(s.coh, leg, ep, mil, besieged);
+                        if sc_ || si || rq { s.ct += 1 } else { s.ct = 0 }
+                    }
+                }
+                if !alive {
+                    e.died = true;
+                    let path = match (rc, ri, rq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    for (ai, alpha) in alphas.iter().enumerate() {
+                        let s = &e.sh[ai];
+                        println!(
+                            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                            aid, seed, mode_label(strategy), t + 1, path, alpha,
+                            (s.ct < 3) as u8, e.cw_mismatch
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -2272,6 +4447,26 @@ fn main() {
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             popevents(scenario, ticks, &seeds, strategy);
         }
+        "cohevents" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            cohevents(scenario, ticks, &seeds, strategy);
+        }
+        "decisive24" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            decisive24(scenario, ticks, &seeds, strategy);
+        }
         "decisive23" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
@@ -2281,6 +4476,44 @@ fn main() {
                 .unwrap_or_else(|| vec![42]);
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             decisive23(scenario, ticks, &seeds, strategy);
+        }
+        "spawnwalk" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            spawnwalk(scenario, ticks, &seeds, strategy);
+        }
+        "decisive25" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            let variants: Vec<Variant> = args
+                .get(6)
+                .map(|s| s.split(',').map(parse_variant).collect())
+                .unwrap_or_else(|| vec![parse_variant("base")]);
+            decisive25(scenario, ticks, &seeds, strategy, &variants);
+        }
+        "poolcut" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            let alphas: Vec<f64> = args
+                .get(6)
+                .map(|s| s.split(',').map(|x| x.parse().expect("alpha")).collect())
+                .unwrap_or_else(|| vec![1.0]);
+            poolcut(scenario, ticks, &seeds, strategy, &alphas);
         }
         other => panic!("unknown mode: {}", other),
     }
