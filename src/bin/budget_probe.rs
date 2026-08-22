@@ -4378,6 +4378,729 @@ fn poolcut(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>,
     }
 }
 
+// ===========================================================================
+// task 24 stage 2 — (D₂), event addressing: `evaddr` and `evtarget`
+// ===========================================================================
+//
+// `(D₂)` is a claim about ADDRESSING, and the statement (§7.1) is explicit that
+// the claim is not "an effect is addressed to someone other than the target" —
+// that is the idiom of every scenario event in the project. The claim is that
+// `mehmed_threatens` is the only event whose target receives NOTHING from its own
+// effect vector, while its firing frequency is controlled entirely by that same
+// non-receiver.
+//
+// Three slots carry addressing, and they are not the same slot:
+//   * `target`     — eligibility and attribution (`mod.rs:452–470`);
+//   * `conditions` — frequency, resolved through `RelativeMetricRef::resolve`
+//                    against the target (`mod.rs:485–492`);
+//   * `effects`    — the write, resolved through the same call (`mod.rs:492`).
+// A key is bound to the target only when it is written `self.<metric>`; anything
+// else is `Absolute` and ignores the target by construction
+// (`core/metric_ref.rs:404–413`).
+//
+// `evaddr` walks all four event containers of the project and classifies every
+// key of every event by that resolution, so "unique" is a counted number and not
+// an impression from reading the file.
+
+/// How one metric key addresses the world, relative to the actor an event fires on.
+/// Classified through `RelativeMetricRef::resolve` — the engine's own call — so a
+/// key that *looks* absolute but names the target still lands in `SameActor`.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum Addr {
+    /// `self.<metric>` — binds to whoever the event fires on, by construction.
+    SelfRel,
+    /// Absolute, and names the target actor.
+    SameActor,
+    /// Absolute, and names a different actor.
+    OtherActor,
+    /// `global:<key>` — addresses no actor at all.
+    Global,
+    /// `family:<key>`.
+    Family,
+}
+
+fn classify_addr(r: &RelativeMetricRef, target: Option<&str>) -> Addr {
+    match r {
+        RelativeMetricRef::SelfRelative(_) => Addr::SelfRel,
+        RelativeMetricRef::Absolute(m) => match m {
+            MetricRef::Actor { actor_id, .. } => match target {
+                Some(t) if actor_id.as_str() == t => Addr::SameActor,
+                // A drawn target (`Any`/`SeaActors`/`All`) can coincide with the named
+                // actor on some draws; counted as `OtherActor` and reported separately
+                // so the coincidence is never silently folded into "addresses target".
+                _ => Addr::OtherActor,
+            },
+            MetricRef::Global { .. } => Addr::Global,
+            MetricRef::Family { .. } => Addr::Family,
+        },
+    }
+}
+
+struct AddrRow {
+    scenario: String,
+    id: String,
+    common: bool,
+    target_kind: &'static str,
+    target_id: String,
+    eff: [u32; 5],  // SelfRel, SameActor, OtherActor, Global, Family
+    cond: [u32; 5],
+    /// no effect reaches the target: neither `self.` nor an absolute key naming it
+    empty_intersect: bool,
+    /// a condition reads a DIFFERENT actor — the structural half of `(D₂)`
+    gate_other_actor: bool,
+    /// the event is gated, but only on non-actor scope (`family:` / `global:`),
+    /// which is a different class and must not be counted with the above
+    gate_nonactor_only: bool,
+    /// the effect vector names actors other than the target
+    other_actors: Vec<String>,
+    /// the condition vector names actors other than the target
+    cond_actors: Vec<String>,
+}
+
+fn addr_rows_of(scenario_label: &str, events: &[(engine13::core::RandomEvent, bool)]) -> Vec<AddrRow> {
+    let mut out = Vec::new();
+    for (ev, common) in events {
+        let (kind, target): (&'static str, Option<String>) = match &ev.target {
+            engine13::core::EventTarget::Actor(id) => ("Actor", Some(id.clone())),
+            engine13::core::EventTarget::Any => ("Any", None),
+            engine13::core::EventTarget::SeaActors => ("SeaActors", None),
+            engine13::core::EventTarget::All => ("All", None),
+        };
+        let t = target.as_deref();
+        let mut eff = [0u32; 5];
+        let mut cond = [0u32; 5];
+        let mut others: Vec<String> = Vec::new();
+        for k in ev.effects.keys() {
+            let a = classify_addr(k, t);
+            eff[a as usize] += 1;
+            if a == Addr::OtherActor {
+                if let RelativeMetricRef::Absolute(MetricRef::Actor { actor_id, .. }) = k {
+                    others.push(actor_id.as_str().to_string());
+                }
+            }
+        }
+        let mut cond_others: Vec<String> = Vec::new();
+        for c in &ev.conditions {
+            let a = classify_addr(&c.metric, t);
+            cond[a as usize] += 1;
+            if a == Addr::OtherActor {
+                if let RelativeMetricRef::Absolute(MetricRef::Actor { actor_id, metric }) = &c.metric {
+                    cond_others.push(format!(
+                        "{}.{}{}{}",
+                        actor_id.as_str(), metric.as_str(), op_str(&c.operator), c.value
+                    ));
+                }
+            }
+        }
+        others.sort();
+        others.dedup();
+        // "reaches the target" = at least one effect is self-relative or names it
+        let empty_intersect = eff[Addr::SelfRel as usize] == 0 && eff[Addr::SameActor as usize] == 0;
+        let gate_other_actor = cond[Addr::OtherActor as usize] > 0;
+        let gate_nonactor_only = !ev.conditions.is_empty()
+            && cond[Addr::SelfRel as usize] == 0
+            && cond[Addr::SameActor as usize] == 0
+            && cond[Addr::OtherActor as usize] == 0;
+        out.push(AddrRow {
+            scenario: scenario_label.to_string(),
+            id: ev.id.clone(),
+            common: *common,
+            target_kind: kind,
+            target_id: target.unwrap_or_else(|| "<drawn>".to_string()),
+            eff,
+            cond,
+            empty_intersect,
+            gate_other_actor,
+            gate_nonactor_only,
+            other_actors: others,
+            cond_actors: cond_others,
+        });
+    }
+    out
+}
+
+/// §7.4 п.2 — the addressing walk over all four event containers of the project.
+fn evaddr() {
+    println!("scenario\tevent\tpool\ttarget_kind\ttarget\tp\teff_self\teff_same\teff_other\teff_glob\teff_fam\tcond_self\tcond_same\tcond_other\tcond_glob\tcond_fam\tempty_isect\tgate_other_actor\tgate_nonactor\tother_actors");
+    let mut rows: Vec<AddrRow> = Vec::new();
+    let common: Vec<(engine13::core::RandomEvent, bool)> = engine13::events::common_events()
+        .into_iter()
+        .map(|e| (e, true))
+        .collect();
+    rows.extend(addr_rows_of("common", &common));
+    let mut probs: BTreeMap<String, f64> = BTreeMap::new();
+    for (e, _) in &common {
+        probs.insert(e.id.clone(), e.probability);
+    }
+    for sid in ["constantinople_1430", "rome_375", "milan_1477"] {
+        let sc = registry::load_by_id(sid).expect("scenario");
+        let scen: Vec<(engine13::core::RandomEvent, bool)> =
+            sc.random_events.iter().cloned().map(|e| (e, false)).collect();
+        for (e, _) in &scen {
+            probs.insert(format!("{}::{}", sid, e.id), e.probability);
+        }
+        rows.extend(addr_rows_of(sid, &scen));
+    }
+    let mut n_empty = 0u32;
+    let mut n_gate_off = 0u32;
+    let mut n_both = 0u32;
+    let mut n_self_keys = 0u32;
+    let mut n_abs_actor_keys = 0u32;
+    for r in &rows {
+        let p = probs
+            .get(&format!("{}::{}", r.scenario, r.id))
+            .or_else(|| probs.get(&r.id))
+            .copied()
+            .unwrap_or(f64::NAN);
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            r.scenario, r.id, if r.common { "pool" } else { "scen" },
+            r.target_kind, r.target_id, p,
+            r.eff[0], r.eff[1], r.eff[2], r.eff[3], r.eff[4],
+            r.cond[0], r.cond[1], r.cond[2], r.cond[3], r.cond[4],
+            r.empty_intersect as u8, r.gate_other_actor as u8, r.gate_nonactor_only as u8,
+            if r.other_actors.is_empty() { "-".to_string() } else { r.other_actors.join(",") }
+        );
+        if r.empty_intersect { n_empty += 1; }
+        if r.gate_other_actor { n_gate_off += 1; }
+        if r.empty_intersect && r.gate_other_actor { n_both += 1; }
+        n_self_keys += r.eff[0] + r.cond[0];
+        n_abs_actor_keys += r.eff[1] + r.eff[2] + r.cond[1] + r.cond[2];
+    }
+    println!(
+        "#ADDRSUM\tevents={}\tempty_isect={}\tgate_other_actor={}\tboth={}\tself_keys={}\tabs_actor_keys={}",
+        rows.len(), n_empty, n_gate_off, n_both, n_self_keys, n_abs_actor_keys
+    );
+    for r in &rows {
+        if r.empty_intersect || r.gate_other_actor {
+            println!(
+                "#ADDRFLAG\t{}\t{}\tempty_isect={}\tgate_other_actor={}\ttarget={}\tother_actors={}",
+                r.scenario, r.id, r.empty_intersect as u8, r.gate_other_actor as u8, r.target_id,
+                if r.other_actors.is_empty() { "-".to_string() } else { r.other_actors.join(",") }
+            );
+            println!(
+                "#ADDRGATE\t{}\t{}\tconds_on_other_actors={}",
+                r.scenario, r.id,
+                if r.cond_actors.is_empty() { "-".to_string() } else { r.cond_actors.join(",") }
+            );
+        }
+    }
+}
+
+/// Which actor an event's write to a GLOBAL key lands on — there is no actor, so
+/// this returns just the delta. Separate from [`event_writes_to`] because the
+/// resolution branch is different (`MetricRef::Global`) and `federation_progress`
+/// is the first conjunct of `constantinople_1430`'s victory condition.
+fn event_writes_global(ev: &engine13::core::RandomEvent, target_id: &str, key: &str) -> f64 {
+    let mut sum = 0.0;
+    for (m, delta) in &ev.effects {
+        if let Ok(MetricRef::Global { key: k }) = m.resolve(target_id) {
+            if k.as_str() == key {
+                sum += *delta;
+            }
+        }
+    }
+    sum
+}
+
+/// The four addressing variants of §7.6, plus the self-test.
+///
+/// `Base` and `Cut` exist to validate the shadow, not to answer the question:
+/// `Base` must produce a shadow identical to the real world (zero divergence), and
+/// `Cut` must reproduce `decisive24` exactly — same 90 runs, same `saved`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Redirect {
+    /// shadow == real; floor test
+    Base,
+    /// remove every event write to `cohesion` — task 24's shadow, re-derived here
+    Cut,
+    /// (i) the cohesion write of `mehmed_threatens` follows its gate onto `ottomans`
+    I,
+    /// (i′) the whole actor vector follows the gate: cohesion AND external_pressure
+    IPrime,
+}
+
+fn redirect_label(r: Redirect) -> &'static str {
+    match r {
+        Redirect::Base => "base",
+        Redirect::Cut => "cut",
+        Redirect::I => "i",
+        Redirect::IPrime => "i_prime",
+    }
+}
+
+const REDIRECTS: [Redirect; 4] = [Redirect::Base, Redirect::Cut, Redirect::I, Redirect::IPrime];
+
+/// Candidate gates for variant (ii) — "the gate follows the effect onto the victim".
+/// The statement forbids picking one by tuning, so the probe measures occupancy of a
+/// declared family and reports it; the choice is stage 2's, on these numbers.
+const II_CANDIDATES: &[(&str, &str, f64, bool)] = &[
+    ("byz.military_size<30", "military_size", 30.0, true),
+    ("byz.military_size<40", "military_size", 40.0, true),
+    ("byz.military_size<50", "military_size", 50.0, true),
+    ("byz.military_size<60", "military_size", 60.0, true),
+    ("byz.cohesion<40", "cohesion", 40.0, true),
+    ("byz.cohesion<50", "cohesion", 50.0, true),
+    ("byz.legitimacy<40", "legitimacy", 40.0, true),
+    ("byz.external_pressure>70", "external_pressure", 70.0, false),
+    ("byz.external_pressure>80", "external_pressure", 80.0, false),
+];
+
+#[derive(Default, Clone)]
+struct EtActor {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    prev_coh: Option<f64>,
+    prev_ep: Option<f64>,
+    s_coh: [f64; 4],
+    /// (i′) alone moves `external_pressure` too, and `external_pressure` is a
+    /// conjunct of `classic_collapse`; so that variant needs its own pressure
+    /// shadow or it silently degenerates into (i).
+    s_ep: f64,
+    real_ct: u32,
+    shad_ct: [u32; 4],
+    saved: [u32; 4],
+    added: [u32; 4],
+    shadow_dead: [bool; 4],
+    shadow_dead_tick: [i64; 4],
+    /// which shadow path was true when the variant's death was recorded — an added
+    /// death can only come through a path that reads the shadowed metric, and
+    /// criterion §7.7 п.3 is a share of exactly those paths
+    added_path: [&'static str; 4],
+    died_tick: i64,
+    died_path: &'static str,
+    cw_mismatch: u32,
+    /// times this actor was the drawn victim of an `EventTarget::Any` event
+    any_draws: u32,
+    any_draws_before_ott_death: u32,
+}
+
+/// §7.4 п.3–п.5 — the four channels, the redirect shadow, and the envelopes the
+/// shadow provably cannot compute.
+fn evtarget(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    assert_pool_matches_source();
+    assert_pool_matches_metric("cohesion", COH_EVENTS);
+
+    println!("actor\tseed\tmode\tticks\tdied\tpath\tsaved_base\tsaved_cut\tsaved_i\tsaved_ip\tadded_base\tadded_cut\tadded_i\tadded_ip\ts_coh_i\ts_coh_ip\tcw_mism\tany_draws");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let any_ids: std::collections::HashSet<String> = pool_of(sc)
+            .into_iter()
+            .filter(|(e, _)| matches!(e.target, engine13::core::EventTarget::Any))
+            .map(|(e, _)| e.id)
+            .collect();
+        let victory = sc.victory_condition.clone();
+        let vic_key: Option<MetricRef> = victory.as_ref().map(|v| v.metric.clone());
+        let vic_thresh = victory.as_ref().map(|v| v.threshold).unwrap_or(0.0);
+
+        let mut acc: BTreeMap<String, EtActor> = BTreeMap::new();
+        let mut victory_tick: i64 = -1;
+        let mut ott_death: i64 = -1;
+        let mut byz_death: i64 = -1;
+        let mut collapses = 0u32;
+
+        // --- federation_progress accounting -------------------------------------
+        let mut fed_nominal: BTreeMap<String, f64> = BTreeMap::new(); // by event id
+        let mut fed_nominal_total = 0.0f64;
+        let mut fed_realized_total = 0.0f64;
+        let mut fed_prev = 0.0f64;
+        let mut fed_first_80: i64 = -1;
+        let mut fed_ticks_80 = 0u32;
+        let mut fed_max = 0.0f64;
+        let mut fed_at_100 = 0u32;
+
+        // --- envelopes ----------------------------------------------------------
+        let mut gate_true = 0u32;            // ottomans.military_size > 150
+        let mut gate_true_alive = 0u32;      // ...and the target was eligible
+        let mut elig_now = 0u32;             // ottomans in the world (target of record)
+        let mut elig_iii = 0u32;             // byzantium in the world (target under (iii))
+        let mut env_iii_gain = 0u32;         // gate held, byz alive, ott NOT alive
+        let mut env_iii_loss = 0u32;         // gate held, ott alive, byz NOT alive
+        let mut ii_occ = [0u32; II_CANDIDATES.len()];
+        let mut fires_mehmed = 0u32;
+        let mut fires_greek = 0u32;
+        let mut greek_gate_true = 0u32;
+        let mut greek_gate_shadow_true = 0u32; // without mehmed's +10 on byz.ep
+        let mut greek_gate_flip = 0u32;
+        let mut byz_ep_shadow = f64::NAN;     // (i′) shadow of byzantium.external_pressure
+        let mut byz_ep_prev = f64::NAN;
+        let mut fg_size_sum = 0u64;
+        let mut fg_ticks = 0u32;
+        let mut live_ticks = 0u32;
+
+        for t in 0..ticks {
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.neighbors = a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+                        let c = a.get_metric("cohesion");
+                        e.s_coh = [c, c, c, c];
+                        e.prev_coh = Some(c);
+                        e.s_ep = a.get_metric("external_pressure");
+                        e.prev_ep = Some(a.get_metric("external_pressure"));
+                        e.died_tick = -1;
+                        e.shadow_dead_tick = [-1, -1, -1, -1];
+                    }
+                }
+                // eligibility and gate occupancy, measured before the tick runs
+                let ott_alive = world.actors.contains_key("ottomans")
+                    && !world.dead_actor_ids.contains("ottomans");
+                let byz_alive = world.actors.contains_key("byzantium")
+                    && !world.dead_actor_ids.contains("byzantium");
+                // the gate is `MetricRef::get`, i.e. `unwrap_or(0.0)` for a dead actor —
+                // read exactly as the engine reads it, not from the live actor map
+                let ott_mil = MetricRef::literal("actor:ottomans.military_size").get(world);
+                let g = ott_mil > 150.0;
+                if g { gate_true += 1; }
+                if g && ott_alive { gate_true_alive += 1; }
+                if ott_alive { elig_now += 1; }
+                if byz_alive { elig_iii += 1; }
+                if g && byz_alive && !ott_alive { env_iii_gain += 1; }
+                if g && ott_alive && !byz_alive { env_iii_loss += 1; }
+                if byz_alive {
+                    live_ticks += 1;
+                    for (i, (_, m, v, less)) in II_CANDIDATES.iter().enumerate() {
+                        let x = MetricRef::literal(&format!("actor:byzantium.{}", m)).get(world);
+                        if (*less && x < *v) || (!*less && x > *v) {
+                            ii_occ[i] += 1;
+                        }
+                    }
+                    let ep = MetricRef::literal("actor:byzantium.external_pressure").get(world);
+                    if byz_ep_shadow.is_nan() {
+                        byz_ep_shadow = ep;
+                        byz_ep_prev = ep;
+                    }
+                    let real_g = ep > 70.0;
+                    let shad_g = byz_ep_shadow > 70.0;
+                    if real_g { greek_gate_true += 1; }
+                    if shad_g { greek_gate_shadow_true += 1; }
+                    if real_g != shad_g { greek_gate_flip += 1; }
+                }
+                let fg = world
+                    .actors
+                    .values()
+                    .filter(|a| {
+                        a.narrative_status == engine13::core::NarrativeStatus::Foreground
+                            && !world.dead_actor_ids.contains(&a.id)
+                    })
+                    .count();
+                fg_size_sum += fg as u64;
+                fg_ticks += 1;
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // ---- what fired, and what each variant would have written -----------
+            // `delta[v][actor]` = (what variant v writes) − (what the run wrote).
+            let mut delta: Vec<BTreeMap<String, f64>> = vec![BTreeMap::new(); REDIRECTS.len()];
+            let mut ep_delta: BTreeMap<String, f64> = BTreeMap::new(); // (i′) only
+            let mut byz_ep_delta = 0.0f64;
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _is_common)) = by_id.get(&ev.id) else { continue };
+                if any_ids.contains(&ev.id) {
+                    let e = acc.entry(ev.actor_id.clone()).or_default();
+                    e.any_draws += 1;
+                    if ott_death < 0 { e.any_draws_before_ott_death += 1; }
+                }
+                let coh_writes = event_writes_to(def, &ev.actor_id, "cohesion");
+                for (v, r) in REDIRECTS.iter().enumerate() {
+                    match r {
+                        Redirect::Base => {}
+                        Redirect::Cut => {
+                            for (aid, d) in &coh_writes {
+                                *delta[v].entry(aid.clone()).or_insert(0.0) -= *d;
+                            }
+                        }
+                        Redirect::I | Redirect::IPrime => {
+                            if ev.id == "mehmed_threatens" {
+                                for (aid, d) in &coh_writes {
+                                    *delta[v].entry(aid.clone()).or_insert(0.0) -= *d;
+                                    *delta[v].entry("ottomans".to_string()).or_insert(0.0) += *d;
+                                }
+                            }
+                        }
+                    }
+                }
+                if ev.id == "mehmed_threatens" {
+                    fires_mehmed += 1;
+                    // (i′) also moves the pressure write off byzantium and onto the
+                    // actor the gate reads
+                    for (aid, d) in event_writes_to(def, &ev.actor_id, "external_pressure") {
+                        if aid == "byzantium" {
+                            byz_ep_delta -= d;
+                        }
+                        *ep_delta.entry(aid.clone()).or_insert(0.0) -= d;
+                        *ep_delta.entry("ottomans".to_string()).or_insert(0.0) += d;
+                    }
+                }
+                if ev.id == "greek_scholars_flee" {
+                    fires_greek += 1;
+                }
+                let g = event_writes_global(def, &ev.actor_id, "federation_progress");
+                if g != 0.0 {
+                    *fed_nominal.entry(ev.id.clone()).or_insert(0.0) += g;
+                    fed_nominal_total += g;
+                }
+            }
+
+            let world = state.world_state.as_ref().unwrap();
+            let cur_tick = t;
+
+            // ---- federation_progress, realized against nominal -------------------
+            if let Some(ref k) = vic_key {
+                let v = k.get(world);
+                fed_realized_total += v - fed_prev;
+                fed_prev = v;
+                if v > fed_max { fed_max = v; }
+                if v >= 100.0 { fed_at_100 += 1; }
+                if v >= vic_thresh {
+                    fed_ticks_80 += 1;
+                    if fed_first_80 < 0 { fed_first_80 = (t + 1) as i64; }
+                }
+            }
+
+            // ---- byzantium's shadow pressure (variant i′) ------------------------
+            if let Some(a) = world.actors.get("byzantium") {
+                let ep = a.get_metric("external_pressure");
+                if !byz_ep_shadow.is_nan() {
+                    let d = ep - byz_ep_prev;
+                    byz_ep_shadow = (byz_ep_shadow + d + byz_ep_delta).clamp(0.0, 100.0);
+                }
+                byz_ep_prev = ep;
+            }
+
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == cur_tick)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen { continue; }
+
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+
+                let d_coh = coh - e.prev_coh.unwrap_or(coh);
+                for (v, dmap) in delta.iter().enumerate() {
+                    let dv = dmap.get(&aid).copied().unwrap_or(0.0);
+                    e.s_coh[v] = (e.s_coh[v] + d_coh + dv).clamp(0.0, 100.0);
+                }
+                let d_ep = ep - e.prev_ep.unwrap_or(ep);
+                e.s_ep = (e.s_ep + d_ep + ep_delta.get(&aid).copied().unwrap_or(0.0)).clamp(0.0, 100.0);
+                e.prev_coh = Some(coh);
+                e.prev_ep = Some(ep);
+                e.ticks += 1;
+
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if cur_tick < ms);
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    let real_d = rc || ri || rq;
+                    if real_d { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                    for (v, rv) in REDIRECTS.iter().enumerate() {
+                        // only (i′) shadows pressure; the others read the real value, so
+                        // their `classic` conjunct is the engine's own
+                        let ep_v = if *rv == Redirect::IPrime { e.s_ep } else { ep };
+                        let (sc_, si, sq) = danger_paths(e.s_coh[v], leg, ep_v, mil, besieged);
+                        let shad_d = sc_ || si || if *rv == Redirect::IPrime { sq } else { rq };
+                        if shad_d { e.shad_ct[v] += 1 } else { e.shad_ct[v] = 0 }
+                        // a shadow that reaches three consecutive dangerous ticks while
+                        // the real actor is still alive is a death the variant ADDS
+                        if e.shad_ct[v] >= 3 && alive && !e.shadow_dead[v] {
+                            e.shadow_dead[v] = true;
+                            e.shadow_dead_tick[v] = (t + 1) as i64;
+                            e.added[v] += 1;
+                            e.added_path[v] = match (sc_, si, rq) {
+                                (true, _, _) => "classic",
+                                (_, true, _) => "internal",
+                                (_, _, true) => "conquest",
+                                _ => "none",
+                            };
+                        }
+                    }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    collapses += 1;
+                    if aid == "ottomans" { ott_death = e.died_tick; }
+                    if aid == "byzantium" { byz_death = e.died_tick; }
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    for v in 0..REDIRECTS.len() {
+                        if e.shad_ct[v] < 3 { e.saved[v] += 1; }
+                    }
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        let mut tot_saved = [0u32; 4];
+        let mut tot_added = [0u32; 4];
+        let mut tot_added_new = [0u32; 4];
+        let mut tot_added_earlier = [0u32; 4];
+        let mut cwm = 0u32;
+        for (aid, e) in &acc {
+            for v in 0..REDIRECTS.len() {
+                tot_saved[v] += e.saved[v];
+                tot_added[v] += e.added[v];
+                if e.shadow_dead[v] {
+                    if e.died_tick < 0 {
+                        tot_added_new[v] += 1;
+                    } else {
+                        tot_added_earlier[v] += 1;
+                    }
+                    println!(
+                        "#ADD\t{}\t{}\t{}\t{}\tshadow_tick={}\treal_tick={}\tgap={}\tclass={}\tpath={}",
+                        aid, seed, mode_label(strategy), redirect_label(REDIRECTS[v]),
+                        e.shadow_dead_tick[v], e.died_tick,
+                        if e.died_tick > 0 { e.died_tick - e.shadow_dead_tick[v] } else { -1 },
+                        if e.died_tick < 0 { "new" } else { "earlier" },
+                        e.added_path[v]
+                    );
+                }
+            }
+            cwm += e.cw_mismatch;
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.died_tick, e.died_path,
+                e.saved[0], e.saved[1], e.saved[2], e.saved[3],
+                e.added[0], e.added[1], e.added[2], e.added[3],
+                e.s_coh[2], e.s_coh[3], e.cw_mismatch, e.any_draws
+            );
+        }
+        let mut fed_rows: Vec<(String, f64)> = fed_nominal.into_iter().collect();
+        fed_rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // Shares are taken against the POSITIVE mass, not the net: the net is a small
+        // difference of two large opposite flows, so a share of it is meaningless —
+        // the same trap task 24 §4.1 named for cohesion (two feedback classes must not
+        // be summed).
+        let fed_pos: f64 = fed_rows.iter().filter(|(_, v)| *v > 0.0).map(|(_, v)| *v).sum();
+        let fed_neg: f64 = fed_rows.iter().filter(|(_, v)| *v < 0.0).map(|(_, v)| *v).sum();
+        for (id, v) in &fed_rows {
+            println!(
+                "#FEDW\t{}\t{}\t{}\t{:+.1}\tshare_of_pos={:.1}%",
+                seed, mode, id, v,
+                if *v > 0.0 && fed_pos != 0.0 { 100.0 * v / fed_pos } else { 0.0 }
+            );
+        }
+        println!(
+            "#FED\tseed={}\tmode={}\tnom_pos={:+.1}\tnom_neg={:+.1}\tnominal={:+.1}\trealized={:+.1}\tclamp_loss={:+.1}\tmax={:.1}\tfirst80={}\tticks80={}\tticks100={}\tvictory={}\tott_death={}\tbyz_death={}",
+            seed, mode, fed_pos, fed_neg, fed_nominal_total, fed_realized_total,
+            fed_realized_total - fed_nominal_total, fed_max, fed_first_80, fed_ticks_80,
+            fed_at_100, victory_tick, ott_death, byz_death
+        );
+        println!(
+            "#ENV\tseed={}\tmode={}\tgate_true={}\tgate_true_alive={}\telig_now={}\telig_iii={}\tiii_gain={}\tiii_loss={}\tfires_mehmed={}\tfires_greek={}\tgreek_gate={}\tgreek_gate_shadow={}\tgreek_flip={}\tfg_mean={:.2}",
+            seed, mode, gate_true, gate_true_alive, elig_now, elig_iii,
+            env_iii_gain, env_iii_loss, fires_mehmed, fires_greek,
+            greek_gate_true, greek_gate_shadow_true, greek_gate_flip,
+            fg_size_sum as f64 / fg_ticks.max(1) as f64
+        );
+        for (i, (label, _, _, _)) in II_CANDIDATES.iter().enumerate() {
+            println!(
+                "#II\tseed={}\tmode={}\t{}\tocc={:.1}%\tticks={}",
+                seed, mode, label,
+                100.0 * ii_occ[i] as f64 / live_ticks.max(1) as f64,
+                ii_occ[i]
+            );
+        }
+        println!(
+            "#ET\tseed={}\tmode={}\tcollapses={}\tsaved_base={}\tsaved_cut={}\tsaved_i={}\tsaved_ip={}\tadded_base={}\tadded_cut={}\tadded_i={}\tadded_ip={}\tnew_i={}\tearlier_i={}\tnew_ip={}\tearlier_ip={}\tcw_mismatch={}",
+            seed, mode, collapses,
+            tot_saved[0], tot_saved[1], tot_saved[2], tot_saved[3],
+            tot_added[0], tot_added[1], tot_added[2], tot_added[3],
+            tot_added_new[2], tot_added_earlier[2], tot_added_new[3], tot_added_earlier[3], cwm
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -4514,6 +5237,17 @@ fn main() {
                 .map(|s| s.split(',').map(|x| x.parse().expect("alpha")).collect())
                 .unwrap_or_else(|| vec![1.0]);
             poolcut(scenario, ticks, &seeds, strategy, &alphas);
+        }
+        "evaddr" => evaddr(),
+        "evtarget" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            evtarget(scenario, ticks, &seeds, strategy);
         }
         other => panic!("unknown mode: {}", other),
     }
