@@ -241,7 +241,14 @@ pub fn calculate_interactions(
     // Get all actor pairs that are neighbors
     let actor_pairs = get_neighbor_pairs(world);
 
-    for (actor_a_id, actor_b_id, distance, border_type) in actor_pairs {
+    // Task 26 (A₁+A₂): migration is aggregated per SOURCE per tick, so the loop has
+    // to remember which sources have already moved. Sequential per-pair application
+    // is what made the loss compound as `1 − 0.99^K` instead of the declared 1 %.
+    let mut migrated_this_tick: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (actor_a_id, actor_b_id, distance, border_type) in &actor_pairs {
+        let (actor_a_id, actor_b_id, distance) = (actor_a_id.clone(), actor_b_id.clone(), *distance);
+        let border_type = border_type.clone();
         // Skip if either actor is dead
         if !world.actors.contains_key(&actor_a_id) || !world.actors.contains_key(&actor_b_id) {
             continue;
@@ -269,6 +276,7 @@ pub fn calculate_interactions(
         calculate_migration_interaction(
             world, &actor_a_id, &actor_b_id, distance, bt.clone(),
             current_tick, current_year, event_log, rng,
+            &actor_pairs, &mut migrated_this_tick,
         );
 
         // Data-driven rules (empty for Rome/Constantinople by default)
@@ -608,93 +616,136 @@ fn calculate_diplomatic_interaction(
     }
 }
 
-/// Migration interaction — population pressure
+/// Migration interaction — population pressure.
+///
+/// **Задача 26, вариант (A₁)+(A₂).** Two things changed, and both were measured
+/// before they were written (`docs/investigation_migration_channel.md` §14):
+///
+/// * **(A₁) the transfer is aggregated per source per tick.** The call is still made
+///   per pair, but the first pair that finds a given source moves its whole
+///   migration for the tick and marks it done. Before, each of the source's `K`
+///   qualifying pairs cut the stock in turn, so the declared "1 % per tick" was in
+///   fact `1 − 0.99^K` — `3.94 %` at `K = 4`, and compounding carried **74.6 %** of
+///   the loss in `constantinople_1430` (§3.2). The declared rate is now the real one.
+/// * **(A₂) the sinks receive what the source lost.** The loss was `1 %` and the
+///   gain `0.5 %`, so half of every migration evaporated; the channel was the only
+///   positive writer of `population` in the project and still net-negative by
+///   construction (`−1774.6` per game, §3.1). The gain is now the loss, split
+///   between the pairs that fired, and the channel is a transfer.
+///
+/// What is deliberately NOT changed: the gate, the tie-break (`actor_a` is tested
+/// first), and the `external_pressure` transfer — the pressure side is the object of
+/// задача 27 and is measured, not touched, here.
 #[allow(clippy::too_many_arguments)]
 fn calculate_migration_interaction(
     world: &mut WorldState,
     actor_a_id: &str,
     actor_b_id: &str,
-    distance: u32,
+    _distance: u32,
     border_type: crate::core::BorderType,
     current_tick: u32,
     current_year: i32,
     event_log: &mut EventLog,
     _rng: &mut ChaCha8Rng,
+    all_pairs: &[(String, String, u32, crate::core::BorderType)],
+    migrated_this_tick: &mut std::collections::HashSet<String>,
 ) {
     // Condition: border Land, external_pressure > 65, cohesion < 40
     if border_type != crate::core::BorderType::Land {
         return;
     }
 
-    // Find the pressuring actor (high external_pressure, low cohesion)
-    let pressuring_id = {
-        let actor_a = match world.actors.get(actor_a_id) {
-            Some(a) => a,
-            None => return,
-        };
-        let actor_b = match world.actors.get(actor_b_id) {
-            Some(a) => a,
-            None => return,
-        };
-
-        if actor_a.get_metric("external_pressure") > 65.0 && actor_a.get_metric("cohesion") < 40.0 {
-            Some(actor_a_id.to_string())
-        } else if actor_b.get_metric("external_pressure") > 65.0 && actor_b.get_metric("cohesion") < 40.0 {
-            Some(actor_b_id.to_string())
-        } else {
-            None
-        }
+    let qualifies = |world: &WorldState, id: &str| -> bool {
+        world
+            .actors
+            .get(id)
+            .map(|a| a.get_metric("external_pressure") > 65.0 && a.get_metric("cohesion") < 40.0)
+            .unwrap_or(false)
     };
 
-    let pressuring_id = match pressuring_id {
-        Some(id) => id,
-        None => return,
-    };
-
-    let neighbor_id = if pressuring_id == actor_a_id {
+    // Find the pressuring actor (high external_pressure, low cohesion).
+    // `actor_a` is tested first: when both sides qualify, the alphabetically smaller
+    // id is the source, because `get_neighbor_pairs` sorts the pair. Unchanged.
+    let pressuring_id = if qualifies(world, actor_a_id) {
+        actor_a_id.to_string()
+    } else if qualifies(world, actor_b_id) {
         actor_b_id.to_string()
     } else {
-        actor_a_id.to_string()
+        return;
     };
 
-    // Apply migration effects
-    let pressuring_pop = match world.actors.get(&pressuring_id) {
-        Some(p) => p.get_metric("population"),
+    // (A₁): one aggregated move per source per tick.
+    if !migrated_this_tick.insert(pressuring_id.clone()) {
+        return;
+    }
+
+    // Every land pair of this source whose source — by the same rule — is this actor.
+    let sinks: Vec<(String, u32)> = all_pairs
+        .iter()
+        .filter(|(a, b, _, bt)| {
+            *bt == crate::core::BorderType::Land && (a == &pressuring_id || b == &pressuring_id)
+        })
+        .filter_map(|(a, b, dist, _)| {
+            let other = if a == &pressuring_id { b } else { a };
+            if !world.actors.contains_key(other) || world.dead_actor_ids.contains(other) {
+                return None;
+            }
+            // the pair's own source under the unchanged tie-break
+            let src_of_pair = if qualifies(world, a) {
+                a
+            } else if qualifies(world, b) {
+                b
+            } else {
+                return None;
+            };
+            if src_of_pair != &pressuring_id {
+                return None;
+            }
+            Some((other.clone(), *dist))
+        })
+        .collect();
+
+    if sinks.is_empty() {
+        return;
+    }
+
+    let (pressuring_pop, pressuring_pressure) = match world.actors.get(&pressuring_id) {
+        Some(p) => (p.get_metric("population"), p.get_metric("external_pressure")),
         None => return,
     };
 
-    let pressuring_pressure = match world.actors.get(&pressuring_id) {
-        Some(p) => p.get_metric("external_pressure"),
-        None => return,
-    };
-
-    let pressure_transfer = (pressuring_pressure - 65.0) * 0.2 / distance as f64;
     let pop_loss_ratio = 0.01;
-    let pop_gain_ratio = 0.005;
+    // (A₂): what leaves the source arrives at the sinks, split between them.
+    let pop_moved = pressuring_pop * pop_loss_ratio;
+    let pop_gain_each = pop_moved / sinks.len() as f64;
 
     if let Some(pressuring) = world.actors.get_mut(&pressuring_id) {
         let pop = pressuring.get_metric("population");
-        pressuring.set_metric("population", pop * (1.0 - pop_loss_ratio));
+        pressuring.set_metric("population", pop - pop_moved);
     }
 
-    if let Some(neighbor) = world.actors.get_mut(&neighbor_id) {
-        neighbor.add_metric("external_pressure", pressure_transfer);
-        let pop_gain = pressuring_pop * pop_gain_ratio;
-        neighbor.add_metric("population", pop_gain);
-    }
+    for (neighbor_id, dist) in &sinks {
+        // The pressure transfer keeps its per-pair form and its per-pair distance:
+        // it is задача 27's object, not this one's.
+        let pressure_transfer = (pressuring_pressure - 65.0) * 0.2 / *dist as f64;
+        if let Some(neighbor) = world.actors.get_mut(neighbor_id) {
+            neighbor.add_metric("external_pressure", pressure_transfer);
+            neighbor.add_metric("population", pop_gain_each);
+        }
 
-    // Record event if significant
-    if should_record_event(&InteractionType::Migration, pressure_transfer) {
-        let event = Event::new(
-            format!("migration_{}_{}", pressuring_id, neighbor_id),
-            current_tick,
-            current_year,
-            pressuring_id.clone(),
-            EventType::Migration,
-            false,
-            format!("Миграция из {} в {}", pressuring_id, neighbor_id),
-        );
-        event_log.add(event);
+        // Record event if significant
+        if should_record_event(&InteractionType::Migration, pressure_transfer) {
+            let event = Event::new(
+                format!("migration_{}_{}", pressuring_id, neighbor_id),
+                current_tick,
+                current_year,
+                pressuring_id.clone(),
+                EventType::Migration,
+                false,
+                format!("Миграция из {} в {}", pressuring_id, neighbor_id),
+            );
+            event_log.add(event);
+        }
     }
 }
 

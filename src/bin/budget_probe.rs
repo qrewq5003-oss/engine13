@@ -5101,6 +5101,1206 @@ fn evtarget(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>
     }
 }
 
+// ===========================================================================
+// task 26 — the migration channel: `migwalk` and `decisive26`
+// ===========================================================================
+//
+// `calculate_migration_interaction` (`interactions.rs:611–700`) is called once per
+// neighbour pair per tick, unconditionally and **without consuming RNG**. That is
+// what makes this channel different from every previous one: given the state the
+// pair loop starts from, migration is deterministic, so the probe can *replicate*
+// it rather than estimate it — the standard задача 23 §11 says the residual
+// attribution failed to meet.
+//
+// Four facts of the carrier, all from the code and all load-bearing here:
+//   1. the gate tests `actor_a` first, and `get_neighbor_pairs` sorts pairs
+//      alphabetically ⇒ when both neighbours qualify, the alphabetically smaller
+//      one is always the source;
+//   2. `pressuring_pop` is read at call time (`:660`), not at the start of the
+//      tick ⇒ a second firing in the same tick cuts an already-reduced stock, and
+//      the sink of that firing receives 0.5 % of the reduced value;
+//   3. the loss is multiplicative (`set_metric(pop * 0.99)`) and the gain additive
+//      (`add_metric(pressuring_pop * 0.005)`) ⇒ half of what moves disappears;
+//   4. `(ep − 65) · 0.2 / distance` is added to the SINK's `external_pressure`
+//      (`:681`), unclamped until phase 5 ⇒ migration can push a neighbour over the
+//      gate's own threshold, inside the same tick, and manufacture a new source.
+//
+// Population writers, established by walk and not by grep: `auto_deltas` (phase 1),
+// rank bonuses (phase 2), dependency rules (phase 3a), **migration — the only
+// population writer inside the pair loop** (`interaction_rules` is empty in all
+// three scenarios), random events (phase 3b), tags (phase 4), the `max(0.0)` clamp
+// (phase 5), and the successor split (`mod.rs:1640`).
+
+/// Distance and border of one live land pair, in the order the engine builds it.
+#[derive(Clone)]
+struct LandPair {
+    a: String,
+    b: String,
+    distance: u32,
+}
+
+/// Replicates `get_neighbor_pairs` (`interactions.rs:296–330`) and keeps the land
+/// pairs: dedup by sorted key, both actors alive, sorted by `(a, b)`.
+///
+/// Private in the engine, so it is re-derived here — the same way задача 25
+/// re-derived it for the spawn walk. The sort is not cosmetic: it decides which
+/// side of a two-qualifier pair becomes the source.
+fn land_pairs(world: &WorldState) -> Vec<LandPair> {
+    let mut seen = std::collections::HashSet::new();
+    let mut pairs = Vec::new();
+    for (actor_id, actor) in &world.actors {
+        for n in &actor.neighbors {
+            if n.border_type != engine13::core::BorderType::Land {
+                continue;
+            }
+            if !world.actors.contains_key(&n.id) || world.dead_actor_ids.contains(&n.id) {
+                continue;
+            }
+            if world.dead_actor_ids.contains(actor_id) {
+                continue;
+            }
+            let (a, b) = if actor_id < &n.id {
+                (actor_id.clone(), n.id.clone())
+            } else {
+                (n.id.clone(), actor_id.clone())
+            };
+            let key = format!("{}-{}", a, b);
+            if seen.insert(key) {
+                pairs.push(LandPair { a, b, distance: n.distance });
+            }
+        }
+    }
+    pairs.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
+    pairs
+}
+
+fn passes_gate(m: &std::collections::HashMap<String, f64>) -> bool {
+    m.get("external_pressure").copied().unwrap_or(0.0) > 65.0
+        && m.get("cohesion").copied().unwrap_or(0.0) < 40.0
+}
+
+#[derive(Default, Clone)]
+struct MigActor {
+    ticks: u32,
+    k_min: u32,
+    k_max: u32,
+    k_sum: u64,
+    gate_ticks: u32,
+    /// the two conjuncts separately — an actor with `cohesion < 40` and no
+    /// pressure is one `(D₁)`-style key away from being a source (§4.3)
+    coh_ticks: u32,
+    ep_ticks: u32,
+    /// ticks this actor would be the source on ≥1 pair
+    src_ticks: u32,
+    /// histogram of "how many pairs at once", index = count, capped at 8
+    src_hist: [u32; 9],
+    sink_ticks: u32,
+    /// ticks the actor passed the gate but was NOT the source on some pair
+    /// because the other side qualified too and sorted first
+    yielded: u32,
+    first_gate_tick: i64,
+    /// had already received a migration pressure transfer before it first
+    /// entered the gate — the manufactured-source contour
+    pressured_before_gate: bool,
+    ep_first_gate: f64,
+    pop0: f64,
+    pop_final: f64,
+}
+
+/// §1 п.1 and п.4 — the graph and the gate, measured in the world tick by tick.
+fn migwalk(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tk_min\tk_max\tk_mean\tgate%\tcoh40%\tep65%\tsrc%\tsink%\tyield\tsrc1\tsrc2\tsrc3\tsrc4+\tfirst_gate\tpre_press\tpop0\tpopF");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let mut acc: BTreeMap<String, MigActor> = BTreeMap::new();
+        let mut pair_hist: BTreeMap<u32, u32> = BTreeMap::new(); // live land pairs per tick
+        let mut fire_pairs = 0u64;   // predicted firings, gate at loop start
+        let mut both_qualify = 0u64; // ticks a pair had two qualifying sides
+
+        for t in 0..ticks {
+            // ---- observation BEFORE the tick: this is what the pair loop of the
+            // previous tick left behind, and the closest observable point to the
+            // loop start of this one. `migwalk` is a census, not the counter —
+            // the counter is `decisive26`, which advances the state itself.
+            {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                *pair_hist.entry(pairs.len() as u32).or_insert(0) += 1;
+                let mut k: BTreeMap<String, u32> = BTreeMap::new();
+                for p in &pairs {
+                    *k.entry(p.a.clone()).or_insert(0) += 1;
+                    *k.entry(p.b.clone()).or_insert(0) += 1;
+                }
+                let mut src_count: BTreeMap<String, u32> = BTreeMap::new();
+                let mut sink: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut yielded: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for p in &pairs {
+                    let ga = world.actors.get(&p.a).map(|x| passes_gate(&x.metrics)).unwrap_or(false);
+                    let gb = world.actors.get(&p.b).map(|x| passes_gate(&x.metrics)).unwrap_or(false);
+                    if ga && gb {
+                        both_qualify += 1;
+                        yielded.insert(p.b.clone()); // b qualifies but a sorts first
+                    }
+                    let src = if ga { Some(&p.a) } else if gb { Some(&p.b) } else { None };
+                    if let Some(s) = src {
+                        *src_count.entry(s.clone()).or_insert(0) += 1;
+                        fire_pairs += 1;
+                        sink.insert(if s == &p.a { p.b.clone() } else { p.a.clone() });
+                    }
+                }
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let e = acc.entry(aid.clone()).or_insert_with(|| MigActor {
+                        k_min: u32::MAX,
+                        first_gate_tick: -1,
+                        pop0: a.get_metric("population"),
+                        ..Default::default()
+                    });
+                    e.ticks += 1;
+                    let kk = k.get(aid).copied().unwrap_or(0);
+                    e.k_min = e.k_min.min(kk);
+                    e.k_max = e.k_max.max(kk);
+                    e.k_sum += kk as u64;
+                    if a.get_metric("cohesion") < 40.0 { e.coh_ticks += 1; }
+                    if a.get_metric("external_pressure") > 65.0 { e.ep_ticks += 1; }
+                    if passes_gate(&a.metrics) {
+                        e.gate_ticks += 1;
+                        if e.first_gate_tick < 0 {
+                            e.first_gate_tick = t as i64;
+                            e.ep_first_gate = a.get_metric("external_pressure");
+                        }
+                    }
+                    if let Some(c) = src_count.get(aid) {
+                        e.src_ticks += 1;
+                        e.src_hist[(*c as usize).min(8)] += 1;
+                    }
+                    if sink.contains(aid) {
+                        e.sink_ticks += 1;
+                        if e.first_gate_tick < 0 {
+                            // received a pressure transfer while still outside the gate
+                            e.pressured_before_gate = true;
+                        }
+                    }
+                    if yielded.contains(aid) {
+                        e.yielded += 1;
+                    }
+                    e.pop_final = a.get_metric("population");
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+        }
+
+        let mode = mode_label(strategy);
+        for (aid, e) in &acc {
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}",
+                aid, seed, mode, e.ticks,
+                if e.k_min == u32::MAX { 0 } else { e.k_min }, e.k_max, e.k_sum as f64 / n,
+                100.0 * e.gate_ticks as f64 / n,
+                100.0 * e.coh_ticks as f64 / n,
+                100.0 * e.ep_ticks as f64 / n,
+                100.0 * e.src_ticks as f64 / n,
+                100.0 * e.sink_ticks as f64 / n,
+                e.yielded,
+                e.src_hist[1], e.src_hist[2], e.src_hist[3],
+                e.src_hist[4] + e.src_hist[5] + e.src_hist[6] + e.src_hist[7] + e.src_hist[8],
+                e.first_gate_tick,
+                e.pressured_before_gate as u8,
+                e.pop0, e.pop_final
+            );
+        }
+        let pairs_desc: Vec<String> = pair_hist.iter().map(|(k, v)| format!("{}x{}", k, v)).collect();
+        println!(
+            "#MIGWALK\tseed={}\tmode={}\tfire_pairs={}\tboth_qualify={}\tpairs_per_tick={}",
+            seed, mode, fire_pairs, both_qualify, pairs_desc.join(",")
+        );
+    }
+}
+
+/// One tick of the migration sub-loop, replicated exactly.
+///
+/// Returns per-actor `(population loss, population gain, external_pressure gained)`
+/// and the ordered list of firings. The loop order is the engine's own — pairs
+/// sorted by `(a, b)` — because that order decides both which side of a
+/// two-qualifier pair is the source and how much each later sink receives.
+///
+/// `pop` and `ep` are advanced in place, so a pressure transfer inside the tick can
+/// open the gate for a pair processed later, exactly as it does in the engine.
+fn replay_migration(
+    pairs: &[LandPair],
+    pop: &mut BTreeMap<String, f64>,
+    ep: &mut BTreeMap<String, f64>,
+    coh: &BTreeMap<String, f64>,
+    loss: &mut BTreeMap<String, f64>,
+    gain: &mut BTreeMap<String, f64>,
+    ep_gain: &mut BTreeMap<String, f64>,
+) -> Vec<(String, String)> {
+    let mut fired = Vec::new();
+    for p in pairs {
+        let qual = |id: &str| -> bool {
+            ep.get(id).copied().unwrap_or(0.0) > 65.0 && coh.get(id).copied().unwrap_or(0.0) < 40.0
+        };
+        // the engine tests `actor_a` first (`interactions.rs:640–646`)
+        let src = if qual(&p.a) {
+            p.a.clone()
+        } else if qual(&p.b) {
+            p.b.clone()
+        } else {
+            continue;
+        };
+        let dst = if src == p.a { p.b.clone() } else { p.a.clone() };
+        let src_pop = pop.get(&src).copied().unwrap_or(0.0);
+        let src_ep = ep.get(&src).copied().unwrap_or(0.0);
+        let transfer = (src_ep - 65.0) * 0.2 / p.distance as f64;
+        // source: multiplicative, on the stock as it stands at THIS call
+        let lost = src_pop * 0.01;
+        pop.insert(src.clone(), src_pop - lost);
+        *loss.entry(src.clone()).or_insert(0.0) += lost;
+        // sink: additive, half of what left, plus the pressure
+        let got = src_pop * 0.005;
+        *pop.entry(dst.clone()).or_insert(0.0) += got;
+        *gain.entry(dst.clone()).or_insert(0.0) += got;
+        *ep.entry(dst.clone()).or_insert(0.0) += transfer;
+        *ep_gain.entry(dst.clone()).or_insert(0.0) += transfer;
+        fired.push((src, dst));
+    }
+    fired
+}
+
+#[derive(Default, Clone)]
+struct Mig26 {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    // --- counters (§1 п.2): every population writer gets its own -----------
+    c_dep: f64,      // dependency rules
+    c_events: f64,   // random events, nominal
+    c_mig_loss: f64, // migration, as source
+    c_mig_gain: f64, // migration, as sink
+    c_split: f64,    // successor split (born with parent's pop × weight)
+    c_floor: f64,    // truncation at the 0 floor
+    c_resid: f64,    // what none of the above explains
+    // --- replica validation ------------------------------------------------
+    rep_bad: u32,
+    rep_worst: f64,
+    // --- shadow: the world where migration never ran -----------------------
+    s_pop: f64,
+    s_ep: f64,
+    prev_pop: Option<f64>,
+    prev_ep: Option<f64>,
+    real_ct: u32,
+    shad_ct: u32,
+    saved: u32,
+    added: u32,
+    shadow_dead: bool,
+    died_tick: i64,
+    died_path: &'static str,
+    cw_mismatch: u32,
+    // --- other consumers of the two metrics --------------------------------
+    treas_debt: f64,
+    up_div: u32,
+    pop_hist: std::collections::VecDeque<f64>,
+    ep_hist: std::collections::VecDeque<f64>,
+}
+
+/// The deterministic half of every `auto_delta` that writes an actor's
+/// `population`, plus the bound on the half that is not deterministic.
+///
+/// `phase_auto_deltas` runs FIRST in the tick (`mod.rs:296–332`), so evaluating its
+/// conditions on the state observed before the tick is exact — unlike the gate of
+/// the pair loop, which sits three phases later. What is *not* exact is the noise
+/// term, `(rng.gen() − 0.5)·2·noise`: it consumes RNG and cannot be replicated from
+/// outside. It is bounded by `±noise`, and that bound is returned so the identity
+/// can be checked to the tolerance the engine actually allows instead of pretending
+/// to a precision that does not exist. `rome_375` is the only scenario with such a
+/// block (`rome.population`, base `0.3`, three conditions, `noise: 0.1`).
+fn price_pop_auto_deltas(
+    sc: &Scenario,
+    snap: &BTreeMap<String, std::collections::HashMap<String, f64>>,
+    globals: &std::collections::HashMap<String, f64>,
+) -> (BTreeMap<String, f64>, BTreeMap<String, f64>) {
+    let read = |r: &MetricRef| -> f64 {
+        match r {
+            MetricRef::Actor { actor_id, metric } => snap
+                .get(actor_id.as_str())
+                .and_then(|m| m.get(metric.as_str()))
+                .copied()
+                .unwrap_or(0.0),
+            MetricRef::Global { key } => globals.get(key.as_str()).copied().unwrap_or(0.0),
+            MetricRef::Family { .. } => 0.0,
+        }
+    };
+    let mut delta: BTreeMap<String, f64> = BTreeMap::new();
+    let mut noise: BTreeMap<String, f64> = BTreeMap::new();
+    for ad in &sc.auto_deltas {
+        let MetricRef::Actor { actor_id, metric } = &ad.metric else { continue };
+        if metric.as_str() != "population" {
+            continue;
+        }
+        let mut d = ad.base;
+        for c in &ad.conditions {
+            let v = read(&c.metric);
+            let hit = match c.operator {
+                ComparisonOperator::Less => v < c.value,
+                ComparisonOperator::LessOrEqual => v <= c.value,
+                ComparisonOperator::Greater => v > c.value,
+                ComparisonOperator::GreaterOrEqual => v >= c.value,
+                ComparisonOperator::Equal => (v - c.value).abs() < 0.001,
+            };
+            if hit {
+                d += c.delta;
+            }
+        }
+        for rc in &ad.ratio_conditions {
+            let b = read(&rc.metric_b);
+            if b == 0.0 {
+                continue;
+            }
+            if rc.operator.evaluate(read(&rc.metric_a) / b, rc.ratio) {
+                d += rc.delta;
+            }
+        }
+        *delta.entry(actor_id.as_str().to_string()).or_insert(0.0) += d;
+        *noise.entry(actor_id.as_str().to_string()).or_insert(0.0) += ad.noise;
+    }
+    (delta, noise)
+}
+
+/// What one solved tick of migration produced: per-actor loss, per-actor gain,
+/// per-actor pressure received, and the ordered list of firings.
+type MigrationTick = (
+    BTreeMap<String, f64>,
+    BTreeMap<String, f64>,
+    BTreeMap<String, f64>,
+    Vec<(String, String)>,
+);
+
+/// The counter proper (§1 п.2): instead of *predicting* which pairs fired from the
+/// state observed before the tick, solve for the set that reproduces the observed
+/// populations exactly.
+///
+/// Why a search and not a prediction: the gate reads `external_pressure` and
+/// `cohesion` **at the moment the pair loop runs**, and between the observation
+/// point and that moment sit `auto_deltas`, rank bonuses, the dependency phase and
+/// the military/diplomatic interactions of earlier pairs — the last of which are
+/// RNG-driven. A prediction is therefore right most of the time and wrong near the
+/// threshold, which is exactly where this channel lives. The search has no such
+/// blind spot: it is validated by the population identity of every actor at once,
+/// so a wrong set cannot pass.
+///
+/// Candidates are pruned to actors near the gate (`ep > 45 ∧ coh < 75` — wide,
+/// because a military defeat inside the same tick can drop `cohesion` by 10–20
+/// points before the pair loop reaches the pair), which in
+/// all three scenarios keeps the subset space at a handful; a tick whose candidate
+/// set is larger than `MAX_SOLVE_CANDIDATES` is reported unresolved rather than
+/// guessed.
+const MAX_SOLVE_CANDIDATES: usize = 12;
+
+#[allow(clippy::too_many_arguments)]
+fn solve_migration(
+    pairs: &[LandPair],
+    base_pop: &BTreeMap<String, f64>,
+    ep0: &BTreeMap<String, f64>,
+    coh0: &BTreeMap<String, f64>,
+    ev_pop: &BTreeMap<String, f64>,
+    observed: &BTreeMap<String, f64>,
+    tol: &BTreeMap<String, f64>,
+) -> Option<MigrationTick> {
+    let mut cands: Vec<String> = ep0
+        .iter()
+        .filter(|(id, e)| **e > 45.0 && coh0.get(*id).copied().unwrap_or(100.0) < 75.0)
+        .map(|(id, _)| id.clone())
+        .collect();
+    cands.sort();
+    if cands.len() > MAX_SOLVE_CANDIDATES {
+        return None;
+    }
+    for mask in 0u32..(1u32 << cands.len()) {
+        let srcs: std::collections::HashSet<&String> = cands
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, c)| c)
+            .collect();
+        let mut pop = base_pop.clone();
+        let mut loss = BTreeMap::new();
+        let mut gain = BTreeMap::new();
+        let mut epg = BTreeMap::new();
+        let mut fired = Vec::new();
+        // the engine's order and tie-break, with the source set fixed by the mask
+        for p in pairs {
+            let src = if srcs.contains(&p.a) {
+                p.a.clone()
+            } else if srcs.contains(&p.b) {
+                p.b.clone()
+            } else {
+                continue;
+            };
+            let dst = if src == p.a { p.b.clone() } else { p.a.clone() };
+            let sp = pop.get(&src).copied().unwrap_or(0.0);
+            let se = ep0.get(&src).copied().unwrap_or(0.0);
+            pop.insert(src.clone(), sp - sp * 0.01);
+            *loss.entry(src.clone()).or_insert(0.0) += sp * 0.01;
+            *pop.entry(dst.clone()).or_insert(0.0) += sp * 0.005;
+            *gain.entry(dst.clone()).or_insert(0.0) += sp * 0.005;
+            *epg.entry(dst.clone()).or_insert(0.0) += (se - 65.0) * 0.2 / p.distance as f64;
+            fired.push((src, dst));
+        }
+        let ok = observed.iter().all(|(aid, obs)| {
+            let pred = (pop.get(aid).copied().unwrap_or(0.0)
+                + ev_pop.get(aid).copied().unwrap_or(0.0))
+            .max(0.0);
+            (pred - obs).abs()
+                <= 1e-6 * obs.abs().max(1.0) + tol.get(aid).copied().unwrap_or(0.0)
+        });
+        if ok {
+            return Some((loss, gain, epg, fired));
+        }
+    }
+    None
+}
+
+/// §1 п.2, п.3, п.5 — the counter, the `K` decomposition and the counterfactual.
+fn decisive26(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tdep\tevents\tmig_loss\tmig_gain\tsplit\tfloor\tresid\trep_bad\trep_worst\ts_pop\ts_ep\tsaved\tadded\tdied\tpath\tcw_mism\tup_div\ttreas_debt");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc.dependencies.clone();
+        let sc_owned = sc.clone();
+        let sc_ref = &sc_owned;
+
+        let mut acc: BTreeMap<String, Mig26> = BTreeMap::new();
+        let mut collapses = 0u32;
+        let mut victory_tick: i64 = -1;
+        // per-tick histogram of "how many pairs one source fired on at once"
+        let mut khist: BTreeMap<u32, u64> = BTreeMap::new();
+        let mut fires = 0u64;
+        let mut fires_first = 0u64; // the first firing of a source in a tick
+        let mut loss_first = 0.0f64;
+        let mut loss_rest = 0.0f64;
+        let mut ep_made_source = 0u64;      // gate opened by a transfer received earlier
+        let mut ep_made_source_pred = 0u64; // same, as the naive prediction saw it
+        let mut solve_unresolved = 0u32; // ticks the search could not reproduce
+        let mut pred_wrong = 0u32;       // ticks the naive prediction differed from the solved set
+
+        for t in 0..ticks {
+            // ---------- predict the migration of this tick ----------------------
+            let (fired_pred, pred_loss, pred_gain, pred_ep, pred_pop, prev_snapshot, pairs_t, base_pop, ep0, coh0, pop_noise) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut pop: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut snapshot: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> = BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let (p, e, c, eo) = (
+                        a.get_metric("population"),
+                        a.get_metric("external_pressure"),
+                        a.get_metric("cohesion"),
+                        a.get_metric("economic_output"),
+                    );
+                    snapshot.insert(aid.clone(), (p, e, c, eo));
+                    full.insert(aid.clone(), a.metrics.clone());
+                    // the dependency phase runs BEFORE the pair loop, so the stock the
+                    // loop cuts is already net of the rule
+                    pop.insert(aid.clone(), p); // auto_delta and the rule are folded in below
+                    ep.insert(aid.clone(), e);
+                    coh.insert(aid.clone(), c);
+                }
+                // phase 1 (auto_deltas) runs before the dependency phase, which runs
+                // before the pair loop — so the stock the loop cuts is the start value
+                // plus the auto_delta and minus the rule, in that order
+                let (ad_delta, ad_noise) = price_pop_auto_deltas(sc_ref, &full, &world.global_metrics);
+                for (aid, d) in &ad_delta {
+                    if let Some(v) = pop.get_mut(aid) {
+                        *v = (*v + d).max(0.0);
+                    }
+                }
+                for (aid, v) in pop.iter_mut() {
+                    let eo = snapshot.get(aid).map(|x| x.3).unwrap_or(0.0);
+                    *v -= price_population_rules(&deps, *v, eo);
+                }
+                let ep_before = ep.clone();
+                let base_for_solver = pop.clone();
+                let mut loss = BTreeMap::new();
+                let mut gain = BTreeMap::new();
+                let mut ep_gain = BTreeMap::new();
+                let fired = replay_migration(
+                    &pairs, &mut pop, &mut ep, &coh, &mut loss, &mut gain, &mut ep_gain,
+                );
+                // a source whose gate was open only because of a transfer received
+                // earlier in this same tick — the contour of §0.1 п.4, counted inside
+                // the tick where it is unambiguous
+                for (src, _) in &fired {
+                    if ep_before.get(src).copied().unwrap_or(0.0) <= 65.0 {
+                        ep_made_source_pred += 1;
+                    }
+                }
+                (fired, loss, gain, ep_gain, pop.clone(), snapshot, pairs, base_for_solver, ep_before, coh, ad_noise)
+            };
+
+            let live_before: std::collections::HashSet<String> = prev_snapshot.keys().cloned().collect();
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if victory_tick < 0 && state.world_state.as_ref().unwrap().victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+
+            // what the events wrote to population this tick, nominal
+            let mut ev_pop: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "population") {
+                    *ev_pop.entry(aid).or_insert(0.0) += d;
+                }
+            }
+
+            // ---------- solve for the firing set that reproduces the tick --------
+            let (mig_loss, mig_gain, mig_ep, fired, solved_ok) = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut observed: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in base_pop.keys() {
+                    if let Some(a) = world.actors.get(aid) {
+                        if !world.dead_actor_ids.contains(aid) {
+                            observed.insert(aid.clone(), a.get_metric("population"));
+                            continue;
+                        }
+                    }
+                    if let Some(d) = world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                        observed.insert(aid.clone(), d.final_metrics.get("population").copied().unwrap_or(0.0));
+                    }
+                }
+                match solve_migration(&pairs_t, &base_pop, &ep0, &coh0, &ev_pop, &observed, &pop_noise) {
+                    Some((l, g, e, f)) => (l, g, e, f, true),
+                    None => (pred_loss.clone(), pred_gain.clone(), pred_ep.clone(), fired_pred.clone(), false),
+                }
+            };
+            if !solved_ok {
+                solve_unresolved += 1;
+                // Characterise the miss rather than absorb it: the suspect is
+                // `economic_output` moving across the dependency rule's threshold
+                // between the observation point and the dependency phase, which
+                // changes the stock the pair loop cuts.
+                let world = state.world_state.as_ref().unwrap();
+                let mut near = Vec::new();
+                for (aid, (p0, e0, c0, eo0)) in prev_snapshot.iter() {
+                    let eo_now = world.actors.get(aid).map(|a| a.get_metric("economic_output")).unwrap_or(-1.0);
+                    if (*eo0 - 50.0).abs() < 10.0 || (eo_now - 50.0).abs() < 10.0 || *e0 > 65.0 {
+                        near.push(format!(
+                            "{}:p0={:.1},ep={:.1},coh={:.1},eo0={:.1},eo1={:.1}",
+                            aid, p0, e0, c0, eo0, eo_now
+                        ));
+                    }
+                }
+                println!("#UNRES\t{}\t{}\ttick={}\t{}", seed, mode_label(strategy), t + 1, near.join(" "));
+            }
+            if fired != fired_pred {
+                pred_wrong += 1;
+            }
+            // §4.2 — a source whose pressure at the START of the pair loop was below
+            // the gate: it can only have crossed it on a transfer received earlier in
+            // this same tick. Counted on the SOLVED set; the prediction-based twin
+            // (`ep_made_source_pred`) is kept alongside so the two can disagree
+            // visibly instead of silently.
+            for (src, _) in &fired {
+                if ep0.get(src).copied().unwrap_or(0.0) <= 65.0 {
+                    ep_made_source += 1;
+                }
+            }
+
+            // per-source firing count of this tick
+            {
+                let mut per_src: BTreeMap<String, u32> = BTreeMap::new();
+                for (src, _) in &fired {
+                    *per_src.entry(src.clone()).or_insert(0) += 1;
+                }
+                for (src, n) in &per_src {
+                    *khist.entry(*n).or_insert(0) += 1;
+                    fires += *n as u64;
+                    fires_first += 1;
+                    // the first cut of the tick against the ones that compound on it
+                    let base = prev_snapshot.get(src).map(|x| x.0).unwrap_or(0.0)
+                        - price_population_rules(
+                            &deps,
+                            prev_snapshot.get(src).map(|x| x.0).unwrap_or(0.0),
+                            prev_snapshot.get(src).map(|x| x.3).unwrap_or(0.0),
+                        );
+                    let first = base * 0.01;
+                    loss_first += first;
+                    loss_rest += mig_loss.get(src).copied().unwrap_or(0.0) - first;
+                }
+            }
+
+
+            let world = state.world_state.as_ref().unwrap();
+            let cur_tick = t;
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == cur_tick)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            // successors born this tick carry `parent_pop × weight` (`mod.rs:1640`)
+            for (aid, a) in world.actors.iter() {
+                if !live_before.contains(aid) && !world.dead_actor_ids.contains(aid) {
+                    let e = acc.entry(aid.clone()).or_default();
+                    e.c_split += a.get_metric("population");
+                }
+            }
+
+            let ids: Vec<String> = world
+                .actors
+                .keys()
+                .cloned()
+                .chain(just_dead.keys().cloned())
+                .collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let pop = m.get("population").copied().unwrap_or(0.0);
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let eo = m.get("economic_output").copied().unwrap_or(0.0);
+
+                let e = acc.entry(aid.clone()).or_default();
+                if !e.seen {
+                    e.seen = true;
+                    e.min_surv = world.actors.get(&aid).and_then(|a| a.minimum_survival_ticks);
+                    e.neighbors = world
+                        .actors
+                        .get(&aid)
+                        .map(|a| a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect())
+                        .unwrap_or_default();
+                    e.s_pop = pop;
+                    e.s_ep = ep;
+                    e.prev_pop = Some(pop);
+                    e.prev_ep = Some(ep);
+                    e.died_tick = -1;
+                    continue; // no previous tick to reconcile against
+                }
+                e.ticks += 1;
+
+                // ---- the counter: does the replica reproduce the tick? ----------
+                if let Some((p0, _e0, _c0, eo0)) = prev_snapshot.get(&aid) {
+                    let base = base_pop.get(&aid).copied().unwrap_or(*p0);
+                    let dep = price_population_rules(&deps, *p0, *eo0);
+                    let l = mig_loss.get(&aid).copied().unwrap_or(0.0);
+                    let g = mig_gain.get(&aid).copied().unwrap_or(0.0);
+                    let evd = ev_pop.get(&aid).copied().unwrap_or(0.0);
+                    let _ = &pred_pop;
+                    // the identity is checked against the SOLVED set, so `rep_bad`
+                    // measures the counter, not the naive prediction
+                    let nominal = base - l + g + evd;
+                    let floor = if nominal < 0.0 { -nominal } else { 0.0 };
+                    let predicted = nominal.max(0.0);
+                    let err = predicted - pop;
+                    e.c_dep -= dep;
+                    e.c_mig_loss -= l;
+                    e.c_mig_gain += g;
+                    e.c_events += evd;
+                    e.c_floor += floor;
+                    if err.abs() > 1e-6 * pop.abs().max(1.0) + pop_noise.get(&aid).copied().unwrap_or(0.0) {
+                        e.rep_bad += 1;
+                        if err.abs() > e.rep_worst.abs() {
+                            e.rep_worst = err;
+                        }
+                        e.c_resid += pop - predicted;
+                    }
+                }
+
+                // ---- the shadow: no migration at all ----------------------------
+                let d_pop = pop - e.prev_pop.unwrap_or(pop);
+                let d_ep = ep - e.prev_ep.unwrap_or(ep);
+                let ml = mig_loss.get(&aid).copied().unwrap_or(0.0);
+                let mg = mig_gain.get(&aid).copied().unwrap_or(0.0);
+                let me = mig_ep.get(&aid).copied().unwrap_or(0.0);
+                e.s_pop = (e.s_pop + d_pop + ml - mg).max(0.0);
+                e.s_ep = (e.s_ep + d_ep - me).clamp(0.0, 100.0);
+                e.prev_pop = Some(pop);
+                e.prev_ep = Some(ep);
+
+                e.treas_debt += (e.s_pop - pop) * eo * 0.001;
+                e.pop_hist.push_back(e.s_pop - pop);
+                while e.pop_hist.len() > 5 { e.pop_hist.pop_front(); }
+                e.ep_hist.push_back(e.s_ep - ep);
+                while e.ep_hist.len() > 5 { e.ep_hist.pop_front(); }
+
+                // ---- verdicts ----------------------------------------------------
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if cur_tick < ms);
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    let real_d = rc || ri || rq;
+                    if real_d { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                    // only `external_pressure` reaches the collapse predicate; the
+                    // shadow of `population` reaches relevance and the treasury
+                    let (sc_, si, sq) = danger_paths(coh, leg, e.s_ep, mil, besieged);
+                    let shad_d = sc_ || si || sq;
+                    if shad_d { e.shad_ct += 1 } else { e.shad_ct = 0 }
+                    if e.shad_ct >= 3 && alive && !e.shadow_dead {
+                        e.shadow_dead = true;
+                        e.added += 1;
+                    }
+                }
+                let pw: f64 = e.pop_hist.back().copied().unwrap_or(0.0)
+                    - e.pop_hist.front().copied().unwrap_or(0.0);
+                let ew: f64 = e.ep_hist.back().copied().unwrap_or(0.0)
+                    - e.ep_hist.front().copied().unwrap_or(0.0);
+                let real_up = upheaval_verdict_multi(world, &aid, &[]);
+                let shad_up = upheaval_verdict_multi(
+                    world, &aid, &[("population", pw), ("external_pressure", ew)],
+                );
+                if real_up != shad_up { e.up_div += 1; }
+
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    collapses += 1;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    if e.shad_ct < 3 { e.saved += 1; }
+                    println!(
+                        "#DEATH26\t{}\t{}\t{}\ttick={}\tpath={}\treal_ct={}\tshad_ct={}\tep={:.2}\ts_ep={:.2}\tpop={:.1}\ts_pop={:.1}",
+                        aid, seed, mode_label(strategy), t + 1, e.died_path,
+                        e.real_ct, e.shad_ct, ep, e.s_ep, pop, e.s_pop
+                    );
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        let mut tot = [0.0f64; 7];
+        let (mut saved, mut added, mut cwm, mut repbad, mut updiv) = (0u32, 0u32, 0u32, 0u32, 0u32);
+        for (aid, e) in &acc {
+            tot[0] += e.c_dep; tot[1] += e.c_events; tot[2] += e.c_mig_loss;
+            tot[3] += e.c_mig_gain; tot[4] += e.c_split; tot[5] += e.c_floor; tot[6] += e.c_resid;
+            saved += e.saved; added += e.added; cwm += e.cw_mismatch; repbad += e.rep_bad; updiv += e.up_div;
+            println!(
+                "{}\t{}\t{}\t{}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{}\t{:+.2e}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{}\t{}\t{}\t{:+.1}",
+                aid, seed, mode, e.ticks,
+                e.c_dep, e.c_events, e.c_mig_loss, e.c_mig_gain, e.c_split, e.c_floor, e.c_resid,
+                e.rep_bad, e.rep_worst, e.s_pop, e.s_ep,
+                e.saved, e.added, e.died_tick, e.died_path, e.cw_mismatch, e.up_div, e.treas_debt
+            );
+        }
+        let kdesc: Vec<String> = khist.iter().map(|(k, v)| format!("{}x{}", k, v)).collect();
+        println!(
+            "#CF26\tseed={}\tmode={}\tdep={:+.1}\tevents={:+.1}\tmig_loss={:+.1}\tmig_gain={:+.1}\tmig_net={:+.1}\tsplit={:+.1}\tfloor={:+.1}\tresid={:+.1}\trep_bad={}\tsaved={}\tadded={}\tcw_mismatch={}\tup_div={}\tcollapses={}\tvictory={}\tfires={}\tsources={}\tloss_first={:.1}\tloss_compound={:.1}\tep_made_source={}\tep_made_source_pred={}\tsolve_unresolved={}\tpred_wrong={}\tkhist={}",
+            seed, mode, tot[0], tot[1], tot[2], tot[3], tot[2] + tot[3], tot[4], tot[5], tot[6],
+            repbad, saved, added, cwm, updiv, collapses, victory_tick,
+            fires, fires_first, loss_first, loss_rest, ep_made_source, ep_made_source_pred,
+            solve_unresolved, pred_wrong, kdesc.join(",")
+        );
+    }
+}
+
+/// The variants §6 put on the table, priced before any of them is written into the
+/// engine (§1 п.4 of the statement, стадия 2).
+///
+/// The shadow here is **exact in its own model**, and for a reason specific to this
+/// channel: the gate reads `external_pressure` and `cohesion`, never `population`.
+/// So changing what migration does to population cannot change **which pairs fire**
+/// — the firing set solved from the real run stays valid for every variant, and only
+/// the amounts differ. The feedback that remains is `population → treasury income`
+/// (`mod.rs:672`), `population → plague` (`> 500`), and `population → relevance`;
+/// the first two are measured below, the third is bounded by задача 26 §5.1
+/// (`up_div` 0…130 actor-ticks).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum MigVariant {
+    /// the world as it is — the floor test
+    Base,
+    /// (A₁) one aggregated transfer per source per tick, split between the pairs
+    /// that fired, instead of `K` sequential cuts
+    A1,
+    /// (A₂) the sink receives what the source lost — the transfer stops evaporating
+    A2,
+    /// (B) both ratios scaled
+    B50,
+    B25,
+    /// (A₁)+(A₂) — a separate variant with its own arithmetic, per §1 п.4 of the
+    /// stage-2 brief: not an automatic union
+    A1A2,
+}
+
+const MIG_VARIANTS: [MigVariant; 6] = [
+    MigVariant::Base, MigVariant::A1, MigVariant::A2,
+    MigVariant::B50, MigVariant::B25, MigVariant::A1A2,
+];
+
+fn mig_variant_label(v: MigVariant) -> &'static str {
+    match v {
+        MigVariant::Base => "base",
+        MigVariant::A1 => "A1_aggregate",
+        MigVariant::A2 => "A2_full_transfer",
+        MigVariant::B50 => "B_half",
+        MigVariant::B25 => "B_quarter",
+        MigVariant::A1A2 => "A1A2",
+    }
+}
+
+/// `(loss ratio, gain ratio, aggregate?)` for a variant.
+fn mig_variant_params(v: MigVariant) -> (f64, f64, bool) {
+    match v {
+        MigVariant::Base => (0.01, 0.005, false),
+        MigVariant::A1 => (0.01, 0.005, true),
+        MigVariant::A2 => (0.01, 0.01, false),
+        MigVariant::B50 => (0.005, 0.0025, false),
+        MigVariant::B25 => (0.0025, 0.00125, false),
+        MigVariant::A1A2 => (0.01, 0.01, true),
+    }
+}
+
+#[derive(Default, Clone)]
+struct VarActor {
+    seen: bool,
+    pop: [f64; 6],
+    /// Σ (shadow − real) · eo · 0.001 — what the variant does to treasury income,
+    /// the only quantitative consumer of `population` in the engine
+    income: [f64; 6],
+    /// ticks where the `plague` gate (`population > 500`) differs from the real run
+    plague_flip: [u32; 6],
+    real_pop_final: f64,
+    pop0: f64,
+}
+
+/// Стадия 2, шаг 1 — the equilibrium calculation across the fork, on the trajectory.
+fn migvariants(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!(
+        "actor\tseed\tmode\tpop0\treal\t{}\t{}\t{}\t{}\t{}\tinc_A1\tinc_A2\tinc_A1A2\tplague_A1\tplague_A2",
+        mig_variant_label(MigVariant::A1),
+        mig_variant_label(MigVariant::A2),
+        mig_variant_label(MigVariant::B50),
+        mig_variant_label(MigVariant::B25),
+        mig_variant_label(MigVariant::A1A2),
+    );
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc.dependencies.clone();
+        let sc_owned = sc.clone();
+        let sc_ref = &sc_owned;
+
+        let mut acc: BTreeMap<String, VarActor> = BTreeMap::new();
+        let mut unresolved = 0u32;
+
+        for t in 0..ticks {
+            let (pairs_t, base_pop, ep0, coh0, snapshot, pop_noise) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut pop: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut snap: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> = BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let (p, eo) = (a.get_metric("population"), a.get_metric("economic_output"));
+                    snap.insert(aid.clone(), (p, eo));
+                    full.insert(aid.clone(), a.metrics.clone());
+                    pop.insert(aid.clone(), p);
+                    ep.insert(aid.clone(), a.get_metric("external_pressure"));
+                    coh.insert(aid.clone(), a.get_metric("cohesion"));
+                }
+                let (ad_delta, ad_noise) = price_pop_auto_deltas(sc_ref, &full, &world.global_metrics);
+                for (aid, d) in &ad_delta {
+                    if let Some(v) = pop.get_mut(aid) {
+                        *v = (*v + d).max(0.0);
+                    }
+                }
+                for (aid, v) in pop.iter_mut() {
+                    let eo = snap.get(aid).map(|x| x.1).unwrap_or(0.0);
+                    *v -= price_population_rules(&deps, *v, eo);
+                }
+                (pairs, pop, ep, coh, snap, ad_noise)
+            };
+
+            // seed the shadows from the real world on first sight
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, (p, _eo)) in snapshot.iter() {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.pop = [*p; 6];
+                        e.pop0 = *p;
+                    }
+                    let _ = world;
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let mut ev_pop: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "population") {
+                    *ev_pop.entry(aid).or_insert(0.0) += d;
+                }
+            }
+
+            // the firing set, solved against the real world (§1 п.2 of stage 1)
+            let fired = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut observed: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in base_pop.keys() {
+                    if let Some(a) = world.actors.get(aid) {
+                        if !world.dead_actor_ids.contains(aid) {
+                            observed.insert(aid.clone(), a.get_metric("population"));
+                            continue;
+                        }
+                    }
+                    if let Some(d) = world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                        observed.insert(aid.clone(), d.final_metrics.get("population").copied().unwrap_or(0.0));
+                    }
+                }
+                match solve_migration(&pairs_t, &base_pop, &ep0, &coh0, &ev_pop, &observed, &pop_noise) {
+                    Some((_, _, _, f)) => f,
+                    None => {
+                        unresolved += 1;
+                        Vec::new()
+                    }
+                }
+            };
+
+            // how many pairs each source fired on — (A₁) needs it to split the transfer
+            let mut per_src: BTreeMap<String, u32> = BTreeMap::new();
+            for (src, _) in &fired {
+                *per_src.entry(src.clone()).or_insert(0) += 1;
+            }
+
+            // advance every shadow with its own arithmetic
+            let world = state.world_state.as_ref().unwrap();
+            for (vi, v) in MIG_VARIANTS.iter().enumerate() {
+                let (loss_r, gain_r, aggregate) = mig_variant_params(*v);
+                // the stock the pair loop cuts, in THIS shadow: auto_delta and the
+                // dependency rule are proportional, so they must be re-priced on the
+                // shadow's own population, not copied from the real run
+                let mut spop: BTreeMap<String, f64> = BTreeMap::new();
+                for (aid, (p_real, eo)) in snapshot.iter() {
+                    let e = acc.get(aid).map(|e| e.pop[vi]).unwrap_or(*p_real);
+                    let ad = base_pop.get(aid).copied().unwrap_or(*p_real) - *p_real
+                        + price_population_rules(&deps, *p_real, *eo);
+                    let after_ad = (e + ad).max(0.0);
+                    spop.insert(aid.clone(), after_ad - price_population_rules(&deps, after_ad, *eo));
+                }
+                if aggregate {
+                    // one cut per source per tick, the transfer divided between the
+                    // pairs that fired — the loss stops compounding and the sinks
+                    // share what actually left
+                    for (src, n) in &per_src {
+                        let sp = spop.get(src).copied().unwrap_or(0.0);
+                        let lost = sp * loss_r;
+                        spop.insert(src.clone(), sp - lost);
+                        let each = sp * gain_r / *n as f64;
+                        for (s2, dst) in &fired {
+                            if s2 == src {
+                                *spop.entry(dst.clone()).or_insert(0.0) += each;
+                            }
+                        }
+                    }
+                } else {
+                    for (src, dst) in &fired {
+                        let sp = spop.get(src).copied().unwrap_or(0.0);
+                        spop.insert(src.clone(), sp - sp * loss_r);
+                        *spop.entry(dst.clone()).or_insert(0.0) += sp * gain_r;
+                    }
+                }
+                for (aid, e) in acc.iter_mut() {
+                    let Some(sp) = spop.get(aid) else { continue };
+                    let evd = ev_pop.get(aid).copied().unwrap_or(0.0);
+                    e.pop[vi] = (sp + evd).max(0.0);
+                    let real = world
+                        .actors
+                        .get(aid)
+                        .map(|a| a.get_metric("population"))
+                        .unwrap_or(e.real_pop_final);
+                    let eo = world.actors.get(aid).map(|a| a.get_metric("economic_output")).unwrap_or(0.0);
+                    e.income[vi] += (e.pop[vi] - real) * eo * 0.001;
+                    if (e.pop[vi] > 500.0) != (real > 500.0) {
+                        e.plague_flip[vi] += 1;
+                    }
+                }
+            }
+            for (aid, e) in acc.iter_mut() {
+                if let Some(a) = world.actors.get(aid) {
+                    e.real_pop_final = a.get_metric("population");
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        for (aid, e) in &acc {
+            println!(
+                "{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{}\t{}",
+                aid, seed, mode, e.pop0, e.real_pop_final,
+                e.pop[1], e.pop[2], e.pop[3], e.pop[4], e.pop[5],
+                e.income[1], e.income[2], e.income[5],
+                e.plague_flip[1], e.plague_flip[2]
+            );
+        }
+        let base_err: f64 = acc.values().map(|e| (e.pop[0] - e.real_pop_final).abs()).sum();
+        println!(
+            "#VAR\tseed={}\tmode={}\tbase_err={:.4}\tunresolved={}",
+            seed, mode, base_err, unresolved
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -5239,6 +6439,36 @@ fn main() {
             poolcut(scenario, ticks, &seeds, strategy, &alphas);
         }
         "evaddr" => evaddr(),
+        "decisive26" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            decisive26(scenario, ticks, &seeds, strategy);
+        }
+        "migvariants" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            migvariants(scenario, ticks, &seeds, strategy);
+        }
+        "migwalk" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            migwalk(scenario, ticks, &seeds, strategy);
+        }
         "evtarget" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
