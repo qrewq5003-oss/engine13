@@ -9,8 +9,12 @@
 //! These tests are content checks only — they load scenarios through the
 //! normal registry and inspect config, they do not modify `engine/`.
 
-use engine13::core::{ComparisonOperator, EventConditionType, MetricName, MetricRef, Scenario};
+use engine13::core::{
+    ComparisonOperator, EventConditionType, EventTarget, MetricName, MetricRef, RandomEvent,
+    RelativeCondition, RelativeMetricRef, Scenario,
+};
 use engine13::scenarios::registry;
+use std::collections::HashMap;
 use std::process::Command;
 
 const SCENARIO_IDS: &[&str] = &["rome_375", "constantinople_1430", "milan_1477"];
@@ -416,4 +420,237 @@ fn content_only_names_metrics_the_engine_knows() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Bug class 6 (Задача 24, стадия 2): **an event whose target receives none of
+/// its effects, or whose gate reads a third actor.**
+///
+/// `phase_random_events` (`engine/mod.rs:396–520`) carries addressing in *three*
+/// slots, and they are not the same slot:
+///   - `target` — eligibility and attribution. For `EventTarget::Actor(id)` the
+///     only test is that the actor exists and is not dead; `Foreground` plays no
+///     part. The chosen id becomes the `actor_id` of the logged `Event`, i.e. who
+///     the chronicle says the event was about.
+///   - `conditions` — frequency. Resolved through `RelativeMetricRef::resolve`
+///     against the target, but that call binds to the target **only** for the
+///     `self.<metric>` form; any other key is `Absolute` and ignores the target
+///     entirely (`core/metric_ref.rs:404–413`).
+///   - `effects` — the write, through the same call and the same dichotomy.
+///
+/// So content can name an actor in `target`, gate on a second, and write to a
+/// third, and nothing anywhere complains. Two shapes of that are pathological,
+/// and the walk in `docs/investigation_event_target_addressing.md` §3 found each
+/// of them exactly once in 46 events:
+///   1. **no effect reaches the target** — the event fires "on" an actor that
+///      receives nothing, so the config cannot tell you who it hurts without
+///      reading all three slots (`mehmed_threatens`);
+///   2. **a condition reads a different actor** — the event's frequency is
+///      controlled by someone who is neither its target nor (necessarily) its
+///      victim, which is how a gate can be identically false forever without
+///      anyone noticing (`barbarian_raid`).
+///
+/// What is deliberately NOT a violation, because the same walk first flagged it
+/// and the flag was wrong (§3, "третий флаг обхода снят как ложный"): an effect
+/// addressed to a *non-target actor* while some other effect does reach the
+/// target — that is the idiom of nearly every scenario event (`crusade_call`
+/// writes `hungary.military_size`, `ottoman_spy_caught` writes
+/// `ottomans.external_pressure`) — and a `family:`/`global:` gate, which
+/// addresses no actor at all and so cannot be "on the wrong one"
+/// (`senator_bribe` gates on `family:wealth`).
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum AddressingRule {
+    /// at least one effect must land on the event's own target
+    EffectsReachTarget,
+    /// no condition may read a *different* actor
+    GateStaysOnTarget,
+}
+
+/// The two events that violate the rules today, allowlisted the same way
+/// [`KNOWN_INERT_GLOBAL_NAMES`] allowlists content задача 18 chose not to revive.
+///
+/// Both are **decisions, not oversights**, and both were taken on measurement:
+///
+/// * `mehmed_threatens` — задача 24 closed `(D₂)`-0 by confirming the addressing
+///   as intentional in game terms. The anomaly is unique (1 event of 46) and its
+///   price on the channel the task existed for is **zero**: redirecting the write
+///   removes 0 of 102 decisive collapses and adds 25, all on `ottomans`. All four
+///   alternatives measured worse. See `docs/investigation_event_target_addressing.md`
+///   §5, §8 and ENGINE13_INFRASTRUCTURE_TASKS.md, задача 24 §7.12.
+/// * `barbarian_raid` — the mirror case, and dead for a reason that is now known:
+///   its gate is `actor:visigoths.military_size > 80` while `visigoths` start at
+///   `48.0` (`rome_375.rs:404`), so the gate is identically false and the event
+///   has never fired in any measured run (задача 24 §3.3: 0 firings / 30 games).
+///   Reviving it would add a mechanic to a calibrated scenario, which is the
+///   Задача 18 argument verbatim; it is listed, not fixed.
+///
+/// The entry is per *rule*, not per event: an event excused for one shape is
+/// still checked for the other.
+const KNOWN_EVENT_ADDRESSING_EXCEPTIONS: &[(&str, &str, AddressingRule)] = &[
+    ("constantinople_1430", "mehmed_threatens", AddressingRule::EffectsReachTarget),
+    ("rome_375", "barbarian_raid", AddressingRule::GateStaysOnTarget),
+];
+
+/// Does this key address `target`? True for `self.<metric>`, and for an absolute
+/// key that happens to name the target. Resolved through the engine's own call,
+/// so the answer is the engine's and not a re-reading of the key string.
+fn addresses_target(key: &RelativeMetricRef, target: &str) -> bool {
+    match key {
+        RelativeMetricRef::SelfRelative(_) => true,
+        RelativeMetricRef::Absolute(MetricRef::Actor { actor_id, .. }) => actor_id.as_str() == target,
+        RelativeMetricRef::Absolute(_) => false,
+    }
+}
+
+/// Names the actor a key addresses, when it addresses one at all and is not
+/// bound to the target.
+fn other_actor_named(key: &RelativeMetricRef, target: &str) -> Option<String> {
+    match key {
+        RelativeMetricRef::Absolute(MetricRef::Actor { actor_id, .. })
+            if actor_id.as_str() != target =>
+        {
+            Some(actor_id.as_str().to_string())
+        }
+        _ => None,
+    }
+}
+
+/// The check itself, over a slice of events, so that it can be applied to real
+/// content *and* to synthetic cases (see
+/// [`event_addressing_check_catches_a_new_violator`]).
+fn event_addressing_violations(scenario_id: &str, events: &[RandomEvent]) -> Vec<String> {
+    let mut failures = Vec::new();
+    for ev in events {
+        // Only a named target can be missed: `Any`/`SeaActors`/`All` draw their
+        // victim at runtime, and every key of those events is `self.`-relative.
+        let EventTarget::Actor(target) = &ev.target else { continue };
+
+        let excused = |rule: AddressingRule| {
+            KNOWN_EVENT_ADDRESSING_EXCEPTIONS.contains(&(scenario_id, ev.id.as_str(), rule))
+        };
+
+        if !excused(AddressingRule::EffectsReachTarget)
+            && !ev.effects.keys().any(|k| addresses_target(k, target))
+        {
+            let elsewhere: Vec<String> = {
+                let mut v: Vec<String> = ev
+                    .effects
+                    .keys()
+                    .filter_map(|k| other_actor_named(k, target))
+                    .collect();
+                v.sort();
+                v.dedup();
+                v
+            };
+            failures.push(format!(
+                "{scenario_id}: event '{}' targets '{target}' but no effect addresses it \
+                 (effects land on {}) — the config cannot say who this event hurts without \
+                 reading all three addressing slots",
+                ev.id,
+                if elsewhere.is_empty() { "no actor at all".to_string() } else { elsewhere.join(", ") }
+            ));
+        }
+
+        if !excused(AddressingRule::GateStaysOnTarget) {
+            let mut strangers: Vec<String> = ev
+                .conditions
+                .iter()
+                .filter_map(|c| other_actor_named(&c.metric, target))
+                .collect();
+            strangers.sort();
+            strangers.dedup();
+            if !strangers.is_empty() {
+                failures.push(format!(
+                    "{scenario_id}: event '{}' targets '{target}' but its gate reads {} — \
+                     the event's frequency is controlled by an actor it does not fire on, \
+                     so the gate can be identically true or false forever without showing it",
+                    ev.id,
+                    strangers.join(", ")
+                ));
+            }
+        }
+    }
+    failures
+}
+
+#[test]
+fn event_target_matches_gate_and_effects() {
+    let mut failures = Vec::new();
+    // The shared pool first: it is the same object for all three scenarios, so it
+    // is walked once, under its own label.
+    failures.extend(event_addressing_violations("common_events", &engine13::events::common_events()));
+    for &id in SCENARIO_IDS {
+        let s = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+        failures.extend(event_addressing_violations(id, &s.random_events));
+    }
+    assert!(
+        failures.is_empty(),
+        "Event addressing violation(s) — target, gate and effects disagree about who the \
+         event is about:\n{}\n\nIf this is deliberate, add it to \
+         KNOWN_EVENT_ADDRESSING_EXCEPTIONS with the measurement that justifies it, the way \
+         задача 24 did for `mehmed_threatens`.",
+        failures.join("\n")
+    );
+}
+
+/// The guard on the guard: a violator that is *not* on the allowlist must be
+/// caught, and a clean event must not be. Synthetic events, so this keeps working
+/// after the two real cases are someday fixed or removed.
+#[test]
+fn event_addressing_check_catches_a_new_violator() {
+    let ev = |id: &str, target: &str, effect: &str, cond: &str| RandomEvent {
+        id: id.to_string(),
+        probability: 0.1,
+        target: EventTarget::Actor(target.to_string()),
+        conditions: vec![RelativeCondition {
+            metric: RelativeMetricRef::literal(cond),
+            operator: ComparisonOperator::Greater,
+            value: 1.0,
+        }],
+        effects: HashMap::from([(RelativeMetricRef::literal(effect), -1.0)]),
+        llm_context: String::new(),
+        one_time: false,
+    };
+
+    // clean: both slots on the target, in either spelling
+    assert!(event_addressing_violations(
+        "synthetic",
+        &[ev("clean_self", "alpha", "self.cohesion", "self.legitimacy")]
+    )
+    .is_empty());
+    assert!(event_addressing_violations(
+        "synthetic",
+        &[ev("clean_literal", "alpha", "actor:alpha.cohesion", "actor:alpha.legitimacy")]
+    )
+    .is_empty());
+
+    // class 1: effects miss the target — the `mehmed_threatens` shape
+    let effects_miss = event_addressing_violations(
+        "synthetic",
+        &[ev("new_violator", "alpha", "actor:beta.cohesion", "self.legitimacy")],
+    );
+    assert_eq!(effects_miss.len(), 1, "an off-target effect must be caught: {effects_miss:?}");
+    assert!(effects_miss[0].contains("no effect addresses it"));
+
+    // class 2: the gate reads a stranger — the `barbarian_raid` shape
+    let gate_strays = event_addressing_violations(
+        "synthetic",
+        &[ev("new_violator", "alpha", "self.cohesion", "actor:beta.military_size")],
+    );
+    assert_eq!(gate_strays.len(), 1, "an off-target gate must be caught: {gate_strays:?}");
+    assert!(gate_strays[0].contains("its gate reads"));
+
+    // the allowlist is per rule: the real exception excuses one shape, not both
+    assert!(
+        !KNOWN_EVENT_ADDRESSING_EXCEPTIONS
+            .contains(&("constantinople_1430", "mehmed_threatens", AddressingRule::GateStaysOnTarget)),
+        "the effects exception for mehmed_threatens must not excuse its gate too"
+    );
+
+    // a `global:`/`family:` gate addresses no actor and must not be flagged —
+    // the false positive the addressing walk found and corrected (§3)
+    assert!(event_addressing_violations(
+        "synthetic",
+        &[ev("family_gated", "alpha", "self.legitimacy", "family:wealth")]
+    )
+    .is_empty());
 }
