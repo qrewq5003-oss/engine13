@@ -6007,6 +6007,300 @@ fn decisive26(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
     }
 }
 
+/// The variants §6 put on the table, priced before any of them is written into the
+/// engine (§1 п.4 of the statement, стадия 2).
+///
+/// The shadow here is **exact in its own model**, and for a reason specific to this
+/// channel: the gate reads `external_pressure` and `cohesion`, never `population`.
+/// So changing what migration does to population cannot change **which pairs fire**
+/// — the firing set solved from the real run stays valid for every variant, and only
+/// the amounts differ. The feedback that remains is `population → treasury income`
+/// (`mod.rs:672`), `population → plague` (`> 500`), and `population → relevance`;
+/// the first two are measured below, the third is bounded by задача 26 §5.1
+/// (`up_div` 0…130 actor-ticks).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum MigVariant {
+    /// the world as it is — the floor test
+    Base,
+    /// (A₁) one aggregated transfer per source per tick, split between the pairs
+    /// that fired, instead of `K` sequential cuts
+    A1,
+    /// (A₂) the sink receives what the source lost — the transfer stops evaporating
+    A2,
+    /// (B) both ratios scaled
+    B50,
+    B25,
+    /// (A₁)+(A₂) — a separate variant with its own arithmetic, per §1 п.4 of the
+    /// stage-2 brief: not an automatic union
+    A1A2,
+}
+
+const MIG_VARIANTS: [MigVariant; 6] = [
+    MigVariant::Base, MigVariant::A1, MigVariant::A2,
+    MigVariant::B50, MigVariant::B25, MigVariant::A1A2,
+];
+
+fn mig_variant_label(v: MigVariant) -> &'static str {
+    match v {
+        MigVariant::Base => "base",
+        MigVariant::A1 => "A1_aggregate",
+        MigVariant::A2 => "A2_full_transfer",
+        MigVariant::B50 => "B_half",
+        MigVariant::B25 => "B_quarter",
+        MigVariant::A1A2 => "A1A2",
+    }
+}
+
+/// `(loss ratio, gain ratio, aggregate?)` for a variant.
+fn mig_variant_params(v: MigVariant) -> (f64, f64, bool) {
+    match v {
+        MigVariant::Base => (0.01, 0.005, false),
+        MigVariant::A1 => (0.01, 0.005, true),
+        MigVariant::A2 => (0.01, 0.01, false),
+        MigVariant::B50 => (0.005, 0.0025, false),
+        MigVariant::B25 => (0.0025, 0.00125, false),
+        MigVariant::A1A2 => (0.01, 0.01, true),
+    }
+}
+
+#[derive(Default, Clone)]
+struct VarActor {
+    seen: bool,
+    pop: [f64; 6],
+    /// Σ (shadow − real) · eo · 0.001 — what the variant does to treasury income,
+    /// the only quantitative consumer of `population` in the engine
+    income: [f64; 6],
+    /// ticks where the `plague` gate (`population > 500`) differs from the real run
+    plague_flip: [u32; 6],
+    real_pop_final: f64,
+    pop0: f64,
+}
+
+/// Стадия 2, шаг 1 — the equilibrium calculation across the fork, on the trajectory.
+fn migvariants(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!(
+        "actor\tseed\tmode\tpop0\treal\t{}\t{}\t{}\t{}\t{}\tinc_A1\tinc_A2\tinc_A1A2\tplague_A1\tplague_A2",
+        mig_variant_label(MigVariant::A1),
+        mig_variant_label(MigVariant::A2),
+        mig_variant_label(MigVariant::B50),
+        mig_variant_label(MigVariant::B25),
+        mig_variant_label(MigVariant::A1A2),
+    );
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc.dependencies.clone();
+        let sc_owned = sc.clone();
+        let sc_ref = &sc_owned;
+
+        let mut acc: BTreeMap<String, VarActor> = BTreeMap::new();
+        let mut unresolved = 0u32;
+
+        for t in 0..ticks {
+            let (pairs_t, base_pop, ep0, coh0, snapshot, pop_noise) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut pop: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut snap: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> = BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let (p, eo) = (a.get_metric("population"), a.get_metric("economic_output"));
+                    snap.insert(aid.clone(), (p, eo));
+                    full.insert(aid.clone(), a.metrics.clone());
+                    pop.insert(aid.clone(), p);
+                    ep.insert(aid.clone(), a.get_metric("external_pressure"));
+                    coh.insert(aid.clone(), a.get_metric("cohesion"));
+                }
+                let (ad_delta, ad_noise) = price_pop_auto_deltas(sc_ref, &full, &world.global_metrics);
+                for (aid, d) in &ad_delta {
+                    if let Some(v) = pop.get_mut(aid) {
+                        *v = (*v + d).max(0.0);
+                    }
+                }
+                for (aid, v) in pop.iter_mut() {
+                    let eo = snap.get(aid).map(|x| x.1).unwrap_or(0.0);
+                    *v -= price_population_rules(&deps, *v, eo);
+                }
+                (pairs, pop, ep, coh, snap, ad_noise)
+            };
+
+            // seed the shadows from the real world on first sight
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, (p, _eo)) in snapshot.iter() {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        e.seen = true;
+                        e.pop = [*p; 6];
+                        e.pop0 = *p;
+                    }
+                    let _ = world;
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let mut ev_pop: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "population") {
+                    *ev_pop.entry(aid).or_insert(0.0) += d;
+                }
+            }
+
+            // the firing set, solved against the real world (§1 п.2 of stage 1)
+            let fired = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut observed: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in base_pop.keys() {
+                    if let Some(a) = world.actors.get(aid) {
+                        if !world.dead_actor_ids.contains(aid) {
+                            observed.insert(aid.clone(), a.get_metric("population"));
+                            continue;
+                        }
+                    }
+                    if let Some(d) = world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                        observed.insert(aid.clone(), d.final_metrics.get("population").copied().unwrap_or(0.0));
+                    }
+                }
+                match solve_migration(&pairs_t, &base_pop, &ep0, &coh0, &ev_pop, &observed, &pop_noise) {
+                    Some((_, _, _, f)) => f,
+                    None => {
+                        unresolved += 1;
+                        Vec::new()
+                    }
+                }
+            };
+
+            // how many pairs each source fired on — (A₁) needs it to split the transfer
+            let mut per_src: BTreeMap<String, u32> = BTreeMap::new();
+            for (src, _) in &fired {
+                *per_src.entry(src.clone()).or_insert(0) += 1;
+            }
+
+            // advance every shadow with its own arithmetic
+            let world = state.world_state.as_ref().unwrap();
+            for (vi, v) in MIG_VARIANTS.iter().enumerate() {
+                let (loss_r, gain_r, aggregate) = mig_variant_params(*v);
+                // the stock the pair loop cuts, in THIS shadow: auto_delta and the
+                // dependency rule are proportional, so they must be re-priced on the
+                // shadow's own population, not copied from the real run
+                let mut spop: BTreeMap<String, f64> = BTreeMap::new();
+                for (aid, (p_real, eo)) in snapshot.iter() {
+                    let e = acc.get(aid).map(|e| e.pop[vi]).unwrap_or(*p_real);
+                    let ad = base_pop.get(aid).copied().unwrap_or(*p_real) - *p_real
+                        + price_population_rules(&deps, *p_real, *eo);
+                    let after_ad = (e + ad).max(0.0);
+                    spop.insert(aid.clone(), after_ad - price_population_rules(&deps, after_ad, *eo));
+                }
+                if aggregate {
+                    // one cut per source per tick, the transfer divided between the
+                    // pairs that fired — the loss stops compounding and the sinks
+                    // share what actually left
+                    for (src, n) in &per_src {
+                        let sp = spop.get(src).copied().unwrap_or(0.0);
+                        let lost = sp * loss_r;
+                        spop.insert(src.clone(), sp - lost);
+                        let each = sp * gain_r / *n as f64;
+                        for (s2, dst) in &fired {
+                            if s2 == src {
+                                *spop.entry(dst.clone()).or_insert(0.0) += each;
+                            }
+                        }
+                    }
+                } else {
+                    for (src, dst) in &fired {
+                        let sp = spop.get(src).copied().unwrap_or(0.0);
+                        spop.insert(src.clone(), sp - sp * loss_r);
+                        *spop.entry(dst.clone()).or_insert(0.0) += sp * gain_r;
+                    }
+                }
+                for (aid, e) in acc.iter_mut() {
+                    let Some(sp) = spop.get(aid) else { continue };
+                    let evd = ev_pop.get(aid).copied().unwrap_or(0.0);
+                    e.pop[vi] = (sp + evd).max(0.0);
+                    let real = world
+                        .actors
+                        .get(aid)
+                        .map(|a| a.get_metric("population"))
+                        .unwrap_or(e.real_pop_final);
+                    let eo = world.actors.get(aid).map(|a| a.get_metric("economic_output")).unwrap_or(0.0);
+                    e.income[vi] += (e.pop[vi] - real) * eo * 0.001;
+                    if (e.pop[vi] > 500.0) != (real > 500.0) {
+                        e.plague_flip[vi] += 1;
+                    }
+                }
+            }
+            for (aid, e) in acc.iter_mut() {
+                if let Some(a) = world.actors.get(aid) {
+                    e.real_pop_final = a.get_metric("population");
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        for (aid, e) in &acc {
+            println!(
+                "{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{}\t{}",
+                aid, seed, mode, e.pop0, e.real_pop_final,
+                e.pop[1], e.pop[2], e.pop[3], e.pop[4], e.pop[5],
+                e.income[1], e.income[2], e.income[5],
+                e.plague_flip[1], e.plague_flip[2]
+            );
+        }
+        let base_err: f64 = acc.values().map(|e| (e.pop[0] - e.real_pop_final).abs()).sum();
+        println!(
+            "#VAR\tseed={}\tmode={}\tbase_err={:.4}\tunresolved={}",
+            seed, mode, base_err, unresolved
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -6154,6 +6448,16 @@ fn main() {
                 .unwrap_or_else(|| vec![42]);
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             decisive26(scenario, ticks, &seeds, strategy);
+        }
+        "migvariants" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            migvariants(scenario, ticks, &seeds, strategy);
         }
         "migwalk" => {
             let scenario = args.get(2).expect("scenario id");
