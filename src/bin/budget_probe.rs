@@ -6301,6 +6301,1315 @@ fn migvariants(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
     }
 }
 
+// ===========================================================================
+// task 27 — the `external_pressure` ratchet: `epratchet`
+// ===========================================================================
+//
+// Задача 2 asked whether decay opens the **vassalage band** and answered no. This
+// mode asks about the other consumer of the same threshold — the **mortality
+// predicate** (`classic_collapse` and `conquest_collapse`, both with `ep > 85`) —
+// and it does three things задача 2 did not:
+//
+//   1. decomposes the INFLOW by producer, so "it grows from combat and auto_deltas"
+//      becomes a number per producer per actor;
+//   2. re-measures `drops` (задача 12's `0 in 72/72`) on the current build instead
+//      of quoting it;
+//   3. sweeps decay **in the shadow**, not in the engine: `λ` is subtracted from a
+//      shadow `external_pressure` carried alongside the real one, with its own
+//      clamp and its own `collapse_warning_ticks`, and the collapse verdict is
+//      recomputed. No second simulation (the rule of задачи 23–26).
+//
+// The trap named in `investigation_migration_channel.md` §14.7 is avoided here by
+// construction: `decisive26`'s solver models the PRE-fix migration arithmetic and
+// is left untouched, and this mode carries its own [`solve_migration_v2`], which
+// mirrors the aggregated conservative transfer the engine runs today.
+
+/// Decay values swept in the shadow. The range is derived from the magnitudes of
+/// the producers, not inherited from задача 2's `1…8`: combat delivers `15…25` per
+/// event to the defender (`interactions.rs:455`), migration up to `+7` per firing
+/// (`(100−65)·0.2/1`), the successor multiplier is `×1.3`, and the content
+/// `auto_deltas` run `+0.3…+2.125` per tick. So the interesting region spans from
+/// "smaller than one content tick" to "one combat event per two ticks".
+const LAMBDAS: [f64; 8] = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 12.5];
+
+#[derive(Default, Clone)]
+struct EpActor {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    ep0: f64,
+    ep_prev: Option<f64>,
+    // --- occupancy ---------------------------------------------------------
+    at_100: u32,
+    in_band: u32,       // (85, 100)
+    above_85: u32,
+    first_85: i64,
+    first_100: i64,
+    // --- the ratchet -------------------------------------------------------
+    drops: u32,         // ticks the real `ep` ended lower than it started
+    drop_mass: f64,
+    /// задача 12 counted something else and its number must be re-measured in ITS
+    /// own terms, not in ours: it asked how often an actor *left sustained
+    /// pressure*, `ep >= 70`. An actor at 100 can lose 3 points and never leave.
+    release_70: u32,
+    below_70: u32,
+    rises: u32,
+    rise_mass: f64,
+    // --- inflow by producer ------------------------------------------------
+    p_auto: f64,
+    p_events: f64,
+    p_migration: f64,
+    p_inherit: f64,
+    p_residual: f64,    // combat: not replicable from outside, so it is what is left
+    resid_negative: f64, // guard: a negative residual on an UNCLAMPED tick means a producer is missing
+    /// nominal inflow the ceiling threw away — the central quantity of this task
+    clamp_absorbed: f64,
+    /// ticks on which the residual is meaningful at all (no truncation either end)
+    free_ticks: u32,
+    // --- shadows, one per lambda -------------------------------------------
+    s_ep: [f64; 8],
+    /// the shadow задача 26 §5.2 built: pressure without the migration transfer,
+    /// re-derived here under TODAY's migration arithmetic instead of quoted
+    s_nomig: f64,
+    nomig_ct: u32,
+    saved_nomig: u32,
+    real_ct: u32,
+    shad_ct: [u32; 8],
+    saved: [u32; 8],
+    cw_mismatch: u32,
+    died_tick: i64,
+    died_path: &'static str,
+    /// the death was already attributed to migration by задача 26 §5.2
+    mig_attributed: bool,
+}
+
+/// What one solved tick of TODAY's migration produced: pressure received per actor,
+/// and the ordered firings with their distances.
+type MigrationTickV2 = (BTreeMap<String, f64>, Vec<(String, String, u32)>);
+
+/// The migration arithmetic the engine runs TODAY (aggregated per source, transfer
+/// conserved), solved the same way задача 26 §1 solved the old one: by the set of
+/// sources that reproduces every actor's observed population at once.
+fn solve_migration_v2(
+    pairs: &[LandPair],
+    base_pop: &BTreeMap<String, f64>,
+    ep0: &BTreeMap<String, f64>,
+    coh0: &BTreeMap<String, f64>,
+    ev_pop: &BTreeMap<String, f64>,
+    observed: &BTreeMap<String, f64>,
+    tol: &BTreeMap<String, f64>,
+) -> Option<MigrationTickV2> {
+    let mut cands: Vec<String> = ep0
+        .iter()
+        .filter(|(id, e)| **e > 45.0 && coh0.get(*id).copied().unwrap_or(100.0) < 75.0)
+        .map(|(id, _)| id.clone())
+        .collect();
+    cands.sort();
+    if cands.len() > MAX_SOLVE_CANDIDATES {
+        return None;
+    }
+    for mask in 0u32..(1u32 << cands.len()) {
+        let srcs: std::collections::HashSet<&String> = cands
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, c)| c)
+            .collect();
+        let mut pop = base_pop.clone();
+        let mut ep_gain: BTreeMap<String, f64> = BTreeMap::new();
+        let mut fired: Vec<(String, String, u32)> = Vec::new();
+        // one aggregated move per source, sinks share what left — `interactions.rs`
+        let mut by_src: BTreeMap<String, Vec<(String, u32)>> = BTreeMap::new();
+        for p in pairs {
+            let src = if srcs.contains(&p.a) {
+                p.a.clone()
+            } else if srcs.contains(&p.b) {
+                p.b.clone()
+            } else {
+                continue;
+            };
+            let dst = if src == p.a { p.b.clone() } else { p.a.clone() };
+            by_src.entry(src).or_default().push((dst, p.distance));
+        }
+        for (src, sinks) in &by_src {
+            let sp = pop.get(src).copied().unwrap_or(0.0);
+            let moved = sp * 0.01;
+            pop.insert(src.clone(), sp - moved);
+            let each = moved / sinks.len() as f64;
+            let se = ep0.get(src).copied().unwrap_or(0.0);
+            for (dst, dist) in sinks {
+                *pop.entry(dst.clone()).or_insert(0.0) += each;
+                *ep_gain.entry(dst.clone()).or_insert(0.0) += (se - 65.0) * 0.2 / *dist as f64;
+                fired.push((src.clone(), dst.clone(), *dist));
+            }
+        }
+        let ok = observed.iter().all(|(aid, obs)| {
+            let pred = (pop.get(aid).copied().unwrap_or(0.0)
+                + ev_pop.get(aid).copied().unwrap_or(0.0))
+            .max(0.0);
+            (pred - obs).abs()
+                <= 1e-6 * obs.abs().max(1.0) + tol.get(aid).copied().unwrap_or(0.0)
+        });
+        if ok {
+            return Some((ep_gain, fired));
+        }
+    }
+    None
+}
+
+/// The deterministic half of every `auto_delta` writing an actor's
+/// `external_pressure`, plus the noise bound. Same contract as
+/// [`price_pop_auto_deltas`]: phase 1 runs first, so the pre-tick state is exact
+/// for the conditions, and only the noise term is not reproducible.
+fn price_ep_auto_deltas(
+    sc: &Scenario,
+    snap: &BTreeMap<String, std::collections::HashMap<String, f64>>,
+    globals: &std::collections::HashMap<String, f64>,
+) -> (BTreeMap<String, f64>, BTreeMap<String, f64>) {
+    let read = |r: &MetricRef| -> f64 {
+        match r {
+            MetricRef::Actor { actor_id, metric } => snap
+                .get(actor_id.as_str())
+                .and_then(|m| m.get(metric.as_str()))
+                .copied()
+                .unwrap_or(0.0),
+            MetricRef::Global { key } => globals.get(key.as_str()).copied().unwrap_or(0.0),
+            MetricRef::Family { .. } => 0.0,
+        }
+    };
+    let mut delta: BTreeMap<String, f64> = BTreeMap::new();
+    let mut noise: BTreeMap<String, f64> = BTreeMap::new();
+    for ad in &sc.auto_deltas {
+        let MetricRef::Actor { actor_id, metric } = &ad.metric else { continue };
+        if metric.as_str() != "external_pressure" {
+            continue;
+        }
+        let mut d = ad.base;
+        for c in &ad.conditions {
+            let v = read(&c.metric);
+            let hit = match c.operator {
+                ComparisonOperator::Less => v < c.value,
+                ComparisonOperator::LessOrEqual => v <= c.value,
+                ComparisonOperator::Greater => v > c.value,
+                ComparisonOperator::GreaterOrEqual => v >= c.value,
+                ComparisonOperator::Equal => (v - c.value).abs() < 0.001,
+            };
+            if hit {
+                d += c.delta;
+            }
+        }
+        for rc in &ad.ratio_conditions {
+            let b = read(&rc.metric_b);
+            if b == 0.0 {
+                continue;
+            }
+            if rc.operator.evaluate(read(&rc.metric_a) / b, rc.ratio) {
+                d += rc.delta;
+            }
+        }
+        *delta.entry(actor_id.as_str().to_string()).or_insert(0.0) += d;
+        *noise.entry(actor_id.as_str().to_string()).or_insert(0.0) += ad.noise;
+    }
+    (delta, noise)
+}
+
+/// §1 п.2–п.4 — occupancy, the ratchet, the inflow decomposition and the λ sweep.
+fn epratchet(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tep0\tepF\tat100%\tband%\tabove85%\tfirst85\tfirst100\tdrops\tdrop_mass\trelease70\tbelow70\trises\trise_mass\tauto\tevents\tmigration\tinherit\tcombat_resid\tclamp_lost\tfree%\tresid_neg\tdied\tpath\tsaved_l1\tsaved_l4\tsaved_l12\tcw_mism");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap();
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc.dependencies.clone();
+        let sc_owned = sc.clone();
+        let sc_ref = &sc_owned;
+
+        let mut acc: BTreeMap<String, EpActor> = BTreeMap::new();
+        let mut collapses = 0u32;
+        let mut mig_unresolved = 0u32;
+
+        for t in 0..ticks {
+            let (pairs_t, base_pop, ep0, coh0, snapshot, pop_noise, ep_auto, ep_noise) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut pop: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut snap: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> = BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    let (p, eo, e) = (
+                        a.get_metric("population"),
+                        a.get_metric("economic_output"),
+                        a.get_metric("external_pressure"),
+                    );
+                    snap.insert(aid.clone(), (p, eo, e));
+                    full.insert(aid.clone(), a.metrics.clone());
+                    pop.insert(aid.clone(), p);
+                    ep.insert(aid.clone(), e);
+                    coh.insert(aid.clone(), a.get_metric("cohesion"));
+                }
+                let (ad_pop, ad_pop_noise) = price_pop_auto_deltas(sc_ref, &full, &world.global_metrics);
+                for (aid, d) in &ad_pop {
+                    if let Some(v) = pop.get_mut(aid) {
+                        *v = (*v + d).max(0.0);
+                    }
+                }
+                for (aid, v) in pop.iter_mut() {
+                    let eo = snap.get(aid).map(|x| x.1).unwrap_or(0.0);
+                    *v -= price_population_rules(&deps, *v, eo);
+                }
+                let (ad_ep, ad_ep_noise) = price_ep_auto_deltas(sc_ref, &full, &world.global_metrics);
+                (pairs, pop, ep, coh, snap, ad_pop_noise, ad_ep, ad_ep_noise)
+            };
+
+            // seed
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for (aid, (_p, _eo, e)) in snapshot.iter() {
+                    let entry = acc.entry(aid.clone()).or_default();
+                    if !entry.seen {
+                        entry.seen = true;
+                        entry.ep0 = *e;
+                        entry.ep_prev = Some(*e);
+                        entry.s_ep = [*e; 8];
+                        entry.s_nomig = *e;
+                        entry.first_85 = -1;
+                        entry.first_100 = -1;
+                        entry.died_tick = -1;
+                        entry.min_surv = world.actors.get(aid).and_then(|a| a.minimum_survival_ticks);
+                        entry.neighbors = world
+                            .actors
+                            .get(aid)
+                            .map(|a| a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect())
+                            .unwrap_or_default();
+                    }
+                }
+            }
+
+            let live_before: std::collections::HashSet<String> = snapshot.keys().cloned().collect();
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+
+            let mut ev_pop: BTreeMap<String, f64> = BTreeMap::new();
+            let mut ev_ep: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &state.event_log.events[log_len..] {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "population") {
+                    *ev_pop.entry(aid).or_insert(0.0) += d;
+                }
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "external_pressure") {
+                    *ev_ep.entry(aid).or_insert(0.0) += d;
+                }
+            }
+
+            // migration's share of the pressure, under TODAY's arithmetic
+            let mig_ep = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut observed: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in base_pop.keys() {
+                    if let Some(a) = world.actors.get(aid) {
+                        if !world.dead_actor_ids.contains(aid) {
+                            observed.insert(aid.clone(), a.get_metric("population"));
+                            continue;
+                        }
+                    }
+                    if let Some(d) = world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                        observed.insert(aid.clone(), d.final_metrics.get("population").copied().unwrap_or(0.0));
+                    }
+                }
+                match solve_migration_v2(&pairs_t, &base_pop, &ep0, &coh0, &ev_pop, &observed, &pop_noise) {
+                    Some((g, _)) => g,
+                    None => {
+                        mig_unresolved += 1;
+                        BTreeMap::new()
+                    }
+                }
+            };
+
+            let world = state.world_state.as_ref().unwrap();
+            let cur_tick = t;
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == cur_tick)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            // a successor born this tick carries `parent_ep × 1.3` (`mod.rs:1644`)
+            for (aid, a) in world.actors.iter() {
+                if !live_before.contains(aid) && !world.dead_actor_ids.contains(aid) {
+                    let e = acc.entry(aid.clone()).or_default();
+                    e.p_inherit += a.get_metric("external_pressure");
+                }
+            }
+
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                e.ticks += 1;
+
+                // ---- occupancy ------------------------------------------------
+                if ep < 70.0 { e.below_70 += 1; }
+                if ep >= 100.0 { e.at_100 += 1; }
+                if ep > 85.0 { e.above_85 += 1; }
+                if ep > 85.0 && ep < 100.0 { e.in_band += 1; }
+                if ep > 85.0 && e.first_85 < 0 { e.first_85 = (t + 1) as i64; }
+                if ep >= 100.0 && e.first_100 < 0 { e.first_100 = (t + 1) as i64; }
+
+                // ---- the ratchet, and the inflow decomposition -----------------
+                if let Some(prev) = e.ep_prev {
+                    let d = ep - prev;
+                    if d < -1e-9 { e.drops += 1; e.drop_mass += -d; }
+                    if prev >= 70.0 && ep < 70.0 { e.release_70 += 1; }
+                    if d > 1e-9 { e.rises += 1; e.rise_mass += d; }
+                    let auto = ep_auto.get(&aid).copied().unwrap_or(0.0);
+                    let evd = ev_ep.get(&aid).copied().unwrap_or(0.0);
+                    let mg = mig_ep.get(&aid).copied().unwrap_or(0.0);
+                    e.p_auto += auto;
+                    e.p_events += evd;
+                    e.p_migration += mg;
+                    // At the ceiling the observed delta is not the delivered inflow:
+                    // `external_pressure` clamps at 100, so a tick that starts there
+                    // absorbs everything its producers wrote. Nominal and delivered
+                    // are therefore accounted separately, and the residual — combat,
+                    // the one producer that cannot be replicated from outside — is
+                    // only taken on ticks where neither end touched the ceiling.
+                    let nominal = auto + evd + mg;
+                    let free = prev < 100.0 - 1e-9 && ep < 100.0 - 1e-9;
+                    if free {
+                        e.free_ticks += 1;
+                        let resid = d - nominal;
+                        if resid < -(ep_noise.get(&aid).copied().unwrap_or(0.0) + 1e-6) {
+                            e.resid_negative += -resid;
+                        } else {
+                            e.p_residual += resid.max(0.0);
+                        }
+                    } else if nominal > d {
+                        e.clamp_absorbed += nominal - d;
+                    }
+                }
+                e.ep_prev = Some(ep);
+
+                // ---- λ sweep in the shadow ------------------------------------
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if cur_tick < ms);
+                let d_ep = ep - e.s_ep[0]; // λ=0 shadow tracks the real value exactly
+                for (li, lam) in LAMBDAS.iter().enumerate() {
+                    e.s_ep[li] = (e.s_ep[li] + d_ep - lam).clamp(0.0, 100.0);
+                }
+                e.s_nomig =
+                    (e.s_nomig + d_ep - mig_ep.get(&aid).copied().unwrap_or(0.0)).clamp(0.0, 100.0);
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    let real_d = rc || ri || rq;
+                    if real_d { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                    for li in 0..LAMBDAS.len() {
+                        let (sc_, si, sq) = danger_paths(coh, leg, e.s_ep[li], mil, besieged);
+                        let shad_d = sc_ || si || sq;
+                        if shad_d { e.shad_ct[li] += 1 } else { e.shad_ct[li] = 0 }
+                    }
+                    let (nc, ni, nq) = danger_paths(coh, leg, e.s_nomig, mil, besieged);
+                    if nc || ni || nq { e.nomig_ct += 1 } else { e.nomig_ct = 0 }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    collapses += 1;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    // was this death already attributed to migration? — the shadow of
+                    // задача 26 §5.2: no migration pressure at all
+                    let no_mig = e.s_nomig;
+                    e.mig_attributed = e.nomig_ct < 3;
+                    if e.mig_attributed { e.saved_nomig += 1; }
+                    for li in 0..LAMBDAS.len() {
+                        if e.shad_ct[li] < 3 { e.saved[li] += 1; }
+                    }
+                    println!(
+                        "#DEATH27\t{}\t{}\t{}\ttick={}\tpath={}\tep={:.2}\tep_no_mig={:.2}\tmig_attr={}\tsaved_at={}",
+                        aid, seed, mode_label(strategy), t + 1, e.died_path, ep, no_mig.max(0.0),
+                        e.mig_attributed as u8,
+                        LAMBDAS
+                            .iter()
+                            .enumerate()
+                            .find(|(li, _)| e.shad_ct[*li] < 3)
+                            .map(|(_, l)| format!("{}", l))
+                            .unwrap_or_else(|| "never".to_string())
+                    );
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        let mut tot_saved = [0u32; 8];
+        let mut cwm = 0u32;
+        let mut prod = [0.0f64; 5];
+        let mut drops = 0u32;
+        let mut rel70 = 0u32;
+        let mut negres = 0.0f64;
+        let mut clamp_lost = 0.0f64;
+        let mut saved_nomig = 0u32;
+        let mut free_ticks = 0u32;
+        let mut all_ticks = 0u32;
+        for (aid, e) in &acc {
+            for (li, t) in tot_saved.iter_mut().enumerate() { *t += e.saved[li]; }
+            cwm += e.cw_mismatch;
+            drops += e.drops;
+            rel70 += e.release_70;
+            negres += e.resid_negative;
+            clamp_lost += e.clamp_absorbed;
+            saved_nomig += e.saved_nomig;
+            free_ticks += e.free_ticks;
+            all_ticks += e.ticks;
+            prod[0] += e.p_auto; prod[1] += e.p_events; prod[2] += e.p_migration;
+            prod[3] += e.p_inherit; prod[4] += e.p_residual;
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:+.1}\t{}\t{}\t{}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:.1}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.ep0, e.ep_prev.unwrap_or(0.0),
+                100.0 * e.at_100 as f64 / n, 100.0 * e.in_band as f64 / n,
+                100.0 * e.above_85 as f64 / n, e.first_85, e.first_100,
+                e.drops, e.drop_mass, e.release_70, e.below_70, e.rises, e.rise_mass,
+                e.p_auto, e.p_events, e.p_migration, e.p_inherit, e.p_residual,
+                e.clamp_absorbed, 100.0 * e.free_ticks as f64 / n, e.resid_negative,
+                e.died_tick, e.died_path,
+                e.saved[3], e.saved[5], e.saved[7], e.cw_mismatch
+            );
+        }
+        let sweep: Vec<String> = LAMBDAS
+            .iter()
+            .enumerate()
+            .map(|(li, l)| format!("λ={}:{}", l, tot_saved[li]))
+            .collect();
+        println!(
+            "#EP27\tseed={}\tmode={}\tcollapses={}\tdrops={}\trelease70={}\tauto={:+.1}\tevents={:+.1}\tmigration={:+.1}\tinherit={:+.1}\tcombat_resid={:+.1}\tclamp_lost={:+.1}\tfree_ticks={}/{}\tresid_neg={:.2}\tsaved_no_migration={}\tmig_unresolved={}\tcw_mismatch={}\tsweep={}",
+            seed, mode, collapses, drops, rel70, prod[0], prod[1], prod[2], prod[3], prod[4],
+            clamp_lost, free_ticks, all_ticks, negres,
+            saved_nomig, mig_unresolved, cwm, sweep.join(",")
+        );
+    }
+}
+
+// ===========================================================================
+// task 27 stage 2 — the valves the author already put in: `epvalves`
+// ===========================================================================
+//
+// Stage 1 counted the six `external_pressure` `auto_deltas` of constantinople as
+// producers **by base**. That is true of the base and false of the block: five of
+// six carry their own relief clause, and two of them (#3, #4) are pure relief with
+// no base at all. So the object of `(B)` is probably not "throttle the producer"
+// but "the valve is installed and does not open" — and that is an occupancy
+// question, not an argument.
+//
+// This mode answers §8.4 of the statement:
+//
+//   1. occupancy of **every condition of every block**, on the trajectory, per
+//      actor, in every mode — evaluated against the pre-tick world the way phase 1
+//      evaluates it, never against the config;
+//   2. the **net contribution of each block per game**, split into base, each
+//      conditional term and the noise bound, which must add up to the `auto`
+//      column stage 1 measured (`438 / 533 / 151 / 82`);
+//   3. **candidate shadows** — each `(B)` candidate is a mutated copy of the
+//      scenario's `auto_deltas`, priced against the same pre-tick state, and its
+//      difference from the real block is carried in a shadow `external_pressure`
+//      with its own clamp and its own `collapse_warning_ticks`, exactly as stage 1
+//      carried the `λ` shadows. **No second simulation**;
+//   4. the three consumers of the threshold `(C)` has to be judged on — the
+//      vassalage band, the migration gate and `greek_scholars_flee` — measured in
+//      the world, not quoted from задача 10.
+//
+// Self-tests, both mandatory (§8.7): candidate `#0` is the unmutated scenario and
+// must save nothing and never diverge from the real `ep`; the replica of the
+// engine's `collapse_warning_ticks` must not mismatch.
+
+/// Peripheral actors of constantinople — the three blocks whose relief clause is a
+/// *ratio* against the Ottoman army. Named once; every candidate that addresses
+/// "the periphery" addresses exactly these.
+const EP_PERIPHERY: [&str; 3] = ["serbia", "trebizond", "hungary"];
+
+/// Absolute military thresholds for `(B₂)`, **derived in §3.3 of the document**
+/// from the measured `military_size` of each actor and of `ottomans`, not swept:
+/// each is the value the author's own ratio names at the Ottoman army's *starting*
+/// size (`180`), which is the only point on the trajectory where the ratio was
+/// written to mean something.
+const B2_ABS_THRESHOLDS: [(&str, f64); 3] =
+    [("serbia", 36.0), ("trebizond", 18.0), ("hungary", 54.0)];
+
+/// A `(B)` candidate: a mutated copy of the whole `auto_deltas` list (so it is
+/// priced by the same code path as the real one), plus an optional per-tick cap on
+/// total delivered inflow — the one candidate that is *not* expressible in
+/// `auto_deltas.toml` and is therefore out of the statement's scope by
+/// construction. It is measured anyway, so the scope call is made on a number.
+/// One `ep`-writing block as the report names it: index in `auto_deltas`, target
+/// actor, base, noise bound, and the rendered text of its conditions and ratio
+/// conditions.
+type EpBlockDesc = (usize, String, f64, f64, Vec<String>, Vec<String>);
+
+struct EpCand {
+    name: &'static str,
+    deltas: Vec<engine13::core::AutoDelta>,
+    cap: Option<f64>,
+}
+
+fn is_ep_block(ad: &engine13::core::AutoDelta) -> Option<&str> {
+    match &ad.metric {
+        MetricRef::Actor { actor_id, metric } if metric.as_str() == "external_pressure" => {
+            Some(actor_id.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// `(B₁)` — scale the bases of the `ep` blocks belonging to `actors`.
+fn cand_scale_bases(sc: &Scenario, actors: &[&str], k: f64) -> Vec<engine13::core::AutoDelta> {
+    let mut v = sc.auto_deltas.clone();
+    for ad in v.iter_mut() {
+        if let Some(a) = is_ep_block(ad) {
+            if actors.contains(&a) {
+                ad.base *= k;
+            }
+        }
+    }
+    v
+}
+
+/// `(B₂)` — replace the relative relief clause with an absolute one, on the model
+/// of the two clauses that demonstrably work (#3 `ep < 50`, #4 `fed > 40`). The
+/// delta is carried over unchanged; only the gate changes shape.
+fn cand_ratio_to_absolute(sc: &Scenario) -> Vec<engine13::core::AutoDelta> {
+    let mut v = sc.auto_deltas.clone();
+    for ad in v.iter_mut() {
+        let Some(a) = is_ep_block(ad).map(|s| s.to_string()) else { continue };
+        let Some((_, thr)) = B2_ABS_THRESHOLDS.iter().find(|(id, _)| *id == a) else { continue };
+        let ratios = std::mem::take(&mut ad.ratio_conditions);
+        for r in ratios {
+            ad.conditions.push(engine13::core::DeltaCondition {
+                metric: MetricRef::parse(&format!("actor:{}.military_size", a)).expect("key"),
+                operator: ComparisonOperator::Greater,
+                value: *thr,
+                delta: r.delta,
+            });
+        }
+    }
+    v
+}
+
+/// `(B₃)` — extend the one absolute valve that provably fires (`#4`,
+/// `global:federation_progress > 40 → −0.8`) to the peripheral blocks.
+fn cand_add_fed_valve(sc: &Scenario, delta: f64) -> Vec<engine13::core::AutoDelta> {
+    let mut v = sc.auto_deltas.clone();
+    for ad in v.iter_mut() {
+        let Some(a) = is_ep_block(ad).map(|s| s.to_string()) else { continue };
+        if !EP_PERIPHERY.contains(&a.as_str()) {
+            continue;
+        }
+        ad.conditions.push(engine13::core::DeltaCondition {
+            metric: MetricRef::parse("global:federation_progress").expect("key"),
+            operator: ComparisonOperator::Greater,
+            value: 40.0,
+            delta,
+        });
+    }
+    v
+}
+
+fn build_ep_candidates(sc: &Scenario) -> Vec<EpCand> {
+    let per: Vec<&str> = EP_PERIPHERY.to_vec();
+    let all: Vec<&str> = sc
+        .auto_deltas
+        .iter()
+        .filter_map(is_ep_block)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    vec![
+        // #0 — the self-test: the scenario unchanged.
+        EpCand { name: "IDENT", deltas: sc.auto_deltas.clone(), cap: None },
+        EpCand { name: "B1-all-x0.50", deltas: cand_scale_bases(sc, &all, 0.5), cap: None },
+        EpCand { name: "B1-per-x0.50", deltas: cand_scale_bases(sc, &per, 0.5), cap: None },
+        EpCand { name: "B1-per-x0.25", deltas: cand_scale_bases(sc, &per, 0.25), cap: None },
+        EpCand { name: "B1-per-x0.00", deltas: cand_scale_bases(sc, &per, 0.0), cap: None },
+        EpCand { name: "B2-abs-valve", deltas: cand_ratio_to_absolute(sc), cap: None },
+        EpCand { name: "B3-fed-0.8", deltas: cand_add_fed_valve(sc, -0.8), cap: None },
+        EpCand { name: "B3-fed-1.5", deltas: cand_add_fed_valve(sc, -1.5), cap: None },
+        // out of scope by construction (engine, not content) — measured, not proposed
+        EpCand { name: "B4-cap-2.0", deltas: sc.auto_deltas.clone(), cap: Some(2.0) },
+        EpCand { name: "B4-cap-1.0", deltas: sc.auto_deltas.clone(), cap: Some(1.0) },
+    ]
+}
+
+/// Per-block detail of one priced tick: `(block index, deterministic delta)`, plus
+/// the per-condition verdicts. Same contract as [`price_ep_auto_deltas`] — phase 1
+/// runs first, so the pre-tick state is exactly what the engine reads.
+struct PricedBlock {
+    idx: usize,
+    actor: String,
+    det: f64,
+    conds: Vec<(bool, f64)>,
+    ratios: Vec<(bool, f64, f64, f64)>, // (fired, a, b, ratio_or_NAN_if_b0)
+}
+
+fn price_ep_blocks(
+    deltas: &[engine13::core::AutoDelta],
+    snap: &BTreeMap<String, std::collections::HashMap<String, f64>>,
+    globals: &std::collections::HashMap<String, f64>,
+) -> (BTreeMap<String, f64>, Vec<PricedBlock>) {
+    let read = |r: &MetricRef| -> f64 {
+        match r {
+            MetricRef::Actor { actor_id, metric } => snap
+                .get(actor_id.as_str())
+                .and_then(|m| m.get(metric.as_str()))
+                .copied()
+                .unwrap_or(0.0),
+            MetricRef::Global { key } => globals.get(key.as_str()).copied().unwrap_or(0.0),
+            MetricRef::Family { .. } => 0.0,
+        }
+    };
+    let mut per_actor: BTreeMap<String, f64> = BTreeMap::new();
+    let mut blocks = Vec::new();
+    for (idx, ad) in deltas.iter().enumerate() {
+        let Some(actor) = is_ep_block(ad) else { continue };
+        let mut d = ad.base;
+        let mut conds = Vec::new();
+        for c in &ad.conditions {
+            let v = read(&c.metric);
+            let hit = match c.operator {
+                ComparisonOperator::Less => v < c.value,
+                ComparisonOperator::LessOrEqual => v <= c.value,
+                ComparisonOperator::Greater => v > c.value,
+                ComparisonOperator::GreaterOrEqual => v >= c.value,
+                ComparisonOperator::Equal => (v - c.value).abs() < 0.001,
+            };
+            if hit {
+                d += c.delta;
+            }
+            conds.push((hit, v));
+        }
+        let mut ratios = Vec::new();
+        for rc in &ad.ratio_conditions {
+            let a = read(&rc.metric_a);
+            let b = read(&rc.metric_b);
+            if b == 0.0 {
+                ratios.push((false, a, b, f64::NAN));
+                continue;
+            }
+            let r = a / b;
+            let hit = rc.operator.evaluate(r, rc.ratio);
+            if hit {
+                d += rc.delta;
+            }
+            ratios.push((hit, a, b, r));
+        }
+        *per_actor.entry(actor.to_string()).or_insert(0.0) += d;
+        blocks.push(PricedBlock { idx, actor: actor.to_string(), det: d, conds, ratios });
+    }
+    (per_actor, blocks)
+}
+
+/// Occupancy and contribution of one `auto_delta` block over one game.
+#[derive(Default, Clone)]
+struct BlockAcc {
+    ticks: u32,
+    ticks_live: u32,
+    base_sum: f64,
+    det_sum: f64,
+    det_sum_live: f64,
+    cond_true: Vec<u32>,
+    cond_sum: Vec<f64>,
+    ratio_true: Vec<u32>,
+    ratio_sum: Vec<f64>,
+    ratio_b0: Vec<u32>,
+    r_a_sum: Vec<f64>,
+    r_a_max: Vec<f64>,
+    r_b_sum: Vec<f64>,
+    r_b_min: Vec<f64>,
+    r_ratio_sum: Vec<f64>,
+    r_ratio_max: Vec<f64>,
+    r_need_sum: Vec<f64>,
+}
+
+#[derive(Default, Clone)]
+struct VActor {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    ep_prev: Option<f64>,
+    det_auto: f64,
+    // --- consumers of the threshold, measured in the world (§8.3) -----------
+    c_band_all: u32,
+    c_band_ep: u32,
+    c_band_leg: u32,
+    c_band_coh: u32,
+    c_band_ep_leg: u32,
+    c_band_ep_coh: u32,
+    c_band_leg_coh: u32,
+    c_gate65: u32,      // migration gate: ep > 65 AND coh < 40
+    c_gate65_max: u32,  // ... of those, ep at the ceiling ⇒ transfer at its maximum
+    c_gate65_mass: f64, // Σ (ep − 65): what the gate would read if it read a scale
+    c_above70: u32,     // `greek_scholars_flee`
+    c_at100: u32,
+    // --- candidate shadows --------------------------------------------------
+    s_ep: Vec<f64>,
+    s_ct: Vec<u32>,
+    s_at100: Vec<u32>,
+    s_above85: Vec<u32>,
+    s_band7085: Vec<u32>,
+    saved: Vec<u32>,
+    /// what the five `external_pressure`-reading dependency rules take out of (or
+    /// put into) this actor over the game — real, and under each candidate. This
+    /// is the second-order channel a shadow cannot follow, priced in its own units.
+    dep_real: BTreeMap<String, f64>,
+    dep_shadow: Vec<BTreeMap<String, f64>>,
+    real_ct: u32,
+    cw_mismatch: u32,
+    ident_div: u32,
+    died_tick: i64,
+}
+
+/// §8.4 — occupancy of the valves, the block-by-block decomposition, the candidate
+/// shadows and the three consumers of the threshold.
+fn epvalves(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tat100%\tdet_auto\tband_all\tband_ep\tband_leg\tband_coh\tb_ep_leg\tb_ep_coh\tb_leg_coh\tgate65\tgate65_max\tgate65_mean_scale\tabove70\tdied");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc_owned = state.current_scenario.as_ref().unwrap().clone();
+        let cands = build_ep_candidates(&sc_owned);
+        let nc = cands.len();
+        // every dependency rule that READS `external_pressure`. `phase_apply_dependencies`
+        // runs the whole list for **every** actor, so these apply to the periphery
+        // exactly as they apply to the protagonist.
+        let ep_deps: Vec<&DependencyRule> = sc_owned
+            .dependencies
+            .iter()
+            .filter(|r| r.from.as_str() == "external_pressure")
+            .collect();
+        let dep_delta = |ep: f64, out: &mut BTreeMap<String, f64>| {
+            for r in &ep_deps {
+                let d = match (&r.mode, r.threshold) {
+                    (&DependencyMode::Excess, Some(t)) if ep > t => -((ep - t) * r.coefficient),
+                    (&DependencyMode::Bonus, Some(t)) if ep > t => (ep - t) * r.coefficient,
+                    (&DependencyMode::Deficit, Some(t)) if ep < t => -((t - ep) * r.coefficient),
+                    (&DependencyMode::Linear, _) => ep * r.coefficient,
+                    _ => 0.0,
+                };
+                if d != 0.0 {
+                    *out.entry(r.to.as_str().to_string()).or_insert(0.0) += d;
+                }
+            }
+        };
+
+        // static description of the ep-writing blocks, for the report
+        let blocks: Vec<EpBlockDesc> = sc_owned
+            .auto_deltas
+            .iter()
+            .enumerate()
+            .filter_map(|(i, ad)| {
+                let a = is_ep_block(ad)?;
+                let cs = ad
+                    .conditions
+                    .iter()
+                    .map(|c| format!("{} {} {} → {:+}", c.metric, op_str(&c.operator), c.value, c.delta))
+                    .collect();
+                let rs = ad
+                    .ratio_conditions
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{}/{} {} {} → {:+}",
+                            r.metric_a, r.metric_b, op_str(&r.operator), r.ratio, r.delta
+                        )
+                    })
+                    .collect();
+                Some((i, a.to_string(), ad.base, ad.noise, cs, rs))
+            })
+            .collect();
+        let mut bacc: BTreeMap<usize, BlockAcc> = BTreeMap::new();
+        for (i, _, _, _, cs, rs) in &blocks {
+            bacc.insert(
+                *i,
+                BlockAcc {
+                    cond_true: vec![0; cs.len()],
+                    cond_sum: vec![0.0; cs.len()],
+                    ratio_true: vec![0; rs.len()],
+                    ratio_sum: vec![0.0; rs.len()],
+                    ratio_b0: vec![0; rs.len()],
+                    r_a_sum: vec![0.0; rs.len()],
+                    r_a_max: vec![0.0; rs.len()],
+                    r_b_sum: vec![0.0; rs.len()],
+                    r_b_min: vec![f64::INFINITY; rs.len()],
+                    r_ratio_sum: vec![0.0; rs.len()],
+                    r_ratio_max: vec![0.0; rs.len()],
+                    r_need_sum: vec![0.0; rs.len()],
+                    ..Default::default()
+                },
+            );
+        }
+
+        let mut acc: BTreeMap<String, VActor> = BTreeMap::new();
+        let mut saved_path: BTreeMap<(usize, &'static str), u32> = BTreeMap::new();
+        let mut deaths_path: BTreeMap<&'static str, u32> = BTreeMap::new();
+
+        for t in 0..ticks {
+            let (full, globals, live_before) = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> =
+                    BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    full.insert(aid.clone(), a.metrics.clone());
+                }
+                let live: std::collections::HashSet<String> = full.keys().cloned().collect();
+                (full, world.global_metrics.clone(), live)
+            };
+
+            let (orig_det, priced) = price_ep_blocks(&sc_owned.auto_deltas, &full, &globals);
+            let cand_det: Vec<BTreeMap<String, f64>> = cands
+                .iter()
+                .map(|c| price_ep_blocks(&c.deltas, &full, &globals).0)
+                .collect();
+
+            // ---- occupancy of every condition of every block ------------------
+            for pb in &priced {
+                let e = bacc.get_mut(&pb.idx).expect("block");
+                let live = live_before.contains(&pb.actor);
+                e.ticks += 1;
+                e.base_sum += sc_owned.auto_deltas[pb.idx].base;
+                e.det_sum += pb.det;
+                if live {
+                    e.ticks_live += 1;
+                    e.det_sum_live += pb.det;
+                }
+                for (ci, (hit, _v)) in pb.conds.iter().enumerate() {
+                    if *hit {
+                        e.cond_true[ci] += 1;
+                        e.cond_sum[ci] += sc_owned.auto_deltas[pb.idx].conditions[ci].delta;
+                    }
+                }
+                for (ri, (hit, a, b, r)) in pb.ratios.iter().enumerate() {
+                    let rc = &sc_owned.auto_deltas[pb.idx].ratio_conditions[ri];
+                    if r.is_nan() {
+                        e.ratio_b0[ri] += 1;
+                    } else {
+                        e.r_ratio_sum[ri] += r;
+                        if *r > e.r_ratio_max[ri] {
+                            e.r_ratio_max[ri] = *r;
+                        }
+                        e.r_need_sum[ri] += b * rc.ratio;
+                    }
+                    e.r_a_sum[ri] += a;
+                    if *a > e.r_a_max[ri] {
+                        e.r_a_max[ri] = *a;
+                    }
+                    e.r_b_sum[ri] += b;
+                    if *b < e.r_b_min[ri] {
+                        e.r_b_min[ri] = *b;
+                    }
+                    if *hit {
+                        e.ratio_true[ri] += 1;
+                        e.ratio_sum[ri] += rc.delta;
+                    }
+                }
+            }
+
+            // seed the per-actor accumulator
+            {
+                let world = state.world_state.as_ref().unwrap();
+                for aid in live_before.iter() {
+                    let entry = acc.entry(aid.clone()).or_default();
+                    if !entry.seen {
+                        entry.seen = true;
+                        let ep = full
+                            .get(aid)
+                            .and_then(|m| m.get("external_pressure"))
+                            .copied()
+                            .unwrap_or(0.0);
+                        entry.ep_prev = Some(ep);
+                        entry.s_ep = vec![ep; nc];
+                        entry.s_ct = vec![0; nc];
+                        entry.s_at100 = vec![0; nc];
+                        entry.s_above85 = vec![0; nc];
+                        entry.s_band7085 = vec![0; nc];
+                        entry.saved = vec![0; nc];
+                        entry.dep_shadow = vec![BTreeMap::new(); nc];
+                        entry.died_tick = -1;
+                        entry.min_surv =
+                            world.actors.get(aid).and_then(|a| a.minimum_survival_ticks);
+                        entry.neighbors = world
+                            .actors
+                            .get(aid)
+                            .map(|a| {
+                                a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect()
+                            })
+                            .unwrap_or_default();
+                    }
+                }
+            }
+
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+
+            let world = state.world_state.as_ref().unwrap();
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == t)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            // a successor born this tick starts a fresh accumulator; it inherits no
+            // shadow, so it is seeded from its own `ep` on the next tick
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                e.ticks += 1;
+                e.det_auto += orig_det.get(&aid).copied().unwrap_or(0.0);
+
+                // ---- the three consumers of the threshold, in the world --------
+                if ep >= 100.0 {
+                    e.c_at100 += 1;
+                }
+                let bep = (70.0..=85.0).contains(&ep);
+                let bleg = (10.0..=25.0).contains(&leg);
+                let bcoh = (15.0..=30.0).contains(&coh);
+                if bep { e.c_band_ep += 1; }
+                if bleg { e.c_band_leg += 1; }
+                if bcoh { e.c_band_coh += 1; }
+                if bep && bleg { e.c_band_ep_leg += 1; }
+                if bep && bcoh { e.c_band_ep_coh += 1; }
+                if bleg && bcoh { e.c_band_leg_coh += 1; }
+                if bep && bleg && bcoh { e.c_band_all += 1; }
+                if ep > 65.0 && coh < 40.0 {
+                    e.c_gate65 += 1;
+                    e.c_gate65_mass += ep - 65.0;
+                    if ep >= 100.0 {
+                        e.c_gate65_max += 1;
+                    }
+                }
+                if ep > 70.0 {
+                    e.c_above70 += 1;
+                }
+
+                // ---- candidate shadows ---------------------------------------
+                let d_real = ep - e.ep_prev.unwrap_or(ep);
+                let o = orig_det.get(&aid).copied().unwrap_or(0.0);
+                for ci in 0..nc {
+                    let adj = if let Some(cap) = cands[ci].cap {
+                        // a cap on total delivered inflow: what the tick actually
+                        // delivered, truncated — not a change of any one producer
+                        d_real.min(cap) - d_real
+                    } else {
+                        cand_det[ci].get(&aid).copied().unwrap_or(0.0) - o
+                    };
+                    e.s_ep[ci] = (e.s_ep[ci] + d_real + adj).clamp(0.0, 100.0);
+                    if e.s_ep[ci] >= 100.0 { e.s_at100[ci] += 1; }
+                    if e.s_ep[ci] > 85.0 { e.s_above85[ci] += 1; }
+                    if (70.0..=85.0).contains(&e.s_ep[ci]) { e.s_band7085[ci] += 1; }
+                }
+                if (e.s_ep[0] - ep).abs() > 1e-9 {
+                    e.ident_div += 1;
+                }
+                {
+                    let mut r = std::mem::take(&mut e.dep_real);
+                    dep_delta(ep, &mut r);
+                    e.dep_real = r;
+                    for ci in 0..nc {
+                        let mut sm = std::mem::take(&mut e.dep_shadow[ci]);
+                        dep_delta(e.s_ep[ci], &mut sm);
+                        e.dep_shadow[ci] = sm;
+                    }
+                }
+                e.ep_prev = Some(ep);
+
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if t < ms);
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    if rc || ri || rq { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct {
+                        e.cw_mismatch += 1;
+                    }
+                    for ci in 0..nc {
+                        let (sc_, si, sq) = danger_paths(coh, leg, e.s_ep[ci], mil, besieged);
+                        if sc_ || si || sq { e.s_ct[ci] += 1 } else { e.s_ct[ci] = 0 }
+                    }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    let path: &'static str = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    *deaths_path.entry(path).or_insert(0) += 1;
+                    let mut flags = Vec::new();
+                    for (ci, cand) in cands.iter().enumerate() {
+                        if e.s_ct[ci] < 3 {
+                            e.saved[ci] += 1;
+                            *saved_path.entry((ci, path)).or_insert(0) += 1;
+                            flags.push(cand.name);
+                        }
+                    }
+                    println!(
+                        "#DEATH27B\t{}\t{}\t{}\ttick={}\tpath={}\tep={:.2}\tsaved_by={}",
+                        aid,
+                        seed,
+                        mode_label(strategy),
+                        t + 1,
+                        path,
+                        ep,
+                        if flags.is_empty() { "-".to_string() } else { flags.join(",") }
+                    );
+                }
+            }
+        }
+
+        // ---- report -------------------------------------------------------
+        let mode = mode_label(strategy);
+        let mut cwm = 0u32;
+        let mut identdiv = 0u32;
+        for (aid, e) in &acc {
+            cwm += e.cw_mismatch;
+            identdiv += e.ident_div;
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{:.1}\t{:+.1}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{}\t{}",
+                aid, seed, mode, e.ticks,
+                100.0 * e.c_at100 as f64 / n,
+                e.det_auto,
+                e.c_band_all, e.c_band_ep, e.c_band_leg, e.c_band_coh,
+                e.c_band_ep_leg, e.c_band_ep_coh, e.c_band_leg_coh,
+                e.c_gate65, e.c_gate65_max,
+                if e.c_gate65 > 0 { e.c_gate65_mass / e.c_gate65 as f64 } else { 0.0 },
+                e.c_above70,
+                e.died_tick
+            );
+        }
+        for (aid, e) in &acc {
+            let n = e.ticks.max(1) as f64;
+            for (ci, c) in cands.iter().enumerate() {
+                println!(
+                    "#SHADOW\tseed={}\tmode={}\tactor={}\tcand={}\tat100={:.1}%\tabove85={:.1}%\tband7085={:.1}%\tep_end={:.1}\tsaved={}",
+                    seed, mode, aid, c.name,
+                    100.0 * e.s_at100[ci] as f64 / n,
+                    100.0 * e.s_above85[ci] as f64 / n,
+                    100.0 * e.s_band7085[ci] as f64 / n,
+                    e.s_ep[ci], e.saved[ci]
+                );
+            }
+        }
+        for (aid, e) in &acc {
+            let keys: Vec<&String> = e.dep_real.keys().collect();
+            for (ci, c) in cands.iter().enumerate() {
+                let cols: Vec<String> = keys
+                    .iter()
+                    .map(|k| {
+                        format!(
+                            "{}={:+.1}/{:+.1}",
+                            k,
+                            e.dep_real.get(*k).copied().unwrap_or(0.0),
+                            e.dep_shadow[ci].get(*k).copied().unwrap_or(0.0)
+                        )
+                    })
+                    .collect();
+                println!(
+                    "#DEP\tseed={}\tmode={}\tactor={}\tcand={}\treal/shadow\t{}",
+                    seed, mode, aid, c.name, cols.join("\t")
+                );
+            }
+        }
+        for (i, actor, base, noise, cs, rs) in &blocks {
+            let b = &bacc[i];
+            let n = b.ticks.max(1) as f64;
+            println!(
+                "#BLOCK\tseed={}\tmode={}\tblk={}\tactor={}\tbase={:+.3}\tnoise={:.2}\tticks={}\tlive={}\tbase_sum={:+.1}\tdet_sum={:+.1}\tdet_live={:+.1}",
+                seed, mode, i, actor, base, noise, b.ticks, b.ticks_live, b.base_sum, b.det_sum, b.det_sum_live
+            );
+            for (ci, c) in cs.iter().enumerate() {
+                println!(
+                    "#COND\tseed={}\tmode={}\tblk={}\tactor={}\tcond={}\t[{}]\ttrue={}/{}\t{:.1}%\tsum={:+.1}",
+                    seed, mode, i, actor, ci, c, b.cond_true[ci], b.ticks,
+                    100.0 * b.cond_true[ci] as f64 / n, b.cond_sum[ci]
+                );
+            }
+            for (ri, r) in rs.iter().enumerate() {
+                println!(
+                    "#RATIO\tseed={}\tmode={}\tblk={}\tactor={}\tratio={}\t[{}]\ttrue={}/{}\t{:.1}%\tsum={:+.1}\tb_zero={}\ta_mean={:.1}\ta_max={:.1}\tb_mean={:.1}\tb_min={:.1}\tr_mean={:.4}\tr_max={:.4}\tneed_mean={:.1}",
+                    seed, mode, i, actor, ri, r, b.ratio_true[ri], b.ticks,
+                    100.0 * b.ratio_true[ri] as f64 / n, b.ratio_sum[ri], b.ratio_b0[ri],
+                    b.r_a_sum[ri] / n, b.r_a_max[ri], b.r_b_sum[ri] / n,
+                    if b.r_b_min[ri].is_finite() { b.r_b_min[ri] } else { 0.0 },
+                    b.r_ratio_sum[ri] / n, b.r_ratio_max[ri], b.r_need_sum[ri] / n
+                );
+            }
+        }
+        let mut cand_cols: Vec<String> = Vec::new();
+        for (ci, c) in cands.iter().enumerate() {
+            let s_cq = saved_path.get(&(ci, "conquest")).copied().unwrap_or(0);
+            let s_cl = saved_path.get(&(ci, "classic")).copied().unwrap_or(0);
+            let s_in = saved_path.get(&(ci, "internal")).copied().unwrap_or(0);
+            let byz_at100 = acc
+                .get("byzantium")
+                .map(|e| 100.0 * e.s_at100[ci] as f64 / e.ticks.max(1) as f64)
+                .unwrap_or(0.0);
+            cand_cols.push(format!(
+                "{}:cq={},cls={},int={},byz100={:.1}%",
+                c.name, s_cq, s_cl, s_in, byz_at100
+            ));
+        }
+        println!(
+            "#EPV\tseed={}\tmode={}\tdeaths={}\tcq={}\tint={}\tcls={}\tcw_mismatch={}\tident_div={}\tcands={}",
+            seed, mode,
+            deaths_path.values().sum::<u32>(),
+            deaths_path.get("conquest").copied().unwrap_or(0),
+            deaths_path.get("internal").copied().unwrap_or(0),
+            deaths_path.get("classic").copied().unwrap_or(0),
+            cwm, identdiv,
+            cand_cols.join("\t")
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("inventory");
@@ -6449,6 +7758,16 @@ fn main() {
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             decisive26(scenario, ticks, &seeds, strategy);
         }
+        "epratchet" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            epratchet(scenario, ticks, &seeds, strategy);
+        }
         "migvariants" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
@@ -6478,6 +7797,16 @@ fn main() {
                 .unwrap_or_else(|| vec![42]);
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             evtarget(scenario, ticks, &seeds, strategy);
+        }
+        "epvalves" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            epvalves(scenario, ticks, &seeds, strategy);
         }
         other => panic!("unknown mode: {}", other),
     }
