@@ -7808,6 +7808,16 @@ fn main() {
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             epvalves(scenario, ticks, &seeds, strategy);
         }
+        "epnominal" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            epnominal(scenario, ticks, &seeds, strategy);
+        }
         other => panic!("unknown mode: {}", other),
     }
 }
@@ -7817,4 +7827,1193 @@ fn main() {
 #[allow(dead_code)]
 fn _display_contract(m: &MetricRef) -> String {
     m.to_string()
+}
+
+// ===========================================================================
+// task 27, milan pass — `epnominal`: the inflow census the constantinople pass
+// could not need
+// ===========================================================================
+//
+// The constantinople pass measured the inflow as a *residual*: everything the probe
+// could price from outside (`auto_deltas`, scenario events, migration) was
+// subtracted from the observed per-tick change, and the remainder was called
+// combat. That is sound exactly where the observed change is informative — on ticks
+// where neither end of the step touches the clamp. In `constantinople_1430` those
+// ticks are a workable share of the run. In `milan_1477` they are **3.4 %**: every
+// actor reaches `external_pressure = 100` between tick 7 and tick 18 and stays
+// there, so for 96.6 % of the run the observed change is `0.0` and carries no
+// information about what was delivered.
+//
+// The same asymmetry breaks the counterfactual. The stage-1 shadow is
+// `s ← clamp(s + Δ_observed − Δ_producer)`. On a clamped tick `Δ_observed = 0` while
+// `Δ_producer > 0`, so the shadow *falls* by the producer's whole nominal delivery
+// while nothing credits it for the other producers that were clamped away in the
+// same tick. Over 300 ticks any shadow built this way decays to zero, and every
+// death is then attributed to whichever producer the shadow removed. That is not an
+// argument against задача 26's number — in that scenario the shadow ran mostly on
+// free ticks — it is a statement that the same instrument cannot be pointed at milan
+// without being rebuilt.
+//
+// So this mode prices the inflow **nominally** instead: every writer of
+// `external_pressure` is enumerated and priced in its own units, before the clamp.
+//
+//   auto_deltas   — priced from the pre-tick world, exactly as phase 1 evaluates
+//                   them (`price_ep_auto_deltas`, reused unchanged), plus the noise
+//                   bound;
+//   actor tags    — `apply_actor_tags` (`mod.rs:684`) re-applies every tag's
+//                   `metrics_modifier` **every tick**, and three milan tags carry
+//                   `external_pressure` (`ottoman_frontier +2`, `papal_vicariate +1`,
+//                   `french_orbit +1`). Two of the three spread, so the carrier set
+//                   is read from the world each tick, never from the scenario;
+//   patron actions— read back from the `player_action_*` records
+//                   `apply_player_action` writes, and priced from the action's own
+//                   effects, so the four negative `ep` effects milan has (and no
+//                   other scenario has) are counted at their nominal value rather
+//                   than at what the ceiling let through;
+//   random events — `event_writes_to`, reused unchanged;
+//   migration     — `solve_migration_v2`, reused unchanged;
+//   combat        — the one producer that cannot be priced exactly from outside,
+//                   because `pressure_gain = 15 + u·10` is an RNG draw. It is
+//                   *counted* exactly: `should_record_event` returns `true`
+//                   unconditionally for `InteractionType::Military`
+//                   (`interactions.rs:1067`), so every fight leaves a
+//                   `military_conflict_<att>_<def>` record. Its mass is therefore
+//                   bracketed, `[15n, 25n]`, and the bracket is carried through
+//                   everything downstream;
+//   inheritance   — a successor is born with `parent_ep × 1.3`; it seeds the shadow
+//                   at its own starting value rather than entering as inflow.
+//
+// Everything downstream is a **bracket**, low and high, and that is what makes the
+// census checkable rather than assumed:
+//
+//   * one-step self-test — the real `ep(t)` must lie inside
+//     `[clamp(ep(t−1) + in_lo), clamp(ep(t−1) + in_hi)]` on every tick of every
+//     actor. A producer missing from the census shows up here as a violation. There
+//     is no way to pass this test with an incomplete list;
+//   * cumulative self-test — the IDENT shadow pair, carried from the actor's first
+//     tick with **no** producer removed, must keep the real value between its two
+//     branches for the whole trajectory;
+//   * the engine's `collapse_warning_ticks` replica must not mismatch, as in both
+//     earlier modes.
+//
+// A counterfactual shadow removes one producer set from the nominal sum and carries
+// its own clamp and its own warning counter. A death is called **decisively** saved
+// only if the *upper* branch of the shadow — the branch most favourable to the actor
+// dying anyway — still fails to reach three consecutive dangerous ticks; and
+// decisively not saved if the *lower* branch reaches them. Anything else is reported
+// as undetermined rather than resolved by a coin flip.
+//
+// The consumer side is walked, not listed: every condition in the scenario that
+// *reads* `external_pressure` — `auto_deltas.conditions`, milestone conditions,
+// random-event conditions, patron `available_if` — is collected from the loaded
+// `Scenario` and its occupancy measured in the world, together with the two engine
+// consumers (`in_vassalage_band`, the migration gate) and the five dependency rules
+// that read the metric.
+
+const COMBAT_EP_LO: f64 = 15.0;
+const COMBAT_EP_HI: f64 = 25.0;
+
+/// The producer sets a shadow can remove. `Ident` removes nothing and is the
+/// cumulative self-test.
+#[derive(Clone, Copy, PartialEq)]
+enum EpDrop {
+    Ident,
+    Migration,
+    Tags,
+    Auto,
+    Content,
+    Combat,
+    /// `auto_deltas` + tags + migration removed — only combat and the player left
+    ContentAndMigration,
+    /// combat and nothing else — the player's own effects and the scenario events
+    /// go too, so this is strictly stronger than `ContentAndMigration`
+    OnlyCombat,
+    /// everything removed except migration, the producer this pass was opened on
+    OnlyMigration,
+}
+
+const EP_DROPS: [(EpDrop, &str); 9] = [
+    (EpDrop::Ident, "IDENT"),
+    (EpDrop::Migration, "no_migration"),
+    (EpDrop::Tags, "no_tags"),
+    (EpDrop::Auto, "no_auto_deltas"),
+    (EpDrop::Content, "no_content(auto+tags)"),
+    (EpDrop::Combat, "no_combat"),
+    (EpDrop::ContentAndMigration, "no_content_no_migration"),
+    (EpDrop::OnlyCombat, "combat_only"),
+    (EpDrop::OnlyMigration, "migration_only"),
+];
+
+/// One tick's nominal inflow to one actor, split by producer. `auto_noise` is the
+/// bound, not a draw; `fights` is a count, not a mass.
+#[derive(Default, Clone, Copy)]
+struct EpInflow {
+    /// the deterministic pricing on the pre-tick state (the reported value) and the
+    /// two endpoints of the bracket, pre- and post-tick
+    auto: f64,
+    auto_lo: f64,
+    auto_hi: f64,
+    auto_noise: f64,
+    /// the tag load is a bracket, not a value: `phase_actor_tags` runs *after*
+    /// `phase_interactions`, so a tag a neighbour spread in the same tick is already
+    /// applied by it, while a tag lost to cultural displacement is not. The set is
+    /// therefore read twice — before and after the tick — and the two readings
+    /// bracket what phase 4 actually charged.
+    tag_lo: f64,
+    tag_hi: f64,
+    patron: f64,
+    events: f64,
+    /// best estimate (post-phase-1 replication) and the valid upper bound
+    migration: f64,
+    migration_hi: f64,
+    fights: u32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Branch {
+    Lo,
+    Mid,
+    Hi,
+}
+
+impl EpInflow {
+    /// One tick of `external_pressure` for one actor, in the order and with the
+    /// clamps the engine applies them.
+    ///
+    /// The naive model — `clamp(prev + Σ producers)` — is exact only while every
+    /// producer is positive, because `clamp(clamp(x) + y) = clamp(x + y)` needs
+    /// `y ≥ 0`. `milan_1477` satisfies that (all four of its `ep` blocks are
+    /// positive-based and it has no negative one), `constantinople_1430` does not:
+    /// `byzantium`'s three blocks net `−2.675` a tick, the phase-1 apply truncates
+    /// that at the `0` floor (`MetricRef::apply` clamps on every apply), and the
+    /// `+1` from `crusade_caller` then lands on the floor rather than on the
+    /// arithmetic sum. Its pressure sits at exactly `1.000` for a hundred ticks — a
+    /// number the sum cannot produce.
+    ///
+    /// So the pipeline is walked in phase order:
+    /// patron actions (before phase 1, clamped per effect) → `auto_deltas`
+    /// (phase 1, clamped per block) → combat and migration (phase 3, unclamped) →
+    /// random events (phase 3b, clamped per effect) → tags (phase 4) → phase 5.
+    fn step(&self, prev: f64, drop: EpDrop, br: Branch) -> f64 {
+        self.step_decayed(prev, drop, br, 0.0)
+    }
+
+    /// The same pipeline with a decay `λ` subtracted at the end of the tick — the
+    /// shape variant `(A)` would take. Re-derived for this pass rather than
+    /// inherited: the constantinople pass swept `λ` against the observed-delta
+    /// shadow, and in a scenario whose free-tick share is `3.4 %` that shadow is not
+    /// the instrument to sweep with.
+    fn step_decayed(&self, prev: f64, drop: EpDrop, br: Branch, lambda: f64) -> f64 {
+        use EpDrop::*;
+        let keep_auto = !matches!(drop, Auto | Content | ContentAndMigration | OnlyCombat | OnlyMigration);
+        let keep_tag = !matches!(drop, Tags | Content | ContentAndMigration | OnlyCombat | OnlyMigration);
+        let keep_mig = !matches!(drop, Migration | ContentAndMigration | OnlyCombat);
+        let keep_combat = !matches!(drop, Combat | OnlyMigration);
+        let auto = if !keep_auto {
+            0.0
+        } else {
+            match br {
+                Branch::Lo => self.auto_lo - self.auto_noise,
+                Branch::Mid => self.auto,
+                Branch::Hi => self.auto_hi + self.auto_noise,
+            }
+        };
+        let tag = if !keep_tag {
+            0.0
+        } else {
+            match br {
+                Branch::Lo => self.tag_lo,
+                Branch::Mid => 0.5 * (self.tag_lo + self.tag_hi),
+                Branch::Hi => self.tag_hi,
+            }
+        };
+        let mig = if !keep_mig {
+            0.0
+        } else {
+            match br {
+                Branch::Lo => 0.0,
+                Branch::Mid => self.migration,
+                Branch::Hi => self.migration_hi,
+            }
+        };
+        let n = self.fights as f64;
+        let combat = if !keep_combat {
+            0.0
+        } else {
+            match br {
+                Branch::Lo => COMBAT_EP_LO * n,
+                Branch::Mid => 0.5 * (COMBAT_EP_LO + COMBAT_EP_HI) * n,
+                Branch::Hi => COMBAT_EP_HI * n,
+            }
+        };
+        // the two "only X" shadows also drop the player's effects and the scenario
+        // events, so that each names exactly one producer
+        let solo = matches!(drop, OnlyCombat | OnlyMigration);
+        let patron = if solo { 0.0 } else { self.patron };
+        let events = if solo { 0.0 } else { self.events };
+        let p = (prev + patron).clamp(0.0, 100.0);
+        let x = (p + auto).clamp(0.0, 100.0);
+        let y = x + combat + mig;
+        let z = (y + events).clamp(0.0, 100.0);
+        (z + tag - lambda).clamp(0.0, 100.0)
+    }
+
+    /// The mid-branch nominal mass this tick, before any clamp — what the ceiling
+    /// is given the chance to throw away.
+    fn nominal_mid(&self) -> f64 {
+        self.patron
+            + self.auto
+            + 0.5 * (self.tag_lo + self.tag_hi)
+            + self.migration
+            + self.events
+            + 0.5 * (COMBAT_EP_LO + COMBAT_EP_HI) * self.fights as f64
+    }
+}
+
+#[derive(Default, Clone)]
+struct EpNomActor {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    ep0: f64,
+    ep_prev: Option<f64>,
+    // occupancy
+    at_100: u32,
+    above_85: u32,
+    in_70_85: u32,
+    first_85: i64,
+    first_100: i64,
+    // the ratchet, as the real world shows it
+    drops: u32,
+    drop_mass: f64,
+    release_70: u32,
+    // nominal inflow, per producer, per game
+    n_auto: f64,
+    n_auto_neg: f64,
+    n_tag: f64,
+    n_patron_pos: f64,
+    n_patron_neg: f64,
+    n_events: f64,
+    n_mig: f64,
+    fights: u32,
+    n_inherit: f64,
+    /// nominal mass the ceiling threw away (mid-point combat estimate)
+    n_wasted: f64,
+    // self-tests
+    step_viol: u32,
+    ident_viol: u32,
+    cw_mismatch: u32,
+    // shadows: (lo, hi) value and (lo, hi) consecutive-danger counters
+    s_lo: [f64; 9],
+    s_mid: [f64; 9],
+    s_hi: [f64; 9],
+    ct_lo: [u32; 9],
+    ct_mid: [u32; 9],
+    ct_hi: [u32; 9],
+    /// deaths this shadow removes **decisively** (its upper branch never reaches
+    /// three dangerous ticks) and deaths it removes on the best estimate
+    saved_hi: [u32; 9],
+    saved_mid: [u32; 9],
+    /// variant `(A)`: the same nominal pipeline with a per-tick decay, swept over
+    /// `LAMBDAS`, carried on the mid branch and on the branch most favourable to the
+    /// actor dying anyway
+    l_mid: [f64; 8],
+    l_hi: [f64; 8],
+    lct_mid: [u32; 8],
+    lct_hi: [u32; 8],
+    l_saved_mid: [u32; 8],
+    l_saved_hi: [u32; 8],
+    /// per `ep`-writing tag: ticks carried, and the tick it was acquired
+    tag_ticks: BTreeMap<String, u32>,
+    tag_since: BTreeMap<String, i64>,
+    real_ct: u32,
+    died_tick: i64,
+    died_path: &'static str,
+}
+
+/// Sum of `external_pressure` written by an actor's tags this tick, read from the
+/// actor's live tag set (they spread) rather than from the scenario.
+fn ep_tag_load(actor: &engine13::core::Actor) -> f64 {
+    let mut s = 0.0;
+    for t in actor.actor_tags.values() {
+        for (m, v) in &t.metrics_modifier {
+            if m.as_str() == "external_pressure" {
+                s += *v as f64;
+            }
+        }
+    }
+    s
+}
+
+/// Every tag in the scenario whose `metrics_modifier` writes `external_pressure`,
+/// with the size it writes **every tick** and whether it can spread. Read from the
+/// loaded scenario, not from a list: `milan_1477` has three, and the largest of them
+/// (`ottoman_frontier`, `+2`) is the only `+2` in the project.
+fn ep_tag_defs(sc: &Scenario) -> Vec<(String, f64, bool)> {
+    let mut out = Vec::new();
+    for t in &sc.tag_definitions {
+        for (m, v) in &t.metrics_modifier {
+            if m.as_str() == "external_pressure" {
+                out.push((t.id.clone(), *v as f64, !t.spreads_via.is_empty() && t.spread_chance > 0.0));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Nominal `external_pressure` effects of the patron actions that fired this tick,
+/// recovered from the `player_action_*` records rather than from the delivered
+/// change, so that an effect the ceiling swallowed is still counted at its own size.
+fn ep_patron_nominal(
+    sc: &Scenario,
+    log: &[engine13::core::Event],
+) -> BTreeMap<String, (f64, f64)> {
+    let mut out: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+    for ev in log {
+        if ev.event_type != engine13::core::EventType::PlayerAction {
+            continue;
+        }
+        let Some(action_id) = ev.id.strip_prefix("player_action_") else { continue };
+        let Some(act) = sc.patron_actions.iter().find(|a| a.id == action_id) else { continue };
+        for (metric, effect) in &act.effects {
+            let MetricRef::Actor { actor_id, metric: key } = metric else { continue };
+            if key.as_str() != "external_pressure" {
+                continue;
+            }
+            let weight = sc
+                .global_metric_weights
+                .get(metric)
+                .and_then(|w| act.source_actor_id.as_deref().and_then(|s| w.get(s)))
+                .copied()
+                .unwrap_or(1.0);
+            let e = out.entry(actor_id.as_str().to_string()).or_insert((0.0, 0.0));
+            let v = effect * weight;
+            if v >= 0.0 { e.0 += v } else { e.1 += v }
+        }
+    }
+    out
+}
+
+/// Fights per defender this tick. Every fight is logged unconditionally
+/// (`interactions.rs:1067`), and the record's `actor_id` is the *attacker*, so the
+/// defender is recovered by matching the id against the live actor set. Pairs that
+/// cannot be resolved uniquely are counted and reported instead of guessed.
+fn ep_fights_by_defender(
+    log: &[engine13::core::Event],
+    ids: &[String],
+    ambiguous: &mut u32,
+) -> BTreeMap<String, u32> {
+    let mut out: BTreeMap<String, u32> = BTreeMap::new();
+    for ev in log {
+        if ev.event_type != engine13::core::EventType::War {
+            continue;
+        }
+        let Some(rest) = ev.id.strip_prefix("military_conflict_") else { continue };
+        let mut hits: Vec<&String> = Vec::new();
+        for b in ids {
+            let suffix = format!("_{}", b);
+            if let Some(head) = rest.strip_suffix(&suffix) {
+                if ids.iter().any(|a| a == head) {
+                    hits.push(b);
+                }
+            }
+        }
+        match hits.len() {
+            1 => *out.entry(hits[0].clone()).or_insert(0) += 1,
+            _ => *ambiguous += 1,
+        }
+    }
+    out
+}
+
+
+/// Migration's `external_pressure` transfer, replicated from the world instead of
+/// solved from the population outcome.
+///
+/// `solve_migration_v2` decides the source set by matching the *population* it
+/// predicts against the population the tick produced. That is the right instrument
+/// for задача 26's object and the wrong one here: in `milan_1477` it leaves 6–11
+/// ticks a game unresolved and, worse, a subset that matches population within
+/// tolerance need not be the subset that moved pressure. Pressure is not solved —
+/// it is *replicated*: the gate (`ep > 65 ∧ cohesion < 40`), the tie-break
+/// (`actor_a` first), the per-source aggregation and the per-pair
+/// `(ep − 65)·0.2/distance` are all deterministic given the state the pair is
+/// evaluated on.
+///
+/// The one thing an outside replica cannot see is *when* inside phase 3 a given
+/// pair is reached: pairs are processed sequentially and each runs combat before
+/// migration, so a source's pressure and a candidate's cohesion may have moved
+/// between the top of the tick and the moment its own pair came up. That is why
+/// this returns three numbers per sink and not one — a best estimate priced on the
+/// post-phase-1 state, and a bracket wide enough to contain any ordering:
+///
+/// * **lo** — no source fires at all (`0`);
+/// * **hi** — every land neighbour that could be a source at any point inside the
+///   tick fires, at the largest pressure it could have held: its post-phase-1 value
+///   plus every fight it took at the maximum `+25`, plus the most it could itself
+///   have received. "Could be a source" is judged on the *lowest* cohesion the
+///   actor could have passed through, not on either endpoint — a defender loses
+///   `10…20` cohesion per fight inside phase 3 and can be back above the gate by the
+///   time the tick ends, which is exactly how rome's `ostrogoths` become a source
+///   invisibly.
+fn ep_migration_transfer(
+    pairs: &[LandPair],
+    ep1: &BTreeMap<String, f64>,
+    coh_pre: &BTreeMap<String, f64>,
+    coh_lo: &BTreeMap<String, f64>,
+    ep_hi: &BTreeMap<String, f64>,
+) -> (BTreeMap<String, f64>, BTreeMap<String, f64>) {
+    let q = |id: &str| -> bool {
+        ep1.get(id).copied().unwrap_or(0.0) > 65.0
+            && coh_pre.get(id).copied().unwrap_or(100.0) < 40.0
+    };
+    // best estimate — the engine's own rule on the post-phase-1 state
+    let mut est: BTreeMap<String, f64> = BTreeMap::new();
+    for p in pairs {
+        let src = if q(&p.a) {
+            &p.a
+        } else if q(&p.b) {
+            &p.b
+        } else {
+            continue;
+        };
+        let dst = if src == &p.a { &p.b } else { &p.a };
+        let se = ep1.get(src).copied().unwrap_or(0.0);
+        *est.entry(dst.clone()).or_insert(0.0) += (se - 65.0) * 0.2 / p.distance as f64;
+    }
+    // upper bound — anything that could have been a source at the largest pressure
+    // it could have held
+    let maybe = |id: &str| -> bool {
+        ep_hi.get(id).copied().unwrap_or(0.0) > 65.0
+            && coh_lo.get(id).copied().unwrap_or(100.0) < 40.0
+    };
+    let mut hi: BTreeMap<String, f64> = BTreeMap::new();
+    for p in pairs {
+        for (src, dst) in [(&p.a, &p.b), (&p.b, &p.a)] {
+            if !maybe(src) {
+                continue;
+            }
+            let se = ep_hi.get(src).copied().unwrap_or(0.0);
+            *hi.entry(dst.clone()).or_insert(0.0) += (se - 65.0).max(0.0) * 0.2 / p.distance as f64;
+        }
+    }
+    (est, hi)
+}
+
+/// One condition somewhere in the scenario that READS `external_pressure`, with the
+/// site that owns it. Collected by walking the loaded `Scenario`, so a consumer
+/// nobody remembered is still measured.
+struct EpConsumer {
+    site: String,
+    actor: Option<String>,
+    op: ComparisonOperator,
+    value: f64,
+    hits: u32,
+    checks: u32,
+}
+
+fn ep_consumers_of(sc: &Scenario) -> Vec<EpConsumer> {
+    let mut out = Vec::new();
+    let is_ep = |m: &MetricRef| -> Option<Option<String>> {
+        match m {
+            MetricRef::Actor { actor_id, metric } if metric.as_str() == "external_pressure" => {
+                Some(Some(actor_id.as_str().to_string()))
+            }
+            _ => None,
+        }
+    };
+    for (i, ad) in sc.auto_deltas.iter().enumerate() {
+        for c in &ad.conditions {
+            if let Some(a) = is_ep(&c.metric) {
+                out.push(EpConsumer {
+                    site: format!("auto_deltas#{} -> {} {:+}", i, ad.metric, c.delta),
+                    actor: a,
+                    op: c.operator.clone(),
+                    value: c.value,
+                    hits: 0,
+                    checks: 0,
+                });
+            }
+        }
+        for rc in &ad.ratio_conditions {
+            for (lbl, m) in [("ratio_a", &rc.metric_a), ("ratio_b", &rc.metric_b)] {
+                if let Some(a) = is_ep(m) {
+                    out.push(EpConsumer {
+                        site: format!("auto_deltas#{} {} -> {:+}", i, lbl, rc.delta),
+                        actor: a,
+                        op: ComparisonOperator::Greater,
+                        value: f64::NEG_INFINITY,
+                        hits: 0,
+                        checks: 0,
+                    });
+                }
+            }
+        }
+    }
+    for ev in &sc.milestone_events {
+        if let EventConditionType::Metric { metric, actor_id, operator, value } =
+            &ev.condition.condition_type
+        {
+            if let Some(a) = is_ep(metric) {
+                out.push(EpConsumer {
+                    site: format!("milestone_events/{}", ev.id),
+                    actor: a.or_else(|| actor_id.clone()),
+                    op: operator.clone(),
+                    value: *value,
+                    hits: 0,
+                    checks: 0,
+                });
+            }
+        }
+    }
+    for ev in &sc.random_events {
+        for c in &ev.conditions {
+            let who = match &c.metric {
+                RelativeMetricRef::SelfRelative(m) if m.as_str() == "external_pressure" => {
+                    Some(None)
+                }
+                RelativeMetricRef::Absolute(m) => is_ep(m),
+                _ => None,
+            };
+            if let Some(a) = who {
+                out.push(EpConsumer {
+                    site: format!("random_events/{}", ev.id),
+                    actor: a,
+                    op: c.operator.clone(),
+                    value: c.value,
+                    hits: 0,
+                    checks: 0,
+                });
+            }
+        }
+    }
+    for act in sc.patron_actions.iter().chain(sc.universal_actions.iter()) {
+        if let ActionCondition::Metric { metric, operator, value } = &act.available_if {
+            if let Some(a) = is_ep(metric) {
+                out.push(EpConsumer {
+                    site: format!("patron_actions/{}.available_if", act.id),
+                    actor: a,
+                    op: operator.clone(),
+                    value: *value,
+                    hits: 0,
+                    checks: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Mass the five `external_pressure` dependency rules move per game — the
+/// second-order price §14.7 of the constantinople pass measured by hand, here
+/// derived from the rule list so it cannot drift from the scenario.
+fn ep_dependency_price(rules: &[DependencyRule], ep: f64) -> Vec<(String, String, f64)> {
+    let mut out = Vec::new();
+    for r in rules {
+        if r.from.as_str() != "external_pressure" {
+            continue;
+        }
+        let thr = r.threshold.unwrap_or(0.0);
+        let v = match r.mode {
+            DependencyMode::Excess => -((ep - thr).max(0.0) * r.coefficient),
+            // The engine's `Bonus` arm reads only `from > threshold`
+            // (`mod.rs:122`) — the rule id says `legitimacy` and the code never
+            // looks at it. Priced as the engine prices it, not as the name reads.
+            DependencyMode::Bonus if ep > thr => (ep - thr) * r.coefficient,
+            _ => 0.0,
+        };
+        out.push((r.id.clone(), r.to.as_str().to_string(), v));
+    }
+    out
+}
+
+/// The milan pass of задача 27: the nominal inflow census, its two self-tests, the
+/// bracketed counterfactuals and the walked consumer occupancy.
+fn epnominal(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    println!("actor\tseed\tmode\tticks\tep0\tepF\tat100%\tab85%\t70_85%\tfirst85\tfirst100\tdrops\tdrop_mass\trel70\tauto\tauto_neg\ttag\tpat+\tpat-\tevents\tmig\tfights\tcombat_mid\tinherit\twasted\tstep_viol\tident_viol\tcw_mism\tdied\tpath");
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc_owned = state.current_scenario.as_ref().unwrap().clone();
+        let sc_ref = &sc_owned;
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc_ref)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc_ref.dependencies.clone();
+
+        let mut acc: BTreeMap<String, EpNomActor> = BTreeMap::new();
+        let mut consumers = ep_consumers_of(sc_ref);
+        let tag_defs = ep_tag_defs(sc_ref);
+        let mut ambiguous_fights = 0u32;
+        let mut collapses = 0u32;
+        // engine consumers, counted over actor-ticks
+        let (mut band_all, mut band_ep, mut gate_fire, mut gate_at_ceiling, mut gate_scale, mut actor_ticks) =
+            (0u32, 0u32, 0u32, 0u32, 0.0f64, 0u32);
+        // second-order price of the five ep-reading dependency rules
+        let mut dep_price: BTreeMap<String, (String, f64)> = BTreeMap::new();
+
+        for t in 0..ticks {
+            // seed newcomers — before the player acts, so that a patron effect on
+            // the actor's first tick is inflow rather than part of its start value
+            {
+                let world = state.world_state.as_ref().unwrap();
+                let mut fresh: Vec<String> = world
+                    .actors
+                    .keys()
+                    .filter(|k| !world.dead_actor_ids.contains(*k))
+                    .cloned()
+                    .collect();
+                fresh.sort();
+                for aid in fresh {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        let a = world.actors.get(&aid).expect("live");
+                        let v = a.get_metric("external_pressure");
+                        e.seen = true;
+                        e.ep0 = v;
+                        e.ep_prev = Some(v);
+                        e.first_85 = -1;
+                        e.first_100 = -1;
+                        e.died_tick = -1;
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.neighbors =
+                            a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+                        for i in 0..EP_DROPS.len() {
+                            e.s_lo[i] = v;
+                            e.s_mid[i] = v;
+                            e.s_hi[i] = v;
+                        }
+                        for i in 0..LAMBDAS.len() {
+                            e.l_mid[i] = v;
+                            e.l_hi[i] = v;
+                        }
+                        if t > 0 {
+                            e.n_inherit += v;
+                        }
+                    }
+                }
+            }
+
+            // ---- patron actions, priced from the records they leave -------------
+            let log_pre = state.event_log.events.len();
+            let (_applied, _rt) = scripted_step(&mut state, scenario_id, strategy);
+            let patron: BTreeMap<String, (f64, f64)> =
+                ep_patron_nominal(sc_ref, &state.event_log.events[log_pre..]);
+
+            // ---- pre-tick world: auto_deltas, tags, the graph, the consumers -----
+            let (pairs_t, ep0, coh0, ep_auto, ep_noise, tag_load, tag_carried, live_ids) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut tags: BTreeMap<String, f64> = BTreeMap::new();
+                let mut carried: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> =
+                    BTreeMap::new();
+                let mut ids: Vec<String> = Vec::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    ids.push(aid.clone());
+                    full.insert(aid.clone(), a.metrics.clone());
+                    ep.insert(aid.clone(), a.get_metric("external_pressure"));
+                    coh.insert(aid.clone(), a.get_metric("cohesion"));
+                    tags.insert(aid.clone(), ep_tag_load(a));
+                    carried.insert(
+                        aid.clone(),
+                        tag_defs
+                            .iter()
+                            .filter(|(id, _, _)| a.actor_tags.contains_key(id))
+                            .map(|(id, _, _)| id.clone())
+                            .collect::<Vec<String>>(),
+                    );
+                }
+                ids.sort();
+                let (ad_ep, ad_ep_noise) =
+                    price_ep_auto_deltas(sc_ref, &full, &world.global_metrics);
+
+                // consumers, evaluated on the same pre-tick state phase 1 sees
+                for c in consumers.iter_mut() {
+                    let targets: Vec<&String> = match &c.actor {
+                        Some(a) => ids.iter().filter(|x| *x == a).collect(),
+                        None => ids.iter().collect(),
+                    };
+                    for a in targets {
+                        let v = ep.get(a).copied().unwrap_or(0.0);
+                        c.checks += 1;
+                        let hit = match c.op {
+                            ComparisonOperator::Less => v < c.value,
+                            ComparisonOperator::LessOrEqual => v <= c.value,
+                            ComparisonOperator::Greater => v > c.value,
+                            ComparisonOperator::GreaterOrEqual => v >= c.value,
+                            ComparisonOperator::Equal => (v - c.value).abs() < 0.001,
+                        };
+                        if hit {
+                            c.hits += 1;
+                        }
+                    }
+                }
+                // engine consumers
+                for aid in &ids {
+                    let a = world.actors.get(aid).expect("live");
+                    actor_ticks += 1;
+                    let e = a.get_metric("external_pressure");
+                    let l = a.get_metric("legitimacy");
+                    let ch = a.get_metric("cohesion");
+                    // `in_vassalage_band` verbatim (`interactions.rs:839`)
+                    if (70.0..=85.0).contains(&e)
+                        && (10.0..=25.0).contains(&l)
+                        && (15.0..=30.0).contains(&ch)
+                    {
+                        band_all += 1;
+                    }
+                    if (70.0..=85.0).contains(&e) {
+                        band_ep += 1;
+                    }
+                    for (id, to, v) in ep_dependency_price(&deps, e) {
+                        let slot = dep_price.entry(id).or_insert((to, 0.0));
+                        slot.1 += v;
+                    }
+                }
+                (pairs, ep, coh, ad_ep, ad_ep_noise, tags, carried, ids)
+            };
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let slice: Vec<engine13::core::Event> =
+                state.event_log.events[log_len..].to_vec();
+
+            let mut ev_ep: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &slice {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "external_pressure") {
+                    *ev_ep.entry(aid).or_insert(0.0) += d;
+                }
+            }
+            let fights = ep_fights_by_defender(&slice, &live_ids, &mut ambiguous_fights);
+
+            // migration, replicated from the world (see `ep_migration_transfer`)
+            let (mig_est, mig_hi) = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut coh_post: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep_hi: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in &live_ids {
+                    let (cp, ep_now) = match world.actors.get(aid) {
+                        Some(a) if !world.dead_actor_ids.contains(aid) => (
+                            a.get_metric("cohesion"),
+                            a.get_metric("external_pressure"),
+                        ),
+                        _ => match world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                            Some(d) => (
+                                d.final_metrics.get("cohesion").copied().unwrap_or(100.0),
+                                d.final_metrics.get("external_pressure").copied().unwrap_or(0.0),
+                            ),
+                            None => (100.0, 0.0),
+                        },
+                    };
+                    coh_post.insert(
+                        aid.clone(),
+                        cp.min(coh0.get(aid).copied().unwrap_or(100.0))
+                            - 20.0 * fights.get(aid).copied().unwrap_or(0) as f64,
+                    );
+                    // the most this actor's pressure could have been at any point
+                    // inside phase 3: its post-phase-1 value, plus every fight it
+                    // took at the maximum `+25`, plus the most it could itself have
+                    // received from its own land neighbours (`7.0` per pair, the
+                    // transfer's ceiling at `ep = 100`, `distance = 1`)
+                    let deg = pairs_t.iter().filter(|p| &p.a == aid || &p.b == aid).count() as f64;
+                    let base = ep0.get(aid).copied().unwrap_or(0.0)
+                        + ep_auto.get(aid).copied().unwrap_or(0.0)
+                        + ep_noise.get(aid).copied().unwrap_or(0.0);
+                    let bound = base
+                        + COMBAT_EP_HI * fights.get(aid).copied().unwrap_or(0) as f64
+                        + 7.0 * deg;
+                    ep_hi.insert(aid.clone(), bound.max(ep_now));
+                }
+                let mut ep1: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in &live_ids {
+                    let v = (ep0.get(aid).copied().unwrap_or(0.0)
+                        + ep_auto.get(aid).copied().unwrap_or(0.0))
+                    .clamp(0.0, 100.0);
+                    ep1.insert(aid.clone(), v);
+                }
+                // gate occupancy, on the same replication (§(C) measurement)
+                for p in &pairs_t {
+                    let q = |id: &str| {
+                        ep1.get(id).copied().unwrap_or(0.0) > 65.0
+                            && coh0.get(id).copied().unwrap_or(100.0) < 40.0
+                    };
+                    let src = if q(&p.a) {
+                        &p.a
+                    } else if q(&p.b) {
+                        &p.b
+                    } else {
+                        continue;
+                    };
+                    gate_fire += 1;
+                    let se = ep1.get(src).copied().unwrap_or(0.0);
+                    gate_scale += se - 65.0;
+                    if se >= 100.0 - 1e-9 {
+                        gate_at_ceiling += 1;
+                    }
+                }
+                ep_migration_transfer(&pairs_t, &ep1, &coh0, &coh_post, &ep_hi)
+            };
+
+            let world = state.world_state.as_ref().unwrap();
+            // Phase 1 walks the whole `auto_deltas` list in order, and a block that
+            // writes some *other* metric can move a value a later `ep` block reads —
+            // `constantinople_1430` prices its three `byzantium` blocks against an
+            // `ottomans.military_size` that an earlier block has already changed. The
+            // pre-tick pricing is therefore an endpoint, not the value; the other
+            // endpoint is the same pricing on the state the tick ended in, and the
+            // two bracket what phase 1 actually charged. In `milan_1477` the two
+            // coincide for three of the four blocks — no `ep` block there reads a
+            // metric an earlier block writes, except `#2` reading `milan.legitimacy`.
+            let ep_auto_post: BTreeMap<String, f64> = {
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> =
+                    BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if !world.dead_actor_ids.contains(aid) {
+                        full.insert(aid.clone(), a.metrics.clone());
+                    }
+                }
+                price_ep_auto_deltas(sc_ref, &full, &world.global_metrics).0
+            };
+            let tag_post: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .filter(|(k, _)| !world.dead_actor_ids.contains(*k))
+                .map(|(k, a)| (k.clone(), ep_tag_load(a)))
+                .collect();
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == t)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let (pat_pos, pat_neg) = patron.get(&aid).copied().unwrap_or((0.0, 0.0));
+                let a_pre = ep_auto.get(&aid).copied().unwrap_or(0.0);
+                let a_post = ep_auto_post.get(&aid).copied().unwrap_or(a_pre);
+                let inflow = EpInflow {
+                    auto: a_pre,
+                    auto_lo: a_pre.min(a_post),
+                    auto_hi: a_pre.max(a_post),
+                    auto_noise: ep_noise.get(&aid).copied().unwrap_or(0.0),
+                    tag_lo: {
+                        let a = tag_load.get(&aid).copied().unwrap_or(0.0);
+                        let b = tag_post.get(&aid).copied().unwrap_or(a);
+                        a.min(b)
+                    },
+                    tag_hi: {
+                        let a = tag_load.get(&aid).copied().unwrap_or(0.0);
+                        let b = tag_post.get(&aid).copied().unwrap_or(a);
+                        a.max(b)
+                    },
+                    patron: pat_pos + pat_neg,
+                    events: ev_ep.get(&aid).copied().unwrap_or(0.0),
+                    migration: mig_est.get(&aid).copied().unwrap_or(0.0),
+                    migration_hi: mig_hi.get(&aid).copied().unwrap_or(0.0),
+                    fights: fights.get(&aid).copied().unwrap_or(0),
+                };
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                e.ticks += 1;
+                for tid in tag_carried.get(&aid).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    *e.tag_ticks.entry(tid.clone()).or_insert(0) += 1;
+                    e.tag_since.entry(tid.clone()).or_insert((t + 1) as i64);
+                }
+
+                // ---- occupancy -------------------------------------------------
+                if ep >= 100.0 { e.at_100 += 1; }
+                if ep > 85.0 { e.above_85 += 1; }
+                if (70.0..=85.0).contains(&ep) { e.in_70_85 += 1; }
+                if ep > 85.0 && e.first_85 < 0 { e.first_85 = (t + 1) as i64; }
+                if ep >= 100.0 && e.first_100 < 0 { e.first_100 = (t + 1) as i64; }
+
+                // ---- the nominal census, and its one-step self-test -------------
+                // the previous tick's *end* value: patron actions run before phase 1,
+                // so they are part of this tick's inflow, not of the state it starts
+                // from
+                let prev_real = e.ep_prev.unwrap_or(0.0);
+                let lo = inflow.step(prev_real, EpDrop::Ident, Branch::Lo);
+                let hi = inflow.step(prev_real, EpDrop::Ident, Branch::Hi);
+                if ep < lo - 1e-6 || ep > hi + 1e-6 {
+                    e.step_viol += 1;
+                    println!(
+                        "#VIOL\t{}\t{}\t{}\ttick={}\tprev={:.3}\treal={:.3}\tlo={:.3}\thi={:.3}\tauto={:+.3}±{:.3}\ttag={:+.1}..{:+.1}\tpat={:+.2}\tev={:+.2}\tmig={:+.3}\tfights={}",
+                        aid, seed, mode_label(strategy), t + 1, prev_real, ep, lo, hi,
+                        inflow.auto, inflow.auto_noise, inflow.tag_lo, inflow.tag_hi,
+                        inflow.patron, inflow.events, inflow.migration, inflow.fights
+                    );
+                    let ids: Vec<String> = slice
+                        .iter()
+                        .filter(|ev| ev.id.contains(&aid) || ev.actor_id == aid)
+                        .map(|ev| format!("{}[{:?}/{}]", ev.id, ev.event_type, ev.actor_id))
+                        .collect();
+                    println!("#VIOLEV\t{}\ttick={}\t{}", aid, t + 1, ids.join(" | "));
+                }
+                let nom = inflow.nominal_mid();
+                e.n_wasted +=
+                    (prev_real + nom - 100.0).max(0.0).min(nom.max(0.0));
+                if inflow.auto >= 0.0 { e.n_auto += inflow.auto } else { e.n_auto_neg += inflow.auto }
+                e.n_tag += (inflow.tag_lo + inflow.tag_hi) / 2.0;
+                e.n_patron_pos += pat_pos;
+                e.n_patron_neg += pat_neg;
+                e.n_events += inflow.events;
+                e.n_mig += inflow.migration;
+                e.fights += inflow.fights;
+                if let Some(prev) = e.ep_prev {
+                    let d = ep - prev;
+                    if d < -1e-9 { e.drops += 1; e.drop_mass += -d; }
+                    if prev >= 70.0 && ep < 70.0 { e.release_70 += 1; }
+                }
+                e.ep_prev = Some(ep);
+
+                // ---- shadows ---------------------------------------------------
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if t < ms);
+                for (i, lam) in LAMBDAS.iter().enumerate() {
+                    e.l_mid[i] =
+                        inflow.step_decayed(e.l_mid[i], EpDrop::Ident, Branch::Mid, *lam);
+                    e.l_hi[i] = inflow.step_decayed(e.l_hi[i], EpDrop::Ident, Branch::Hi, *lam);
+                }
+                for (i, (drop, _)) in EP_DROPS.iter().enumerate() {
+                    e.s_lo[i] = inflow.step(e.s_lo[i], *drop, Branch::Lo);
+                    e.s_mid[i] = inflow.step(e.s_mid[i], *drop, Branch::Mid);
+                    e.s_hi[i] = inflow.step(e.s_hi[i], *drop, Branch::Hi);
+                }
+                if ep < e.s_lo[0] - 1e-6 || ep > e.s_hi[0] + 1e-6 {
+                    e.ident_viol += 1;
+                }
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    if rc || ri || rq { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                    for i in 0..LAMBDAS.len() {
+                        let (a4, b4, c4) = danger_paths(coh, leg, e.l_mid[i], mil, besieged);
+                        if a4 || b4 || c4 { e.lct_mid[i] += 1 } else { e.lct_mid[i] = 0 }
+                        let (a5, b5, c5) = danger_paths(coh, leg, e.l_hi[i], mil, besieged);
+                        if a5 || b5 || c5 { e.lct_hi[i] += 1 } else { e.lct_hi[i] = 0 }
+                    }
+                    for i in 0..EP_DROPS.len() {
+                        let (a1, b1, c1) = danger_paths(coh, leg, e.s_lo[i], mil, besieged);
+                        if a1 || b1 || c1 { e.ct_lo[i] += 1 } else { e.ct_lo[i] = 0 }
+                        let (a3, b3, c3) = danger_paths(coh, leg, e.s_mid[i], mil, besieged);
+                        if a3 || b3 || c3 { e.ct_mid[i] += 1 } else { e.ct_mid[i] = 0 }
+                        let (a2, b2, c2) = danger_paths(coh, leg, e.s_hi[i], mil, besieged);
+                        if a2 || b2 || c2 { e.ct_hi[i] += 1 } else { e.ct_hi[i] = 0 }
+                    }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    collapses += 1;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    for i in 0..LAMBDAS.len() {
+                        if e.lct_mid[i] < 3 { e.l_saved_mid[i] += 1 }
+                        if e.lct_hi[i] < 3 { e.l_saved_hi[i] += 1 }
+                    }
+                    let mut verdicts = Vec::new();
+                    for (i, (_, dname)) in EP_DROPS.iter().enumerate() {
+                        // the upper branch is the one most favourable to the actor
+                        // dying anyway: if even it is not in danger, removal is
+                        // decisive
+                        if e.ct_mid[i] < 3 {
+                            e.saved_mid[i] += 1;
+                        }
+                        let v = if e.ct_hi[i] < 3 {
+                            e.saved_hi[i] += 1;
+                            "SAVED"
+                        } else if e.ct_lo[i] >= 3 {
+                            "not_saved"
+                        } else if e.ct_mid[i] < 3 {
+                            "saved(est)"
+                        } else {
+                            "not_saved(est)"
+                        };
+                        verdicts.push(format!(
+                            "{}={}[{:.1}|{:.1}|{:.1}]",
+                            dname, v, e.s_lo[i], e.s_mid[i], e.s_hi[i]
+                        ));
+                    }
+                    let lam: Vec<String> = LAMBDAS
+                        .iter()
+                        .enumerate()
+                        .map(|(i, l)| {
+                            format!(
+                                "λ{}={}",
+                                l,
+                                if e.lct_hi[i] < 3 {
+                                    "SAVED"
+                                } else if e.lct_mid[i] < 3 {
+                                    "saved(est)"
+                                } else {
+                                    "no"
+                                }
+                            )
+                        })
+                        .collect();
+                    println!(
+                        "#DEATHM\t{}\t{}\t{}\ttick={}\tpath={}\tep={:.2}\tfights={}\t{}\tlambda\t{}",
+                        aid, seed, mode_label(strategy), t + 1, e.died_path, ep, e.fights,
+                        verdicts.join("\t"), lam.join("\t")
+                    );
+                }
+            }
+        }
+
+        let mode = mode_label(strategy);
+        let mut tot = [0.0f64; 8];
+        let mut saved_hi = [0u32; 9];
+        let mut saved_mid = [0u32; 9];
+        let mut lam_hi = [0u32; 8];
+        let mut lam_mid = [0u32; 8];
+        let (mut sv, mut iv, mut cwm, mut tot_fights) = (0u32, 0u32, 0u32, 0u32);
+        for (aid, e) in &acc {
+            for i in 0..EP_DROPS.len() {
+                saved_hi[i] += e.saved_hi[i];
+                saved_mid[i] += e.saved_mid[i];
+            }
+            for i in 0..LAMBDAS.len() {
+                lam_hi[i] += e.l_saved_hi[i];
+                lam_mid[i] += e.l_saved_mid[i];
+            }
+            sv += e.step_viol;
+            iv += e.ident_viol;
+            cwm += e.cw_mismatch;
+            tot_fights += e.fights;
+            tot[0] += e.n_auto; tot[1] += e.n_tag; tot[2] += e.n_patron_pos;
+            tot[3] += e.n_patron_neg; tot[4] += e.n_events; tot[5] += e.n_mig;
+            tot[6] += 20.0 * e.fights as f64; tot[7] += e.n_inherit;
+            let n = e.ticks.max(1) as f64;
+            println!(
+                "{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:+.1}\t{}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{:+.1}\t{}\t{:+.1}\t{:+.1}\t{:.1}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, mode, e.ticks, e.ep0, e.ep_prev.unwrap_or(0.0),
+                100.0 * e.at_100 as f64 / n, 100.0 * e.above_85 as f64 / n,
+                100.0 * e.in_70_85 as f64 / n, e.first_85, e.first_100,
+                e.drops, e.drop_mass, e.release_70,
+                e.n_auto, e.n_auto_neg, e.n_tag, e.n_patron_pos, e.n_patron_neg,
+                e.n_events, e.n_mig, e.fights, 20.0 * e.fights as f64, e.n_inherit,
+                e.n_wasted, e.step_viol, e.ident_viol, e.cw_mismatch,
+                e.died_tick, e.died_path
+            );
+        }
+        for (aid, e) in &acc {
+            for (tid, size, spreads) in &tag_defs {
+                let n = e.tag_ticks.get(tid).copied().unwrap_or(0);
+                if n == 0 {
+                    continue;
+                }
+                println!(
+                    "#TAG\tseed={}\tmode={}\tactor={}\ttag={}\tsize={:+}\tspreads={}\tticks={}/{}\tsince={}\tmass={:+.1}",
+                    seed, mode, aid, tid, size, *spreads as u8, n, e.ticks,
+                    e.tag_since.get(tid).copied().unwrap_or(-1),
+                    size * n as f64
+                );
+            }
+        }
+        for c in &consumers {
+            println!(
+                "#CONS\tseed={}\tmode={}\tsite={}\tactor={}\top={} {}\thits={}/{}\t{:.1}%",
+                seed, mode, c.site,
+                c.actor.clone().unwrap_or_else(|| "*".into()),
+                op_str(&c.op), c.value, c.hits, c.checks,
+                100.0 * c.hits as f64 / c.checks.max(1) as f64
+            );
+        }
+        for (id, (to, v)) in &dep_price {
+            println!("#DEP\tseed={}\tmode={}\trule={}\tto={}\tmass={:+.1}", seed, mode, id, to, v);
+        }
+        let sv_str: Vec<String> = EP_DROPS
+            .iter()
+            .enumerate()
+            .map(|(i, (_, n))| format!("{}:{}/{}", n, saved_hi[i], saved_mid[i]))
+            .collect();
+        println!(
+            "#EPN\tseed={}\tmode={}\tcollapses={}\tauto={:+.1}\ttag={:+.1}\tpatron+={:+.1}\tpatron-={:+.1}\tevents={:+.1}\tmig={:+.1}\tfights={}\tcombat_mid={:+.1}\tinherit={:+.1}\tstep_viol={}\tident_viol={}\tcw_mismatch={}\tambig_fights={}\tband_all={}/{}\tband_ep={}\tgate={}\tgate_ceiling={}\tgate_scale={:.1}\tsaved={}\tlambda={}",
+            seed, mode, collapses, tot[0], tot[1], tot[2], tot[3], tot[4], tot[5],
+            tot_fights, tot[6], tot[7], sv, iv, cwm, ambiguous_fights,
+            band_all, actor_ticks, band_ep, gate_fire, gate_at_ceiling,
+            gate_scale / gate_fire.max(1) as f64,
+            sv_str.join(","),
+            LAMBDAS
+                .iter()
+                .enumerate()
+                .map(|(i, l)| format!("λ={}:{}/{}", l, lam_hi[i], lam_mid[i]))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
 }
