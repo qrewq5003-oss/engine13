@@ -65,6 +65,15 @@ const GUARDED_METRICS: &[&str] = &["legitimacy", "cohesion", "external_pressure"
 ///   `93.1 %` to `42.1 %` occupancy, which turns 4 generation transfers into 3 and
 ///   collides head-on with задача 15.
 ///
+/// **Superseded in part by задача 29 (2026-08-24).** The fourth bullet no longer holds:
+/// `early_transfer` has been removed from `rome_375` (`early_transfer: None`), so rome's
+/// generation count does not depend on `external_pressure` at all any more, and the
+/// guarded base is 3 transfers per 200 ticks, not 4. The measurement that killed it: at
+/// the ticks where the gate actually decided anything `rome.external_pressure` read
+/// exactly `100.0` in 80 runs of 80, i.e. the conjunct could not become false. The other
+/// three bullets are untouched and the verdict below stands on them. See
+/// `docs/investigation_early_transfer.md`.
+///
 /// So the pattern is left running and written down. Per tag, in the units the walk
 /// produced (`noplayer`, 10 seeds, 300 ticks, nominal `external_pressure` per game):
 ///

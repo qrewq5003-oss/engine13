@@ -1108,6 +1108,7 @@ fn price_population_rules(rules: &[DependencyRule], pop: f64, eo: f64) -> f64 {
 
 fn priority_list(scenario_id: &str, strategy: &str) -> &'static [&'static str] {
     match (scenario_id, strategy) {
+        ("rome_375", "influence") => ROME_INFLUENCE,
         ("rome_375", "wealth") => ROME_WEALTH,
         ("rome_375", _) => ROME_BALANCED,
         ("milan_1477", _) => MILAN_AGGRESSIVE,
@@ -7849,6 +7850,16 @@ fn main() {
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             epnominal(scenario, ticks, &seeds, strategy);
         }
+        "gentransfer" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            gentransfer(scenario, ticks, &seeds, strategy);
+        }
         other => panic!("unknown mode: {}", other),
     }
 }
@@ -10494,6 +10505,536 @@ fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) 
             100.0 * *cs as f64 / (*c).max(1) as f64,
             l, ls,
             100.0 * *ls as f64 / (*l).max(1) as f64
+        );
+    }
+}
+
+// ============================================================================
+// Task 29, stage 1 — `gentransfer`: rome's `early_transfer`, the conjunct that
+// cannot become false
+// ============================================================================
+//
+// `check_generation_transfer` (`engine/mod.rs:1366`) fires when
+// `age >= early.age ∧ op(ep, early.condition_value)` **or** `age >= patriarch_end_age`.
+// The `ep` conjunct is measured by `tagshadow` as `93.1 %` occupancy — but that
+// counter (`et_checks`, `:10259`) increments on **every** tick, while the condition
+// only decides anything on the ticks where the age gate is already open. Two
+// different measures; this mode reports both.
+//
+// The counterfactual is a **shadow on the verdict of a boolean predicate**, not a
+// second simulation and not a shadow on a clamped mass — so the mine of
+// `investigation_pressure_ratchet_milan.md` §15 (a shadow computed as "observed
+// delta minus producer" is unsound once the metric sits on its clamp) does not
+// apply here: nothing is subtracted, the predicate is re-evaluated.
+//
+// The replay iterates the *engine's own* age arithmetic over the observed `ep`
+// trajectory. That is exact for the actual rule (self-test below) and exact for an
+// alternative rule **under one stated condition**: that `ep(t)` does not depend on
+// when the transfers happen. The walk supports it — the only outward path from
+// `family_state` is three `auto_deltas` of rome gated on `family_knowledge`
+// (`investigation_knowledge_gates.md`), two of which are measured inert and the
+// third of which writes `family_knowledge` itself; none writes `external_pressure`.
+// In `noplayer` the condition is trivially satisfied because the family metrics
+// never leave `0.0`. The condition is stated, not assumed away.
+//
+// Self-test (mandatory, §1 п.6 of the statement): the replay under the ACTUAL rule
+// must reproduce the observed transfer ticks exactly, to the last one. `gt_viol > 0`
+// invalidates every number this mode prints.
+
+const ROME_INFLUENCE: &[&str] = &[
+    "build_reputation", "support_city", "fund_defense", "back_administration",
+    "expand_network", "educate_family", "invest_wealth", "gather_information", "lay_low",
+];
+
+/// One alternative rule for the transfer predicate.
+#[derive(Clone)]
+struct GtVariant {
+    label: &'static str,
+    early: bool,
+    thr: f64,
+}
+
+const GT_VARIANTS: [GtVariant; 13] = [
+    GtVariant { label: "IDENT>70", early: true, thr: 70.0 },
+    GtVariant { label: "X>75", early: true, thr: 75.0 },
+    GtVariant { label: "X>80", early: true, thr: 80.0 },
+    GtVariant { label: "X>85", early: true, thr: 85.0 },
+    GtVariant { label: "X>90", early: true, thr: 90.0 },
+    GtVariant { label: "X>95", early: true, thr: 95.0 },
+    GtVariant { label: "X>99", early: true, thr: 99.0 },
+    GtVariant { label: "X>99.9", early: true, thr: 99.9 },
+    GtVariant { label: "X>100", early: true, thr: 100.0 },
+    GtVariant { label: "NOEARLY", early: false, thr: f64::INFINITY },
+    // The same rule as NOEARLY (transfers fire on the normal trigger only), but the
+    // occupancy counters are evaluated against a real threshold. This is the number
+    // that says whether the `ep` conjunct is degenerate *by itself* or only because
+    // today's window is one tick wide: under NOEARLY the age gate stands open for
+    // ages 65..75, i.e. ~84 ticks per 300-tick game instead of 6.
+    GtVariant { label: "WINDOW@70", early: false, thr: 70.0 },
+    GtVariant { label: "WINDOW@85", early: false, thr: 85.0 },
+    GtVariant { label: "WINDOW@95", early: false, thr: 95.0 },
+];
+
+struct GtReplay {
+    /// (tick 1-based, age at transfer, normal trigger true, early trigger true)
+    transfers: Vec<(u32, u32, bool, bool)>,
+    /// ticks on which the age gate was open and the generation had not yet ended
+    checks: u64,
+    /// of those, ticks on which the `ep` conjunct was true
+    hits: u64,
+    /// ticks on which the age gate was open (same as `checks`), by age
+    age_hist: [u32; 12],
+}
+
+/// Replays the engine's trigger arithmetic (`engine/mod.rs:1383–1410`) over an
+/// observed `ep` trajectory. `ep[t]` is the value the condition read on the call
+/// whose `world.tick` was `t` — phases 8 and 9 touch no actor metric, so the
+/// post-tick observation is that value (checked in `engine/mod.rs:648–664`).
+fn gt_replay(
+    ep: &[f64],
+    start_age: u32,
+    end_age: u32,
+    early_age: u32,
+    op: &ComparisonOperator,
+    v: &GtVariant,
+) -> GtReplay {
+    let mut age = start_age;
+    let mut r = GtReplay { transfers: vec![], checks: 0, hits: 0, age_hist: [0; 12] };
+    for (t, e) in ep.iter().enumerate() {
+        if t.is_multiple_of(2) {
+            age += 1;
+        }
+        if age >= early_age {
+            r.checks += 1;
+            if op.evaluate(*e, v.thr) {
+                r.hits += 1;
+            }
+            let idx = ((age - early_age) as usize).min(11);
+            r.age_hist[idx] += 1;
+        }
+        let early_fired = v.early && age >= early_age && op.evaluate(*e, v.thr);
+        let normal = age >= end_age;
+        if early_fired || normal {
+            r.transfers.push((t as u32 + 1, age, normal, early_fired));
+            age = start_age;
+        }
+    }
+    r
+}
+
+fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+    use engine13::db::Db;
+
+    let scenario0 = registry::load_by_id(scenario_id).expect("scenario");
+    let Some(gm0) = scenario0.generation_mechanics.clone() else {
+        println!("# {} has generation_mechanics: None — nothing to measure", scenario_id);
+        return;
+    };
+    // After task 29 variant B `early_transfer` is `None`. The mode still has to
+    // measure everything it measured before, so the *reference* condition (the one
+    // the scenario used to carry) is reconstructed explicitly and marked as such:
+    // occupancy, the age window and the threshold grid stay comparable across the
+    // change, and `has_early` says which rule the engine actually ran.
+    let has_early = gm0.early_transfer.is_some();
+    let et0 = gm0.early_transfer.clone().unwrap_or(engine13::core::EarlyTransfer {
+        age: 65,
+        condition_metric: MetricRef::literal(&format!(
+            "actor:{}.external_pressure",
+            match scenario_id {
+                "constantinople_1430" => "byzantium",
+                "rome_375" => "rome",
+                _ => "milan",
+            }
+        )),
+        condition_operator: ComparisonOperator::Greater,
+        condition_value: 70.0,
+    });
+    let (start_age, end_age, early_age) =
+        (gm0.patriarch_start_age, gm0.patriarch_end_age, et0.age);
+    println!(
+        "# gentransfer {} {} ticks × {} seeds, mode {} — start_age {} early_age {} end_age {} cond {} {} {} (early_transfer present: {})",
+        scenario_id, ticks, seeds.len(), mode_label(strategy),
+        start_age, early_age, end_age,
+        et0.condition_metric, op_str(&et0.condition_operator), et0.condition_value,
+        has_early
+    );
+    println!(
+        "# generation_length (GenerationMechanics) = {}, (Scenario) = {:?} — neither is read by the engine",
+        gm0.generation_length, scenario0.generation_length
+    );
+
+    let sample: Vec<u32> = (1..=ticks).filter(|t| t.is_multiple_of(50)).collect();
+    let mut gt_viol_total = 0u32;
+    let mut var_transfers: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
+    let mut var_normal: BTreeMap<&'static str, (u64, u64)> = BTreeMap::new();
+    let mut var_occ: BTreeMap<&'static str, (u64, u64)> = BTreeMap::new();
+
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        let et = et0.clone();
+        let prot = match scenario_id {
+            "constantinople_1430" => "byzantium",
+            "rome_375" => "rome",
+            _ => "milan",
+        };
+        let know_ref = MetricRef::literal("family:family_knowledge");
+
+        let mut ep_series: Vec<f64> = Vec::with_capacity(ticks as usize);
+        let mut alive: Vec<bool> = Vec::with_capacity(ticks as usize);
+        let mut obs_transfers: Vec<u32> = vec![];
+        let mut obs_ages: Vec<u32> = vec![];
+        let mut prev_gen = 0u32;
+        let mut prev_age = start_age;
+        let mut victory_tick: i64 = -1;
+        let mut prot_dead_tick: i64 = -1;
+        let mut know40: i64 = -1;
+        let mut know50: i64 = -1;
+        // rome's five clamped metrics, over all ticks and over age-gate-open ticks
+        let mut m_all: [(f64, u64, u64); 5] = [(0.0, 0, 0); 5]; // (sum, at ceiling, in [70,85])
+        let mut m_gate: [(f64, u64, u64); 5] = [(0.0, 0, 0); 5];
+        let mut gate_open_ticks = 0u64;
+        let mut fam_at_transfer: Vec<(u32, [f64; 4])> = vec![];
+        // recovery: does the coefficient compound across generations, or does the
+        // metric climb back to where it was before the next transfer? (§7 price)
+        // (D1): does the panel's calendar arithmetic agree with the model counter?
+        // `FamilyPanel.tsx:39-41` renders floor((year - start_year)/generation_length) + 1;
+        // the model's number of the generation currently in power is generation_count + 1.
+        // Measured on the whole trajectory, not at one point.
+        let mut panel_mismatch = 0u32;
+        let mut panel_first_mismatch: i64 = -1;
+        let mut panel_max_gap = 0i64;
+        let mut fam_prev: [f64; 4] = [0.0; 4];
+        let mut pending_rec: Vec<(usize, f64, u32)> = vec![];
+        let mut recovered: Vec<(usize, u32, u32)> = vec![]; // (metric, transfer tick, ticks to recover)
+        let mut rel_rows: Vec<(u32, u64, u64, u64, u64)> = vec![]; // tick, log_total, log_gen, cur_gen_empty, cur_gen_nonempty
+
+        for t in 0..ticks {
+            let _ = scripted_step(&mut state, scenario_id, strategy);
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let world = state.world_state.as_ref().unwrap();
+            // the condition's own path, so a dead actor reads exactly what the engine reads
+            let ep = et.condition_metric.get(world);
+            ep_series.push(ep);
+            let is_alive = world.actors.contains_key(prot);
+            alive.push(is_alive);
+            if victory_tick < 0 && world.victory_achieved {
+                victory_tick = (t + 1) as i64;
+            }
+            if prot_dead_tick < 0 && world.dead_actor_ids.contains(prot) {
+                prot_dead_tick = (t + 1) as i64;
+            }
+            let fs = world.family_state.as_ref();
+            let gen = fs.map(|f| f.generation_count).unwrap_or(0);
+            let age_post = fs.map(|f| f.patriarch_age).unwrap_or(0);
+            let aged = if t.is_multiple_of(2) { prev_age + 1 } else { prev_age };
+            if gen > prev_gen {
+                obs_transfers.push(t + 1);
+                obs_ages.push(aged);
+                let fm = fs.unwrap();
+                fam_at_transfer.push((
+                    t + 1,
+                    [
+                        fm.metrics.get("influence").copied().unwrap_or(0.0),
+                        fm.metrics.get("knowledge").copied().unwrap_or(0.0),
+                        fm.metrics.get("wealth").copied().unwrap_or(0.0),
+                        fm.metrics.get("connections").copied().unwrap_or(0.0),
+                    ],
+                ));
+            }
+            {
+                let cur = [
+                    fs.and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0),
+                    fs.and_then(|f| f.metrics.get("knowledge")).copied().unwrap_or(0.0),
+                    fs.and_then(|f| f.metrics.get("wealth")).copied().unwrap_or(0.0),
+                    fs.and_then(|f| f.metrics.get("connections")).copied().unwrap_or(0.0),
+                ];
+                if gen > prev_gen {
+                    for i in 0..4 {
+                        if fam_prev[i] > cur[i] + 1e-9 {
+                            pending_rec.push((i, fam_prev[i], t + 1));
+                        }
+                    }
+                }
+                pending_rec.retain(|(i, pre, tk)| {
+                    if cur[*i] >= *pre - 0.1 {
+                        recovered.push((*i, *tk, t + 1 - *tk));
+                        false
+                    } else {
+                        true
+                    }
+                });
+                fam_prev = cur;
+            }
+            {
+                let panel = ((world.year - scenario0.start_year) as f64
+                    / gm0.generation_length as f64)
+                    .floor() as i64
+                    + 1;
+                let model = gen as i64 + 1;
+                if panel != model {
+                    panel_mismatch += 1;
+                    if panel_first_mismatch < 0 {
+                        panel_first_mismatch = (t + 1) as i64;
+                    }
+                    panel_max_gap = panel_max_gap.max((model - panel).abs());
+                }
+            }
+            prev_gen = gen;
+            prev_age = age_post;
+            let kn = know_ref.get(world);
+            if know40 < 0 && kn > 40.0 {
+                know40 = (t + 1) as i64;
+            }
+            if know50 < 0 && kn > 50.0 {
+                know50 = (t + 1) as i64;
+            }
+            if let Some(a) = world.actors.get(prot) {
+                let gate = aged >= early_age;
+                if gate {
+                    gate_open_ticks += 1;
+                }
+                for (i, key) in CLAMPED_METRICS.iter().enumerate() {
+                    let v = a.get_metric(key);
+                    m_all[i].0 += v;
+                    if v >= 100.0 - 1e-9 {
+                        m_all[i].1 += 1;
+                    }
+                    if (70.0..=85.0).contains(&v) {
+                        m_all[i].2 += 1;
+                    }
+                    if gate {
+                        m_gate[i].0 += v;
+                        if v >= 100.0 - 1e-9 {
+                            m_gate[i].1 += 1;
+                        }
+                        if (70.0..=85.0).contains(&v) {
+                            m_gate[i].2 += 1;
+                        }
+                    }
+                }
+            }
+            if sample.contains(&(t + 1)) {
+                let mut fg: Vec<String> = world
+                    .actors
+                    .values()
+                    .filter(|a| {
+                        a.narrative_status == engine13::core::NarrativeStatus::Foreground
+                            && !world.dead_actor_ids.contains(&a.id)
+                    })
+                    .map(|a| a.id.clone())
+                    .collect();
+                fg.sort();
+                let mut db = Db::open_in_memory().expect("db");
+                let evs: Vec<engine13::core::Event> = state
+                    .event_log
+                    .events
+                    .iter()
+                    .cloned()
+                    .map(|mut e| {
+                        e.scenario_id = scenario_id.to_string();
+                        e
+                    })
+                    .collect();
+                db.insert_events_batch(&evs).expect("batch");
+                let log_total = evs.len() as u64;
+                let log_gen = evs.iter().filter(|e| e.id == "generation_transfer").count() as u64;
+                let mut cur = [0u64; 2];
+                for (i, q) in [Vec::<String>::new(), vec!["war".to_string(), "crisis".to_string()]]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let out = db.get_relevant_events_scored(t + 1, &q, &fg).expect("scored");
+                    cur[i] = out.iter().filter(|e| e.id == "generation_transfer").count() as u64;
+                }
+                rel_rows.push((t + 1, log_total, log_gen, cur[0], cur[1]));
+            }
+        }
+
+        // ---- self-test: the replay under the ACTUAL rule must reproduce sim ----
+        let actual = GtVariant {
+            label: if has_early { "IDENT>70" } else { "IDENT(noearly)" },
+            early: has_early,
+            thr: if has_early { et.condition_value } else { f64::INFINITY },
+        };
+        let ident = gt_replay(&ep_series, start_age, end_age, early_age, &et.condition_operator,
+                              &actual);
+        let replay_ticks: Vec<u32> = ident.transfers.iter().map(|x| x.0).collect();
+        let replay_ages: Vec<u32> = ident.transfers.iter().map(|x| x.1).collect();
+        let viol = u32::from(replay_ticks != obs_transfers) + u32::from(replay_ages != obs_ages);
+        gt_viol_total += viol;
+
+        let per_game_hits = ep_series
+            .iter()
+            .filter(|e| et.condition_operator.evaluate(**e, et.condition_value))
+            .count() as u64;
+
+        println!(
+            "RUN\t{}\t{}\t{}\t{}\tvictory={}\tprot_dead={}\talive_ticks={}\ttransfers={}\tticks={:?}\tages={:?}\tviol={}",
+            scenario_id, seed, mode_label(strategy), ticks, victory_tick, prot_dead_tick,
+            alive.iter().filter(|a| **a).count(), obs_transfers.len(),
+            obs_transfers, obs_ages, viol
+        );
+        // final rome metrics, so the replica can be checked against `sim`'s own
+        // `[FINAL]` line rather than assumed equal to it
+        if let Some(a) = state.world_state.as_ref().unwrap().actors.get(prot) {
+            println!(
+                "ROMEFIN\t{}\t{}\tmilitary={:.1}\tcohesion={:.1}\tlegitimacy={:.1}\tep={:.1}",
+                seed, mode_label(strategy),
+                a.get_metric("military_size"), a.get_metric("cohesion"),
+                a.get_metric("legitimacy"), a.get_metric("external_pressure")
+            );
+        }
+        println!(
+            "OCC\t{}\t{}\tper_game={}/{}={:.1}%\tdecision={}/{}={:.1}%\tgate_open_ticks={}",
+            seed, mode_label(strategy),
+            per_game_hits, ep_series.len(),
+            100.0 * per_game_hits as f64 / ep_series.len().max(1) as f64,
+            ident.hits, ident.checks,
+            100.0 * ident.hits as f64 / ident.checks.max(1) as f64,
+            gate_open_ticks
+        );
+        for v in GT_VARIANTS.iter() {
+            let r = gt_replay(&ep_series, start_age, end_age, early_age,
+                              &et.condition_operator, v);
+            let n = r.transfers.len();
+            let normals = r.transfers.iter().filter(|x| x.2).count() as u64;
+            let ages: Vec<u32> = r.transfers.iter().map(|x| x.1).collect();
+            let mean_age = if n > 0 {
+                ages.iter().map(|a| *a as f64).sum::<f64>() / n as f64
+            } else {
+                0.0
+            };
+            let var_age = if n > 0 {
+                ages.iter().map(|a| (*a as f64 - mean_age).powi(2)).sum::<f64>() / n as f64
+            } else {
+                0.0
+            };
+            let first_div = ident
+                .transfers
+                .iter()
+                .zip(r.transfers.iter())
+                .find(|(a, b)| a.0 != b.0)
+                .map(|(a, _)| a.0 as i64)
+                .unwrap_or(if n == ident.transfers.len() { -1 } else { 0 });
+            println!(
+                "VAR\t{}\t{}\t{}\ttransfers={}\tnormal={}\tmean_age={:.2}\tvar_age={:.2}\tocc_decision={}/{}={:.1}%\tfirst_div={}\tticks={:?}\tages={:?}",
+                seed, mode_label(strategy), v.label, n, normals, mean_age, var_age,
+                r.hits, r.checks, 100.0 * r.hits as f64 / r.checks.max(1) as f64,
+                first_div, r.transfers.iter().map(|x| x.0).collect::<Vec<_>>(), ages
+            );
+            var_transfers.entry(v.label).or_default().push(n);
+            let e = var_normal.entry(v.label).or_insert((0, 0));
+            e.0 += normals;
+            e.1 += n as u64;
+            let o = var_occ.entry(v.label).or_insert((0, 0));
+            o.0 += r.hits;
+            o.1 += r.checks;
+        }
+        let n_all = ep_series.len().max(1) as f64;
+        for (i, key) in CLAMPED_METRICS.iter().enumerate() {
+            println!(
+                "SCALE\t{}\t{}\t{}\tall_mean={:.1}\tall_at100={:.1}%\tall_70_85={:.1}%\tgate_mean={:.1}\tgate_at100={:.1}%\tgate_70_85={:.1}%",
+                seed, mode_label(strategy), key,
+                m_all[i].0 / n_all,
+                100.0 * m_all[i].1 as f64 / n_all,
+                100.0 * m_all[i].2 as f64 / n_all,
+                m_gate[i].0 / gate_open_ticks.max(1) as f64,
+                100.0 * m_gate[i].1 as f64 / gate_open_ticks.max(1) as f64,
+                100.0 * m_gate[i].2 as f64 / gate_open_ticks.max(1) as f64
+            );
+        }
+        let world = state.world_state.as_ref().unwrap();
+        let fs = world.family_state.as_ref().unwrap();
+        println!(
+            "FAM\t{}\t{}\tinfluence={:.2}\tknowledge={:.2}\twealth={:.2}\tconnections={:.2}\ttotal={:.2}\tknow40={}\tknow50={}",
+            seed, mode_label(strategy),
+            fs.metrics.get("influence").copied().unwrap_or(0.0),
+            fs.metrics.get("knowledge").copied().unwrap_or(0.0),
+            fs.metrics.get("wealth").copied().unwrap_or(0.0),
+            fs.metrics.get("connections").copied().unwrap_or(0.0),
+            fs.metrics.values().sum::<f64>(),
+            know40, know50
+        );
+        println!(
+            "PANEL\t{}\t{}\tmismatch_ticks={}/{}\tfirst={}\tmax_gap={}",
+            seed, mode_label(strategy), panel_mismatch, ticks, panel_first_mismatch, panel_max_gap
+        );
+        {
+            const FKEYS: [&str; 4] = ["influence", "knowledge", "wealth", "connections"];
+            for (i, key) in FKEYS.iter().enumerate() {
+                let rec: Vec<u32> = recovered.iter().filter(|(m, _, _)| *m == i).map(|(_, _, d)| *d).collect();
+                let unrec = pending_rec.iter().filter(|(m, _, _)| *m == i).count();
+                if !rec.is_empty() || unrec > 0 {
+                    println!(
+                        "REC\t{}\t{}\t{}\tdrops={}\trecovered={}\tnot_recovered={}\tticks={:?}",
+                        seed, mode_label(strategy), key,
+                        rec.len() + unrec, rec.len(), unrec, rec
+                    );
+                }
+            }
+        }
+        for (tk, m) in &fam_at_transfer {
+            println!(
+                "FAMT\t{}\t{}\ttick={}\tinfluence={:.2}\tknowledge={:.2}\twealth={:.2}\tconnections={:.2}",
+                seed, mode_label(strategy), tk, m[0], m[1], m[2], m[3]
+            );
+        }
+        for (tk, lt, lg, ce, cn) in &rel_rows {
+            println!(
+                "REL\t{}\t{}\ttick={}\tlog_total={}\tlog_gen={}\tcurated_gen_empty={}\tcurated_gen_nonempty={}",
+                seed, mode_label(strategy), tk, lt, lg, ce, cn
+            );
+        }
+    }
+
+    println!("\n#SELFTEST\tgt_viol={}", gt_viol_total);
+    println!("SUM\tvariant\ttransfers_min\ttransfers_max\tnormal_share\tocc_decision");
+    for v in GT_VARIANTS.iter() {
+        let t = var_transfers.get(v.label).cloned().unwrap_or_default();
+        let (n, tot) = var_normal.get(v.label).copied().unwrap_or((0, 0));
+        let (h, c) = var_occ.get(v.label).copied().unwrap_or((0, 0));
+        println!(
+            "SUM\t{}\t{}\t{}\t{}/{}={:.1}%\t{}/{}={:.1}%",
+            v.label,
+            t.iter().min().copied().unwrap_or(0),
+            t.iter().max().copied().unwrap_or(0),
+            n, tot, 100.0 * n as f64 / tot.max(1) as f64,
+            h, c, 100.0 * h as f64 / c.max(1) as f64
         );
     }
 }
