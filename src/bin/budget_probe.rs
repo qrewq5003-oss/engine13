@@ -7808,6 +7808,37 @@ fn main() {
             let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
             epvalves(scenario, ticks, &seeds, strategy);
         }
+        "tagwalk" => tagwalk(),
+        "tagrel" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            tagrel(scenario, ticks, &seeds, strategy);
+        }
+        "tagshadow" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            tagshadow(scenario, ticks, &seeds, strategy);
+        }
+        "tagdiff" => {
+            let scenario = args.get(2).expect("scenario id");
+            let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
+            let seeds: Vec<u64> = args
+                .get(4)
+                .map(|s| s.split(',').map(|x| x.parse().expect("seed")).collect())
+                .unwrap_or_else(|| vec![42]);
+            let strategy = args.get(5).map(|s| s.as_str()).filter(|s| *s != "noplayer");
+            tagdiff(scenario, ticks, &seeds, strategy);
+        }
         "epnominal" => {
             let scenario = args.get(2).expect("scenario id");
             let ticks: u32 = args.get(3).expect("ticks").parse().expect("ticks");
@@ -9014,6 +9045,1455 @@ fn epnominal(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
                 .map(|(i, l)| format!("λ={}:{}/{}", l, lam_hi[i], lam_mid[i]))
                 .collect::<Vec<_>>()
                 .join(",")
+        );
+    }
+}
+
+// ===========================================================================
+// task 28, stage 1 — the tag channel of `external_pressure`
+// ===========================================================================
+//
+// Three modes, all additive: `epratchet` / `epnominal` / `epvalves` / `inventory` /
+// `attractor` / `migwalk` / `decisive26` are reused byte-for-byte.
+//
+//   `tagwalk`   — the static walk §1 п.1 asks for. Every tag of every scenario, all
+//                 seven fields of `TagDefinition`, its starting carriers read from
+//                 `scenario.actors[].tags`, and — separately — every *clamped* metric
+//                 it writes, so the collision tags are named rather than recalled.
+//                 No simulation: this is the container walk, and its population is
+//                 `Scenario::tag_definitions` closed against `Actor::tags` in both
+//                 directions (a tag carried but not defined, a tag defined but never
+//                 carried).
+//
+//   `tagdiff`   — diffusion **per spread channel**. The engine logs a successful
+//                 spread as `tag_spread_<tag>_<target>` with the source only in the
+//                 description, and it logs nothing at all about *which* of the five
+//                 `spreads_via` channels opened the door. So the channel is recovered
+//                 by re-evaluating the five gate predicates (`interactions.rs:1221–1245`)
+//                 for that ordered pair on the pre-tick world and again on the
+//                 post-tick world; a channel counted as decisive only when both
+//                 readings agree. Ambiguity is reported, not hidden.
+//                 The same pass counts the **second** propagation path — the wholesale
+//                 tag transfer inside `apply_cultural_pressure` (`interactions.rs:1109–1133`),
+//                 which reads neither `spreads_via` nor `spread_chance` nor the
+//                 cooldown — by diffing each actor's tag set against what the spread
+//                 events explain.
+//
+//   `tagshadow` — the counterfactual, in shadow, measured by **consumer occupancy**.
+//                 It reuses `EpInflow` and its pipeline unchanged: each variant is the
+//                 same nominal tick with the tag component replaced by the load the
+//                 actor would carry under that variant, so the three self-tests of
+//                 `epnominal` (one-step bracket, cumulative IDENT, the
+//                 `collapse_warning_ticks` replica) carry over verbatim.
+
+/// The five metrics `clamp_metrics` (`engine/mod.rs:707`) holds inside `0..100`.
+const CLAMPED_METRICS: [&str; 5] = [
+    "cohesion",
+    "economic_output",
+    "external_pressure",
+    "legitimacy",
+    "military_quality",
+];
+
+/// The two of them `tests/scenario_conventions.rs` guards against contagion.
+const GUARDED_METRICS_PROBE: [&str; 2] = ["cohesion", "legitimacy"];
+
+const TAG_SCENARIOS: [&str; 3] = ["constantinople_1430", "milan_1477", "rome_375"];
+
+fn spread_channel_name(t: &engine13::core::TagSpreadType) -> &'static str {
+    match t {
+        engine13::core::TagSpreadType::War => "War",
+        engine13::core::TagSpreadType::Trade => "Trade",
+        engine13::core::TagSpreadType::Culture => "Culture",
+        engine13::core::TagSpreadType::Migration => "Migration",
+        engine13::core::TagSpreadType::Conquest => "Conquest",
+    }
+}
+
+const ALL_CHANNELS: [engine13::core::TagSpreadType; 5] = [
+    engine13::core::TagSpreadType::Trade,
+    engine13::core::TagSpreadType::War,
+    engine13::core::TagSpreadType::Culture,
+    engine13::core::TagSpreadType::Migration,
+    engine13::core::TagSpreadType::Conquest,
+];
+
+/// `try_spread_direction`'s channel gate, replicated verbatim
+/// (`engine/interactions.rs:1221–1245`). `src`/`dst` are `(economic_output,
+/// military_size, external_pressure)` of source and target.
+fn channel_open(
+    ch: &engine13::core::TagSpreadType,
+    src: (f64, f64, f64),
+    dst: (f64, f64, f64),
+    border_land: bool,
+) -> bool {
+    match ch {
+        engine13::core::TagSpreadType::Trade => src.0 > 20.0 && dst.0 > 20.0,
+        engine13::core::TagSpreadType::War => src.1 > dst.1 * 1.3,
+        engine13::core::TagSpreadType::Culture => border_land,
+        engine13::core::TagSpreadType::Migration => dst.2 > 50.0,
+        engine13::core::TagSpreadType::Conquest => src.1 > dst.1 * 1.5,
+    }
+}
+
+/// Every metric a tag writes, clamped ones flagged. Returned sorted so the table is
+/// stable.
+fn tag_metric_row(t: &engine13::core::TagDefinition) -> Vec<(String, i32, bool)> {
+    let mut v: Vec<(String, i32, bool)> = t
+        .metrics_modifier
+        .iter()
+        .map(|(m, d)| {
+            (
+                m.as_str().to_string(),
+                *d,
+                CLAMPED_METRICS.contains(&m.as_str()),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn tagwalk() {
+    println!("# tagwalk — полный обход `tag_definitions` трёх сценариев (не греп)");
+    println!(
+        "# население перечисления: Scenario::tag_definitions, замкнутое на Actor::tags в обе стороны"
+    );
+    println!(
+        "TAGDEF\tscenario\ttag\tmetrics(all)\tclamped_written\tspreads_via\tchance\tcooldown\trequires_era\tunlocks\tstart_carriers\tn_start\tin_era_from_tags"
+    );
+
+    // per-metric contagious-pair census, the 41 of §0.1 п.5
+    let mut pair_census: BTreeMap<String, (u32, u32)> = BTreeMap::new(); // metric -> (contagious, total)
+    for id in TAG_SCENARIOS {
+        let sc = registry::load_by_id(id).expect("scenario");
+
+        // starting carriers, from the scenario's own actor list
+        let mut carriers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for a in &sc.actors {
+            for t in &a.tags {
+                carriers.entry(t.clone()).or_default().push(a.id.clone());
+            }
+        }
+        // tags a spawn config could bring in — `phase_events` builds spawned actors
+        // with `tags: vec![]` (`engine/mod.rs:938`), so this is provably empty; the
+        // walk asserts it rather than assuming it.
+        let mut spawn_tags = 0u32;
+        for m in &sc.milestone_events {
+            if m.spawn_actor.is_some() {
+                spawn_tags += 0; // no tag field exists on SpawnActorConfig
+            }
+        }
+        assert_eq!(spawn_tags, 0, "SpawnActorConfig gained a tag field");
+
+        let era_tags: std::collections::BTreeSet<String> = sc
+            .era_definitions
+            .iter()
+            .flat_map(|e| e.from_tags.iter().cloned())
+            .collect();
+
+        let defined: std::collections::BTreeSet<String> =
+            sc.tag_definitions.iter().map(|t| t.id.clone()).collect();
+
+        for t in &sc.tag_definitions {
+            let metrics = tag_metric_row(t);
+            let contagious = t.spread_chance > 0.0 && !t.spreads_via.is_empty();
+            for (m, _, clamped) in &metrics {
+                if !*clamped {
+                    continue;
+                }
+                let e = pair_census.entry(m.clone()).or_insert((0, 0));
+                e.1 += 1;
+                if contagious {
+                    e.0 += 1;
+                }
+            }
+            let start = carriers.get(&t.id).cloned().unwrap_or_default();
+            println!(
+                "TAGDEF\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
+                id,
+                t.id,
+                metrics
+                    .iter()
+                    .map(|(m, d, _)| format!("{}{:+}", m, d))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                metrics
+                    .iter()
+                    .filter(|(_, _, c)| *c)
+                    .map(|(m, _, _)| m.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                if t.spreads_via.is_empty() {
+                    "-".to_string()
+                } else {
+                    t.spreads_via
+                        .iter()
+                        .map(spread_channel_name)
+                        .collect::<Vec<_>>()
+                        .join("+")
+                },
+                t.spread_chance,
+                t.spread_cooldown_ticks,
+                t.requires_era
+                    .as_ref()
+                    .map(|e| format!("{:?}", e))
+                    .unwrap_or_else(|| "-".into()),
+                if t.unlocks.is_empty() {
+                    "-".to_string()
+                } else {
+                    t.unlocks.join(",")
+                },
+                if start.is_empty() {
+                    "NONE".to_string()
+                } else {
+                    start.join(",")
+                },
+                start.len(),
+                era_tags.contains(&t.id),
+            );
+        }
+
+        // closure in the other direction: a tag carried by an actor with no definition
+        for (tag, who) in &carriers {
+            if !defined.contains(tag) {
+                println!("ORPHAN\t{}\t{}\tcarried_by={}\tno_definition", id, tag, who.join(","));
+            }
+        }
+        for t in &sc.tag_definitions {
+            if !carriers.contains_key(&t.id) {
+                println!("UNSEEDED\t{}\t{}\tno_starting_carrier", id, t.id);
+            }
+        }
+    }
+
+    println!("\n# заразные пары «тег × клампованная метрика» — перепись §0.1 п.5");
+    println!("PAIRS\tmetric\tcontagious\ttotal\tguarded_by_test");
+    let mut tot_c = 0u32;
+    let mut tot_t = 0u32;
+    for (m, (c, t)) in &pair_census {
+        tot_c += *c;
+        tot_t += *t;
+        println!(
+            "PAIRS\t{}\t{}\t{}\t{}",
+            m,
+            c,
+            t,
+            GUARDED_METRICS_PROBE.contains(&m.as_str())
+        );
+    }
+    println!("PAIRS\tTOTAL\t{}\t{}\t-", tot_c, tot_t);
+}
+
+/// All neighbour pairs with their border type, replicating `get_neighbor_pairs`
+/// (`interactions.rs:304`) including its sort — `land_pairs` above drops every
+/// non-land edge, and the `Culture` channel is the only one that reads the border,
+/// so the tag walk needs the unfiltered list.
+fn tag_pairs(world: &WorldState) -> Vec<(String, String, bool)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut pairs = Vec::new();
+    for (actor_id, actor) in &world.actors {
+        if world.dead_actor_ids.contains(actor_id) {
+            continue;
+        }
+        for n in &actor.neighbors {
+            if !world.actors.contains_key(&n.id) || world.dead_actor_ids.contains(&n.id) {
+                continue;
+            }
+            let (a, b) = if actor_id < &n.id {
+                (actor_id.clone(), n.id.clone())
+            } else {
+                (n.id.clone(), actor_id.clone())
+            };
+            let key = format!("{}-{}", a, b);
+            if seen.insert(key) {
+                pairs.push((a, b, n.border_type == engine13::core::BorderType::Land));
+            }
+        }
+    }
+    pairs.sort_by(|x, y| (&x.0, &x.1).cmp(&(&y.0, &y.1)));
+    pairs
+}
+
+#[derive(Default, Clone)]
+struct TagStat {
+    /// successful spreads, split by the channel the replicated gate says opened
+    by_channel: BTreeMap<String, u32>,
+    ambiguous: u32,
+    /// spreads the replicated gate says were impossible on both readings — a
+    /// mismatch, reported not hidden
+    unexplained: u32,
+    acquisitions: u32,
+    /// acquisitions the spread events do NOT explain — the displacement path
+    displacement: u32,
+    /// tick each actor first carried it (over the whole run set)
+    first_tick: BTreeMap<String, u32>,
+    /// actor-ticks carried
+    carrier_ticks: u64,
+}
+
+fn tagdiff(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    let mut stats: BTreeMap<String, TagStat> = BTreeMap::new();
+    // channel availability over ordered pairs, per tick — what the graph offers
+    let mut chan_open: BTreeMap<String, u64> = BTreeMap::new();
+    let mut ordered_pair_ticks: u64 = 0;
+    let mut displacement_events: u32 = 0;
+    let mut spread_events: u32 = 0;
+    // The RNG claim of §0.1: the roll (`interactions.rs:1267`) is consumed after the
+    // channel and cooldown checks and before the comparison with `spread_chance`, so
+    // zeroing the chance does not change *that* decision point. It does change how
+    // many decision points there are: the loop skips before the roll when the target
+    // already carries the tag (`:1202`), and under `(A)` the target never acquires
+    // it, so every such skip becomes a roll. Counted here, per game, over the
+    // `ep`-writing tags only.
+    let mut skip_target_has: u64 = 0;
+    let mut reach_gate: u64 = 0;
+    let mut total_events: u32 = 0;
+    // carriers of each tag, per tick, averaged over seeds
+    let mut carriers_at: BTreeMap<String, BTreeMap<u32, u32>> = BTreeMap::new();
+
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc = state.current_scenario.as_ref().unwrap().clone();
+        let tag_ids: Vec<String> = sc.tag_definitions.iter().map(|t| t.id.clone()).collect();
+        let via: BTreeMap<String, Vec<engine13::core::TagSpreadType>> = sc
+            .tag_definitions
+            .iter()
+            .map(|t| (t.id.clone(), t.spreads_via.clone()))
+            .collect();
+        let ep_tag_ids: std::collections::BTreeSet<String> = sc
+            .tag_definitions
+            .iter()
+            .filter(|t| {
+                t.metrics_modifier
+                    .keys()
+                    .any(|m| m.as_str() == "external_pressure")
+            })
+            .map(|t| t.id.clone())
+            .collect();
+
+        for t in 0..ticks {
+            let _ = scripted_step(&mut state, scenario_id, strategy);
+
+            // ---- pre-tick reading -------------------------------------------
+            let (pre_m, pre_tags, pairs) = {
+                let w = state.world_state.as_ref().unwrap();
+                let mut m: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
+                let mut tg: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+                for (aid, a) in w.actors.iter() {
+                    if w.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    m.insert(
+                        aid.clone(),
+                        (
+                            a.get_metric("economic_output"),
+                            a.get_metric("military_size"),
+                            a.get_metric("external_pressure"),
+                        ),
+                    );
+                    tg.insert(aid.clone(), a.tags.iter().cloned().collect());
+                }
+                (m, tg, tag_pairs(w))
+            };
+
+            // channel availability, both directions of every pair
+            for (a, b, land) in &pairs {
+                let (Some(ma), Some(mb)) = (pre_m.get(a), pre_m.get(b)) else { continue };
+                ordered_pair_ticks += 2;
+                for ch in ALL_CHANNELS.iter() {
+                    let n = spread_channel_name(ch).to_string();
+                    let e = chan_open.entry(n).or_insert(0);
+                    if channel_open(ch, *ma, *mb, *land) {
+                        *e += 1;
+                    }
+                    if channel_open(ch, *mb, *ma, *land) {
+                        *e += 1;
+                    }
+                }
+            }
+
+            // rolls the `(A)` variant would add: an `ep`-tag the source carries and
+            // the target already has is skipped before the roll today
+            for (a, b, land) in &pairs {
+                let (Some(ma), Some(mb)) = (pre_m.get(a), pre_m.get(b)) else { continue };
+                for (src, dst, sm, dm) in [(a, b, ma, mb), (b, a, mb, ma)] {
+                    let (Some(st), Some(dt)) = (pre_tags.get(src), pre_tags.get(dst)) else { continue };
+                    for tag in st {
+                        let Some(chs) = via.get(tag) else { continue };
+                        if !ep_tag_ids.contains(tag) {
+                            continue;
+                        }
+                        let open = chs.iter().any(|c| channel_open(c, *sm, *dm, *land));
+                        if dt.contains(tag) {
+                            if open {
+                                skip_target_has += 1;
+                            }
+                        } else if open {
+                            reach_gate += 1;
+                        }
+                    }
+                }
+            }
+
+            // carrier census on the pre-tick world
+            for (aid, ts) in &pre_tags {
+                let _ = aid;
+                for tag in ts {
+                    *carriers_at.entry(tag.clone()).or_default().entry(t).or_insert(0) += 1;
+                    stats.entry(tag.clone()).or_default().carrier_ticks += 1;
+                }
+            }
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let slice: Vec<engine13::core::Event> = state.event_log.events[log_len..].to_vec();
+            total_events += slice.len() as u32;
+
+            // ---- post-tick reading -------------------------------------------
+            let (post_m, post_tags) = {
+                let w = state.world_state.as_ref().unwrap();
+                let mut m: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
+                let mut tg: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+                for (aid, a) in w.actors.iter() {
+                    if w.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    m.insert(
+                        aid.clone(),
+                        (
+                            a.get_metric("economic_output"),
+                            a.get_metric("military_size"),
+                            a.get_metric("external_pressure"),
+                        ),
+                    );
+                    tg.insert(aid.clone(), a.tags.iter().cloned().collect());
+                }
+                (m, tg)
+            };
+            let land_of: BTreeMap<(String, String), bool> = pairs
+                .iter()
+                .map(|(a, b, l)| ((a.clone(), b.clone()), *l))
+                .collect();
+
+            // ---- classify every logged spread --------------------------------
+            let mut explained: BTreeMap<String, std::collections::BTreeSet<String>> =
+                BTreeMap::new(); // target -> tags explained by a spread event
+            for ev in &slice {
+                if ev.id.starts_with("cultural_displacement_") {
+                    displacement_events += 1;
+                }
+                let Some(rest) = ev.id.strip_prefix("tag_spread_") else { continue };
+                spread_events += 1;
+                // `tag_spread_<tag>_<target>`; tag ids carry underscores, so the tag
+                // is recovered by matching the scenario's own id list, longest first
+                let mut best: Option<(&String, String)> = None;
+                for tid in &tag_ids {
+                    if let Some(tgt) = rest.strip_prefix(&format!("{}_", tid)) {
+                        if best.as_ref().map(|(b, _)| tid.len() > b.len()).unwrap_or(true) {
+                            best = Some((tid, tgt.to_string()));
+                        }
+                    }
+                }
+                let Some((tid, target)) = best else { continue };
+                // the source lives only in the description the engine wrote
+                let source = ev
+                    .description
+                    .split(" от ")
+                    .nth(1)
+                    .and_then(|s| s.split(" к ").next())
+                    .unwrap_or("")
+                    .to_string();
+                let st = stats.entry(tid.clone()).or_default();
+                st.acquisitions += 1;
+                st.first_tick.entry(format!("{}:{}", seed, target)).or_insert(t + 1);
+                explained.entry(target.clone()).or_default().insert(tid.clone());
+
+                let land = land_of
+                    .get(&(source.clone().min(target.clone()), source.clone().max(target.clone())))
+                    .copied()
+                    .unwrap_or(false);
+                let chans = via.get(tid).cloned().unwrap_or_default();
+                let mut decisive: Vec<&'static str> = Vec::new();
+                let mut maybe: Vec<&'static str> = Vec::new();
+                for ch in &chans {
+                    let pre_ok = match (pre_m.get(&source), pre_m.get(&target)) {
+                        (Some(a), Some(b)) => channel_open(ch, *a, *b, land),
+                        _ => false,
+                    };
+                    let post_ok = match (post_m.get(&source), post_m.get(&target)) {
+                        (Some(a), Some(b)) => channel_open(ch, *a, *b, land),
+                        _ => false,
+                    };
+                    if pre_ok && post_ok {
+                        decisive.push(spread_channel_name(ch));
+                    } else if pre_ok || post_ok {
+                        maybe.push(spread_channel_name(ch));
+                    }
+                }
+                if decisive.len() == 1 && maybe.is_empty() {
+                    *st.by_channel.entry(decisive[0].to_string()).or_insert(0) += 1;
+                } else if decisive.is_empty() && maybe.len() == 1 {
+                    *st.by_channel.entry(maybe[0].to_string()).or_insert(0) += 1;
+                } else if decisive.is_empty() && maybe.is_empty() {
+                    st.unexplained += 1;
+                } else {
+                    st.ambiguous += 1;
+                }
+            }
+
+            // ---- acquisitions the spread log does not explain ------------------
+            for (aid, after) in &post_tags {
+                let before = pre_tags.get(aid);
+                for tag in after {
+                    let had = before.map(|b| b.contains(tag)).unwrap_or(false);
+                    if had {
+                        continue;
+                    }
+                    if before.is_none() {
+                        // actor was not alive last tick — a spawn or a successor, its
+                        // tag set is native, not acquired
+                        continue;
+                    }
+                    if explained.get(aid).map(|s| s.contains(tag)).unwrap_or(false) {
+                        continue;
+                    }
+                    stats.entry(tag.clone()).or_default().displacement += 1;
+                }
+            }
+        }
+    }
+
+    let ns = seeds.len() as f64;
+    println!(
+        "# tagdiff {} {} ticks × {} seeds, mode {}",
+        scenario_id,
+        ticks,
+        seeds.len(),
+        mode_label(strategy)
+    );
+    println!("#EVENTS\ttotal={}\ttag_spread={}\tcultural_displacement={}\tshare_of_log={:.2}%",
+        total_events, spread_events, displacement_events,
+        100.0 * spread_events as f64 / total_events.max(1) as f64);
+    println!(
+        "#ROLLS\tep_tags: skip_because_target_has={:.0}/game\treach_gate={:.0}/game\t(A) adds {:.0} rolls/game at the decision point",
+        skip_target_has as f64 / seeds.len() as f64,
+        reach_gate as f64 / seeds.len() as f64,
+        skip_target_has as f64 / seeds.len() as f64
+    );
+    println!("#CHANOPEN\tordered_pair_ticks={}", ordered_pair_ticks);
+    for (c, n) in &chan_open {
+        println!(
+            "CHANOPEN\t{}\t{}\t{:.2}%",
+            c,
+            n,
+            100.0 * *n as f64 / ordered_pair_ticks.max(1) as f64
+        );
+    }
+    // acquisition tick per actor, for every tag — §1 п.2 asks for the tick each
+    // actor receives it, not only the mean
+    println!("TAGACT\ttag\tactor\tn_seeds\tmean_tick\tmin\tmax");
+    for (tag, st) in &stats {
+        let mut per: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+        for (k, v) in &st.first_tick {
+            let actor = k.split_once(':').map(|x| x.1.to_string()).unwrap_or_default();
+            per.entry(actor).or_default().push(*v);
+        }
+        for (actor, mut v) in per {
+            v.sort_unstable();
+            let mean = v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
+            println!(
+                "TAGACT\t{}\t{}\t{}\t{:.1}\t{}\t{}",
+                tag, actor, v.len(), mean, v[0], v[v.len() - 1]
+            );
+        }
+    }
+    println!("TAGDIFF\ttag\tacquis/game\tdisplacement/game\tunexplained\tambiguous\tby_channel\tmean_first_tick\tdistinct_targets\tcarrier_actor_ticks/game");
+    for (tag, st) in &stats {
+        let n = st.first_tick.len() as f64;
+        let mean = if n > 0.0 {
+            st.first_tick.values().map(|v| *v as f64).sum::<f64>() / n
+        } else {
+            f64::NAN
+        };
+        println!(
+            "TAGDIFF\t{}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.0}",
+            tag,
+            st.acquisitions as f64 / ns,
+            st.displacement as f64 / ns,
+            st.unexplained,
+            st.ambiguous,
+            if st.by_channel.is_empty() {
+                "-".to_string()
+            } else {
+                st.by_channel
+                    .iter()
+                    .map(|(c, n)| format!("{}={:.1}", c, *n as f64 / ns))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
+            mean,
+            n / ns,
+            st.carrier_ticks as f64 / ns,
+        );
+    }
+}
+
+/// The tag-channel variants §3 of the statement names, plus the one §1 п.5 demands
+/// be costed on its own line — full removal of the channel.
+///
+/// Each is expressed as *the `external_pressure` load an actor's tags would put on
+/// it under that variant*, so the shadow reuses `EpInflow`'s pipeline verbatim
+/// instead of a second model of the tick.
+const TAG_VARIANTS: [(&str, &str); 5] = [
+    ("IDENT", "ничего не снято — накопительный самотест"),
+    ("A1_all9", "spread_chance→0 у всех девяти заразных ep-тегов"),
+    ("A2_pure6", "spread_chance→0 только у шести «чистых» ep-тегов"),
+    ("A3_fast4", "spread_chance→0 только у четырёх самых быстрых (≥0.25)"),
+    ("NONE_all", "тег-канал ep снят целиком (стартовые носители тоже)"),
+];
+
+/// The three `ep`-tags that also write another clamped metric — the collision §0.1 п.2
+/// says the fork must account for before it chooses, not after.
+const COLLISION_TAGS: [&str; 3] = ["ottoman_frontier_const", "roman_frontier", "roman_border"];
+
+/// The four fastest `ep`-tags (`spread_chance ≥ 0.25`), the `(A₃)` gradation.
+const FAST_TAGS: [&str; 4] = [
+    "ottoman_frontier_const",
+    "migrating",
+    "roman_frontier",
+    "roman_border",
+];
+
+/// A tag key that separates `constantinople`'s `ottoman_frontier` (`+1 ep`, `+1 mq`)
+/// from `milan`'s (`+2 ep`, nothing else): they share an id across scenarios but are
+/// different tags, and the `(A₂)`/`(A₃)` gradations put them on opposite sides.
+fn tag_key(scenario_id: &str, tag: &str) -> String {
+    if tag == "ottoman_frontier" && scenario_id == "constantinople_1430" {
+        "ottoman_frontier_const".to_string()
+    } else {
+        tag.to_string()
+    }
+}
+
+#[derive(Default, Clone)]
+struct TagShadowActor {
+    seen: bool,
+    ticks: u32,
+    min_surv: Option<u32>,
+    neighbors: Vec<(String, u32)>,
+    ep0: f64,
+    ep_prev: Option<f64>,
+    native: std::collections::BTreeSet<String>,
+    // real occupancy
+    at_100: u32,
+    above_85: u32,
+    in_70_85: u32,
+    first_100: i64,
+    // nominal census
+    n_tag_native: f64,
+    n_tag_acquired: f64,
+    n_total: f64,
+    // self-tests
+    step_viol: u32,
+    ident_viol: u32,
+    cw_mismatch: u32,
+    real_ct: u32,
+    // per-variant shadow
+    s_lo: [f64; 5],
+    s_mid: [f64; 5],
+    s_hi: [f64; 5],
+    ct_lo: [u32; 5],
+    ct_mid: [u32; 5],
+    ct_hi: [u32; 5],
+    saved_hi: [u32; 5],
+    saved_mid: [u32; 5],
+    v_at100: [u32; 5],
+    v_in70_85: [u32; 5],
+    v_above85: [u32; 5],
+    v_first100: [i64; 5],
+    died_tick: i64,
+    died_path: &'static str,
+}
+
+#[allow(clippy::too_many_lines)]
+fn tagshadow(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+
+    // aggregate accumulators across seeds
+    let mut consumer_hits: BTreeMap<String, [u64; 5]> = BTreeMap::new();
+    let mut consumer_checks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut dep_mass: BTreeMap<String, (String, [f64; 5])> = BTreeMap::new();
+    let mut band_full = [0u64; 5];
+    let mut band_ep = [0u64; 5];
+    let mut gate_fire = [0u64; 5];
+    let mut gate_scale = [0.0f64; 5];
+    let mut gate_ceiling = [0u64; 5];
+    let mut actor_ticks: u64 = 0;
+    let mut deaths_total = 0u32;
+    let mut deaths_by_path: BTreeMap<&'static str, u32> = BTreeMap::new();
+    let mut saved_hi_tot = [0u32; 5];
+    let mut saved_mid_tot = [0u32; 5];
+    let mut blocked_internal = [0u32; 5];
+    let mut clear_at_death = [0u32; 5];
+    let mut first100_sum = [0.0f64; 5];
+    let mut first100_n = [0u32; 5];
+    let mut occ_at100 = [0u64; 5];
+    let mut occ_70_85 = [0u64; 5];
+    let mut occ_above85 = [0u64; 5];
+    let mut real_at100 = 0u64;
+    let mut real_70_85 = 0u64;
+    let mut real_above85 = 0u64;
+    // collision metrics: nominal mass written by tags, native vs acquired
+    let mut coll_mass: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+    let mut coll_clamp: BTreeMap<String, (u64, u64)> = BTreeMap::new(); // metric -> (at 100, ticks)
+    let mut viol_total = (0u32, 0u32, 0u32);
+    // early_transfer, the eighth rome consumer
+    let mut et_checks = 0u64;
+    let mut et_hits = [0u64; 5];
+
+    println!(
+        "# tagshadow {} {} ticks × {} seeds, mode {}",
+        scenario_id,
+        ticks,
+        seeds.len(),
+        mode_label(strategy)
+    );
+
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let sc_owned = state.current_scenario.as_ref().unwrap().clone();
+        let sc_ref = &sc_owned;
+        let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc_ref)
+            .into_iter()
+            .map(|(e, c)| (e.id.clone(), (e, c)))
+            .collect();
+        let deps = sc_ref.dependencies.clone();
+        let consumers_def = ep_consumers_of(sc_ref);
+        let early = sc_ref
+            .generation_mechanics
+            .as_ref()
+            .and_then(|g| g.early_transfer.clone());
+
+        // `ep` written per tag, and every other clamped metric each tag writes
+        let mut ep_of_tag: BTreeMap<String, f64> = BTreeMap::new();
+        let mut other_of_tag: BTreeMap<String, Vec<(String, f64)>> = BTreeMap::new();
+        for t in &sc_ref.tag_definitions {
+            let k = tag_key(scenario_id, &t.id);
+            for (m, v) in &t.metrics_modifier {
+                if m.as_str() == "external_pressure" {
+                    *ep_of_tag.entry(k.clone()).or_insert(0.0) += *v as f64;
+                } else if CLAMPED_METRICS.contains(&m.as_str()) {
+                    other_of_tag
+                        .entry(k.clone())
+                        .or_default()
+                        .push((m.as_str().to_string(), *v as f64));
+                }
+            }
+        }
+
+        let mut acc: BTreeMap<String, TagShadowActor> = BTreeMap::new();
+
+        for t in 0..ticks {
+            {
+                let world = state.world_state.as_ref().unwrap();
+                let mut fresh: Vec<String> = world
+                    .actors
+                    .keys()
+                    .filter(|k| !world.dead_actor_ids.contains(*k))
+                    .cloned()
+                    .collect();
+                fresh.sort();
+                for aid in fresh {
+                    let e = acc.entry(aid.clone()).or_default();
+                    if !e.seen {
+                        let a = world.actors.get(&aid).expect("live");
+                        let v = a.get_metric("external_pressure");
+                        e.seen = true;
+                        e.ep0 = v;
+                        e.ep_prev = Some(v);
+                        e.first_100 = -1;
+                        e.died_tick = -1;
+                        e.min_surv = a.minimum_survival_ticks;
+                        e.neighbors =
+                            a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
+                        // the tag set the actor is born with — for a spawn this is
+                        // empty (`mod.rs:938`), for a successor it is the template's
+                        e.native = a.tags.iter().map(|x| tag_key(scenario_id, x)).collect();
+                        for i in 0..TAG_VARIANTS.len() {
+                            e.s_lo[i] = v;
+                            e.s_mid[i] = v;
+                            e.s_hi[i] = v;
+                            e.v_first100[i] = -1;
+                        }
+                    }
+                }
+            }
+
+            let log_pre = state.event_log.events.len();
+            let (_a, _r) = scripted_step(&mut state, scenario_id, strategy);
+            let patron: BTreeMap<String, (f64, f64)> =
+                ep_patron_nominal(sc_ref, &state.event_log.events[log_pre..]);
+
+            let (pairs_t, ep0, coh0, ep_auto, ep_noise, tag_load, tag_split, live_ids) = {
+                let world = state.world_state.as_ref().unwrap();
+                let pairs = land_pairs(world);
+                let mut ep: BTreeMap<String, f64> = BTreeMap::new();
+                let mut coh: BTreeMap<String, f64> = BTreeMap::new();
+                let mut tags: BTreeMap<String, f64> = BTreeMap::new();
+                // per actor: [ident, A1, A2, A3, NONE] ep tag load
+                let mut split: BTreeMap<String, [f64; 5]> = BTreeMap::new();
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> =
+                    BTreeMap::new();
+                let mut ids: Vec<String> = Vec::new();
+                for (aid, a) in world.actors.iter() {
+                    if world.dead_actor_ids.contains(aid) {
+                        continue;
+                    }
+                    ids.push(aid.clone());
+                    full.insert(aid.clone(), a.metrics.clone());
+                    ep.insert(aid.clone(), a.get_metric("external_pressure"));
+                    coh.insert(aid.clone(), a.get_metric("cohesion"));
+                    tags.insert(aid.clone(), ep_tag_load(a));
+
+                    let native = acc.get(aid).map(|e| e.native.clone()).unwrap_or_default();
+                    let mut row = [0.0f64; 5];
+                    for tid in a.actor_tags.keys() {
+                        let k = tag_key(scenario_id, tid);
+                        let Some(v) = ep_of_tag.get(&k) else { continue };
+                        let is_native = native.contains(&k);
+                        row[0] += *v; // IDENT
+                        if is_native {
+                            row[1] += *v;
+                            row[2] += *v;
+                            row[3] += *v;
+                        } else {
+                            // acquired: survives only if its tag keeps its chance
+                            if COLLISION_TAGS.contains(&k.as_str()) {
+                                row[2] += *v; // (A₂) leaves the three collision tags contagious
+                            }
+                            if !FAST_TAGS.contains(&k.as_str()) {
+                                row[3] += *v; // (A₃) touches only the fast four
+                            }
+                        }
+                        // row[4] (full removal) stays 0
+                    }
+                    split.insert(aid.clone(), row);
+
+                    // collision-metric mass, native vs acquired, in its own units
+                    for tid in a.actor_tags.keys() {
+                        let k = tag_key(scenario_id, tid);
+                        let is_native = native.contains(&k);
+                        for (m, v) in other_of_tag.get(&k).map(|x| x.as_slice()).unwrap_or(&[]) {
+                            let e = coll_mass.entry(m.clone()).or_insert((0.0, 0.0));
+                            if is_native {
+                                e.0 += *v;
+                            } else {
+                                e.1 += *v;
+                            }
+                        }
+                    }
+                    for m in CLAMPED_METRICS {
+                        if m == "external_pressure" {
+                            continue;
+                        }
+                        let e = coll_clamp.entry(m.to_string()).or_insert((0, 0));
+                        e.1 += 1;
+                        if a.get_metric(m) >= 100.0 {
+                            e.0 += 1;
+                        }
+                    }
+                }
+                ids.sort();
+                let (ad_ep, ad_noise) = price_ep_auto_deltas(sc_ref, &full, &world.global_metrics);
+                (pairs, ep, coh, ad_ep, ad_noise, tags, split, ids)
+            };
+
+            let log_len = state.event_log.events.len();
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            let slice: Vec<engine13::core::Event> =
+                state.event_log.events[log_len..].to_vec();
+            let mut ev_ep: BTreeMap<String, f64> = BTreeMap::new();
+            for ev in &slice {
+                let Some((def, _)) = by_id.get(&ev.id) else { continue };
+                for (aid, d) in event_writes_to(def, &ev.actor_id, "external_pressure") {
+                    *ev_ep.entry(aid).or_insert(0.0) += d;
+                }
+            }
+            let mut ambiguous = 0u32;
+            let fights = ep_fights_by_defender(&slice, &live_ids, &mut ambiguous);
+
+            let (mig_est, mig_hi) = {
+                let world = state.world_state.as_ref().unwrap();
+                let mut coh_post: BTreeMap<String, f64> = BTreeMap::new();
+                let mut ep_hi: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in &live_ids {
+                    let (cp, ep_now) = match world.actors.get(aid) {
+                        Some(a) if !world.dead_actor_ids.contains(aid) => (
+                            a.get_metric("cohesion"),
+                            a.get_metric("external_pressure"),
+                        ),
+                        _ => match world.dead_actors.iter().find(|d| &d.id == aid && d.tick_death == t) {
+                            Some(d) => (
+                                d.final_metrics.get("cohesion").copied().unwrap_or(100.0),
+                                d.final_metrics.get("external_pressure").copied().unwrap_or(0.0),
+                            ),
+                            None => (100.0, 0.0),
+                        },
+                    };
+                    coh_post.insert(
+                        aid.clone(),
+                        cp.min(coh0.get(aid).copied().unwrap_or(100.0))
+                            - 20.0 * fights.get(aid).copied().unwrap_or(0) as f64,
+                    );
+                    let deg = pairs_t.iter().filter(|p| &p.a == aid || &p.b == aid).count() as f64;
+                    let base = ep0.get(aid).copied().unwrap_or(0.0)
+                        + ep_auto.get(aid).copied().unwrap_or(0.0)
+                        + ep_noise.get(aid).copied().unwrap_or(0.0);
+                    let bound = base
+                        + COMBAT_EP_HI * fights.get(aid).copied().unwrap_or(0) as f64
+                        + 7.0 * deg;
+                    ep_hi.insert(aid.clone(), bound.max(ep_now));
+                }
+                let mut ep1: BTreeMap<String, f64> = BTreeMap::new();
+                for aid in &live_ids {
+                    let v = (ep0.get(aid).copied().unwrap_or(0.0)
+                        + ep_auto.get(aid).copied().unwrap_or(0.0))
+                    .clamp(0.0, 100.0);
+                    ep1.insert(aid.clone(), v);
+                }
+                ep_migration_transfer(&pairs_t, &ep1, &coh0, &coh_post, &ep_hi)
+            };
+
+            let world = state.world_state.as_ref().unwrap();
+            let ep_auto_post: BTreeMap<String, f64> = {
+                let mut full: BTreeMap<String, std::collections::HashMap<String, f64>> =
+                    BTreeMap::new();
+                for (aid, a) in world.actors.iter() {
+                    if !world.dead_actor_ids.contains(aid) {
+                        full.insert(aid.clone(), a.metrics.clone());
+                    }
+                }
+                price_ep_auto_deltas(sc_ref, &full, &world.global_metrics).0
+            };
+            let tag_post: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .filter(|(k, _)| !world.dead_actor_ids.contains(*k))
+                .map(|(k, a)| (k.clone(), ep_tag_load(a)))
+                .collect();
+            let just_dead: BTreeMap<String, &std::collections::HashMap<String, f64>> = world
+                .dead_actors
+                .iter()
+                .filter(|d| d.tick_death == t)
+                .map(|d| (d.id.clone(), &d.final_metrics))
+                .collect();
+            let live_mil: BTreeMap<String, f64> = world
+                .actors
+                .iter()
+                .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
+                .collect();
+
+            // ---- per-actor step, shadows, consumers -----------------------------
+            let mut shadow_ep: [BTreeMap<String, f64>; 5] = Default::default();
+            let ids: Vec<String> = acc.keys().cloned().collect();
+            for aid in ids {
+                let alive = world.actors.contains_key(&aid) && !world.dead_actor_ids.contains(&aid);
+                let metrics: Option<std::collections::HashMap<String, f64>> = if alive {
+                    world.actors.get(&aid).map(|a| a.metrics.clone())
+                } else {
+                    just_dead.get(&aid).map(|m| (*m).clone())
+                };
+                let Some(m) = metrics else { continue };
+                let ep = m.get("external_pressure").copied().unwrap_or(0.0);
+                let coh = m.get("cohesion").copied().unwrap_or(0.0);
+                let leg = m.get("legitimacy").copied().unwrap_or(0.0);
+                let mil = m.get("military_size").copied().unwrap_or(0.0);
+                let (pat_pos, pat_neg) = patron.get(&aid).copied().unwrap_or((0.0, 0.0));
+                let a_pre = ep_auto.get(&aid).copied().unwrap_or(0.0);
+                let a_post = ep_auto_post.get(&aid).copied().unwrap_or(a_pre);
+                let tl = tag_load.get(&aid).copied().unwrap_or(0.0);
+                let tp = tag_post.get(&aid).copied().unwrap_or(tl);
+                let base = EpInflow {
+                    auto: a_pre,
+                    auto_lo: a_pre.min(a_post),
+                    auto_hi: a_pre.max(a_post),
+                    auto_noise: ep_noise.get(&aid).copied().unwrap_or(0.0),
+                    tag_lo: tl.min(tp),
+                    tag_hi: tl.max(tp),
+                    patron: pat_pos + pat_neg,
+                    events: ev_ep.get(&aid).copied().unwrap_or(0.0),
+                    migration: mig_est.get(&aid).copied().unwrap_or(0.0),
+                    migration_hi: mig_hi.get(&aid).copied().unwrap_or(0.0),
+                    fights: fights.get(&aid).copied().unwrap_or(0),
+                };
+                let e = acc.get_mut(&aid).expect("seeded");
+                if !e.seen {
+                    continue;
+                }
+                e.ticks += 1;
+                actor_ticks += 1;
+
+                if ep >= 100.0 { e.at_100 += 1; real_at100 += 1; }
+                if ep > 85.0 { e.above_85 += 1; real_above85 += 1; }
+                if (70.0..=85.0).contains(&ep) { e.in_70_85 += 1; real_70_85 += 1; }
+                if ep >= 100.0 && e.first_100 < 0 { e.first_100 = (t + 1) as i64; }
+
+                // one-step self-test, identical to `epnominal`
+                let prev_real = e.ep_prev.unwrap_or(0.0);
+                let lo = base.step(prev_real, EpDrop::Ident, Branch::Lo);
+                let hi = base.step(prev_real, EpDrop::Ident, Branch::Hi);
+                if ep < lo - 1e-6 || ep > hi + 1e-6 {
+                    e.step_viol += 1;
+                }
+                let split = tag_split.get(&aid).copied().unwrap_or([0.0; 5]);
+                e.n_tag_native += split[1];
+                e.n_tag_acquired += split[0] - split[1];
+                e.n_total += base.nominal_mid();
+                e.ep_prev = Some(ep);
+
+                let besieged = e.neighbors.iter().any(|(nid, dist)| {
+                    *dist == 1
+                        && live_mil
+                            .get(nid)
+                            .map(|v| *v >= engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY)
+                            .unwrap_or(false)
+                });
+                let skip = matches!(e.min_surv, Some(ms) if t < ms);
+
+                for i in 0..TAG_VARIANTS.len() {
+                    let mut inf = base;
+                    if i > 0 {
+                        inf.tag_lo = split[i];
+                        inf.tag_hi = split[i];
+                    }
+                    e.s_lo[i] = inf.step(e.s_lo[i], EpDrop::Ident, Branch::Lo);
+                    e.s_mid[i] = inf.step(e.s_mid[i], EpDrop::Ident, Branch::Mid);
+                    e.s_hi[i] = inf.step(e.s_hi[i], EpDrop::Ident, Branch::Hi);
+                    let v = e.s_mid[i];
+                    if v >= 100.0 {
+                        e.v_at100[i] += 1;
+                        occ_at100[i] += 1;
+                        if e.v_first100[i] < 0 { e.v_first100[i] = (t + 1) as i64; }
+                    }
+                    if v > 85.0 { e.v_above85[i] += 1; occ_above85[i] += 1; }
+                    if (70.0..=85.0).contains(&v) { e.v_in70_85[i] += 1; occ_70_85[i] += 1; }
+                    shadow_ep[i].insert(aid.clone(), v);
+
+                    // vassalage band and the migration gate, on the shadow value
+                    if (70.0..=85.0).contains(&v) {
+                        band_ep[i] += 1;
+                        if (10.0..=25.0).contains(&leg) && (15.0..=30.0).contains(&coh) {
+                            band_full[i] += 1;
+                        }
+                    }
+                    // the five dependency rules, priced on the shadow value
+                    for (id, to, mass) in ep_dependency_price(&deps, v) {
+                        let slot = dep_mass.entry(id).or_insert((to, [0.0; 5]));
+                        slot.1[i] += mass;
+                    }
+                }
+                if ep < e.s_lo[0] - 1e-6 || ep > e.s_hi[0] + 1e-6 {
+                    e.ident_viol += 1;
+                }
+
+                if !skip {
+                    let (rc, ri, rq) = danger_paths(coh, leg, ep, mil, besieged);
+                    if rc || ri || rq { e.real_ct += 1 } else { e.real_ct = 0 }
+                    let engine_ct = world.collapse_warning_ticks.get(&aid).copied().unwrap_or(0);
+                    if engine_ct != e.real_ct { e.cw_mismatch += 1; }
+                    for i in 0..TAG_VARIANTS.len() {
+                        let (a1, b1, c1) = danger_paths(coh, leg, e.s_lo[i], mil, besieged);
+                        if a1 || b1 || c1 { e.ct_lo[i] += 1 } else { e.ct_lo[i] = 0 }
+                        let (a2, b2, c2) = danger_paths(coh, leg, e.s_mid[i], mil, besieged);
+                        if a2 || b2 || c2 { e.ct_mid[i] += 1 } else { e.ct_mid[i] = 0 }
+                        let (a3, b3, c3) = danger_paths(coh, leg, e.s_hi[i], mil, besieged);
+                        if a3 || b3 || c3 { e.ct_hi[i] += 1 } else { e.ct_hi[i] = 0 }
+                    }
+                }
+                if !alive && e.died_tick < 0 {
+                    e.died_tick = (t + 1) as i64;
+                    deaths_total += 1;
+                    let (dc, di, dq) = danger_paths(coh, leg, ep, mil, besieged);
+                    e.died_path = match (dc, di, dq) {
+                        (true, _, _) => "classic",
+                        (_, true, _) => "internal",
+                        (_, _, true) => "conquest",
+                        _ => "none",
+                    };
+                    *deaths_by_path.entry(e.died_path).or_insert(0) += 1;
+                    for i in 0..TAG_VARIANTS.len() {
+                        if e.ct_hi[i] < 3 { e.saved_hi[i] += 1; saved_hi_tot[i] += 1; }
+                        if e.ct_mid[i] < 3 { e.saved_mid[i] += 1; saved_mid_tot[i] += 1; }
+                        // why a death is not removed: on the shadow value, is the
+                        // actor still dangerous through an arm that does not read
+                        // `ep` at all (`internal`: leg < 5 ∧ coh < 8)?
+                        let (sc_, si_, sq_) = danger_paths(coh, leg, e.s_mid[i], mil, besieged);
+                        if !sc_ && !sq_ {
+                            if si_ {
+                                blocked_internal[i] += 1;
+                            } else {
+                                clear_at_death[i] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- content consumers, on the real and on every shadow --------------
+            for c in &consumers_def {
+                let targets: Vec<String> = match &c.actor {
+                    Some(a) => live_ids.iter().filter(|x| *x == a).cloned().collect(),
+                    None => live_ids.clone(),
+                };
+                for a in targets {
+                    *consumer_checks.entry(c.site.clone()).or_insert(0) += 1;
+                    let row = consumer_hits.entry(c.site.clone()).or_insert([0; 5]);
+                    for i in 0..TAG_VARIANTS.len() {
+                        let v = shadow_ep[i].get(&a).copied().unwrap_or(0.0);
+                        let hit = match c.op {
+                            ComparisonOperator::Less => v < c.value,
+                            ComparisonOperator::LessOrEqual => v <= c.value,
+                            ComparisonOperator::Greater => v > c.value,
+                            ComparisonOperator::GreaterOrEqual => v >= c.value,
+                            ComparisonOperator::Equal => (v - c.value).abs() < 0.001,
+                        };
+                        if hit {
+                            row[i] += 1;
+                        }
+                    }
+                }
+            }
+
+            // ---- the migration gate, per land pair, on every shadow --------------
+            for p in &pairs_t {
+                for i in 0..TAG_VARIANTS.len() {
+                    let q = |id: &str| {
+                        shadow_ep[i].get(id).copied().unwrap_or(0.0) > 65.0
+                            && coh0.get(id).copied().unwrap_or(100.0) < 40.0
+                    };
+                    let src = if q(&p.a) {
+                        &p.a
+                    } else if q(&p.b) {
+                        &p.b
+                    } else {
+                        continue;
+                    };
+                    gate_fire[i] += 1;
+                    let se = shadow_ep[i].get(src).copied().unwrap_or(0.0);
+                    gate_scale[i] += se - 65.0;
+                    if se >= 100.0 - 1e-9 {
+                        gate_ceiling[i] += 1;
+                    }
+                }
+            }
+
+            // ---- early_transfer, the consumer `ep_consumers_of` cannot see --------
+            if let Some(et) = &early {
+                if let MetricRef::Actor { actor_id, metric } = &et.condition_metric {
+                    if metric.as_str() == "external_pressure" {
+                        et_checks += 1;
+                        for i in 0..TAG_VARIANTS.len() {
+                            let v = shadow_ep[i].get(actor_id.as_str()).copied().unwrap_or(0.0);
+                            if et.condition_operator.evaluate(v, et.condition_value) {
+                                et_hits[i] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (aid, e) in &acc {
+            if !e.seen {
+                continue;
+            }
+            viol_total.0 += e.step_viol;
+            viol_total.1 += e.ident_viol;
+            viol_total.2 += e.cw_mismatch;
+            println!(
+                "ACT\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}%\t{:.1}%\t{}\t{:.0}\t{:.0}\t{:.0}\t{}\t{}\t{}\t{}\t{}",
+                aid, seed, mode_label(strategy), e.ticks, e.ep0,
+                100.0 * e.at_100 as f64 / e.ticks.max(1) as f64,
+                100.0 * e.in_70_85 as f64 / e.ticks.max(1) as f64,
+                e.first_100,
+                e.n_total, e.n_tag_native, e.n_tag_acquired,
+                e.step_viol, e.ident_viol, e.cw_mismatch,
+                e.died_tick, e.died_path
+            );
+            for i in 0..TAG_VARIANTS.len() {
+                if e.v_first100[i] > 0 {
+                    first100_sum[i] += e.v_first100[i] as f64;
+                    first100_n[i] += 1;
+                }
+                println!(
+                    "VAR\t{}\t{}\t{}\t{}\t{:.1}%\t{:.1}%\t{:.1}%\t{}\t{}",
+                    aid, seed, mode_label(strategy), TAG_VARIANTS[i].0,
+                    100.0 * e.v_at100[i] as f64 / e.ticks.max(1) as f64,
+                    100.0 * e.v_in70_85[i] as f64 / e.ticks.max(1) as f64,
+                    100.0 * e.v_above85[i] as f64 / e.ticks.max(1) as f64,
+                    e.saved_hi[i], e.saved_mid[i]
+                );
+            }
+        }
+    }
+
+    println!("\n#SELFTEST\tstep_viol={}\tident_viol={}\tcw_mismatch={}", viol_total.0, viol_total.1, viol_total.2);
+    println!("#DEATHS\ttotal={}\t{}", deaths_total,
+        deaths_by_path.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" "));
+    println!("#ACTORTICKS\t{}", actor_ticks);
+    println!("REAL\tat100={:.1}%\tin70_85={:.1}%\tabove85={:.1}%",
+        100.0 * real_at100 as f64 / actor_ticks.max(1) as f64,
+        100.0 * real_70_85 as f64 / actor_ticks.max(1) as f64,
+        100.0 * real_above85 as f64 / actor_ticks.max(1) as f64);
+    println!("SUM\tvariant\tat100%\tin70_85%\tabove85%\tsaved_hi\tsaved_mid\tband_full\tband_ep\tgate_fire\tgate_ceiling%\tgate_mean_scale");
+    for i in 0..TAG_VARIANTS.len() {
+        println!(
+            "SUM\t{}\t{:.1}%\t{:.1}%\t{:.1}%\t{}\t{}\t{}\t{}\t{}\t{:.1}%\t{:.2}",
+            TAG_VARIANTS[i].0,
+            100.0 * occ_at100[i] as f64 / actor_ticks.max(1) as f64,
+            100.0 * occ_70_85[i] as f64 / actor_ticks.max(1) as f64,
+            100.0 * occ_above85[i] as f64 / actor_ticks.max(1) as f64,
+            saved_hi_tot[i], saved_mid_tot[i],
+            band_full[i], band_ep[i], gate_fire[i],
+            100.0 * gate_ceiling[i] as f64 / gate_fire[i].max(1) as f64,
+            gate_scale[i] / gate_fire[i].max(1) as f64
+        );
+    }
+    println!("WHY\tvariant\tsaved_hi\tsaved_mid\tblocked_by_internal\tclear_at_death_but_counter_ran\tmean_first100\tn_reaching_100");
+    for i in 0..TAG_VARIANTS.len() {
+        println!(
+            "WHY\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{}",
+            TAG_VARIANTS[i].0, saved_hi_tot[i], saved_mid_tot[i],
+            blocked_internal[i], clear_at_death[i],
+            first100_sum[i] / first100_n[i].max(1) as f64, first100_n[i]
+        );
+    }
+    println!("CONS\tsite\tchecks\t{}", TAG_VARIANTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join("\t"));
+    for (site, hits) in &consumer_hits {
+        let ch = consumer_checks.get(site).copied().unwrap_or(1);
+        println!(
+            "CONS\t{}\t{}\t{}",
+            site, ch,
+            hits.iter().map(|h| format!("{:.1}%", 100.0 * *h as f64 / ch.max(1) as f64)).collect::<Vec<_>>().join("\t")
+        );
+    }
+    if et_checks > 0 {
+        println!(
+            "CONS\tgeneration_mechanics/early_transfer\t{}\t{}",
+            et_checks,
+            et_hits.iter().map(|h| format!("{:.1}%", 100.0 * *h as f64 / et_checks as f64)).collect::<Vec<_>>().join("\t")
+        );
+    }
+    println!("DEP\trule\tto\t{}", TAG_VARIANTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join("\t"));
+    let ns = seeds.len() as f64;
+    for (id, (to, mass)) in &dep_mass {
+        println!("DEP\t{}\t{}\t{}", id, to,
+            mass.iter().map(|m| format!("{:+.1}", m / ns)).collect::<Vec<_>>().join("\t"));
+    }
+    println!("COLL\tmetric\tnative_mass/game\tacquired_mass/game\tacquired_share\tat_clamp%");
+    for (m, (nat, acq)) in &coll_mass {
+        let (at, tot) = coll_clamp.get(m).copied().unwrap_or((0, 1));
+        println!("COLL\t{}\t{:.0}\t{:.0}\t{:.1}%\t{:.1}%", m, nat / ns, acq / ns,
+            100.0 * acq / (nat + acq).max(1e-9),
+            100.0 * at as f64 / tot.max(1) as f64);
+    }
+}
+
+/// Does the canonical relevance path ever hand a `tag_spread_*` event to the
+/// narrative layer?
+///
+/// Invariant 2 of `AGENTS.md` names `db.rs::get_relevant_events_scored` as the
+/// canonical scoring path, so this mode uses **that call**, on a real in-memory
+/// `Db` seeded with the game's own event log, rather than re-deriving the selection
+/// rules. It is run at a set of sampling ticks with the world's own foreground
+/// actors as `narrative_actor_ids`.
+///
+/// `query_tags` has no runtime producer inside the simulator — it is a parameter of
+/// the Tauri command (`commands.rs:328`, `api.ts:144`) — so both ends of its range
+/// are measured: the empty query (which `thematic_similarity` scores `1.0` against
+/// an event with no tags) and a non-empty one (which scores such an event `0.0`).
+/// Every engine-written event carries `tags = []` (`Event::new`, `core/event.rs:41`),
+/// so those two ends bracket everything a caller could ask for.
+fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
+    use engine13::commands::AppState;
+    use engine13::db::Db;
+
+    let sample: Vec<u32> = (1..=ticks).filter(|t| t % 50 == 0).collect();
+    println!(
+        "# tagrel {} {} ticks × {} seeds, mode {} — канонический путь db.rs::get_relevant_events_scored",
+        scenario_id, ticks, seeds.len(), mode_label(strategy)
+    );
+    println!("REL\tseed\ttick\tquery\tlog_total\tlog_tag_spread\tcurated\tcurated_tag_spread\tcurated_key");
+
+    let mut agg: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
+    for &seed in seeds {
+        let scenario = registry::load_by_id(scenario_id).expect("scenario");
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref initial_metrics) = scenario.initial_family_metrics {
+            let patriarch_age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40);
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(initial_metrics),
+                patriarch_age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+        let mut state = AppState {
+            world_state: Some(world),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+
+        for t in 0..ticks {
+            let _ = scripted_step(&mut state, scenario_id, strategy);
+            {
+                let world_state = state.world_state.as_mut().unwrap();
+                let scenario_ref = state.current_scenario.as_ref().unwrap();
+                let rng = state.rng.as_mut().unwrap();
+                tick(world_state, scenario_ref, &mut state.event_log, rng);
+            }
+            if !sample.contains(&(t + 1)) {
+                continue;
+            }
+            let world = state.world_state.as_ref().unwrap();
+            let mut fg: Vec<String> = world
+                .actors
+                .values()
+                .filter(|a| {
+                    a.narrative_status == engine13::core::NarrativeStatus::Foreground
+                        && !world.dead_actor_ids.contains(&a.id)
+                })
+                .map(|a| a.id.clone())
+                .collect();
+            fg.sort();
+
+            let mut db = Db::open_in_memory().expect("db");
+            let evs: Vec<engine13::core::Event> = state
+                .event_log
+                .events
+                .iter()
+                .cloned()
+                .map(|mut e| {
+                    e.scenario_id = scenario_id.to_string();
+                    e
+                })
+                .collect();
+            db.insert_events_batch(&evs).expect("batch");
+            let log_total = evs.len() as u64;
+            let log_spread = evs.iter().filter(|e| e.id.starts_with("tag_spread_")).count() as u64;
+
+            for (label, q) in [
+                ("empty", Vec::<String>::new()),
+                ("nonempty", vec!["war".to_string(), "crisis".to_string()]),
+            ] {
+                let out = db
+                    .get_relevant_events_scored(t + 1, &q, &fg)
+                    .expect("scored");
+                let cur = out.len() as u64;
+                let cur_spread =
+                    out.iter().filter(|e| e.id.starts_with("tag_spread_")).count() as u64;
+                let cur_key = out.iter().filter(|e| e.is_key).count() as u64;
+                println!(
+                    "REL\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    seed, t + 1, label, log_total, log_spread, cur, cur_spread, cur_key
+                );
+                let a = agg.entry(label.to_string()).or_insert((0, 0, 0, 0));
+                a.0 += cur;
+                a.1 += cur_spread;
+                a.2 += log_total;
+                a.3 += log_spread;
+            }
+        }
+    }
+    println!("SUMREL\tquery\tcurated_total\tcurated_tag_spread\tshare_curated\tlog_total\tlog_tag_spread\tshare_log");
+    for (q, (c, cs, l, ls)) in &agg {
+        println!(
+            "SUMREL\t{}\t{}\t{}\t{:.2}%\t{}\t{}\t{:.2}%",
+            q, c, cs,
+            100.0 * *cs as f64 / (*c).max(1) as f64,
+            l, ls,
+            100.0 * *ls as f64 / (*l).max(1) as f64
         );
     }
 }
