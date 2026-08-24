@@ -73,7 +73,11 @@ fn main() {
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
         world.family_state = Some(engine13::core::FamilyState {
-            metrics: m.clone(),
+            // Every seeding path goes through this; a raw `m.clone()` puts the
+            // content keys (`family:family_influence`) into a container the
+            // runtime reads canonically, so `MetricRef::Family::get` misses and
+            // `apply` opens a second entry beside the stale one (§5.H).
+            metrics: engine13::core::normalize_family_metrics(m),
             patriarch_age: age,
             generation_count: 0,
         });
