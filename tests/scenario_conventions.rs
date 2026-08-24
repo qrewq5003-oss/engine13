@@ -11,7 +11,7 @@
 
 use engine13::core::{
     ComparisonOperator, EventConditionType, EventTarget, MetricName, MetricRef, RandomEvent,
-    RelativeCondition, RelativeMetricRef, Scenario,
+    RelativeCondition, RelativeMetricRef, Scenario, TagDefinition, TagSpreadType,
 };
 use engine13::scenarios::registry;
 use std::collections::HashMap;
@@ -19,36 +19,213 @@ use std::process::Command;
 
 const SCENARIO_IDS: &[&str] = &["rome_375", "constantinople_1430", "milan_1477"];
 
-const GUARDED_METRICS: &[&str] = &["legitimacy", "cohesion"];
+/// The clamped-to-`0..100` metrics a contagious tag may not write.
+///
+/// `legitimacy` and `cohesion` have been here since задача 1. `external_pressure`
+/// was added by задача 28, which measured the whole channel end to end
+/// (`docs/investigation_tag_channel.md`) and closed it **as a convention, not as a
+/// balance change**: the nine tags that carry the pattern today are listed in
+/// [`KNOWN_CONTAGIOUS_TAG_EXCEPTIONS`] with their numbers, and not one
+/// `spread_chance` was touched.
+///
+/// The remaining two clamped metrics — `military_quality` (13 contagious pairs) and
+/// `economic_output` (19) — are deliberately **not** here. Задача 28 §9 measured why
+/// they are not the same case: `economic_output` sits at its clamp `84.9…94.7 %` of
+/// actor-ticks (a step, like `external_pressure`), but `military_quality` sits there
+/// only `18.9…56.9 %` — it is still a scale, and its one behavioural reader is
+/// `power_projection`, i.e. the relevance channel задача 25 moved by `−50.9 %`.
+/// Guarding it would be an unannounced balance change, so it is named and left.
+const GUARDED_METRICS: &[&str] = &["legitimacy", "cohesion", "external_pressure"];
 
-/// Bug class 1: a tag that modifies a guarded metric (legitimacy/cohesion)
-/// must not spread (spread_chance must be 0.0). Cultural/trade/war contagion
+/// Contagious tags that write a guarded metric and are kept that way **on purpose**,
+/// each with the number that justifies it — the same shape as
+/// [`KNOWN_EVENT_ADDRESSING_EXCEPTIONS`] below, and for the same reason: the decision
+/// stays visible, and a tenth such tag cannot be added silently.
+///
+/// The entry is per *(scenario, tag, metric)*, not per tag: a tag excused for
+/// `external_pressure` is still caught the moment it starts writing `cohesion` or
+/// `legitimacy`.
+///
+/// # Why these nine are excused
+///
+/// Задача 28 measured the counterfactual in shadow over nine configurations
+/// (`314 026` actor-ticks, `254` collapses) and found that removing the tag channel
+/// **entirely** — a far stronger edit than zeroing these nine chances —
+///
+/// * removes **0 of 254** deaths, on both branches of the bracket. 109 of them die
+///   through `internal_collapse`, whose predicate does not read `external_pressure`
+///   at all; for the other 145 the death-tick predicate stays true on the shadow
+///   value in **every** case;
+/// * leaves the vassalage band at **0 of 314 026** actor-ticks, exactly where it is
+///   today — the band is bound by `legitimacy ∈ [10,25] ∧ cohesion ∈ [15,30]`, not by
+///   pressure;
+/// * does **not** make the metric readable as a scale: occupancy of the meaningful
+///   `[70, 85]` band goes `1.82 % → 1.43 %`, i.e. it gets *worse*;
+/// * does break something that is calibrated: rome's `early_transfer` gate falls from
+///   `93.1 %` to `42.1 %` occupancy, which turns 4 generation transfers into 3 and
+///   collides head-on with задача 15.
+///
+/// So the pattern is left running and written down. Per tag, in the units the walk
+/// produced (`noplayer`, 10 seeds, 300 ticks, nominal `external_pressure` per game):
+///
+/// | scenario | tag | `+ep` | mass/game | delivered by | share of the scenario's `ep` inflow |
+/// |---|---|---|---|---|---|
+/// | constantinople | `crusade_caller` | +1 | 2 329 | **Culture alone**, 7.8 of 7.8 acquisitions | 61.6…75.1 % (all tags) |
+/// | constantinople | `ottoman_frontier` | +1 | 1 844 | **War alone**, 4.6 of 5.6 | — |
+/// | milan | `ottoman_frontier` | **+2** | 6 642 | **War alone**, 11.6 of 12.8 | 70.9…71.4 % (all tags) |
+/// | milan | `french_orbit` | +1 | 3 303 | **Culture alone**, 12.0 of 12.1 | — |
+/// | rome | `migrating` | +1 | 3 798 | **Migration alone**, 14.0 of 14.0 | 93.4…93.9 % (all tags) |
+/// | rome | `roman_frontier` | +1 | 3 981 | Trade *or* War, **neither necessary** | — |
+/// | rome | `roman_border` | +1 | 3 999 | Trade *or* War, **neither necessary** | — |
+/// | rome | `rhine_border` | +1 | 1 244 | War, only **2.0** targets, first at tick **127.8** | — |
+/// | rome | `persian_border` | +1 | 98 | War, **0.0** targets in `noplayer`/`wealth` | — |
+///
+/// Three of the nine also write a second clamped metric, and that is part of why the
+/// chance was not zeroed: `ottoman_frontier` (constantinople) carries
+/// `military_quality +1`, `roman_frontier` and `roman_border` carry
+/// `economic_output +1`. Zeroing their spread would silently switch off contagion for
+/// a metric this list does not guard — `87.7 %` of the tag-borne `military_quality`
+/// mass in constantinople, `87.0 %` of the `economic_output` mass in rome.
+///
+/// The last two rows are the weakest cases and are marked as such: `persian_border`
+/// and `rhine_border` are declared contagious and are all but inert
+/// (`(D₆)` of задача 28). They are listed because they carry the pattern **today**,
+/// not because the pattern earns its keep there.
+const KNOWN_CONTAGIOUS_TAG_EXCEPTIONS: &[(&str, &str, &str)] = &[
+    ("constantinople_1430", "crusade_caller", "external_pressure"),
+    ("constantinople_1430", "ottoman_frontier", "external_pressure"),
+    ("milan_1477", "ottoman_frontier", "external_pressure"),
+    ("milan_1477", "french_orbit", "external_pressure"),
+    ("rome_375", "migrating", "external_pressure"),
+    ("rome_375", "rhine_border", "external_pressure"),
+    ("rome_375", "persian_border", "external_pressure"),
+    ("rome_375", "roman_frontier", "external_pressure"),
+    ("rome_375", "roman_border", "external_pressure"),
+];
+
+/// The check itself, over a slice of tags, so that it can be applied to real content
+/// *and* to synthetic cases (see [`contagious_tag_check_catches_a_new_violator`]).
+fn contagious_guarded_tag_violations(scenario_id: &str, tags: &[TagDefinition]) -> Vec<String> {
+    let mut failures = Vec::new();
+    for tag in tags {
+        if tag.spread_chance == 0.0 {
+            continue;
+        }
+        for metric in GUARDED_METRICS {
+            if !tag
+                .metrics_modifier
+                .contains_key(&MetricName::new(metric).unwrap())
+            {
+                continue;
+            }
+            if KNOWN_CONTAGIOUS_TAG_EXCEPTIONS.contains(&(scenario_id, tag.id.as_str(), metric)) {
+                continue;
+            }
+            failures.push(format!(
+                "{scenario_id}: tag '{}' modifies the guarded metric '{metric}' but \
+                 spread_chance = {} (must be 0.0, or be listed in \
+                 KNOWN_CONTAGIOUS_TAG_EXCEPTIONS with the number that justifies it)",
+                tag.id, tag.spread_chance
+            ));
+        }
+    }
+    failures
+}
+
+/// Bug class 1: a tag that modifies a guarded metric (legitimacy / cohesion /
+/// external_pressure) must not spread (spread_chance must be 0.0) unless it is on
+/// [`KNOWN_CONTAGIOUS_TAG_EXCEPTIONS`]. Cultural/trade/war contagion
 /// across a dense neighbor graph stacks these modifiers on every actor
 /// within a few dozen ticks, saturating the metric at its clamp - this is
 /// exactly what made the vassalage band unreachable in Milan 1477 before
 /// the tags were fixed (see tags.toml comment on the `oligarchy` tag there).
+///
+/// Задача 28 measured the same saturation for `external_pressure` and confirmed the
+/// docstring above is describing a real mechanism, not a fear: every one of the
+/// three scenarios reaches `ep = 100` on `85.5 %` of actor-ticks, and the tag channel
+/// supplies `61.6…93.9 %` of the inflow that puts it there.
 #[test]
 fn tags_touching_guarded_metrics_do_not_spread() {
     let mut failures = Vec::new();
     for &id in SCENARIO_IDS {
         let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
-        for tag in &scenario.tag_definitions {
-            let touches_guarded = GUARDED_METRICS
-                .iter()
-                .any(|m| tag.metrics_modifier.contains_key(&MetricName::new(m).unwrap()));
-            if touches_guarded && tag.spread_chance != 0.0 {
-                failures.push(format!(
-                    "{id}: tag '{}' modifies a guarded metric {:?} but spread_chance = {} (must be 0.0)",
-                    tag.id, tag.metrics_modifier, tag.spread_chance
-                ));
-            }
-        }
+        failures.extend(contagious_guarded_tag_violations(id, &scenario.tag_definitions));
     }
     assert!(
         failures.is_empty(),
         "Contagious guarded-metric tag(s) found:\n{}",
         failures.join("\n")
     );
+}
+
+/// The guard on the guard: a contagious tag that writes a guarded metric and is
+/// *not* on the allowlist must be caught, a listed one must not be, and the
+/// allowlist must be per metric rather than per tag. Synthetic tags, so this keeps
+/// working if the real content is someday changed.
+#[test]
+fn contagious_tag_check_catches_a_new_violator() {
+    let tag = |id: &str, metric: &str, chance: f64| TagDefinition {
+        id: id.to_string(),
+        metrics_modifier: HashMap::from([(MetricName::new(metric).unwrap(), 1)]),
+        spreads_via: vec![TagSpreadType::War],
+        spread_cooldown_ticks: 6,
+        spread_chance: chance,
+        requires_era: None,
+        unlocks: Vec::new(),
+    };
+
+    // clean: writes a guarded metric but does not spread
+    assert!(
+        contagious_guarded_tag_violations("synthetic", &[tag("quiet", "cohesion", 0.0)]).is_empty()
+    );
+    // clean: spreads, but writes nothing guarded
+    assert!(contagious_guarded_tag_violations(
+        "synthetic",
+        &[tag("harmless", "military_quality", 0.25)]
+    )
+    .is_empty());
+
+    // a new contagious `external_pressure` tag, not on the allowlist — the case
+    // задача 28 exists to make impossible to add silently
+    let new_ep = contagious_guarded_tag_violations(
+        "rome_375",
+        &[tag("new_frontier", "external_pressure", 0.25)],
+    );
+    assert_eq!(new_ep.len(), 1, "a new contagious ep tag must be caught: {new_ep:?}");
+    assert!(new_ep[0].contains("KNOWN_CONTAGIOUS_TAG_EXCEPTIONS"));
+
+    // the two older guarded metrics still behave as they did before задача 28
+    for metric in ["legitimacy", "cohesion"] {
+        let v =
+            contagious_guarded_tag_violations("milan_1477", &[tag("new_court", metric, 0.2)]);
+        assert_eq!(v.len(), 1, "a contagious {metric} tag must be caught: {v:?}");
+    }
+
+    // the allowlist is per metric: an excused tag that starts writing a *second*
+    // guarded metric is caught for that one
+    let mut widened = tag("migrating", "external_pressure", 0.35);
+    widened
+        .metrics_modifier
+        .insert(MetricName::new("cohesion").unwrap(), -1);
+    let v = contagious_guarded_tag_violations("rome_375", &[widened]);
+    assert_eq!(v.len(), 1, "the ep exception must not excuse cohesion too: {v:?}");
+    assert!(v[0].contains("'cohesion'"));
+
+    // and it is per scenario: `ottoman_frontier` is excused in constantinople and in
+    // milan, but the same id in rome would be a new violator
+    let v = contagious_guarded_tag_violations(
+        "rome_375",
+        &[tag("ottoman_frontier", "external_pressure", 0.25)],
+    );
+    assert_eq!(v.len(), 1, "the exception must not travel between scenarios: {v:?}");
+
+    // every listed exception must name a metric this test actually guards
+    for (_, tag_id, metric) in KNOWN_CONTAGIOUS_TAG_EXCEPTIONS {
+        assert!(
+            GUARDED_METRICS.contains(metric),
+            "exception for '{tag_id}' names '{metric}', which is not guarded"
+        );
+    }
 }
 
 /// Bug class 2: a `type = "metric"` milestone/rank condition must be resolvable
