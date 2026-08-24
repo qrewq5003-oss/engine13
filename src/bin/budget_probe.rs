@@ -10631,17 +10631,33 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
         println!("# {} has generation_mechanics: None — nothing to measure", scenario_id);
         return;
     };
-    let Some(et0) = gm0.early_transfer.clone() else {
-        println!("# {} has early_transfer: None", scenario_id);
-        return;
-    };
+    // After task 29 variant B `early_transfer` is `None`. The mode still has to
+    // measure everything it measured before, so the *reference* condition (the one
+    // the scenario used to carry) is reconstructed explicitly and marked as such:
+    // occupancy, the age window and the threshold grid stay comparable across the
+    // change, and `has_early` says which rule the engine actually ran.
+    let has_early = gm0.early_transfer.is_some();
+    let et0 = gm0.early_transfer.clone().unwrap_or(engine13::core::EarlyTransfer {
+        age: 65,
+        condition_metric: MetricRef::literal(&format!(
+            "actor:{}.external_pressure",
+            match scenario_id {
+                "constantinople_1430" => "byzantium",
+                "rome_375" => "rome",
+                _ => "milan",
+            }
+        )),
+        condition_operator: ComparisonOperator::Greater,
+        condition_value: 70.0,
+    });
     let (start_age, end_age, early_age) =
         (gm0.patriarch_start_age, gm0.patriarch_end_age, et0.age);
     println!(
-        "# gentransfer {} {} ticks × {} seeds, mode {} — start_age {} early_age {} end_age {} cond {} {} {}",
+        "# gentransfer {} {} ticks × {} seeds, mode {} — start_age {} early_age {} end_age {} cond {} {} {} (early_transfer present: {})",
         scenario_id, ticks, seeds.len(), mode_label(strategy),
         start_age, early_age, end_age,
-        et0.condition_metric, op_str(&et0.condition_operator), et0.condition_value
+        et0.condition_metric, op_str(&et0.condition_operator), et0.condition_value,
+        has_early
     );
     println!(
         "# generation_length (GenerationMechanics) = {}, (Scenario) = {:?} — neither is read by the engine",
@@ -10710,6 +10726,13 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
         let mut fam_at_transfer: Vec<(u32, [f64; 4])> = vec![];
         // recovery: does the coefficient compound across generations, or does the
         // metric climb back to where it was before the next transfer? (§7 price)
+        // (D1): does the panel's calendar arithmetic agree with the model counter?
+        // `FamilyPanel.tsx:39-41` renders floor((year - start_year)/generation_length) + 1;
+        // the model's number of the generation currently in power is generation_count + 1.
+        // Measured on the whole trajectory, not at one point.
+        let mut panel_mismatch = 0u32;
+        let mut panel_first_mismatch: i64 = -1;
+        let mut panel_max_gap = 0i64;
         let mut fam_prev: [f64; 4] = [0.0; 4];
         let mut pending_rec: Vec<(usize, f64, u32)> = vec![];
         let mut recovered: Vec<(usize, u32, u32)> = vec![]; // (metric, transfer tick, ticks to recover)
@@ -10776,6 +10799,20 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
                     }
                 });
                 fam_prev = cur;
+            }
+            {
+                let panel = ((world.year - scenario0.start_year) as f64
+                    / gm0.generation_length as f64)
+                    .floor() as i64
+                    + 1;
+                let model = gen as i64 + 1;
+                if panel != model {
+                    panel_mismatch += 1;
+                    if panel_first_mismatch < 0 {
+                        panel_first_mismatch = (t + 1) as i64;
+                    }
+                    panel_max_gap = panel_max_gap.max((model - panel).abs());
+                }
             }
             prev_gen = gen;
             prev_age = age_post;
@@ -10849,8 +10886,13 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
         }
 
         // ---- self-test: the replay under the ACTUAL rule must reproduce sim ----
+        let actual = GtVariant {
+            label: if has_early { "IDENT>70" } else { "IDENT(noearly)" },
+            early: has_early,
+            thr: if has_early { et.condition_value } else { f64::INFINITY },
+        };
         let ident = gt_replay(&ep_series, start_age, end_age, early_age, &et.condition_operator,
-                              &GT_VARIANTS[0]);
+                              &actual);
         let replay_ticks: Vec<u32> = ident.transfers.iter().map(|x| x.0).collect();
         let replay_ages: Vec<u32> = ident.transfers.iter().map(|x| x.1).collect();
         let viol = u32::from(replay_ticks != obs_transfers) + u32::from(replay_ages != obs_ages);
@@ -10948,15 +10990,19 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
             fs.metrics.values().sum::<f64>(),
             know40, know50
         );
+        println!(
+            "PANEL\t{}\t{}\tmismatch_ticks={}/{}\tfirst={}\tmax_gap={}",
+            seed, mode_label(strategy), panel_mismatch, ticks, panel_first_mismatch, panel_max_gap
+        );
         {
             const FKEYS: [&str; 4] = ["influence", "knowledge", "wealth", "connections"];
-            for i in 0..4 {
+            for (i, key) in FKEYS.iter().enumerate() {
                 let rec: Vec<u32> = recovered.iter().filter(|(m, _, _)| *m == i).map(|(_, _, d)| *d).collect();
                 let unrec = pending_rec.iter().filter(|(m, _, _)| *m == i).count();
                 if !rec.is_empty() || unrec > 0 {
                     println!(
                         "REC\t{}\t{}\t{}\tdrops={}\trecovered={}\tnot_recovered={}\tticks={:?}",
-                        seed, mode_label(strategy), FKEYS[i],
+                        seed, mode_label(strategy), key,
                         rec.len() + unrec, rec.len(), unrec, rec
                     );
                 }

@@ -1616,12 +1616,18 @@ fn create_generation_mechanics() -> GenerationMechanics {
             crate::core::EraText { from_year: 410, to_year: 455, text: "Западная империя агонизирует. Влияние семьи — последний якорь.".to_string() },
             crate::core::EraText { from_year: 455, to_year: 500, text: "Из пепла рождается новый порядок.".to_string() },
         ],
-        early_transfer: Some(crate::core::EarlyTransfer {
-            age: 65,
-            condition_metric: crate::core::MetricRef::literal("actor:rome.external_pressure"),
-            condition_operator: crate::core::ComparisonOperator::Greater,
-            condition_value: 70.0,
-        }),
+        // Removed by task 29 (variant B). The condition was
+        // `age >= 65 AND rome.external_pressure > 70`, and the second conjunct was
+        // never false where it decided anything: `rome.external_pressure` reads
+        // exactly `100.0` at every tick on which the age gate is open (measured,
+        // 80 runs of 80; occupancy over the whole 65..75 window is 100 % even for
+        // `> 95`). So the rule fired every generation regardless of the world, the
+        // generation lasted 23 years instead of the authored 33, and
+        // `patriarch_end_age: 75` was unreachable. Raising the threshold cannot fix
+        // that: the reachable set at the decision tick is the single point `100.0`,
+        // so every `X < 100` is today's behaviour and every `X >= 100` is this one.
+        // See `docs/investigation_early_transfer.md`.
+        early_transfer: None,
     }
 }
 
