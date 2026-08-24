@@ -1367,10 +1367,17 @@ impl SimStats {
             }
             
             if let Some(ref family) = world.family_state {
-                self.family_influence_timeline.push(*family.metrics.get("family_influence").unwrap_or(&0.0));
-                self.family_knowledge_timeline.push(*family.metrics.get("family_knowledge").unwrap_or(&0.0));
-                self.family_wealth_timeline.push(*family.metrics.get("family_wealth").unwrap_or(&0.0));
-                self.family_connections_timeline.push(*family.metrics.get("family_connections").unwrap_or(&0.0));
+                // Canonical runtime keys, the same space every seeding path
+                // produces (`normalize_family_metrics`) and the only one
+                // `MetricRef::Family` reads. Spelled raw (`family_influence`),
+                // these four missed every time and `.unwrap_or(&0.0)` printed
+                // `0.0` for any world state — the other two read paths of this
+                // same binary (`run_scripted`, lines ~1168 and ~1243) were
+                // already canonical, so one report was true and this one was not.
+                self.family_influence_timeline.push(*family.metrics.get("influence").unwrap_or(&0.0));
+                self.family_knowledge_timeline.push(*family.metrics.get("knowledge").unwrap_or(&0.0));
+                self.family_wealth_timeline.push(*family.metrics.get("wealth").unwrap_or(&0.0));
+                self.family_connections_timeline.push(*family.metrics.get("connections").unwrap_or(&0.0));
             }
             
             // Count foreground shifts
