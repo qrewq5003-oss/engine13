@@ -13,6 +13,12 @@ import { SaveSlotModal } from './components/SaveSlotModal';
 import { MapPanel } from './components/MapPanel';
 import VictoryScreen from './components/VictoryScreen';
 import {
+  initialVictoryOverlayState,
+  shouldShowVictoryOverlay,
+  dismissVictoryOverlay,
+  resetVictoryOverlay,
+} from './utils/victoryOverlay';
+import {
   loadScenario,
   getWorldState,
   getActionsWithAvailability,
@@ -93,6 +99,7 @@ const App: React.FC = () => {
       // Reset UI state for clean start
       setNarrative("");
       setRecentEvents([]);
+      setVictoryOverlay(resetVictoryOverlay());
 
       const loadResult = await loadScenario(scenarioId);
       if (!loadResult.success) {
@@ -119,6 +126,7 @@ const App: React.FC = () => {
     try {
       setIsLoading(true);
       setLoadingStep('Loading save...');
+      setVictoryOverlay(resetVictoryOverlay());
 
       // Sort by tick descending to get latest save
       const sortedSaves = [...saves].sort((a, b) => b.tick - a.tick);
@@ -321,6 +329,10 @@ const App: React.FC = () => {
   // Save notification state
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   
+  // Показ экрана победы. Отдельно от `worldState.victory_achieved`, потому что тот
+  // после победы истинен всегда и один решением быть не может — см. utils/victoryOverlay.
+  const [victoryOverlay, setVictoryOverlay] = useState(initialVictoryOverlayState);
+
   // Save modal state
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [currentSaves, setCurrentSaves] = useState<SaveSlotList | null>(null);
@@ -401,7 +413,7 @@ const App: React.FC = () => {
         <StatusPanel indicators={statusIndicators} />
       )}
 
-      {worldState?.victory_achieved && (
+      {shouldShowVictoryOverlay(worldState?.victory_achieved, victoryOverlay) && (
         <VictoryScreen
           worldState={worldState}
           victoryTitle={(() => {
@@ -412,7 +424,7 @@ const App: React.FC = () => {
             const scenario = scenarios.find(s => s.id === worldState.scenario_id);
             return scenario?.victory_description ?? 'Вы достигли цели сценария.';
           })()}
-          onContinue={() => {}}
+          onContinue={() => setVictoryOverlay(dismissVictoryOverlay)}
           onNewGame={() => setGameState('menu')}
         />
       )}
