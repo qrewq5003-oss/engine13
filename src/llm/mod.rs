@@ -159,8 +159,16 @@ fn determine_world_focus(snapshot: &NarrativeWorldSnapshot) -> String {
         return "victory achieved".to_string();
     }
     
-    // Check for high pressure situations
-    for (key, value) in &snapshot.key_metrics {
+    // Check for high pressure situations.
+    // Sorted by key: this loop returns on the *first* match, and `key_metrics` is a
+    // HashMap — so with several metrics qualifying at once the label returned was
+    // whichever the per-process iteration order happened to reach first. Sorting does
+    // not change which labels are reachable, only which of the tied ones wins.
+    // (This function is currently unreachable in the product: it is only called from
+    // `update_memory`, which has no call sites — see §3.4 of the task-31 write-up.)
+    let mut metrics: Vec<(&String, &f64)> = snapshot.key_metrics.iter().collect();
+    metrics.sort_by(|a, b| a.0.cmp(b.0));
+    for (key, value) in metrics {
         if key.contains("pressure") && *value > 80.0 {
             return "high external pressure".to_string();
         }
@@ -192,22 +200,34 @@ pub fn build_snapshot(
     // Half-year from tick
     let half_year = HalfYear::from_tick(world.tick);
     
-    // Alive actors (not in dead_actors list)
-    let alive_actors: Vec<String> = world.actors.keys()
+    // Alive actors (not in dead_actors list).
+    // Sorted for a deterministic order: `world.actors` is a HashMap, so this
+    // collection order is randomized per process. The list is joined verbatim
+    // into the chronicler's prompt ("Живые акторы: ..."), so an unsorted order
+    // makes the prompt differ run-to-run at a fixed seed, and no narrative
+    // baseline can exist. Same reasoning as `engine/mod.rs`'s `foreground_ids`.
+    let mut alive_actors: Vec<String> = world.actors.keys()
         .filter(|id| !world.dead_actors.iter().any(|d| &d.id == *id))
         .cloned()
         .collect();
+    alive_actors.sort();
     
-    // Dead actors
+    // Dead actors — `world.dead_actors` is a Vec in collapse order, already deterministic.
     let dead_actors: Vec<String> = world.dead_actors.iter()
         .map(|a| a.id.clone())
         .collect();
     
-    // Foreground actors
-    let foreground_actors: Vec<String> = world.actors.values()
+    // Foreground actors. Sorted for the same reason as `alive_actors` above:
+    // the source is the same HashMap. This list does not reach the prompt text
+    // directly today (it is used as a membership test when filtering
+    // `recent_important_events`, which is order-independent), but it is part of
+    // the serialized snapshot and is read by `determine_world_focus` /
+    // `extract_actor_focus`, so it is stabilized here rather than at each reader.
+    let mut foreground_actors: Vec<String> = world.actors.values()
         .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
         .map(|a| a.id.clone())
         .collect();
+    foreground_actors.sort();
     
     // Key milestones fired
     let key_milestones_fired: Vec<String> = scenario.milestone_events.iter()
@@ -231,13 +251,21 @@ pub fn build_snapshot(
             id: e.id.clone(),
             name: e.description.clone(),
             key_effects: {
-                // Parse effects from metadata if available
+                // Parse effects from metadata if available.
+                // Sorted: the metadata deserializes into a HashMap, so `into_iter`
+                // order is randomized per process. These strings are emitted one per
+                // line under "=== ДЕЙСТВИЯ ИГРОКА ===", so an unsorted order makes the
+                // prompt differ run-to-run. This is the largest of the four sites in
+                // constantinople_1430, where every patron action carries >1 effect.
                 if !e.metadata.is_empty() {
-                    serde_json::from_str::<HashMap<String, f64>>(&e.metadata)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|(metric, delta)| format!("{}: {:+.1}", metric, delta))
-                        .collect()
+                    let mut effects: Vec<String> =
+                        serde_json::from_str::<HashMap<String, f64>>(&e.metadata)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|(metric, delta)| format!("{}: {:+.1}", metric, delta))
+                            .collect();
+                    effects.sort();
+                    effects
                 } else {
                     vec![]
                 }
@@ -657,7 +685,13 @@ pub fn generate_narrative_prompt(
 
     if !snapshot.key_metrics.is_empty() {
         prompt.push_str("Ключевые метрики:\n");
-        for (key, value) in &snapshot.key_metrics {
+        // Sorted by key: `key_metrics` is a HashMap, so iterating it directly puts
+        // these lines in a per-process random order. They are the only part of the
+        // prompt that changes between adjacent half-years, so an unsorted order both
+        // breaks fixed-seed reproducibility and makes prompt diffs unreadable.
+        let mut metrics: Vec<(&String, &f64)> = snapshot.key_metrics.iter().collect();
+        metrics.sort_by(|a, b| a.0.cmp(b.0));
+        for (key, value) in metrics {
             prompt.push_str(&format!("  {}: {:.1}\n", key, value));
         }
         prompt.push('\n');
