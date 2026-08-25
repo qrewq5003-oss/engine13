@@ -12,8 +12,10 @@
 //! cargo run --bin sim rome_375 50 scripted balanced  # Rome scripted balanced
 //! cargo run --bin sim rome_375 50 scripted influence  # Rome scripted influence-focused
 //! cargo run --bin sim rome_375 50 scripted wealth  # Rome scripted wealth-focused
-//! cargo run --bin sim rome_375 20 narrative_eval  # narrative evaluation mode
-//! cargo run --bin sim rome_375 narrative_pack  # generate manual review pack
+//! cargo run --bin sim rome_375 6 narrative_eval 42 live   # evaluate real narratives
+//! cargo run --bin sim rome_375 6 narrative_eval 42 dry    # same, without calling the LLM
+//! cargo run --bin sim rome_375 0 narrative_pack 42 live   # review pack, bound derived from scenario
+//! cargo run --bin sim milan_1477 0 narrative_pack 42 dry  # inputs only, no LLM calls
 //! ```
 
 use engine13::{
@@ -23,34 +25,6 @@ use engine13::{
 };
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
-
-// ============================================================================
-// Narrative Evaluation Heuristics (PR 3A)
-// ============================================================================
-
-/// Action type keywords for strategy reflection check
-const ACTION_KEYWORDS: &[(&str, &[&str])] = &[
-    ("build_reputation", &["репутация", "влияние", "известность", "имя"]),
-    ("back_administration", &["управление", "администрация", "порядок", "чиновник"]),
-    ("invest_wealth", &["казна", "богатство", "вложение", "деньги"]),
-    ("support_city", &["город", "поддержка", "снабжение", "гарнизон"]),
-    ("gather_information", &["сведения", "разведка", "слухи", "информация"]),
-    ("expand_network", &["связи", "контакты", "сеть", "союзник"]),
-    ("lay_low", &["тень", "осторожность", "выжидание", "тихо"]),
-    ("fund_defense", &["оборона", "войска", "укрепление", "защита"]),
-];
-
-/// Consequence markers for causality check
-const CONSEQUENCE_MARKERS: &[&str] = &[
-    "поэтому", "в результате", "это привело", "тем временем",
-    "после этого", "вслед за", "что повлекло", "следствием",
-];
-
-/// Generic opening phrases to avoid
-const GENERIC_OPENINGS: &[&str] = &[
-    "В это время", "Мир менялся", "Годы шли", "Империя стояла",
-    "Время шло", "История продолжалась",
-];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -70,8 +44,16 @@ fn main() {
             let seed: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(42);
             run_scripted(scenario_id, ticks, strategy, seed);
         },
-        "narrative_eval" => run_narrative_eval(scenario_id, ticks),
-        "narrative_pack" => run_narrative_pack(scenario_id),
+        "narrative_eval" => {
+            let seed: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(42);
+            let live = args.get(5).map(|s| s.as_str()) != Some("dry");
+            run_narrative_eval(scenario_id, ticks, seed, live)
+        }
+        "narrative_pack" => {
+            let seed: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(42);
+            let live = args.get(5).map(|s| s.as_str()) != Some("dry");
+            run_narrative_pack(scenario_id, ticks, seed, live)
+        }
         _ => {
             let seed: u64 = mode.parse().unwrap_or(42);
             println!("Seed: {}", seed);
@@ -134,103 +116,205 @@ fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
 }
 
 // ============================================================================
-// Narrative Evaluation Mode (PR 3A)
+// Narrative Evaluation Mode
+//
+// Rewritten for task 31 plan item (D). What it used to do (§2.1 of
+// docs/narrative_state_2026_08.md): score the literal string
+// `"[Narrative for tick N would appear here]"`. Its printed verdict — always
+// `Avg 1.0/4`, always `N of N ticks FAIL` — was a constant of that literal:
+// only `not_generic` passed, because the placeholder happens not to open with a
+// banned Russian phrase. No state of the world and no quality of narrative could
+// change it.
+//
+// It is now a SMOKE TEST over real output, not a quality judge. §4.1 of the
+// write-up measured what happens when this kind of regex scoring is trusted as a
+// verdict — three of seven rules had to be thrown away as proximity artifacts —
+// so the four checks here are deliberately narrow: they answer "did a real
+// narrative come back, in the language and vocabulary of THIS scenario", not
+// "is it good". Quality stays a human read of the review pack.
 // ============================================================================
 
-fn run_narrative_eval(scenario_id: &str, ticks: u32) {
+/// Consequence markers for causality check
+const CONSEQUENCE_MARKERS: &[&str] = &[
+    "поэтому", "в результате", "это привело", "тем временем",
+    "после этого", "вслед за", "что повлекло", "следствием",
+];
+
+/// Generic opening phrases to avoid
+const GENERIC_OPENINGS: &[&str] = &[
+    "В это время", "Мир менялся", "Годы шли", "Империя стояла",
+    "Время шло", "История продолжалась",
+];
+
+/// Word stems of an action's own display name, for the strategy-reflection check.
+///
+/// This replaces a hardcoded `ACTION_KEYWORDS` table that listed eight ids, six of
+/// them rome's. Constantinople's and milan's action ids were absent from it, so the
+/// check returned FAIL for those two scenarios on every tick regardless of the text
+/// — the same rome-only assumption §2.2 found in the pack generator. The vocabulary
+/// now comes from the scenario itself: the action's `name` is exactly the string the
+/// chronicler is shown ("Действие игрока: Сбор ополчения"), so matching against its
+/// stems asks whether the narrative picked up the action it was told about.
+///
+/// Six-character stems are a crude stand-in for Russian inflection ("ополчения" →
+/// "ополче" matches "ополчение"). It misses aspect changes ("Вложить" vs
+/// "вкладывают"), so a FAIL here is weak evidence and a PASS is strong evidence —
+/// which is why this is a smoke test.
+fn action_name_stems(name: &str) -> Vec<String> {
+    name.split_whitespace()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|w| w.chars().count() >= 5)
+        .map(|w| w.chars().take(6).collect::<String>())
+        .collect()
+}
+
+fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
+    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+    use engine13::commands::AppState;
+
+    let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+
     println!("Running narrative evaluation mode");
+    println!(
+        "  scenario: {}  seed: {}  ticks: {}  narrative: {}",
+        scenario_id,
+        seed,
+        ticks,
+        if live { "generated by the configured model" } else { "NOT requested (dry)" }
+    );
+    println!("  (smoke test over real output — not a quality verdict; quality is the review pack)");
     println!();
 
-    let scenario = registry::load_by_id(scenario_id)
-        .expect("Unknown scenario");
-
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
-
-    // Initialize actors from scenario
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
             world.actors.insert(actor.id.clone(), actor.clone());
         }
     }
-
-    // Initialize family_state for family-based scenarios
     if let Some(ref initial_metrics) = scenario.initial_family_metrics {
-        let patriarch_age = scenario.generation_mechanics
+        let patriarch_age = scenario
+            .generation_mechanics
             .as_ref()
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
-
         world.family_state = Some(engine13::core::FamilyState {
             metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });
     }
-
     world.generation_mechanics = scenario.generation_mechanics.clone();
     world.generation_length = scenario.generation_length;
 
-    let mut event_log = EventLog::new();
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    let mut state = AppState {
+        world_state: Some(world),
+        event_log: EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+        narrative_memory: engine13::llm::NarrativeMemory::default(),
+    };
+
+    let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
+    let priority = strategy.priority_actions();
+    let db = engine13::db::Db::open_in_memory().expect("in-memory db");
+    let cfg = engine13::llm::get_llm_config();
+    if live {
+        eprintln!("[eval] provider={} model={}", cfg.provider, cfg.model);
+    }
 
     let mut total_scores: Vec<u32> = Vec::new();
     let mut low_score_ticks: Vec<u32> = Vec::new();
+    let mut llm_failures = 0u32;
 
     for tick_num in 0..ticks {
-        // Get actions that would be available this tick
-        let available_actions = engine13::application::get_available_actions(
-            &engine13::commands::AppState {
-                world_state: Some(world.clone()),
-                event_log: event_log.clone(),
-                current_scenario: Some(scenario.clone()),
-                rng: Some(rng.clone()),
-                narrative_memory: engine13::llm::NarrativeMemory::default(),
+        let mut applied = 0u32;
+        let mut actions_applied: Vec<String> = Vec::new();
+        for action_id in &priority {
+            if applied >= scenario.actions_per_tick {
+                break;
             }
-        ).unwrap_or_default();
-
-        // Simulate applying first 2 available actions (like balanced strategy)
-        let mut actions_applied_this_tick: Vec<String> = Vec::new();
-
-        // For narrative eval, we just track what WOULD be applied
-        for action in available_actions.iter().take(2) {
-            actions_applied_this_tick.push(action.id.clone());
+            let input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            if apply_player_action(&mut state, &input).is_ok() {
+                applied += 1;
+                actions_applied.push(action_id.to_string());
+            }
         }
 
-        // Run tick
-        tick(&mut world, &scenario, &mut event_log, &mut rng);
+        {
+            let ws = state.world_state.as_mut().unwrap();
+            let sc = state.current_scenario.as_ref().unwrap();
+            let rng = state.rng.as_mut().unwrap();
+            tick(ws, sc, &mut state.event_log, rng);
+        }
 
-        // Get narrative (would be generated by LLM)
-        // For now, we simulate - in real usage this would come from LLM
-        let narrative_text = format!("[Narrative for tick {} would appear here]", tick_num);
+        if actions_applied.is_empty() {
+            continue;
+        }
 
-        // Evaluate this tick's narrative against actions
-        if !actions_applied_this_tick.is_empty() {
-            let tick_result = evaluate_narrative_tick(
-                &narrative_text,
-                &actions_applied_this_tick,
-                &world,
+        // The narrative the player would actually read, through the canonical path.
+        let ws = state.world_state.as_ref().unwrap();
+        let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
+        let prompt = engine13::llm::generate_narrative_prompt(
+            &snapshot,
+            &scenario,
+            &db,
+            &state.narrative_memory,
+        );
+
+        let narrative_text = if live {
+            match engine13::llm::generate_narrative_blocking(&prompt, &cfg, 5) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("[eval] tick {} FAILED: {}", tick_num, e);
+                    llm_failures += 1;
+                    continue;
+                }
+            }
+        } else {
+            println!(
+                "tick {:2}: prompt {} bytes, actions=[{}] — dry, LLM not called",
                 tick_num,
+                prompt.len(),
+                actions_applied.join(", ")
             );
+            continue;
+        };
 
-            total_scores.push(tick_result.best_score);
-            if tick_result.best_score < 3 {
-                low_score_ticks.push(tick_num);
-            }
+        let ws = state.world_state.as_ref().unwrap();
+        let tick_result =
+            evaluate_narrative_tick(&narrative_text, &actions_applied, ws, &scenario, tick_num);
 
-            if tick_result.best_score < 3 || tick_num < 3 {
-                println!("{}", tick_result.output);
-            }
+        total_scores.push(tick_result.best_score);
+        if tick_result.best_score < 3 {
+            low_score_ticks.push(tick_num);
         }
+        println!("{}", tick_result.output);
     }
 
-    // Print summary
     println!();
     println!("=== SUMMARY ===");
+    if !live {
+        println!("Dry run — no narrative was generated, nothing was scored.");
+        return;
+    }
     println!("Ticks evaluated: {}", total_scores.len());
+    if llm_failures > 0 {
+        println!("LLM failures (tick skipped): {}", llm_failures);
+    }
     if !total_scores.is_empty() {
         let avg_score = total_scores.iter().sum::<u32>() as f64 / total_scores.len() as f64;
         println!("Avg best-action score: {:.1}/4", avg_score);
-        println!("Ticks with score < 3: {} (ticks: {:?})", low_score_ticks.len(), low_score_ticks);
+        println!(
+            "Ticks with score < 3: {} (ticks: {:?})",
+            low_score_ticks.len(),
+            low_score_ticks
+        );
     }
 }
 
@@ -243,21 +327,32 @@ fn evaluate_narrative_tick(
     narrative: &str,
     actions: &[String],
     world: &WorldState,
+    scenario: &engine13::core::Scenario,
     tick_num: u32,
 ) -> NarrativeEvalResult {
     let mut output = String::new();
     output.push_str(&format!("=== NARRATIVE EVAL: tick {} ===\n", tick_num));
-    output.push_str(&format!("Actions this tick: {}\n\n", actions.join(", ")));
+    output.push_str(&format!("Actions this tick: {}\n", actions.join(", ")));
+    output.push_str(&format!(
+        "Narrative: {} chars, {} paragraphs\n\n",
+        narrative.chars().count(),
+        narrative.split("\n\n").filter(|p| !p.trim().is_empty()).count()
+    ));
 
     let mut best_score = 0u32;
 
     for action_id in actions {
         let mut score = 0u32;
         let mut action_output = String::new();
-        action_output.push_str(&format!("  Action: {}\n", action_id));
+        let action_name = scenario
+            .patron_actions
+            .iter()
+            .find(|a| &a.id == action_id)
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| action_id.clone());
+        action_output.push_str(&format!("  Action: {} (\"{}\")\n", action_id, action_name));
 
-        // Criterion 1: action_type_reflected
-        let (c1_pass, c1_match) = check_action_type_reflected(narrative, action_id);
+        let (c1_pass, c1_match) = check_action_type_reflected(narrative, &action_name);
         if c1_pass { score += 1; }
         action_output.push_str(&format!(
             "    action_type_reflected:      {}  [matched: \"{}\"]\n",
@@ -265,7 +360,6 @@ fn evaluate_narrative_tick(
             c1_match.unwrap_or_else(|| "none".to_string())
         ));
 
-        // Criterion 2: consequence_marker_present
         let (c2_pass, c2_match) = check_consequence_marker(narrative);
         if c2_pass { score += 1; }
         action_output.push_str(&format!(
@@ -274,7 +368,6 @@ fn evaluate_narrative_tick(
             c2_match.unwrap_or_else(|| "none".to_string())
         ));
 
-        // Criterion 3: not_generic
         let c3_pass = check_not_generic(narrative);
         if c3_pass { score += 1; }
         action_output.push_str(&format!(
@@ -282,7 +375,6 @@ fn evaluate_narrative_tick(
             if c3_pass { "PASS" } else { "FAIL" }
         ));
 
-        // Criterion 4: actor_mentioned
         let (c4_pass, c4_match) = check_actor_mentioned(narrative, world);
         if c4_pass { score += 1; }
         action_output.push_str(&format!(
@@ -300,28 +392,22 @@ fn evaluate_narrative_tick(
         output.push_str(&action_output);
     }
 
-    output.push_str(&format!("Tick result: {} (best action score: {}/4)\n",
+    output.push_str(&format!(
+        "Tick result: {} (best action score: {}/4)\n",
         if best_score >= 3 { "PASS" } else { "FAIL" },
         best_score
     ));
 
-    NarrativeEvalResult {
-        best_score,
-        output,
-    }
+    NarrativeEvalResult { best_score, output }
 }
 
-fn check_action_type_reflected(narrative: &str, action_id: &str) -> (bool, Option<String>) {
+/// Does the narrative pick up the vocabulary of the action it was told about?
+/// Matches against stems of the action's own display name — see `action_name_stems`.
+fn check_action_type_reflected(narrative: &str, action_name: &str) -> (bool, Option<String>) {
     let narrative_lower = narrative.to_lowercase();
-
-    for (action, keywords) in ACTION_KEYWORDS {
-        if *action == action_id {
-            for keyword in keywords.iter() {
-                if narrative_lower.contains(keyword) {
-                    return (true, Some(keyword.to_string()));
-                }
-            }
-            return (false, None);
+    for stem in action_name_stems(action_name) {
+        if narrative_lower.contains(&stem) {
+            return (true, Some(stem));
         }
     }
     (false, None)
@@ -349,201 +435,584 @@ fn check_not_generic(narrative: &str) -> bool {
 }
 
 fn check_actor_mentioned(narrative: &str, world: &WorldState) -> (bool, Option<String>) {
-    for (_, actor) in world.actors.iter() {
-        if narrative.contains(&actor.name) {
-            return (true, Some(actor.name.clone()));
+    // Sorted: `world.actors` is a HashMap, so an unsorted scan would report a
+    // different "matched" name per process even when the verdict is the same.
+    // Same class as the five sites plan item (C) fixed in `llm/mod.rs`.
+    let mut names: Vec<&str> = world.actors.values().map(|a| a.name.as_str()).collect();
+    names.sort_unstable();
+    for name in names {
+        if narrative.contains(name) {
+            return (true, Some(name.to_string()));
         }
     }
     (false, None)
 }
 
 // ============================================================================
-// Narrative Review Pack Generator (PR 3B)
+// Narrative Review Pack Generator
+//
+// Rewritten for task 31 plan item (D). What it used to do, and why none of it
+// could be trusted (see docs/narrative_state_2026_08.md §2.2):
+//   - it wrote the literal "[LLM UNAVAILABLE - narrative would appear here]"
+//     into every case, so the pack never contained a narrative;
+//   - it built the metrics table from `world` *after* the loop, so every case
+//     showed the final tick's state and the final year, not the case's;
+//   - it read `world.actors.get("rome")` unconditionally, so for
+//     constantinople_1430 and milan_1477 the whole table was 0.0;
+//   - "Player actions this tick" and "Key events" were string literals;
+//   - `MAX_TICKS = 60` was inherited, and task 29 moved rome's generation
+//     period to 33 years = 66 ticks, silently making case 5 unreachable.
+//
+// The rewrite: one deterministic pass records per-tick state *and the exact
+// prompt the chronicler would receive* (via `llm::build_snapshot` +
+// `llm::generate_narrative_prompt` — the same path the app uses, made
+// reproducible by plan item (C)); cases are then selected from that recorded
+// series, so a case's table is by construction the state at the case's tick;
+// and the narrative for the selected ticks is generated through the shared
+// `llm::generate_narrative_blocking`.
 // ============================================================================
 
-fn run_narrative_pack(scenario_id: &str) {
+/// One recorded half-year of a pack run.
+struct PackTurn {
+    tick: u32,
+    year: i32,
+    half_year: String,
+    /// Scenario's own `narrative_config.key_metrics`, resolved at this tick.
+    key_metrics: Vec<(String, f64)>,
+    /// Actors the engine currently considers in danger, sorted.
+    collapse_warnings: Vec<String>,
+    dead_actors: Vec<String>,
+    victory_achieved: bool,
+    victory_sustained: u32,
+    generation_transfer: bool,
+    actions_applied: Vec<String>,
+    /// Event ids the chronicler is actually shown (first five of the prompt).
+    events_shown: Vec<String>,
+    prompt: String,
+}
+
+/// Why a case slot has no tick.
+enum CaseOutcome {
+    Found(usize),
+    NotReached,
+    /// The scenario cannot produce this case at all — it declares no such mechanic.
+    NotApplicable(&'static str),
+}
+
+fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bool) {
+    use engine13::application::actions::{apply_player_action, PlayerActionInput};
+    use engine13::commands::AppState;
+
+    let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+
+    // ------------------------------------------------------------------
+    // Bound. Derived from measurement, not inherited.
+    //
+    // The old `MAX_TICKS = 60` had no relation to any scenario value, and task 29
+    // silently invalidated it: restoring rome's authored `generation_length` of 33
+    // years moved the generation transfer to tick 64, past the bound, so that case
+    // became permanently unreachable and nobody noticed.
+    //
+    // The bound is therefore re-derived here from what the cases actually need,
+    // measured on this branch (`narrative_pack <scenario> 400 ... dry`, §11.2):
+    //
+    //   binding case            measured first tick
+    //   rome generation transfer  64 (stable across seeds 42/1/7 — fixed period)
+    //   rome first collapse warn  77
+    //   milan first collapse warn 127
+    //   constantinople victory    86 / 97 / 113 / 120 / 164 / 203
+    //                             (seeds 13 / 1 / 99 / 3 / 42 / 7)
+    //
+    // The widest is constantinople's victory at 203, so the default carries ~18%
+    // headroom above it. The generation period is kept as an explicit floor so a
+    // future scenario with a longer period cannot be silently truncated the way
+    // task 29 truncated this tool.
+    // ------------------------------------------------------------------
+    const MEASURED_TICKS: u32 = 240;
+    let generation_floor = scenario
+        .generation_length
+        .map(|years| years * 2 + 4)
+        .unwrap_or(0);
+    let derived_ticks = MEASURED_TICKS.max(generation_floor);
+    let max_ticks = if max_ticks_arg > 0 { max_ticks_arg } else { derived_ticks };
+
     println!("Generating narrative review pack");
+    println!(
+        "  scenario: {}  seed: {}  bound: {} ticks ({})",
+        scenario_id,
+        seed,
+        max_ticks,
+        if max_ticks_arg > 0 { "from argument" } else { "derived from scenario" }
+    );
+    println!(
+        "  generation_length: {}",
+        scenario
+            .generation_length
+            .map(|y| format!("{} years = {} ticks", y, y * 2))
+            .unwrap_or_else(|| "none (scenario has no generation mechanic)".to_string())
+    );
     println!();
 
-    let scenario = registry::load_by_id(scenario_id)
-        .expect("Unknown scenario");
-
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
-
-    // Initialize actors
+    // ------------------------------------------------------------------
+    // World init — identical to run_scripted, so the pack reflects a game
+    // someone is actually playing rather than an idle world.
+    // ------------------------------------------------------------------
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
             world.actors.insert(actor.id.clone(), actor.clone());
         }
     }
-
-    // Initialize family_state
     if let Some(ref initial_metrics) = scenario.initial_family_metrics {
-        let patriarch_age = scenario.generation_mechanics
+        let patriarch_age = scenario
+            .generation_mechanics
             .as_ref()
             .map(|g| g.patriarch_start_age)
             .unwrap_or(40) as u32;
-
         world.family_state = Some(engine13::core::FamilyState {
             metrics: engine13::core::normalize_family_metrics(initial_metrics),
             patriarch_age,
             generation_count: 0,
         });
     }
-
     world.generation_mechanics = scenario.generation_mechanics.clone();
     world.generation_length = scenario.generation_length;
 
-    let mut event_log = EventLog::new();
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    let mut state = AppState {
+        world_state: Some(world),
+        event_log: EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+        narrative_memory: engine13::llm::NarrativeMemory::default(),
+    };
 
-    // Track cases
-    let mut cases_found: Vec<(usize, u32, String)> = Vec::new(); // (case_num, tick, narrative)
-    let mut case_conditions_met: [bool; 6] = [false; 6];
-    let mut generation_transfer_tick: Option<u32> = None;
+    let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
+    let priority = strategy.priority_actions();
+    let db = engine13::db::Db::open_in_memory().expect("in-memory db");
 
-    const MAX_TICKS: u32 = 60;
+    let mut turns: Vec<PackTurn> = Vec::new();
+    let mut seen_transfer_ticks: HashSet<u32> = HashSet::new();
 
-    for tick_num in 0..MAX_TICKS {
-        // Run tick
-        tick(&mut world, &scenario, &mut event_log, &mut rng);
-
-        // Check case conditions
-        // Case 1: tick == 3
-        if tick_num == 3 && !case_conditions_met[0] {
-            case_conditions_met[0] = true;
-            cases_found.push((1, tick_num, "[Narrative would appear here]".to_string()));
-        }
-
-        // Case 2: rome.cohesion < 30 AND rome.external_pressure > 70
-        if let Some(rome) = world.actors.get("rome") {
-            if rome.get_metric("cohesion") < 30.0 && rome.get_metric("external_pressure") > 70.0 && !case_conditions_met[1] {
-                case_conditions_met[1] = true;
-                cases_found.push((2, tick_num, "[Narrative would appear here]".to_string()));
+    for tick_num in 0..max_ticks {
+        let mut applied = 0u32;
+        let mut actions_applied: Vec<String> = Vec::new();
+        for action_id in &priority {
+            if applied >= scenario.actions_per_tick {
+                break;
+            }
+            let input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            if apply_player_action(&mut state, &input).is_ok() {
+                applied += 1;
+                actions_applied.push(action_id.to_string());
             }
         }
 
-        // Case 3: family_influence > 70
-        if let Some(ref family) = world.family_state {
-            if family.metrics.get("influence").copied().unwrap_or(0.0) > 70.0 && !case_conditions_met[2] {
-                case_conditions_met[2] = true;
-                cases_found.push((3, tick_num, "[Narrative would appear here]".to_string()));
-            }
+        {
+            let ws = state.world_state.as_mut().unwrap();
+            let sc = state.current_scenario.as_ref().unwrap();
+            let rng = state.rng.as_mut().unwrap();
+            tick(ws, sc, &mut state.event_log, rng);
         }
 
-        // Case 4: collapse_warning_ticks not empty
-        if !world.collapse_warning_ticks.is_empty() && !case_conditions_met[3] {
-            case_conditions_met[3] = true;
-            cases_found.push((4, tick_num, "[Narrative would appear here]".to_string()));
-        }
+        let ws = state.world_state.as_ref().unwrap();
+        let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
+        let prompt = engine13::llm::generate_narrative_prompt(
+            &snapshot,
+            &scenario,
+            &db,
+            &state.narrative_memory,
+        );
 
-        // Case 5: after generation_transfer event
-        if generation_transfer_tick.is_none() {
-            for event in &event_log.events {
-                if event.id == "generation_transfer" && event.tick == tick_num {
-                    generation_transfer_tick = Some(tick_num);
+        // Key metrics: the scenario's own declared narrative metrics, resolved at
+        // THIS tick. Sorted for the same reason the prompt sorts them — the source
+        // is a HashMap and the pack has to be reproducible run to run.
+        let mut key_metrics: Vec<(String, f64)> = snapshot
+            .key_metrics
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        key_metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut collapse_warnings: Vec<String> =
+            ws.collapse_warning_ticks.keys().cloned().collect();
+        collapse_warnings.sort();
+
+        let generation_transfer = state
+            .event_log
+            .events
+            .iter()
+            .any(|e| e.id == "generation_transfer" && e.tick == tick_num && seen_transfer_ticks.insert(tick_num));
+
+        turns.push(PackTurn {
+            tick: tick_num,
+            year: snapshot.year,
+            half_year: snapshot.half_year.display_name().to_string(),
+            key_metrics,
+            collapse_warnings,
+            dead_actors: snapshot.dead_actors.clone(),
+            victory_achieved: snapshot.victory_achieved,
+            victory_sustained: ws.victory_sustained_ticks,
+            generation_transfer,
+            actions_applied,
+            events_shown: snapshot
+                .recent_important_events
+                .iter()
+                .take(5)
+                .map(|e| e.id.clone())
+                .collect(),
+            prompt,
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Case selection — from the recorded series, by engine-generic signals.
+    //
+    // No case predicate names an actor, a metric or a scenario. "Crisis" is
+    // whatever the engine itself flags via `collapse_warning_ticks`; "winning"
+    // and "victory" are the engine's own `victory_sustained_ticks` /
+    // `victory_achieved`. A scenario that declares no victory condition or no
+    // generation mechanic reports those slots as *not applicable*, which is a
+    // different statement from "not reached" and the old tool could not make it.
+    // ------------------------------------------------------------------
+    let has_victory = scenario.victory_condition.is_some();
+    let has_generations = scenario.generation_mechanics.is_some();
+    // "Winning but not yet won" needs the victory condition to require holding for
+    // more than one tick. rome_375 declares `sustained_ticks_required: 1`, so the
+    // engine flips `victory_achieved` in the same tick the condition first holds and
+    // that state cannot exist there — not applicable, not "not reached".
+    let sustained_required = scenario
+        .victory_condition
+        .as_ref()
+        .map(|vc| vc.sustained_ticks_required)
+        .unwrap_or(0);
+    // "Early" is 20 ticks = 10 game years, absolute. It must NOT be a fraction of the
+    // bound: at the 400-tick bound used to derive the default, a quarter-of-the-run
+    // window called tick 77 "early game" in rome.
+    const EARLY_WINDOW_TICKS: u32 = 20;
+
+    let case_names = [
+        "Ранняя партия, устойчиво",
+        "Ранняя партия, кризис",
+        "Середина партии, игрок ведёт",
+        "Первое предупреждение о коллапсе",
+        "Смена поколения",
+        "Момент победы",
+    ];
+
+    let mut outcomes: Vec<CaseOutcome> = Vec::with_capacity(6);
+
+    // 1: earliest tick from 3 onward with nothing in danger and nobody dead.
+    outcomes.push(
+        turns
+            .iter()
+            .position(|t| t.tick >= 3 && t.collapse_warnings.is_empty() && t.dead_actors.is_empty())
+            .map(CaseOutcome::Found)
+            .unwrap_or(CaseOutcome::NotReached),
+    );
+
+    // 2: first danger signal, if it lands in the first quarter of the run.
+    outcomes.push(
+        match turns.iter().position(|t| !t.collapse_warnings.is_empty()) {
+            Some(i) if turns[i].tick < EARLY_WINDOW_TICKS => CaseOutcome::Found(i),
+            _ => CaseOutcome::NotReached,
+        },
+    );
+
+    // 3: victory condition currently satisfied, not yet sustained long enough.
+    outcomes.push(if !has_victory {
+        CaseOutcome::NotApplicable("сценарий не объявляет victory_condition")
+    } else if sustained_required <= 1 {
+        CaseOutcome::NotApplicable(
+            "victory_condition требует удержания 1 тик — состояние «условие держится, но победы ещё нет» невозможно",
+        )
+    } else {
+        turns
+            .iter()
+            .position(|t| t.victory_sustained >= 1 && !t.victory_achieved)
+            .map(CaseOutcome::Found)
+            .unwrap_or(CaseOutcome::NotReached)
+    });
+
+    // 4: the first half-year the engine flags anyone as in danger, whenever it happens.
+    //
+    // An earlier draft used the *peak* number of actors under warning at once. That is
+    // bound-relative — at a 400-tick bound the peak landed on tick 333 in constantinople
+    // and 364 in milan, centuries past the scenario's premise, and two packs built with
+    // different bounds would not be comparable. "First warning" is absolute.
+    // It coincides with case 2 when the first warning happens to be early; that is not a
+    // duplicate, the two slots ask different questions.
+    outcomes.push(
+        turns
+            .iter()
+            .position(|t| !t.collapse_warnings.is_empty())
+            .map(CaseOutcome::Found)
+            .unwrap_or(CaseOutcome::NotReached),
+    );
+
+    // 5: the half-year after a generation transfer fired.
+    outcomes.push(if !has_generations {
+        CaseOutcome::NotApplicable("сценарий не объявляет generation_mechanics")
+    } else {
+        match turns.iter().position(|t| t.generation_transfer) {
+            Some(i) if i + 1 < turns.len() => CaseOutcome::Found(i + 1),
+            Some(i) => CaseOutcome::Found(i),
+            None => CaseOutcome::NotReached,
+        }
+    });
+
+    // 6: the half-year victory was achieved.
+    outcomes.push(if !has_victory {
+        CaseOutcome::NotApplicable("сценарий не объявляет victory_condition")
+    } else {
+        turns
+            .iter()
+            .position(|t| t.victory_achieved)
+            .map(CaseOutcome::Found)
+            .unwrap_or(CaseOutcome::NotReached)
+    });
+
+    // ------------------------------------------------------------------
+    // Narrative for the selected ticks. This is the part that used to be a
+    // string literal.
+    // ------------------------------------------------------------------
+    let mut narratives: HashMap<usize, String> = HashMap::new();
+    if live {
+        let cfg = engine13::llm::get_llm_config();
+        eprintln!("[pack] provider={} model={}", cfg.provider, cfg.model);
+        let mut wanted: Vec<usize> = outcomes
+            .iter()
+            .filter_map(|o| match o {
+                CaseOutcome::Found(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        for i in wanted {
+            match engine13::llm::generate_narrative_blocking(&turns[i].prompt, &cfg, 5) {
+                Ok(text) => {
+                    eprintln!("[pack] tick {} -> {} chars", turns[i].tick, text.chars().count());
+                    narratives.insert(i, text);
+                }
+                Err(e) => {
+                    eprintln!("[pack] tick {} FAILED: {}", turns[i].tick, e);
+                    narratives.insert(i, format!("[LLM ERROR] {}", e));
                 }
             }
         }
-        if let Some(gt_tick) = generation_transfer_tick {
-            if tick_num == gt_tick + 1 && !case_conditions_met[4] {
-                case_conditions_met[4] = true;
-                cases_found.push((5, tick_num, "[Narrative would appear here]".to_string()));
-            }
-        }
-
-        // Case 6: family_influence >= 85 AND tick >= 14
-        if let Some(ref family) = world.family_state {
-            if family.metrics.get("influence").copied().unwrap_or(0.0) >= 85.0 && tick_num >= 14 && !case_conditions_met[5] {
-                case_conditions_met[5] = true;
-                cases_found.push((6, tick_num, "[Narrative would appear here]".to_string()));
-            }
-        }
-
-        // Stop if all cases found
-        if case_conditions_met.iter().all(|&x| x) {
-            break;
-        }
     }
 
-    // Generate markdown file
-    let mut markdown = String::new();
-    markdown.push_str("# Narrative Manual Review Pack\n\n");
-    markdown.push_str("**Generated:** Auto-generated review cases\n\n");
-    markdown.push_str("**Instructions:** Fill in the checklists by hand after reading each narrative.\n\n");
-    markdown.push_str("---\n\n");
+    // ------------------------------------------------------------------
+    // Markdown
+    // ------------------------------------------------------------------
+    let mut md = String::new();
+    md.push_str("# Narrative Manual Review Pack\n\n");
+    md.push_str(&format!(
+        "**Сценарий:** `{}` · **сид:** `{}` · **граница:** `{}` тиков · **стратегия:** `{}`\n\n",
+        scenario_id,
+        seed,
+        max_ticks,
+        strategy.name()
+    ));
+    md.push_str(&format!(
+        "**Нарратив:** {}\n\n",
+        if live {
+            "сгенерирован моделью из конфига (`llm::generate_narrative_blocking`)"
+        } else {
+            "НЕ запрашивался — пакет собран в режиме `dry`, перезапустить с `live`"
+        }
+    ));
+    md.push_str(
+        "Метрики каждого кейса — это состояние мира **на тике этого кейса**, не в конце партии, \
+         и это `narrative_config.key_metrics` самого сценария, а не фиксированный список.\n\n",
+    );
+    md.push_str("**Инструкция:** заполнить чек-листы вручную после чтения каждого нарратива.\n\n");
+    // The command that regenerates this file, verbatim. This pack's predecessor sat in
+    // docs/ for five months while the engine moved out from under it and nobody could
+    // tell it had gone stale (§2.3); a file that carries its own reproduction line can
+    // at least be re-run by whoever next doubts it.
+    md.push_str(&format!(
+        "**Пересобрать:** `cargo run --release --bin sim -- {} {} narrative_pack {} {}`\n\n",
+        scenario_id,
+        if max_ticks_arg > 0 { max_ticks_arg.to_string() } else { "0".to_string() },
+        seed,
+        if live { "live" } else { "dry" }
+    ));
+    md.push_str("---\n\n");
 
-    let case_names = [
-        "Early game, stable",
-        "Early game, crisis",
-        "Mid game, player winning",
-        "Collapse warning active",
-        "Generation transfer",
-        "Near victory",
-    ];
+    for (idx, outcome) in outcomes.iter().enumerate() {
+        md.push_str(&format!("## Case {}: {}\n\n", idx + 1, case_names[idx]));
+        let i = match outcome {
+            CaseOutcome::NotApplicable(reason) => {
+                md.push_str(&format!(
+                    "**[НЕПРИМЕНИМ К ЭТОМУ СЦЕНАРИЮ — {}]**\n\nЭто не «не достигнут»: \
+                     кейс не может возникнуть здесь ни при какой партии.\n\n---\n\n",
+                    reason
+                ));
+                continue;
+            }
+            CaseOutcome::NotReached => {
+                md.push_str(&format!(
+                    "**[НЕ ДОСТИГНУТ за {} тиков]**\n\n---\n\n",
+                    max_ticks
+                ));
+                continue;
+            }
+            CaseOutcome::Found(i) => *i,
+        };
+        let t = &turns[i];
 
-    for (case_num, tick, _narrative) in &cases_found {
-        let case_idx = case_num - 1;
-        markdown.push_str(&format!("## Case {}: {}\n\n", case_num, case_names[case_idx]));
-        markdown.push_str(&format!("**Tick:** {} | **Year:** {}\n\n", tick, world.year));
-
-        // World state summary
-        markdown.push_str("**World state summary:**\n");
-        markdown.push_str("| Metric | Value |\n");
-        markdown.push_str("|--------|-------|\n");
-
-        let rome_legitimacy = world.actors.get("rome").map(|a| a.get_metric("legitimacy")).unwrap_or(0.0);
-        let rome_cohesion = world.actors.get("rome").map(|a| a.get_metric("cohesion")).unwrap_or(0.0);
-        let rome_pressure = world.actors.get("rome").map(|a| a.get_metric("external_pressure")).unwrap_or(0.0);
-        let family_influence = world.family_state.as_ref()
-            .and_then(|f| f.metrics.get("influence")).copied().unwrap_or(0.0);
-        let treasury = world.actors.get("rome").map(|a| a.get_metric("treasury")).unwrap_or(0.0);
-        let collapse_warnings: Vec<&String> = world.collapse_warning_ticks.keys().collect();
-
-        markdown.push_str(&format!("| rome.legitimacy | {:.1} |\n", rome_legitimacy));
-        markdown.push_str(&format!("| rome.cohesion | {:.1} |\n", rome_cohesion));
-        markdown.push_str(&format!("| rome.external_pressure | {:.1} |\n", rome_pressure));
-        markdown.push_str(&format!("| family_influence | {:.1} |\n", family_influence));
-        markdown.push_str(&format!("| treasury | {:.1} |\n", treasury));
-        markdown.push_str(&format!("| collapse_warnings | {} |\n",
-            if collapse_warnings.is_empty() { "none".to_string() } else { collapse_warnings.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ") }
+        md.push_str(&format!(
+            "**Тик:** {} · **год:** {} ({})\n\n",
+            t.tick, t.year, t.half_year
         ));
-        markdown.push('\n');
 
-        markdown.push_str("**Player actions this tick:** [none]\n\n");
-        markdown.push_str("**Key events (last 3):** [events would be listed here]\n\n");
-        markdown.push_str("**Generated narrative:**\n\n");
-        markdown.push_str("[LLM UNAVAILABLE - narrative would appear here]\n\n");
-        markdown.push_str("---\n");
-        markdown.push_str("### Human review checklist\n\n");
-        markdown.push_str("- [ ] Factually accurate — нет галлюцинированных событий или акторов\n");
-        markdown.push_str("- [ ] Strategy reflected — действия игрока присутствуют как причины\n");
-        markdown.push_str("- [ ] World-first — narrative не начинается с семьи или игрока\n");
-        markdown.push_str("- [ ] No generic opening — нет шаблонного начала\n");
-        markdown.push_str("- [ ] Correct tone — соответствует сценарию\n");
-        markdown.push_str("- [ ] At least 2 paragraphs\n\n");
-        markdown.push_str("**Reviewer notes:** [заполнить вручную]\n\n");
-        markdown.push_str("**Score: /6**\n\n");
-        markdown.push_str("---\n\n");
-    }
-
-    // Add cases not reached
-    for i in 0..6 {
-        if !case_conditions_met[i] {
-            markdown.push_str(&format!("## Case {}: {}\n\n", i + 1, case_names[i]));
-            markdown.push_str("**[CASE NOT REACHED within 60 ticks]**\n\n");
-            markdown.push_str("---\n\n");
+        md.push_str("**Ключевые метрики сценария на этом тике:**\n\n");
+        md.push_str("| Метрика | Значение |\n|---|---|\n");
+        for (k, v) in &t.key_metrics {
+            md.push_str(&format!("| `{}` | {:.1} |\n", k, v));
         }
+        md.push('\n');
+
+        md.push_str("**Состояние мира:**\n\n");
+        md.push_str(&format!(
+            "- под угрозой коллапса: {}\n",
+            if t.collapse_warnings.is_empty() {
+                "никого".to_string()
+            } else {
+                t.collapse_warnings.join(", ")
+            }
+        ));
+        md.push_str(&format!(
+            "- павшие: {}\n",
+            if t.dead_actors.is_empty() {
+                "никого".to_string()
+            } else {
+                t.dead_actors.join(", ")
+            }
+        ));
+        md.push_str(&format!(
+            "- победа: {} (условие держится {} тиков подряд)\n",
+            if t.victory_achieved { "достигнута" } else { "нет" },
+            t.victory_sustained
+        ));
+        md.push('\n');
+
+        md.push_str(&format!(
+            "**Действия игрока в этом полугодии:** {}\n\n",
+            if t.actions_applied.is_empty() {
+                "нет".to_string()
+            } else {
+                t.actions_applied.join(", ")
+            }
+        ));
+        md.push_str(&format!(
+            "**События, показанные летописцу:** {}\n\n",
+            if t.events_shown.is_empty() {
+                "нет".to_string()
+            } else {
+                t.events_shown.join(", ")
+            }
+        ));
+
+        md.push_str("**Сгенерированный нарратив:**\n\n");
+        match narratives.get(&i) {
+            Some(text) => {
+                md.push_str(text);
+                md.push_str("\n\n");
+            }
+            None => md.push_str("_(режим `dry` — нарратив не запрашивался)_\n\n"),
+        }
+
+        md.push_str("---\n\n");
+        md.push_str("### Чек-лист (заполнить вручную)\n\n");
+        md.push_str("- [ ] Фактическая точность — нет событий, которых нет в снапшоте\n");
+        md.push_str("- [ ] Нет выдуманного краха / смерти / победы\n");
+        md.push_str("- [ ] Мир сначала — текст не открывается игроком\n");
+        md.push_str("- [ ] Голос сценария\n");
+        md.push_str("- [ ] Стратегия игрока отражена как причина\n");
+        md.push_str("- [ ] Повтор относительно предыдущего полугодия низкий\n");
+        md.push_str("- [ ] Объём абзацев\n\n");
+        md.push_str("**Заметки рецензента:** _(заполнить)_\n\n");
+        md.push_str("**Оценка: /7**\n\n");
+        md.push_str("---\n\n");
     }
 
-    // Write to file
-    std::fs::write("docs/narrative_review_pack.md", &markdown)
-        .expect("Failed to write narrative_review_pack.md");
+    let path = format!("docs/narrative_review_pack_{}.md", scenario_id);
+    std::fs::write(&path, &md).unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
 
-    println!("Generated docs/narrative_review_pack.md");
-    println!("Cases found: {}/6", cases_found.len());
-    for (case_num, tick, _) in &cases_found {
-        println!("  Case {}: tick {}", case_num, tick);
+    // Diagnostics: the measured series behind the verdicts, so "НЕ ДОСТИГНУТ" is
+    // readable without re-running anything.
+    println!();
+    println!("=== ИЗМЕРЕННЫЙ РЯД (основание вердиктов) ===");
+    println!(
+        "  первое предупреждение о коллапсе: {}",
+        turns
+            .iter()
+            .find(|t| !t.collapse_warnings.is_empty())
+            .map(|t| format!("тик {} (год {}): {}", t.tick, t.year, t.collapse_warnings.join(", ")))
+            .unwrap_or_else(|| "не было".to_string())
+    );
+    println!(
+        "  максимум одновременно под угрозой: {}",
+        turns.iter().map(|t| t.collapse_warnings.len()).max().unwrap_or(0)
+    );
+    println!(
+        "  первая гибель актора:             {}",
+        turns
+            .iter()
+            .find(|t| !t.dead_actors.is_empty())
+            .map(|t| format!("тик {} (год {}): {}", t.tick, t.year, t.dead_actors.join(", ")))
+            .unwrap_or_else(|| "не было".to_string())
+    );
+    println!(
+        "  условие победы впервые держится:  {}",
+        turns
+            .iter()
+            .find(|t| t.victory_sustained >= 1)
+            .map(|t| format!("тик {} (год {}), требуется удержать {} тик(ов)", t.tick, t.year, sustained_required))
+            .unwrap_or_else(|| "ни разу".to_string())
+    );
+    println!(
+        "  победа достигнута:                {}",
+        turns
+            .iter()
+            .find(|t| t.victory_achieved)
+            .map(|t| format!("тик {} (год {})", t.tick, t.year))
+            .unwrap_or_else(|| "нет".to_string())
+    );
+    println!(
+        "  смена поколения:                  {}",
+        turns
+            .iter()
+            .find(|t| t.generation_transfer)
+            .map(|t| format!("тик {} (год {})", t.tick, t.year))
+            .unwrap_or_else(|| "не было".to_string())
+    );
+    println!();
+    println!("Generated {}", path);
+    for (idx, outcome) in outcomes.iter().enumerate() {
+        match outcome {
+            CaseOutcome::Found(i) => println!(
+                "  Case {}: tick {} (год {})  {}",
+                idx + 1,
+                turns[*i].tick,
+                turns[*i].year,
+                case_names[idx]
+            ),
+            CaseOutcome::NotReached => {
+                println!("  Case {}: НЕ ДОСТИГНУТ            {}", idx + 1, case_names[idx])
+            }
+            CaseOutcome::NotApplicable(r) => println!(
+                "  Case {}: неприменим ({})  {}",
+                idx + 1,
+                r,
+                case_names[idx]
+            ),
+        }
     }
 }
 

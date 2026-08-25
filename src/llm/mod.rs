@@ -964,6 +964,119 @@ pub async fn stream_narrative_openai(
     Ok(())
 }
 
+/// Generate a narrative headlessly, without a Tauri app handle, and return the text.
+///
+/// The streaming entry points (`stream_narrative_anthropic` / `stream_narrative_openai`)
+/// emit chunks to the frontend and return `Result<(), String>`, so the finished text is
+/// never available to Rust. Headless callers — the evaluation tools in `bin/sim.rs` and
+/// `bin/narrative_probe.rs` — need the text itself, and before this existed each of them
+/// grew its own copy of the request. That is exactly the "parallel implementation" the
+/// snapshot contract (`AGENTS.md`, invariant 3) is meant to prevent, so the request lives
+/// here, next to the streaming variants it mirrors.
+///
+/// Same model, same endpoint, same body as `stream_narrative_openai`, minus `stream`.
+/// `attempts` is the total number of tries; transient network failures are retried with a
+/// linear backoff (the evaluation runs lose whole batches of requests to DNS otherwise).
+pub fn generate_narrative_blocking(
+    prompt: &str,
+    config: &LlmConfig,
+    attempts: u32,
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
+
+    let anthropic = config.provider == "anthropic";
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(api_key) = &config.api_key {
+        if anthropic {
+            headers.insert(
+                "x-api-key",
+                api_key.parse().map_err(|e| format!("Invalid API key: {}", e))?,
+            );
+            headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+        } else {
+            headers.insert(
+                "Authorization",
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .map_err(|e| format!("Invalid API key: {}", e))?,
+            );
+        }
+    }
+
+    let (url, body) = if anthropic {
+        (
+            format!("{}/v1/messages", config.base_url),
+            serde_json::json!({
+                "model": config.model,
+                "max_tokens": 4000,
+                "messages": [{ "role": "user", "content": prompt }],
+            }),
+        )
+    } else {
+        (
+            format!("{}/v1/chat/completions", config.base_url),
+            serde_json::json!({
+                "model": config.model,
+                "messages": [{ "role": "user", "content": prompt }],
+                "max_tokens": 4000,
+                "stream": false,
+            }),
+        )
+    };
+
+    let mut last_err = String::new();
+    for attempt in 1..=attempts.max(1) {
+        match send_narrative_request(&client, &url, headers.clone(), &body, anthropic) {
+            Ok(text) => return Ok(text),
+            Err(e) => {
+                last_err = e;
+                if attempt < attempts.max(1) {
+                    std::thread::sleep(std::time::Duration::from_secs(5 * attempt as u64));
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
+
+fn send_narrative_request(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    headers: reqwest::header::HeaderMap,
+    body: &serde_json::Value,
+    anthropic: bool,
+) -> Result<String, String> {
+    let res = client
+        .post(url)
+        .headers(headers)
+        .json(body)
+        .send()
+        .map_err(|e| format!("send: {}", e))?;
+    let status = res.status();
+    let text = res.text().map_err(|e| format!("body: {}", e))?;
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {}: {}",
+            status,
+            text.chars().take(300).collect::<String>()
+        ));
+    }
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!("json: {} / {}", e, text.chars().take(300).collect::<String>())
+    })?;
+    let content = if anthropic {
+        v["content"][0]["text"].as_str()
+    } else {
+        v["choices"][0]["message"]["content"].as_str()
+    };
+    content.map(|s| s.to_string()).ok_or_else(|| {
+        format!("no content: {}", text.chars().take(300).collect::<String>())
+    })
+}
+
 /// Get available models from LLM provider
 pub fn get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     let client = reqwest::blocking::Client::builder()
