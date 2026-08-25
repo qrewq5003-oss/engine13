@@ -255,26 +255,17 @@ fn main() {
         for t in &samples {
             let idx = *t as usize;
             let prompt = records[idx].prompt.clone();
-            // сеть на этой машине роняет соединение пачками — ретраи с backoff,
-            // иначе в выборке появляются дырки, которых нет в продукте
-            let mut attempt = 0u32;
-            loop {
-                attempt += 1;
-                match call_llm(&cfg, &prompt) {
-                    Ok(text) => {
-                        eprintln!("[live] tick {} -> {} chars (attempt {})", t, text.chars().count(), attempt);
-                        records[idx].narrative = Some(text);
-                        break;
-                    }
-                    Err(e) if attempt < 5 => {
-                        eprintln!("[live] tick {} attempt {} failed: {} — retrying", t, attempt, e);
-                        std::thread::sleep(std::time::Duration::from_secs(5 * attempt as u64));
-                    }
-                    Err(e) => {
-                        eprintln!("[live] tick {} FAILED after {} attempts: {}", t, attempt, e);
-                        records[idx].narrative = Some(format!("[LLM ERROR] {}", e));
-                        break;
-                    }
+            // Ретраи и сам запрос живут в `llm::generate_narrative_blocking` —
+            // общий путь с `sim`'s narrative_eval / narrative_pack. Своей копии
+            // запроса у пробника больше нет.
+            match engine13::llm::generate_narrative_blocking(&prompt, &cfg, 5) {
+                Ok(text) => {
+                    eprintln!("[live] tick {} -> {} chars", t, text.chars().count());
+                    records[idx].narrative = Some(text);
+                }
+                Err(e) => {
+                    eprintln!("[live] tick {} FAILED: {}", t, e);
+                    records[idx].narrative = Some(format!("[LLM ERROR] {}", e));
                 }
             }
         }
@@ -334,34 +325,3 @@ fn byte_diff(a: &str, b: &str) -> usize {
     d
 }
 
-/// Тот же endpoint/модель/тело, что и `stream_narrative_openai`, но без stream,
-/// чтобы текст вернулся в Rust (в проде он уходит только в фронтенд событиями).
-fn call_llm(cfg: &engine13::llm::LlmConfig, prompt: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut headers = reqwest::header::HeaderMap::new();
-    if let Some(k) = &cfg.api_key {
-        headers.insert("Authorization", format!("Bearer {}", k).parse().map_err(|e: reqwest::header::InvalidHeaderValue| e.to_string())?);
-    }
-    let body = serde_json::json!({
-        "model": cfg.model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 4000,
-        "stream": false
-    });
-    let url = format!("{}/v1/chat/completions", cfg.base_url);
-    let res = client.post(&url).headers(headers).json(&body).send()
-        .map_err(|e| format!("send: {}", e))?;
-    let status = res.status();
-    let text = res.text().map_err(|e| format!("body: {}", e))?;
-    if !status.is_success() {
-        return Err(format!("HTTP {}: {}", status, text.chars().take(300).collect::<String>()));
-    }
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("json: {} / {}", e, text.chars().take(300).collect::<String>()))?;
-    v["choices"][0]["message"]["content"].as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("no content: {}", text.chars().take(300).collect::<String>()))
-}
