@@ -194,7 +194,7 @@ fn main() {
             foreground: snapshot.foreground_actors.clone(),
             dead: snapshot.dead_actors.clone(),
             events_shown: snapshot.recent_important_events.iter().take(5)
-                .map(|e| e.id.clone()).collect(),
+                .map(|e| format!("{}@t{}", e.id, e.tick)).collect(),
             narrative: None,
         });
     }
@@ -242,7 +242,10 @@ fn main() {
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
             narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
-        let tone: Vec<String> = scenario.narrative_config.tone_tags.clone();
+        // Непустой запрос как вариант отбора отпал: он делает релевантность нулевой
+        // у ВСЕХ событий, а нужный эффект дала правка `thematic_similarity` (§14.4),
+        // поэтому вариант V3 считается с пустым запросом, как и продукт.
+        let _tone: Vec<String> = scenario.narrative_config.tone_tags.clone();
         // событие тика 0 — маркер «пересказывает самое старое»
         let mut tick0_ids: HS<String> = HS::new();
         let (mut seen_base, mut seen_v1, mut seen_v2): (HS<String>, HS<String>, HS<String>) =
@@ -311,7 +314,46 @@ fn main() {
         let ws = st2.world_state.as_ref().unwrap();
         let _ = ws;
         println!("=== РАВНОВЕСНЫЙ РАСЧЁТ (A): {} / {} / seed {} / {} тиков ===", scenario_id, strategy, seed, ticks);
-        println!("событий в логе к концу партии: {}", st2.event_log.events.len());
+        // Плотность и перепись id — измерения, отвечающие на вопрос «почему у сценария
+        // столько различных наборов», без обращения к LLM.
+        let nonmetric = st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")).count();
+        {
+            use std::collections::HashMap as HM;
+            let mut per: HM<u32, usize> = HM::new();
+            for e in st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")) {
+                *per.entry(e.tick).or_insert(0) += 1;
+            }
+            let empty = (0..ticks).filter(|t| !per.contains_key(t)).count();
+            {
+                use std::collections::HashMap as HM2;
+                let mut freq: HM2<String, usize> = HM2::new();
+                for e in st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")) {
+                    *freq.entry(e.id.clone()).or_insert(0) += 1;
+                }
+                let mut v: Vec<(String, usize)> = freq.into_iter().collect();
+                v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                let uniq = v.len();
+                let top: Vec<String> = v.iter().take(5).map(|(i, c)| format!("{}×{}", i, c)).collect();
+                println!("различных id среди не-metrics: {} | самые частые: {}", uniq, top.join(", "));
+            }
+            // Построчная выкладка окрестности одного окна — ею установлена причина
+            // по milan (§14.6): повторяющиеся id занимают слоты, потому что отбор
+            // дедуплицирует по id, а id у большинства событий не уникальны.
+            if std::env::var("DUMP_TICKS").is_ok() {
+                for t in 28..36u32 {
+                    let ids: Vec<String> = st2.event_log.events.iter()
+                        .filter(|e| e.tick == t && !e.id.starts_with("metrics_"))
+                        .map(|e| format!("{}(key={})", e.id, e.is_key)).collect();
+                    println!("   tick {}: {:?}", t, ids);
+                }
+            }
+            let mut counts: Vec<usize> = (0..ticks).map(|t| *per.get(&t).unwrap_or(&0)).collect();
+            counts.sort_unstable();
+            println!("полугодий БЕЗ единого не-metrics события: {} из {} ({:.0}%), медиана событий на полугодие: {}",
+                empty, ticks, empty as f64 / ticks as f64 * 100.0, counts[counts.len()/2]);
+        }
+        println!("событий в логе к концу партии: {} (из них не-metrics: {} = {:.1} на полугодие)",
+            st2.event_log.events.len(), nonmetric, nonmetric as f64 / ticks as f64);
         println!("  из них с непустыми tags:      {}", st2.event_log.events.iter().filter(|e| !e.tags.is_empty()).count());
         println!("  is_key с actor_id=\"scenario\": {}", st2.event_log.events.iter().filter(|e| e.is_key && e.actor_id == "scenario").count());
         println!("  (на тике 0 было: всего {}, с tags {}, scenario-key {})", total_events, tagged, scenario_key);
