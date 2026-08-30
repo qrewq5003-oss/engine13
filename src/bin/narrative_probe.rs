@@ -200,6 +200,145 @@ fn main() {
     }
 
     // ------------------------------------------------------------------
+    // Режим `window` — равновесный расчёт для плана (A) ДО правки продукта.
+    //
+    // Считает, что показал бы летописцу каждый вариант отбора на ОДНОЙ и той же
+    // партии, и ничего в продукте не меняет. Варианты:
+    //   base — то, что делает `build_snapshot` сегодня: filter + truncate(10), take(5)
+    //   V1   — канонический отбор `db::select_relevant_events`, query_tags = []
+    //   V2   — он же, query_tags = tone_tags сценария (непустой запрос)
+    // ------------------------------------------------------------------
+    if mode == "window" {
+        use std::collections::HashSet as HS;
+        let mut base_sets: HS<String> = HS::new();
+        let mut v1_sets: HS<String> = HS::new();
+        let mut v2_sets: HS<String> = HS::new();
+        let (mut base_t0, mut v1_t0, mut v2_t0) = (0usize, 0usize, 0usize);
+        let mut tagged = 0usize;
+        let mut scenario_key = 0usize;
+        let mut total_events = 0usize;
+
+        // Реплей ещё раз, чтобы иметь лог на каждом тике
+        let mut w2 = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+        for actor in &scenario.actors {
+            if !actor.is_successor_template {
+                w2.actors.insert(actor.id.clone(), actor.clone());
+            }
+        }
+        if let Some(ref im) = scenario.initial_family_metrics {
+            let pa = scenario.generation_mechanics.as_ref().map(|g| g.patriarch_start_age).unwrap_or(40) as u32;
+            w2.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(im),
+                patriarch_age: pa,
+                generation_count: 0,
+            });
+        }
+        w2.generation_mechanics = scenario.generation_mechanics.clone();
+        w2.generation_length = scenario.generation_length;
+        let mut st2 = AppState {
+            world_state: Some(w2),
+            event_log: EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
+            narrative_memory: engine13::llm::NarrativeMemory::default(),
+        };
+        let tone: Vec<String> = scenario.narrative_config.tone_tags.clone();
+        // событие тика 0 — маркер «пересказывает самое старое»
+        let mut tick0_ids: HS<String> = HS::new();
+        let (mut seen_base, mut seen_v1, mut seen_v2): (HS<String>, HS<String>, HS<String>) =
+            (HS::new(), HS::new(), HS::new());
+        let (mut slots_v1, mut slots_v3, mut metric_slots_v1) = (0usize, 0usize, 0usize);
+
+        for tick_num in 0..ticks {
+            let mut applied = 0u32;
+            for id in &prio {
+                if applied >= scenario.actions_per_tick { break; }
+                let input = PlayerActionInput { action_id: id.to_string(), target_actor_id: None };
+                if apply_player_action(&mut st2, &input).is_ok() { applied += 1; }
+            }
+            {
+                let ws = st2.world_state.as_mut().unwrap();
+                let sc = st2.current_scenario.as_ref().unwrap();
+                let rng = st2.rng.as_mut().unwrap();
+                tick(ws, sc, &mut st2.event_log, rng);
+            }
+            let ws = st2.world_state.as_ref().unwrap();
+            let mut fg: Vec<String> = ws.actors.values()
+                .filter(|a| a.narrative_status == engine13::core::NarrativeStatus::Foreground)
+                .map(|a| a.id.clone()).collect();
+            fg.sort();
+
+            // base
+            let mut base: Vec<engine13::core::Event> = st2.event_log.events.iter()
+                .filter(|e| e.is_key || fg.contains(&e.actor_id)).cloned().collect();
+            base.truncate(10);
+            let base_ids: Vec<String> = base.iter().take(5).map(|e| e.id.clone()).collect();
+
+            // Кандидаты нормализуются так же, как в build_snapshot
+            let mut cand: Vec<engine13::core::Event> = st2.event_log.events.clone();
+            cand.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.id.cmp(&b.id)));
+
+            let v1 = engine13::db::select_relevant_events(&cand, ws.tick, &[], &fg);
+            let v1_ids: Vec<String> = v1.iter().take(5).map(|e| e.id.clone()).collect();
+            // V3 — контрфакт: тот же канонический отбор, но потиковые дампы metrics_*
+            // исключены из КАНДИДАТОВ. Оценка объёма правки кормильца, продукт не меняется.
+            let cand3: Vec<engine13::core::Event> = cand.iter()
+                .filter(|e| !e.id.starts_with("metrics_"))
+                .cloned().collect();
+            let v2 = engine13::db::select_relevant_events(&cand3, ws.tick, &[], &fg);
+            let v2_ids: Vec<String> = v2.iter().take(5).map(|e| e.id.clone()).collect();
+            slots_v1 += v1_ids.len();
+            slots_v3 += v2_ids.len();
+            metric_slots_v1 += v1_ids.iter().filter(|i| i.starts_with("metrics_")).count();
+
+            if tick_num == 0 {
+                tick0_ids = base_ids.iter().cloned().collect();
+                total_events = st2.event_log.events.len();
+                tagged = st2.event_log.events.iter().filter(|e| !e.tags.is_empty()).count();
+                scenario_key = st2.event_log.events.iter().filter(|e| e.is_key && e.actor_id == "scenario").count();
+            }
+            for i in &base_ids { seen_base.insert(i.clone()); }
+            for i in &v1_ids { seen_v1.insert(i.clone()); }
+            for i in &v2_ids { seen_v2.insert(i.clone()); }
+            base_sets.insert(base_ids.join("|"));
+            v1_sets.insert(v1_ids.join("|"));
+            v2_sets.insert(v2_ids.join("|"));
+            if base_ids.iter().any(|i| tick0_ids.contains(i)) { base_t0 += 1; }
+            if v1_ids.iter().any(|i| tick0_ids.contains(i)) { v1_t0 += 1; }
+            if v2_ids.iter().any(|i| tick0_ids.contains(i)) { v2_t0 += 1; }
+        }
+        let n = ticks as f64;
+        let ws = st2.world_state.as_ref().unwrap();
+        let _ = ws;
+        println!("=== РАВНОВЕСНЫЙ РАСЧЁТ (A): {} / {} / seed {} / {} тиков ===", scenario_id, strategy, seed, ticks);
+        println!("событий в логе к концу партии: {}", st2.event_log.events.len());
+        println!("  из них с непустыми tags:      {}", st2.event_log.events.iter().filter(|e| !e.tags.is_empty()).count());
+        println!("  is_key с actor_id=\"scenario\": {}", st2.event_log.events.iter().filter(|e| e.is_key && e.actor_id == "scenario").count());
+        println!("  (на тике 0 было: всего {}, с tags {}, scenario-key {})", total_events, tagged, scenario_key);
+        println!();
+        println!("{:<6} {:>12} {:>26}", "вариант", "разл.наборов", "доля тиков с событием т.0");
+        println!("{:<6} {:>12} {:>25.0}%", "base", base_sets.len(), base_t0 as f64 / n * 100.0);
+        println!("{:<6} {:>12} {:>25.0}%", "V1", v1_sets.len(), v1_t0 as f64 / n * 100.0);
+        println!("{:<6} {:>12} {:>25.0}%", "V3", v2_sets.len(), v2_t0 as f64 / n * 100.0);
+        println!();
+        println!("слотов в промпте: V1 {} (из них metrics_* {} = {:.0}%), V3 {} (metrics_* исключены)",
+            slots_v1, metric_slots_v1, metric_slots_v1 as f64 / slots_v1.max(1) as f64 * 100.0, slots_v3);
+        println!();
+        let kinds = |set: &HS<String>| -> String {
+            let d = set.iter().filter(|i| i.starts_with("death_")).count();
+            let p = set.iter().filter(|i| i.starts_with("player_action_")).count();
+            let t = set.iter().filter(|i| i.starts_with("tag_spread_")).count();
+            let o = set.len() - d - p - t;
+            format!("{:>5} всего | смертей {:>2} | действий {:>3} | тегов {:>3} | прочих {:>3}", set.len(), d, p, t, o)
+        };
+        println!("различных id, дошедших до летописца за партию:");
+        println!("  base  {}", kinds(&seen_base));
+        println!("  V1    {}", kinds(&seen_v1));
+        println!("  V3    {}", kinds(&seen_v2));
+        return;
+    }
+
+    // ------------------------------------------------------------------
     // Model-free измерения по промптам (LLM не нужен)
     // ------------------------------------------------------------------
     let mut identical_pairs = 0usize;

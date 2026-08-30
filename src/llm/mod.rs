@@ -235,12 +235,69 @@ pub fn build_snapshot(
         .map(|m| m.id.clone())
         .collect();
     
-    // Recent important events (last 10, keyed events first)
-    let mut recent_important_events: Vec<crate::core::Event> = event_log.events.iter()
-        .filter(|e| e.is_key || foreground_actors.contains(&e.actor_id))
+    // Recent important events — through the canonical relevance selection.
+    //
+    // What this replaces: `filter(...).truncate(10)` over `event_log.events`. The log is
+    // append-only and never cleared, so `truncate` kept the OLDEST ten matches, not the
+    // newest — the comment above it said "last 10" and the code did the opposite. Task 31
+    // measured the result: 1–2 distinct event sets reached the chronicler over a whole
+    // 150-half-year game, 98% of generated chronicles re-told an event from tick 0, and
+    // not one of the ~2000 authored random events (plague, famine, revolt, the Ottoman
+    // embassy) was ever shown.
+    //
+    // `select_relevant_events` is the selection `AGENTS.md` invariant 2 calls canonical.
+    // It was unreachable in the product: it lives behind `Db::get_relevant_events_scored`,
+    // which reads the `events` table, and nothing ever writes that table — `insert_event`
+    // has no callers outside `budget_probe`, and `save_load.rs` only deletes from it. So
+    // the rules are fed here from the in-memory log instead, through the same pure
+    // function the DB entry point uses. One selection, two feeders; no second path.
+    //
+    // `query_tags` is empty on purpose. Nothing in the narrative layer computes query
+    // tags, and with an empty query `thematic_similarity` returns 1.0 for the untagged
+    // events that make up ~99.9% of the log, so rule 1 (top 15 by relevance) becomes a
+    // genuine recency ranking — relevance collapses to `temporal_coefficient`. Passing a
+    // non-empty query instead scores *every* event 0.0 (measured: 1–3 events per game
+    // carry tags at all), which would leave the window resting on rule 2 alone. Both were
+    // measured and are numerically identical today; see §14.3 of the task-31 write-up for
+    // the inversion this exposes in `thematic_similarity`, recorded and not fixed here.
+    //
+    // The candidate slice is normalised before it is handed over, and that is load-bearing,
+    // not tidiness. `record_metric_changes` (`engine/mod.rs:1662`) appends one `metrics_*`
+    // event per actor while iterating `world.actors` — a HashMap — so the *log's own order*
+    // is randomized per process. The canonical selection sorts by relevance with a stable
+    // sort, so ties fall through to input order, and feeding it the raw log made the prompt
+    // differ between processes at a fixed seed: measured 6 distinct prompt files out of 6
+    // runs, which is exactly the regression plan item (C) exists to prevent. Sorting here
+    // fixes it at the feeder without touching either the engine's append order or the
+    // shared selection rules.
+    // Per-tick metric dumps are dropped from the candidates before the selection sees
+    // them. `record_metric_changes` (`engine/mod.rs:1662`) emits one `metrics_<actor>_<tick>`
+    // event per actor per tick whose description is a list of raw deltas — "Аламанны:
+    // military_quality: -4.2, treasury: +10.7". They are bookkeeping for the debug/tick
+    // explanation, not chronicle material, and there is no filter anywhere between the
+    // snapshot and the prompt text (`generate_narrative_prompt` prints `id: description`
+    // verbatim), so without this they went to the model as-is — 91% of the five evidence
+    // slots in rome, 82% in constantinople, 56% in milan — inside the same prompt that
+    // orders the chronicler to never name a number. §5.2 already measured what the model
+    // does with numbers it is shown and forbidden to use: it spells them out in words.
+    //
+    // Filtering here rather than in `select_relevant_events` is deliberate: the canonical
+    // rules stay untouched and the DB feeder keeps its own candidate set. Measured cost of
+    // the filter — distinct event sets per 150-half-year game fall 150 → 115 / 111 / 94,
+    // still far above the acceptance threshold of 30, while the five slots stay full and
+    // what fills them becomes authored content instead of ledger lines.
+    let mut event_candidates: Vec<crate::core::Event> = event_log.events.iter()
+        .filter(|e| !e.id.starts_with("metrics_"))
         .cloned()
         .collect();
-    recent_important_events.truncate(10);
+    event_candidates.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.id.cmp(&b.id)));
+
+    let recent_important_events: Vec<crate::core::Event> = crate::db::select_relevant_events(
+        &event_candidates,
+        world.tick,
+        &[],
+        &foreground_actors,
+    );
     
     // Recent player actions (last 5)
     let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
