@@ -60,7 +60,16 @@ pub struct NarrativeWorldSnapshot {
     pub dead_actors: Vec<String>,
     pub victory_achieved: bool,
     pub foreground_actors: Vec<String>,
-    pub key_milestones_fired: Vec<String>,
+    /// Milestones fired so far, oldest first, as `(id, "<year> год: <llm_context_shift>")`.
+    ///
+    /// The second element is the authored sentence saying what the milestone changed
+    /// about the world — the field the content calls a *context shift*. Until this it
+    /// had exactly one consumer in the whole codebase (`engine::check_milestone_events`,
+    /// where it becomes the milestone event's `description`) and never reached the
+    /// chronicler except through the five transient slots of the event window: measured
+    /// **2 half-years out of 395** after the milestone became true. The id alone —
+    /// `france_intervenes`, `adrianople` — tells the model nothing.
+    pub key_milestones_fired: Vec<(String, String)>,
     pub recent_important_events: Vec<crate::core::Event>,
     pub recent_player_actions: Vec<PlayerActionSummary>,
     pub key_metrics: HashMap<String, f64>,
@@ -259,10 +268,40 @@ pub fn build_snapshot(
         .collect();
     foreground_actors.sort();
     
-    // Key milestones fired
-    let key_milestones_fired: Vec<String> = scenario.milestone_events.iter()
+    // Key milestones fired, each with the year it fired and the authored sentence
+    // describing what it changed.
+    //
+    // Ordered by firing tick, not by definition order. The list is append-only and a
+    // milestone never retracts an earlier one, so rome can hold both "Семья Ди Милано
+    // стала одной из значимых сил" and "Семья Ди Милано потеряла всё что нажила" at
+    // once; without a time order those two lines are simply contradictory. The year
+    // comes from the milestone's own event in the log — the same record the engine
+    // wrote when it fired — and it is what lets the chronicler place each change
+    // against the current year instead of guessing.
+    //
+    // Deterministic: the log is append-only, and the tie-break on id makes the order
+    // total even when several milestones fire in the same half-year.
+    let mut fired_with_tick: Vec<(u32, String, String)> = scenario.milestone_events.iter()
         .filter(|m| world.milestone_events_fired.contains(&m.id))
-        .map(|m| m.id.clone())
+        .map(|m| {
+            // First firing: a milestone with a cooldown can fire more than once.
+            let ev = event_log.events.iter().find(|e| e.id == m.id);
+            let tick = ev.map(|e| e.tick).unwrap_or(0);
+            let year = ev.map(|e| e.year).unwrap_or(scenario.start_year);
+            // A milestone with no authored shift falls back to its id, so the line still
+            // says that *something* happened in that year. No scenario ships an empty
+            // one today (25 of 25 are non-empty), so this is a guard, not a path.
+            let what = if m.llm_context_shift.trim().is_empty() {
+                m.id.as_str()
+            } else {
+                m.llm_context_shift.trim()
+            };
+            (tick, format!("{} год: {}", year, what), m.id.clone())
+        })
+        .collect();
+    fired_with_tick.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
+    let key_milestones_fired: Vec<(String, String)> = fired_with_tick.into_iter()
+        .map(|(_, line, id)| (id, line))
         .collect();
     
     // Recent important events — through the canonical relevance selection.
@@ -809,6 +848,27 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     // Section 4: Scenario Context (game mode dependent)
     // ========================================================================
+    //
+    // `scenario.llm_context` is a constant: it has exactly one writer in the whole
+    // codebase — the scenario constructor — and `WorldState` has no field it could be
+    // updated into. It therefore states the world as it was in the *starting* year for
+    // all 150 half-years, and its time-bound sentences ("Через три года Адрианополь.
+    // Но это ещё не случилось", "Франция ещё не вошла в игру") become false as soon as
+    // the world overtakes them: measured 563 anachronistic half-years out of 1050.
+    //
+    // The header below is the whole of the fix on this side, and it is deliberately
+    // small. Rewriting or redacting the premise per scenario would mean maintaining a
+    // claim→milestone map in content, and the retraction sentences already exist as
+    // `llm_context_shift` (Section 6). Labelling the block with the year it describes
+    // costs one line and makes every sentence in it *true*: it stops being a claim
+    // about now and becomes a claim about the starting year, which is what it is.
+    let start_frame = format!(
+        "=== ОБСТАНОВКА НА НАЧАЛО СЦЕНАРИЯ ({} год) ===\n\
+         Ниже — положение дел в стартовый год. Это НЕ описание текущего момента.\n\
+         Что изменилось с тех пор — ниже, в блоке «что изменилось с начала сценария»\n\
+         и в состоянии мира. Текущий год всегда берётся оттуда, а не отсюда.\n\n",
+        scenario.start_year
+    );
     match snapshot.game_mode {
         crate::core::GameMode::Consequences => {
             prompt.push_str(&scenario.consequence_context);
@@ -818,6 +878,7 @@ pub fn generate_narrative_prompt(
             // Free mode: no scenario context
         }
         _ => {
+            prompt.push_str(&start_frame);
             prompt.push_str(&scenario.llm_context);
             prompt.push_str("\n\n");
         }
@@ -844,12 +905,26 @@ pub fn generate_narrative_prompt(
     }
 
     // ========================================================================
-    // Section 6: Key Milestones Fired
+    // Section 6: Key Milestones Fired — what has changed since the premise
     // ========================================================================
+    //
+    // Prints the authored `llm_context_shift`, not the engine id. The ids that used to
+    // stand here (`otranto_threat_rises`, `adrianople`, `france_intervenes`) carry no
+    // information the chronicler can use, while the sentence behind each of them is
+    // written by the content authors as exactly the retraction the premise needs —
+    // "Готы перешли черту. Адрианополь. Валент мёртв." against the premise's "Через три
+    // года Адрианополь. Но это ещё не случилось."
+    //
+    // This list is permanent and grows: once a milestone has fired it stays here for the
+    // rest of the game. That is the property the retraction needed and did not have. The
+    // event window is a five-slot ranking with temporal decay, so a shift shown there is
+    // gone by the next half-year — measured reach after the milestone became true was
+    // 2 half-years out of 395, while the equally permanent list of fallen powers reached
+    // 122 out of 122 in the same corpus. Permanence, not relevance, is what this needs.
     if !snapshot.key_milestones_fired.is_empty() {
-        prompt.push_str("Ключевые вехи:\n");
-        for milestone in &snapshot.key_milestones_fired {
-            prompt.push_str(&format!("  - {}\n", milestone));
+        prompt.push_str("=== ЧТО ИЗМЕНИЛОСЬ С НАЧАЛА СЦЕНАРИЯ ===\n");
+        for (_id, line) in &snapshot.key_milestones_fired {
+            prompt.push_str(&format!("- {}\n", line));
         }
         prompt.push('\n');
     }
