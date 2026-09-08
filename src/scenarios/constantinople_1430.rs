@@ -403,7 +403,7 @@ fn create_ottomans() -> Actor {
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 1, border_type: BorderType::Land },
-            Neighbor { id: "serbia".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "serbia".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "hungary".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "trebizond".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "venice".to_string(), distance: 3, border_type: BorderType::Sea },
@@ -661,7 +661,7 @@ fn create_serbia() -> Actor {
         scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 2, border_type: BorderType::Land },
-            Neighbor { id: "ottomans".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "ottomans".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "hungary".to_string(), distance: 2, border_type: BorderType::Land },
         ],
         // Falls to the Ottomans (absorption), as Byzantium does; `ottoman_serbia`
