@@ -96,6 +96,26 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         check_actor_exists(metric, &actor_ids, "narrative_config.key_metrics", &mut errors);
     }
 
+    // Check on_collapse heirs. Every declared heir must be an actor of THIS
+    // scenario — a template or a living power. The engine creates a successor only
+    // when it finds one in `scenario.actors` and used to skip silently otherwise:
+    // constantinople_1430 declared five `ottoman_*` heirs with a template for none,
+    // so byzantium fell in 30 of 30 no-player runs and its heir never existed
+    // (docs/investigation_successor_entry.md §2). A self-heir is rejected too.
+    for actor in &scenario.actors {
+        for heir in &actor.on_collapse {
+            if heir.id == actor.id {
+                errors.push(format!("actor '{}': on_collapse names itself as heir", actor.id));
+            } else if !actor_ids.contains(heir.id.as_str()) {
+                errors.push(format!(
+                    "actor '{}': on_collapse names unknown heir '{}' — no template and no actor \
+                     with that id in the scenario",
+                    actor.id, heir.id
+                ));
+            }
+        }
+    }
+
     // Check dependency thresholds. Centralized here so every scenario routed
     // through `load_by_id` is checked even if it omits a per-scenario
     // `validate_dependencies` call. Metric-name checks (from/to) stay per-scenario
@@ -185,4 +205,39 @@ pub fn get_scenario_meta() -> Vec<crate::commands::ScenarioMeta> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Successor;
+
+    #[test]
+    fn every_registered_scenario_validates() {
+        for entry in get_registry() {
+            let scenario = (entry.loader)();
+            assert!(validate_scenario(&scenario).is_ok(), "{}: {:?}", entry.id, validate_scenario(&scenario));
+        }
+    }
+
+    #[test]
+    fn validate_rejects_unknown_heir() {
+        let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
+        let savoy = scenario.actors.iter_mut().find(|a| a.id == "savoy").unwrap();
+        savoy.on_collapse = vec![Successor { id: "ghost".to_string(), weight: 1.0 }];
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.contains("'savoy'") && e.contains("'ghost'")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_self_heir() {
+        let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
+        let savoy = scenario.actors.iter_mut().find(|a| a.id == "savoy").unwrap();
+        savoy.on_collapse = vec![Successor { id: "savoy".to_string(), weight: 1.0 }];
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("names itself")), "{errors:?}");
+    }
 }

@@ -76,8 +76,12 @@ const KNOWN_METRICS: &[&str] = &[
 const KNOWN_ACTOR_IDS: &[&str] = &[
     "byzantium", "ottomans", "venice", "genoa", "milan",
     "papacy", "hungary", "serbia", "trebizond",
-    // Successor states (appear on collapse)
-    "ottoman_balkans", "ottoman_anatolia", "ottoman_byzantium", "ottoman_serbia", "ottoman_trebizond",
+    // No successor states. The five `ottoman_*` heirs this list used to carry had
+    // no template and no map polygon — only geodata files
+    // (`public/geodata/constantinople_1430/ottoman_*.geojson`, the byzantium and
+    // serbia ones geometrically identical to the parent's: a recolouring device,
+    // not a state). Byzantium, Serbia and Trebizond now fall TO the Ottomans
+    // (absorption); see docs/investigation_successor_entry.md §5–6.
     // Spawned actors (appear via milestone events)
     "wallachia", "poland_lithuania", "mamluks",
 ];
@@ -354,8 +358,12 @@ fn create_byzantium() -> Actor {
             Neighbor { id: "serbia".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "trebizond".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
+        // Heir is the living Ottoman power: absorption through the `else`
+        // branch of `check_collapses` (expansion_count), as savoy → milan.
+        // `ottoman_byzantium` had no template and was never created — in 30/30
+        // no-player runs and 3/3 scripted-diplomacy runs Byzantium fell to nobody.
         on_collapse: vec![
-            Successor { id: "ottoman_byzantium".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 28.9 }),
@@ -400,10 +408,11 @@ fn create_ottomans() -> Actor {
             Neighbor { id: "trebizond".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "venice".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
-        on_collapse: vec![
-            Successor { id: "ottoman_balkans".to_string(), weight: 0.5 },
-            Successor { id: "ottoman_anatolia".to_string(), weight: 0.5 },
-        ],
+        // No heirs. The Balkans/Anatolia split declared here had no templates
+        // and was unreachable: the Ottomans die in 0 of 30 no-player and 0 of 9
+        // scripted runs. Writing two states from nothing would be invented
+        // numbers; the drawn polygons stay in `public/geodata` for whoever does.
+        on_collapse: vec![],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 39.0, lng: 35.0 }),
         is_successor_template: false,
@@ -655,8 +664,11 @@ fn create_serbia() -> Actor {
             Neighbor { id: "ottomans".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "hungary".to_string(), distance: 2, border_type: BorderType::Land },
         ],
+        // Falls to the Ottomans (absorption), as Byzantium does; `ottoman_serbia`
+        // had no template. Serbia never dies in the measured runs, so this is
+        // declared for completeness of the rule, not for a measured effect.
         on_collapse: vec![
-            Successor { id: "ottoman_serbia".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 21.0 }),
@@ -697,8 +709,9 @@ fn create_trebizond() -> Actor {
             Neighbor { id: "ottomans".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "byzantium".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
+        // Falls to the Ottomans (absorption); `ottoman_trebizond` had no template.
         on_collapse: vec![
-            Successor { id: "ottoman_trebizond".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0 },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 39.7 }),
