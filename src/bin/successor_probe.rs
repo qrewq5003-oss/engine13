@@ -159,7 +159,18 @@ fn main() {
                 }
             }
         }
-        // Births not tied to a death this tick are milestone spawns; not this probe's object.
+        // Births not tied to a death this tick are milestone spawns. Printed with the
+        // spawn's own edge count and how many of the listed neighbours name it back
+        // (the spawn-edge task's criterion).
+        for id in &born_this_tick {
+            if born_tick.contains_key(id) { continue; }
+            if let Some(a) = world.actors.get(id) {
+                let back = a.neighbors.iter().filter(|n| {
+                    world.actors.get(&n.id).map(|o| o.neighbors.iter().any(|m| &m.id == id)).unwrap_or(false)
+                }).count();
+                println!("SPAWN\t{}\t{}\t{}\t{}\tneighbors={}\tlisted_back_by={}", scenario_id, seed, t, id, a.neighbors.len(), back);
+            }
+        }
         alive = now;
     }
 
