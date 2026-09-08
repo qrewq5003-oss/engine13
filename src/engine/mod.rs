@@ -957,7 +957,19 @@ fn check_milestone_events(
                     };
                     
                     world.actors.insert(cfg.actor_id.clone(), actor);
-                    
+
+                    // The other direction of each configured edge. The comment above
+                    // is right about pairs and wrong about everything else: three
+                    // readers walk an actor's OWN list — `besieged` in
+                    // `check_collapses`, the overlord choice in `check_vassalage`,
+                    // `condition_contact` in relevance — so a one-sided edge has a
+                    // direction for them. France could be besieged by Savoy; Savoy,
+                    // whose list never named France, could not be besieged by France
+                    // (measured: 9 of 9 surviving Savoys would fall, 9 more earlier —
+                    // docs/investigation_spawn_reverse_edges.md §2). A living
+                    // neighbour that already lists the spawn keeps its own entry.
+                    link_spawn_back(world, &cfg.actor_id, &cfg.neighbors);
+
                     // is_key event for spawn
                     let event = Event::new(
                         format!("spawn_{}", cfg.actor_id),
@@ -988,6 +1000,25 @@ fn check_milestone_events(
                 milestone.llm_context_shift.clone(),
             );
             event_log.add(event);
+        }
+    }
+}
+
+/// Give every living neighbour listed by a freshly spawned actor the reverse entry,
+/// with the same distance and border type, unless it already lists the spawn.
+fn link_spawn_back(world: &mut WorldState, spawn_id: &str, edges: &[crate::core::Neighbor]) {
+    for edge in edges {
+        if edge.id == spawn_id {
+            continue;
+        }
+        if let Some(other) = world.actors.get_mut(&edge.id) {
+            if !other.neighbors.iter().any(|n| n.id == spawn_id) {
+                other.neighbors.push(crate::core::Neighbor {
+                    id: spawn_id.to_string(),
+                    distance: edge.distance,
+                    border_type: edge.border_type.clone(),
+                });
+            }
         }
     }
 }
@@ -2288,6 +2319,59 @@ mod tests {
 
         assert!(neighbor_ids(&world, "heir").is_empty());
         assert_eq!(neighbor_ids(&world, "huns"), ["parent"]);
+    }
+
+    #[test]
+    fn spawned_actor_links_its_neighbours_back() {
+        use crate::core::{BorderType, EventCondition, EventConditionType, MilestoneEvent, Neighbor, SpawnActorConfig};
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![
+            vassalage_actor("savoy", 20.0, 30.0, 60.0, 60.0, &["milan"]),
+            vassalage_actor("genoa", 20.0, 30.0, 60.0, 60.0, &[]),
+            vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]),
+        ];
+        scenario.milestone_events = vec![MilestoneEvent {
+            id: "france_intervenes".into(),
+            condition: EventCondition { condition_type: EventConditionType::Tick { tick: 0 }, duration: None },
+            is_key: true,
+            triggers_collapse: false,
+            llm_context_shift: String::new(),
+            cooldown_ticks: None,
+            spawn_actor: Some(SpawnActorConfig {
+                actor_id: "france".into(),
+                label: "Франция".into(),
+                initial_metrics: HashMap::new(),
+                lat: 48.85,
+                lng: 2.35,
+                color: "#1e3a8a".into(),
+                neighbors: vec![
+                    Neighbor { id: "savoy".into(), distance: 1, border_type: BorderType::Land },
+                    Neighbor { id: "genoa".into(), distance: 2, border_type: BorderType::Sea },
+                    Neighbor { id: "milan".into(), distance: 3, border_type: BorderType::Land },
+                ],
+            }),
+        }];
+        // Milan already names France on its own terms — that entry must survive as is.
+        let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);
+        milan_lists_france.neighbors.push(Neighbor { id: "france".into(), distance: 2, border_type: BorderType::Land });
+        let mut world = WorldState::new("test".into(), 1477);
+        for a in &scenario.actors { world.actors.insert(a.id.clone(), a.clone()); }
+        world.actors.insert("milan".into(), milan_lists_france);
+        let mut log = EventLog::new();
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+        tick(&mut world, &scenario, &mut log, &mut rng);
+
+        assert!(world.actors.contains_key("france"), "spawn fired");
+        let savoy = &world.actors["savoy"].neighbors;
+        let back = savoy.iter().find(|n| n.id == "france").expect("savoy lists france");
+        assert_eq!((back.distance, back.border_type.clone()), (1, BorderType::Land));
+        let genoa = &world.actors["genoa"].neighbors;
+        let back = genoa.iter().find(|n| n.id == "france").expect("genoa lists france");
+        assert_eq!((back.distance, back.border_type.clone()), (2, BorderType::Sea));
+        let milan = &world.actors["milan"].neighbors;
+        assert_eq!(milan.iter().filter(|n| n.id == "france").count(), 1, "existing entry kept, no duplicate");
+        assert_eq!(milan.iter().find(|n| n.id == "france").unwrap().distance, 2, "existing entry not overwritten");
     }
 
     #[test]
