@@ -1568,10 +1568,14 @@ fn check_collapses(
         // the actor is removed from `world.actors` a few lines below, while the
         // successor loop that needs the name runs after that removal.
         let mut parent_name = actor_id.clone();
+        // The fallen power's border, captured for the same reason: an heir born
+        // below with no authored neighbours stands where the parent stood.
+        let mut parent_neighbors: Vec<crate::core::Neighbor> = Vec::new();
 
         // Record death event
         if let Some(actor) = world.actors.get(&actor_id) {
             parent_name = actor.name.clone();
+            parent_neighbors = actor.neighbors.clone();
             let event = Event::new(
                 format!("death_{}", actor_id),
                 current_tick,
@@ -1647,8 +1651,47 @@ fn check_collapses(
                     crate::core::actor::ensure_default_metrics(&mut new_actor.metrics);
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
+                    // Succession of the border. Five of rome's seven templates are
+                    // authored with `neighbors: vec![]` and no living actor lists
+                    // them, so an heir used to enter a world in which it was in no
+                    // pair at all: `ostrogoth_kingdom` lived 52–79 ticks with
+                    // `military_size` and `external_pressure` frozen at their
+                    // template values, never fought, never migrated, and died of
+                    // isolation. An authored list (`rome_west`, `rome_east`) wins;
+                    // an empty one inherits the parent's edges.
+                    if new_actor.neighbors.is_empty() {
+                        new_actor.neighbors = parent_neighbors.clone();
+                    }
                     let successor_name = new_actor.name.clone();
                     world.actors.insert(successor.id.clone(), new_actor);
+
+                    // The other direction. Three readers walk an actor's OWN list —
+                    // `besieged` in this function, the overlord choice in
+                    // `check_vassalage`, and `condition_contact` in relevance — so a
+                    // one-sided edge has a direction for them: the heir could be
+                    // besieged by the huns, the huns never by the heir, because
+                    // their list still named the dead parent. A sole heir takes the
+                    // parent's place in every living neighbour's list; with two or
+                    // more heirs (rome → west + east) the replacement is undefined
+                    // and the heirs' authored lists carry the split instead.
+                    // Per-actor and order-independent, so HashMap iteration is safe.
+                    // See docs/investigation_successor_edges.md §2, §5.
+                    if successors.len() == 1 {
+                        for (other_id, other) in world.actors.iter_mut() {
+                            if *other_id == successor.id {
+                                continue;
+                            }
+                            if other.neighbors.iter().any(|n| n.id == successor.id) {
+                                other.neighbors.retain(|n| n.id != actor_id);
+                            } else {
+                                for n in other.neighbors.iter_mut() {
+                                    if n.id == actor_id {
+                                        n.id = successor.id.clone();
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Birth of a successor as a chronicle event.
                     //
@@ -2151,6 +2194,100 @@ mod tests {
             .map(|e| e.actor_id.as_str())
             .collect();
         assert_eq!(deaths, ["france", "genoa", "milan"]);
+    }
+
+    fn neighbor_ids(world: &WorldState, id: &str) -> Vec<String> {
+        world.actors.get(id).unwrap().neighbors.iter().map(|n| n.id.clone()).collect()
+    }
+
+    #[test]
+    fn heir_with_empty_list_inherits_parent_edges_and_takes_its_place() {
+        let mut template = vassalage_actor("heir", 50.0, 35.0, 35.0, 50.0, &[]);
+        template.is_successor_template = true;
+        let mut parent = doomed_actor("parent", &["heir"]);
+        parent.neighbors = vassalage_actor("parent", 0.0, 0.0, 0.0, 0.0, &["huns", "rome"]).neighbors;
+        let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
+        let rome = vassalage_actor("rome", 350.0, 38.0, 62.0, 42.0, &["parent", "huns"]);
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![parent.clone(), template, huns.clone(), rome.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), parent);
+        world.actors.insert("huns".into(), huns);
+        world.actors.insert("rome".into(), rome);
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        assert_eq!(neighbor_ids(&world, "heir"), ["huns", "rome"], "empty list inherits the parent's");
+        assert_eq!(neighbor_ids(&world, "huns"), ["heir"], "sole heir replaces the parent");
+        assert_eq!(neighbor_ids(&world, "rome"), ["heir", "huns"], "other entries untouched");
+        let d = world.actors.get("huns").unwrap().neighbors[0].distance;
+        assert_eq!(d, 1, "distance and border type of the retargeted edge are kept");
+    }
+
+    #[test]
+    fn heir_with_authored_list_keeps_it() {
+        let mut template = vassalage_actor("heir", 50.0, 35.0, 35.0, 50.0, &["rome"]);
+        template.is_successor_template = true;
+        let mut parent = doomed_actor("parent", &["heir"]);
+        parent.neighbors = vassalage_actor("parent", 0.0, 0.0, 0.0, 0.0, &["huns"]).neighbors;
+        let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
+        let rome = vassalage_actor("rome", 350.0, 38.0, 62.0, 42.0, &[]);
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![parent.clone(), template, huns.clone(), rome.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), parent);
+        world.actors.insert("huns".into(), huns);
+        world.actors.insert("rome".into(), rome);
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        assert_eq!(neighbor_ids(&world, "heir"), ["rome"], "authored list wins over inheritance");
+        assert_eq!(neighbor_ids(&world, "huns"), ["heir"], "retargeting is independent of the heir's own list");
+    }
+
+    #[test]
+    fn two_heirs_do_not_retarget_neighbours() {
+        let mut west = vassalage_actor("west", 50.0, 35.0, 35.0, 50.0, &["huns"]);
+        west.is_successor_template = true;
+        let mut east = vassalage_actor("east", 50.0, 35.0, 35.0, 50.0, &[]);
+        east.is_successor_template = true;
+        let mut parent = doomed_actor("parent", &["west", "east"]);
+        parent.neighbors = vassalage_actor("parent", 0.0, 0.0, 0.0, 0.0, &["huns"]).neighbors;
+        let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![parent.clone(), west, east, huns.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), parent);
+        world.actors.insert("huns".into(), huns);
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        assert_eq!(neighbor_ids(&world, "huns"), ["parent"], "split: replacement undefined, list left as authored");
+        assert_eq!(neighbor_ids(&world, "east"), ["huns"], "empty heir list still inherits");
+        assert_eq!(neighbor_ids(&world, "west"), ["huns"]);
+    }
+
+    #[test]
+    fn absorption_does_not_touch_any_list() {
+        let heir = vassalage_actor("heir", 50.0, 30.0, 60.0, 60.0, &[]);
+        let mut parent = doomed_actor("parent", &["heir"]);
+        parent.neighbors = vassalage_actor("parent", 0.0, 0.0, 0.0, 0.0, &["huns"]).neighbors;
+        let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![parent.clone(), heir.clone(), huns.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), parent);
+        world.actors.insert("heir".into(), heir);
+        world.actors.insert("huns".into(), huns);
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        assert!(neighbor_ids(&world, "heir").is_empty());
+        assert_eq!(neighbor_ids(&world, "huns"), ["parent"]);
     }
 
     #[test]
