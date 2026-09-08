@@ -1554,8 +1554,14 @@ fn check_collapses(
 
     // Process collapses
     for (actor_id, successors) in to_collapse {
+        // Human-readable name of the power that just fell. Captured here because
+        // the actor is removed from `world.actors` a few lines below, while the
+        // successor loop that needs the name runs after that removal.
+        let mut parent_name = actor_id.clone();
+
         // Record death event
         if let Some(actor) = world.actors.get(&actor_id) {
+            parent_name = actor.name.clone();
             let event = Event::new(
                 format!("death_{}", actor_id),
                 current_tick,
@@ -1563,7 +1569,12 @@ fn check_collapses(
                 actor_id.clone(),
                 EventType::Death,
                 true,
-                format!("{} прекратил существование", actor.name),
+                // Prefixed with "Держава" rather than agreeing with the actor name:
+                // actor names in the content are of every gender and number
+                // ("Византия", "Остготы", "Савойя"), and the old wording produced
+                // "Византия прекратил существование" in a prompt that demands
+                // Russian prose. The prefix agrees with itself and is name-agnostic.
+                format!("Держава {} прекратила существование", actor.name),
             )
             .with_metrics_snapshot(metrics_to_snapshot(&actor.metrics))
             .with_tags(vec!["collapse".to_string(), actor_id.clone()]);
@@ -1573,6 +1584,7 @@ fn check_collapses(
             // Move to dead_actors and add to dead_actor_ids HashSet
             let dead_actor = crate::core::DeadActor {
                 id: actor_id.clone(),
+                name: actor.name.clone(),
                 tick_death: current_tick,
                 year_death: current_year,
                 final_metrics: metrics_to_snapshot(&actor.metrics),
@@ -1605,7 +1617,32 @@ fn check_collapses(
                     );
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
+                    let successor_name = new_actor.name.clone();
                     world.actors.insert(successor.id.clone(), new_actor);
+
+                    // Birth of a successor as a chronicle event.
+                    //
+                    // Until this, the birth of an heir was the only actor-lifecycle
+                    // transition the engine performed silently: `EventType::Birth`
+                    // had zero producers in the whole codebase, so `ostrogoth_kingdom`
+                    // could appear in rome_375, live 30 half-years and fall, and none
+                    // of the three appearances reached the chronicler. Tagged the same
+                    // way the death event is, so the canonical relevance selection
+                    // ranks it the same way (`db::thematic_similarity`).
+                    let event = Event::new(
+                        format!("birth_{}", successor.id),
+                        current_tick,
+                        current_year,
+                        successor.id.clone(),
+                        EventType::Birth,
+                        true,
+                        format!(
+                            "Держава {} возникла на месте, которое занимала держава {}",
+                            successor_name, parent_name
+                        ),
+                    )
+                    .with_tags(vec!["birth".to_string(), successor.id.clone()]);
+                    event_log.add(event);
                 }
             } else {
                 // Heir is an already-living power: this is full absorption via

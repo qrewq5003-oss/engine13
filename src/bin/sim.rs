@@ -1864,7 +1864,13 @@ impl SimStats {
             match event.event_type {
                 EventType::Threshold => self.random_events_fired += 1,
                 EventType::War => self.military_conflicts += 1,
-                EventType::Collapse => self.collapses.push(event.actor_id.clone()),
+                // `EventType::Death`, not `EventType::Collapse`. The second variant
+                // is the scenario-level `Scenario → Consequences` mode switch, whose
+                // `actor_id` is the literal `"scenario"` — so this line used to print
+                // `Collapsed actors: scenario` in every run where the milestone fired
+                // and never named a single actor that actually died. Same defective
+                // read as the narrative layer's period block (task 31, item (B)).
+                EventType::Death => self.collapses.push(event.actor_id.clone()),
                 _ => {}
             }
             
