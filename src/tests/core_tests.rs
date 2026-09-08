@@ -856,7 +856,7 @@ fn test_cultural_displacement_progress_accumulates() {
     let scenario = registry::load_by_id("rome_375").unwrap();
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
 
-    // Add rome (strong) and alamanni (weak, neighbor at distance 2)
+    // Add rome (strong) and alamanni (weak; distance-1 neighbours since the limes edges)
     for actor in &scenario.actors {
         if actor.id == "rome" || actor.id == "alamanni" {
             world.actors.insert(actor.id.clone(), actor.clone());

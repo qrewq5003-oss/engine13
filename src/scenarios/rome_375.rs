@@ -318,13 +318,13 @@ fn create_rome() -> Actor {
         ]),
         scenario_metrics,
         neighbors: vec![
-            Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "visigoths".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "ostrogoths".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "sassanids".to_string(), distance: 3, border_type: BorderType::Land },
-            Neighbor { id: "vandals".to_string(), distance: 2, border_type: BorderType::Land },
-            Neighbor { id: "burgundians".to_string(), distance: 2, border_type: BorderType::Land },
-            Neighbor { id: "franks".to_string(), distance: 2, border_type: BorderType::Land },
-            Neighbor { id: "alamanni".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "vandals".to_string(), distance: 1, border_type: BorderType::Land },
+            Neighbor { id: "burgundians".to_string(), distance: 1, border_type: BorderType::Land },
+            Neighbor { id: "franks".to_string(), distance: 1, border_type: BorderType::Land },
+            Neighbor { id: "alamanni".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "saxons".to_string(), distance: 3, border_type: BorderType::Sea },
             Neighbor { id: "berbers".to_string(), distance: 2, border_type: BorderType::Sea },
             Neighbor { id: "armenia".to_string(), distance: 2, border_type: BorderType::Land },
@@ -411,7 +411,7 @@ fn create_visigoths() -> Actor {
         ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
-            Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "ostrogoths".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "burgundians".to_string(), distance: 2, border_type: BorderType::Land },
         ],
@@ -535,7 +535,7 @@ fn create_vandals() -> Actor {
         ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
-            Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
         on_collapse: vec![Successor { id: "vandal_kingdom_africa".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
@@ -573,7 +573,7 @@ fn create_burgundians() -> Actor {
         ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
-            Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
         ],
         on_collapse: vec![],
@@ -613,7 +613,7 @@ fn create_franks() -> Actor {
         ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
-            Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
         on_collapse: vec![Successor { id: "frankish_kingdom".to_string(), weight: 1.0 }],
         actor_tags: HashMap::new(),
@@ -690,7 +690,7 @@ fn create_alamanni() -> Actor {
         ]),
         scenario_metrics: HashMap::new(),
         neighbors: vec![
-            Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
+            Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
         on_collapse: vec![],
         actor_tags: HashMap::new(),
