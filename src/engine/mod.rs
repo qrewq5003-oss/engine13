@@ -1603,18 +1603,38 @@ fn check_collapses(
             world.actors.remove(&actor_id);
         }
 
-        // Create successors (simplified - just add with split metrics)
-        // In full implementation, this would use the formula from architecture
+        // Heirs. Three outcomes per declared id — and `registry::validate_scenario`
+        // guarantees the id names an actor of this scenario, so "no template" is
+        // not a fourth one any more:
+        //
+        //   * a template (or a not-yet-living actor) → born, with its authored
+        //     metrics VERBATIM;
+        //   * a living power → absorption: no new actor, the heir's shared
+        //     expansion counter is credited (the `else` branch below);
+        //   * a dead actor → nothing. Without this guard `milan`, heir of `savoy`,
+        //     came back from the dead in 2 of 30 no-player runs whenever savoy fell
+        //     after it — the protagonist resurrected past its own defeat screen.
+        //
+        // "Verbatim" is deliberate and replaces `split_metrics_for_successor`. That
+        // function implemented the architecture's split formula (`родитель × …` on
+        // every line), but its only caller ever fed it the heir's OWN template, so
+        // 7 of the 8 authored values were overwritten on entry (`ostrogoth_kingdom`:
+        // ep 35→45.5, coh 50→20, leg 35→30, mil 50→35, …), and `rome_west` /
+        // `rome_east` — whose templates already carry the parent's share by hand
+        // (3600 = 8000 × 0.45) — would have been split a second time. Feeding it
+        // the parent instead is degenerate by construction: every collapse path
+        // requires ep > 85 or leg < 5, so the heir would be born at ep = 100 with
+        // the parent's zero army and inherit the death itself. The formula stays
+        // in the architecture as the unimplemented procedural split of a LIVING
+        // power. See docs/investigation_successor_entry.md §4.
         for successor in &successors {
+            if world.dead_actor_ids.contains(&successor.id) {
+                continue;
+            }
             if !world.actors.contains_key(&successor.id) {
-                // Find actor template in scenario (includes successor templates with is_successor_template: true)
                 if let Some(scenario_actor) = scenario.actors.iter().find(|a| a.id == successor.id) {
                     let mut new_actor = scenario_actor.clone();
-                    new_actor.metrics = split_metrics_for_successor(
-                        &scenario_actor.metrics,
-                        successor.weight,
-                        successors.len(),
-                    );
+                    crate::core::actor::ensure_default_metrics(&mut new_actor.metrics);
                     new_actor.narrative_status = crate::core::NarrativeStatus::Foreground;
                     new_actor.is_successor_template = false; // Clear the template flag for the actual actor
                     let successor_name = new_actor.name.clone();
@@ -1659,30 +1679,6 @@ fn check_collapses(
 
 fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
     crate::core::actor::metrics_to_snapshot(metrics)
-}
-
-fn split_metrics_for_successor(
-    parent: &HashMap<String, f64>,
-    weight: f64,
-    _total_successors: usize,
-) -> HashMap<String, f64> {
-    let mut m = parent.clone();
-    let ms = m.get("military_size").copied().unwrap_or(0.0);
-    m.insert("military_size".to_string(), ms * weight * 0.7);
-    let mil_q = m.get("military_quality").copied().unwrap_or(0.0);
-    m.insert("military_quality".to_string(), mil_q * 0.8);
-    let eco = m.get("economic_output").copied().unwrap_or(0.0);
-    m.insert("economic_output".to_string(), eco * 0.7);
-    let pop = m.get("population").copied().unwrap_or(0.0);
-    m.insert("population".to_string(), pop * weight);
-    let tr = m.get("treasury").copied().unwrap_or(0.0);
-    m.insert("treasury".to_string(), tr * weight * 0.5);
-    let ep = m.get("external_pressure").copied().unwrap_or(0.0);
-    m.insert("external_pressure".to_string(), (ep * 1.3).min(100.0));
-    m.insert("cohesion".to_string(), 20.0);
-    m.insert("legitimacy".to_string(), 30.0);
-    crate::core::actor::ensure_default_metrics(&mut m);
-    m
 }
 
 // ============================================================================
@@ -1787,10 +1783,8 @@ mod tests {
         crate::core::resolve_at_load(metric, actor_id).expect("test metric key")
     }
 
-    #[test]
-    fn test_tick_advances_time() {
-        let mut world = WorldState::new("test".to_string(), 375);
-        let scenario = Scenario {
+    fn empty_scenario() -> Scenario {
+        Scenario {
             id: "test".to_string(),
             label: "Test".to_string(),
             description: "Test scenario".to_string(),
@@ -1828,7 +1822,13 @@ mod tests {
             map: None,
             tag_definitions: vec![],
             era_definitions: vec![],
-        };
+        }
+    }
+
+    #[test]
+    fn test_tick_advances_time() {
+        let mut world = WorldState::new("test".to_string(), 375);
+        let scenario = empty_scenario();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
 
@@ -2048,6 +2048,94 @@ mod tests {
         interactions::check_vassalage(&mut world, &mut log);
         assert!(world.vassalages.is_empty(), "vassal must break free from a fully-weakened overlord");
     }
+
+    // ------------------------------------------------------------------
+    // Successor entry (docs/investigation_successor_entry.md)
+    // ------------------------------------------------------------------
+
+    /// An actor already inside the `internal_collapse` band (`leg < 5`, `coh < 8`);
+    /// three consecutive `check_collapses` calls kill it.
+    fn doomed_actor(id: &str, heirs: &[&str]) -> crate::core::Actor {
+        let mut a = vassalage_actor(id, 0.0, 100.0, 1.0, 1.0, &[]);
+        a.on_collapse = heirs
+            .iter()
+            .map(|h| crate::core::Successor { id: h.to_string(), weight: 1.0 })
+            .collect();
+        a
+    }
+
+    fn kill(world: &mut WorldState, scenario: &Scenario, log: &mut EventLog) {
+        for _ in 0..3 {
+            check_collapses(world, scenario, log);
+        }
+    }
+
+    #[test]
+    fn heir_template_enters_world_verbatim() {
+        let mut template = vassalage_actor("heir", 50.0, 35.0, 35.0, 50.0, &[]);
+        template.is_successor_template = true;
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![doomed_actor("parent", &["heir"]), template.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), doomed_actor("parent", &["heir"]));
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        assert!(world.dead_actor_ids.contains("parent"));
+        let heir = world.actors.get("heir").expect("heir must be born");
+        assert!(!heir.is_successor_template);
+        for (k, v) in &template.metrics {
+            assert_eq!(heir.get_metric(k), *v, "metric {k} must enter verbatim");
+        }
+        // The values the old split used to overwrite.
+        assert_eq!(heir.get_metric("external_pressure"), 35.0);
+        assert_eq!(heir.get_metric("cohesion"), 50.0);
+        assert_eq!(heir.get_metric("legitimacy"), 35.0);
+        assert_eq!(heir.get_metric("military_size"), 50.0);
+        assert_eq!(
+            log.events.iter().filter(|e| e.event_type == EventType::Birth && e.actor_id == "heir").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dead_heir_is_not_resurrected() {
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![doomed_actor("first", &[]), doomed_actor("second", &["first"])];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("first".into(), doomed_actor("first", &[]));
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+        assert!(world.dead_actor_ids.contains("first"));
+
+        world.actors.insert("second".into(), doomed_actor("second", &["first"]));
+        kill(&mut world, &scenario, &mut log);
+
+        assert!(world.dead_actor_ids.contains("second"));
+        assert!(!world.actors.contains_key("first"), "a dead heir must stay dead");
+        assert_eq!(log.events.iter().filter(|e| e.event_type == EventType::Birth).count(), 0);
+        assert_eq!(world.dead_actors.len(), 2);
+    }
+
+    #[test]
+    fn living_heir_absorbs_instead_of_being_reborn() {
+        let heir = vassalage_actor("heir", 50.0, 30.0, 60.0, 60.0, &[]);
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![doomed_actor("parent", &["heir"]), heir.clone()];
+        let mut world = WorldState::new("test".into(), 375);
+        world.actors.insert("parent".into(), doomed_actor("parent", &["heir"]));
+        world.actors.insert("heir".into(), heir);
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        let heir = world.actors.get("heir").unwrap();
+        assert_eq!(heir.get_metric("expansion_count"), 1.0);
+        assert_eq!(heir.get_metric("external_pressure"), 30.0, "absorption must not touch the heir");
+        assert_eq!(log.events.iter().filter(|e| e.event_type == EventType::Birth).count(), 0);
+    }
 }
 
 // ============================================================================
@@ -2105,4 +2193,5 @@ pub fn generate_tick_explanation(
     }
 
     explanation
+
 }
