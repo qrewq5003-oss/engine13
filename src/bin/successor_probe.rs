@@ -164,6 +164,11 @@ fn main() {
     }
 
     for (id, bt) in &born_tick {
+        // State of a still-living heir at the end of the run: the only way to see
+        // whether it ever fought or was pressed once it stopped dying (stage D₄).
+        if let Some(a) = world.actors.get(id) {
+            println!("ALIVE\t{}\t{}\t{}\tborn={}\tneighbors={}\t{}", scenario_id, seed, id, bt, a.neighbors.len(), fmt(&a.metrics));
+        }
         let death = world.dead_actors.iter().find(|d| &d.id == id).map(|d| d.tick_death);
         println!(
             "FATE\t{}\t{}\t{}\tborn={}\tdeath={}\tlifetime={}",
