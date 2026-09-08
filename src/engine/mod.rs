@@ -1462,8 +1462,18 @@ fn check_collapses(
     // Find actors that should collapse
     let mut to_collapse: Vec<(String, Vec<crate::core::Successor>)> = Vec::new();
 
-    // Get actor IDs to avoid borrow conflict with collapse_warning_ticks
-    let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+    // Get actor IDs to avoid borrow conflict with collapse_warning_ticks.
+    //
+    // Sorted, because `world.actors` is a std `HashMap` whose iteration order is
+    // random per process. When two actors reach their third warning tick on the
+    // same tick — milan and genoa do, in 8 of 30 no-player milan runs — the order
+    // in which they are processed below decides the order of the `Death` events
+    // in the log, the order of `dead_actors`, and, for a parent and its heir
+    // falling together, absorption versus nothing. Measured before this line: 8
+    // processes of one seed gave 2…6 distinct outputs (3! for a triple death),
+    // identical up to line order. See docs/investigation_collapse_order.md.
+    let mut actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+    actor_ids.sort();
 
     for actor_id in &actor_ids {
         let actor = match world.actors.get(actor_id) {
@@ -2117,6 +2127,30 @@ mod tests {
         assert!(!world.actors.contains_key("first"), "a dead heir must stay dead");
         assert_eq!(log.events.iter().filter(|e| e.event_type == EventType::Birth).count(), 0);
         assert_eq!(world.dead_actors.len(), 2);
+    }
+
+    #[test]
+    fn same_tick_deaths_are_processed_in_id_order() {
+        // Three actors in the collapse band from tick 0: all three reach their
+        // third warning on the same `check_collapses` call. The processing order
+        // must not depend on HashMap iteration order.
+        let mut scenario = empty_scenario();
+        scenario.actors = vec![doomed_actor("milan", &[]), doomed_actor("genoa", &[]), doomed_actor("france", &[])];
+        let mut world = WorldState::new("test".into(), 375);
+        for id in ["milan", "genoa", "france"] {
+            world.actors.insert(id.into(), doomed_actor(id, &[]));
+        }
+        let mut log = EventLog::new();
+
+        kill(&mut world, &scenario, &mut log);
+
+        let dead: Vec<&str> = world.dead_actors.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(dead, ["france", "genoa", "milan"]);
+        let deaths: Vec<&str> = log.events.iter()
+            .filter(|e| e.event_type == EventType::Death)
+            .map(|e| e.actor_id.as_str())
+            .collect();
+        assert_eq!(deaths, ["france", "genoa", "milan"]);
     }
 
     #[test]
