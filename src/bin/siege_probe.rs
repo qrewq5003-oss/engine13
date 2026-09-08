@@ -22,7 +22,14 @@
 //!
 //! Read-only: drives `tick()`, reads metrics. No engine symbol is touched.
 //!
-//! Usage: cargo run --release --bin siege_probe -- <scenario> <ticks> <seed>
+//! Usage: cargo run --release --bin siege_probe -- <scenario> <ticks> <seed> [a:b:d:l|s ...]
+//!
+//! Optional trailing arguments inject candidate edges into the world at tick 0,
+//! symmetrically (both lists; an existing entry for the pair is overwritten with the
+//! given distance and border type). This is the d1-graph task's measuring device:
+//! the cost of an authored edge is read from a full simulation with the edge in
+//! place — combat, siege, migration, relevance all included — without touching the
+//! scenario source. With no trailing arguments the probe is byte-identical to before.
 
 use engine13::{core::WorldState, engine::{tick, EventLog}, scenarios::registry};
 use rand::SeedableRng;
@@ -74,6 +81,26 @@ fn main() {
     }
     world.generation_mechanics = scenario.generation_mechanics.clone();
     world.generation_length = scenario.generation_length;
+
+    // Candidate edges (stage-1 device of the d1-graph task; see usage).
+    let mut edge_spec: Vec<String> = Vec::new();
+    for spec in args.iter().skip(4) {
+        let parts: Vec<&str> = spec.split(':').collect();
+        assert!(parts.len() == 4, "edge spec must be a:b:d:l|s, got {spec}");
+        let (a, b) = (parts[0].to_string(), parts[1].to_string());
+        let d: u32 = parts[2].parse().expect("distance");
+        let bt = match parts[3] { "l" => engine13::core::BorderType::Land, "s" => engine13::core::BorderType::Sea, x => panic!("border {x}") };
+        for (x, y) in [(&a, &b), (&b, &a)] {
+            let actor = world.actors.get_mut(x).unwrap_or_else(|| panic!("edge names unknown actor {x}"));
+            if let Some(n) = actor.neighbors.iter_mut().find(|n| n.id == *y) {
+                n.distance = d;
+                n.border_type = bt.clone();
+            } else {
+                actor.neighbors.push(engine13::core::Neighbor { id: y.clone(), distance: d, border_type: bt.clone() });
+            }
+        }
+        edge_spec.push(spec.clone());
+    }
 
     let mut event_log = EventLog::new();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
@@ -208,5 +235,5 @@ fn main() {
         for (v, name) in VARIANTS.iter().enumerate().skip(1) { print!("\tflip_{}={}", name, r.flip_ticks[v]); }
         println!("\thas_d1_edge={}\tliving_d1_end={}\tdangling_d1_end={}", r.has_d1_edge, r.living_d1_end, r.dangling_d1_end);
     }
-    println!("SUMMARY\t{}\t{}\tactors={}\tdeaths={}\tselfcheck_mismatches={}", scenario_id, seed, rows.len(), world.dead_actors.len(), mismatches);
+    println!("SUMMARY\t{}\t{}\tactors={}\tdeaths={}\tselfcheck_mismatches={}\tedges={}", scenario_id, seed, rows.len(), world.dead_actors.len(), mismatches, if edge_spec.is_empty() { "-".to_string() } else { edge_spec.join(",") });
 }
