@@ -31,6 +31,8 @@ use std::collections::{BTreeMap, HashMap};
 const MIN_MIL: f64 = engine13::engine::interactions::MIN_DEFENSIBLE_MILITARY;
 const VARIANTS: [&str; 5] = ["own1", "own2", "sym1", "sym2", "heir"];
 const NV: usize = 5;
+/// One evaluated actor: id, neighbour list (id, distance), [mil, leg, coh, ep], minimum_survival_ticks.
+type Snap = (String, Vec<(String, u32)>, [f64; 4], Option<u32>);
 
 #[derive(Default, Clone)]
 struct Row {
@@ -111,7 +113,7 @@ fn main() {
         };
 
         // Living actors: update last-seen lists, then evaluate.
-        let mut snapshot: Vec<(String, Vec<(String, u32)>, [f64; 4], Option<u32>)> = Vec::new();
+        let mut snapshot: Vec<Snap> = Vec::new();
         for (aid, a) in &world.actors {
             let list: Vec<(String, u32)> = a.neighbors.iter().map(|n| (n.id.clone(), n.distance)).collect();
             last_neighbors.insert(aid.clone(), list.clone());
@@ -141,10 +143,10 @@ fn main() {
             let survival_ok = min_surv.map(|mv| t >= mv).unwrap_or(true);
             if band && !besieged[0] {
                 row.defenceless_ticks += 1;
-                for v in 0..NV { if besieged[v] { row.flip_ticks[v] += 1; } }
+                for (v, &b) in besieged.iter().enumerate() { if b { row.flip_ticks[v] += 1; } }
             }
-            for v in 0..NV {
-                let danger = survival_ok && (classic || internal || (band && besieged[v]));
+            for (v, &b) in besieged.iter().enumerate() {
+                let danger = survival_ok && (classic || internal || (band && b));
                 if danger {
                     row.streak[v] += 1;
                     if row.streak[v] >= 3 && row.cf_death[v].is_none() { row.cf_death[v] = Some(t); }
@@ -155,7 +157,7 @@ fn main() {
         }
 
         // Variant "heir": heirless deaths this tick hand their border to the besieger.
-        for d in world.dead_actors[seen_deaths..].to_vec() {
+        for d in world.dead_actors[seen_deaths..].iter().cloned() {
             let heir_born = d.successor_ids.iter().any(|s| world.actors.contains_key(&s.id));
             if heir_born { continue; }
             let list = last_neighbors.get(&d.id).cloned().unwrap_or_default();
@@ -201,9 +203,9 @@ fn main() {
     for (id, r) in &rows {
         if r.actual_death != r.cf_death[0] { mismatches += 1; }
         print!("ACTOR\t{}\t{}\t{}\tactual={}\tpath={}", scenario_id, seed, id, fmt(r.actual_death), if r.path.is_empty() { "-" } else { &r.path });
-        for v in 0..NV { print!("\tcf_{}={}", VARIANTS[v], fmt(r.cf_death[v])); }
+        for (v, name) in VARIANTS.iter().enumerate() { print!("\tcf_{}={}", name, fmt(r.cf_death[v])); }
         print!("\tdefenceless_ticks={}", r.defenceless_ticks);
-        for v in 1..NV { print!("\tflip_{}={}", VARIANTS[v], r.flip_ticks[v]); }
+        for (v, name) in VARIANTS.iter().enumerate().skip(1) { print!("\tflip_{}={}", name, r.flip_ticks[v]); }
         println!("\thas_d1_edge={}\tliving_d1_end={}\tdangling_d1_end={}", r.has_d1_edge, r.living_d1_end, r.dangling_d1_end);
     }
     println!("SUMMARY\t{}\t{}\tactors={}\tdeaths={}\tselfcheck_mismatches={}", scenario_id, seed, rows.len(), world.dead_actors.len(), mismatches);
