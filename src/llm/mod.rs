@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use tauri::Emitter;
 
-use crate::core::{ActorDelta, Scenario, WorldState};
+use crate::core::{Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
 
@@ -214,9 +214,29 @@ pub fn build_snapshot(
     scenario: &Scenario,
     event_log: &EventLog,
 ) -> NarrativeWorldSnapshot {
-    // Half-year from tick
-    let half_year = HalfYear::from_tick(world.tick);
-    
+    // The half-year this chronicle describes — one definition, used by every part of
+    // the snapshot that needs it.
+    //
+    // `engine::tick` runs `phase_advance` last, which increments `world.tick` and
+    // re-derives `world.year` from it. A snapshot is always built after a tick has
+    // finished, so at that moment `world.tick` names the half-year that is *about to
+    // start*, not the one whose events the chronicler is being handed. Reading it
+    // directly dated every prompt one half-year late: a power that fell in tick 27 was
+    // recorded by the engine in 1443 and narrated under a heading that said 1444.
+    //
+    // Measured before this fix, over 35 games / 5250 half-years: the *year* in the
+    // heading was wrong in 2625 prompts (it only diverges on odd ticks, where `T/2`
+    // and `(T+1)/2` differ), and the *half-year label* was wrong in all 5250 — the
+    // label flips on every single tick. Counting only the year understates the defect
+    // by half, which is why both are reported in §19.
+    //
+    // `world.year` is not read at all any more: the engine derives it as
+    // `start_year + tick/2` (`phase_advance`), so deriving it here from `period_tick`
+    // keeps one rule rather than mixing a stored value with a computed one.
+    let period_tick = world.tick.saturating_sub(1);
+    let half_year = HalfYear::from_tick(period_tick);
+    let year = scenario.start_year + (period_tick / 2) as i32;
+
     // Alive actors (not in dead_actors list).
     // Sorted for a deterministic order: `world.actors` is a HashMap, so this
     // collection order is randomized per process. The list is joined verbatim
@@ -361,6 +381,15 @@ pub fn build_snapshot(
         .collect();
     event_candidates.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.id.cmp(&b.id)));
 
+    // NB: `world.tick`, deliberately, NOT `period_tick`.
+    //
+    // This argument is `current_tick` for the temporal decay of relevance, not the
+    // dateline. Passing `period_tick` would shift every `ticks_ago` down by one and
+    // move events across the bucket boundaries of `Db::temporal_coefficient`
+    // (`0..=10 => 1.0`, `11..=30 => 0.7`, …), i.e. it would re-tune the selection that
+    // task (A) established — a different decision about a different function. Measured
+    // as a counterfactual (§19.3): the shift changes which events are shown in a
+    // minority of half-years and nothing else, and it is not made here.
     let recent_important_events: Vec<crate::core::Event> = crate::db::select_relevant_events(
         &event_candidates,
         world.tick,
@@ -446,12 +475,15 @@ pub fn build_snapshot(
     // path stays the single owner of *relevance*; it is not asked a question it does
     // not answer.
     //
-    // `phase_advance` increments `world.tick` at the end of the tick, so the events of
-    // the period the chronicler is about to narrate carry `tick == world.tick - 1`.
+    // Uses the same `period_tick` as the heading above. Task (B) computed
+    // `world.tick - 1` here on its own, because at that point the heading was still
+    // read straight from `world.tick` and the two could not share a definition — which
+    // is exactly why the block said "Держава Византийская Империя прекратила
+    // существование" under a heading dated a half-year later. Now there is one
+    // definition of "the period being narrated" and both read it.
     // At `world.tick == 0` no period has concluded yet and the block stays empty.
     let mut period_lifecycle: Vec<(String, Vec<String>)> = Vec::new();
     if world.tick > 0 {
-        let period_tick = world.tick - 1;
         let heir_name = |id: &str| -> String {
             scenario.actors.iter()
                 .find(|a| a.id == id)
@@ -497,7 +529,7 @@ pub fn build_snapshot(
     }
 
     NarrativeWorldSnapshot {
-        year: world.year,
+        year,
         half_year,
         alive_actors,
         dead_actors,
@@ -546,54 +578,6 @@ impl LlmConfig {
             _ => "http://localhost:1234".to_string(),
         }
     }
-}
-
-/// LLM trigger type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerType {
-    PlayerAction,
-    ThresholdEvent,
-    Time,
-}
-
-/// Action info for player_action trigger
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionInfo {
-    pub action_name: String,
-    pub effects: HashMap<String, f64>,
-    pub costs: HashMap<String, f64>,
-}
-
-/// Threshold context for threshold_event trigger
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThresholdContext {
-    pub actor_id: String,
-    pub actor_name: String,
-    pub threshold_type: String,
-    pub description: String,
-}
-
-/// LLM trigger response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LlmTrigger {
-    pub trigger_type: TriggerType,
-    pub prompt: String,
-    pub context: LlmContext,
-    pub action_info: Option<ActionInfo>,
-    pub threshold_context: Option<ThresholdContext>,
-    pub actor_deltas: Vec<ActorDelta>,
-}
-
-/// Context for LLM generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LlmContext {
-    pub current_year: i32,
-    pub current_tick: u32,
-    pub narrative_actors: Vec<String>,
-    pub recent_events: Vec<String>,
-    pub scenario_context: String,
-    pub ticks_since_last: u32,
 }
 
 /// Get LLM config from ~/.config/engine13/config.json

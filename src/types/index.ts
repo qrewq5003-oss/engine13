@@ -318,30 +318,15 @@ export interface ScenarioMeta {
 // Command Response Types
 // ============================================================================
 
-export interface LlmContext {
-  current_year: number;
-  current_tick: number;
-  narrative_actors: string[];
-  recent_events: string[];
-  scenario_context: string;
-}
-
-export interface LlmTrigger {
-  prompt: string;
-  context: LlmContext;
-}
-
 export interface AdvanceTickResponse {
   world_state: WorldState;
   events: Event[];
-  llm_trigger: LlmTrigger | null;
 }
 
 export interface SubmitActionResponse {
   success: boolean;
   effects: Record<string, number>;
   new_state: WorldState;
-  llm_trigger: LlmTrigger | null;
   error: string | null;
 }
 
