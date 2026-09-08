@@ -99,6 +99,7 @@ fn main() {
     let mut n_births = 0usize;
     let mut n_phantom = 0usize;
     let mut n_absorbed = 0usize;
+    let mut n_dead = 0usize;
 
     for t in 0..ticks {
         tick(&mut world, &scenario, &mut event_log, &mut rng);
@@ -117,21 +118,27 @@ fn main() {
             let mut created = vec![];
             let mut phantom = vec![];
             let mut absorbed = vec![];
+            let mut dead = vec![];
             for s in &d.successor_ids {
                 if born_this_tick.contains(&s.id) {
                     created.push(s.id.clone());
                 } else if world.actors.contains_key(&s.id) {
                     absorbed.push(s.id.clone());
+                } else if world.dead_actor_ids.contains(&s.id) {
+                    // Heir died before its parent: skipped by the dead-guard (stage 2);
+                    // before it, this was the resurrection path.
+                    dead.push(s.id.clone());
                 } else {
                     phantom.push(s.id.clone());
                 }
             }
             n_phantom += phantom.len();
             n_absorbed += absorbed.len();
+            n_dead += dead.len();
             println!(
-                "DEATH\t{}\t{}\t{}\t{}\t{}\tdeclared=[{}]\tcreated=[{}]\tphantom=[{}]\tabsorbed=[{}]\ttemplate_missing=[{}]",
+                "DEATH\t{}\t{}\t{}\t{}\t{}\tdeclared=[{}]\tcreated=[{}]\tphantom=[{}]\tabsorbed=[{}]\tdead=[{}]\ttemplate_missing=[{}]",
                 scenario_id, seed, t, d.id, fmt(&d.final_metrics),
-                declared.join(","), created.join(","), phantom.join(","), absorbed.join(","),
+                declared.join(","), created.join(","), phantom.join(","), absorbed.join(","), dead.join(","),
                 declared.iter().filter(|id| !templates.contains_key(id.as_str()))
                     .cloned().collect::<Vec<_>>().join(","),
             );
@@ -166,7 +173,7 @@ fn main() {
         );
     }
     println!(
-        "SUMMARY\t{}\t{}\tdeaths={}\tbirths={}\tphantom={}\tabsorbed={}\talive_end={}",
-        scenario_id, seed, world.dead_actors.len(), n_births, n_phantom, n_absorbed, world.actors.len()
+        "SUMMARY\t{}\t{}\tdeaths={}\tbirths={}\tphantom={}\tabsorbed={}\tdead={}\talive_end={}",
+        scenario_id, seed, world.dead_actors.len(), n_births, n_phantom, n_absorbed, n_dead, world.actors.len()
     );
 }
