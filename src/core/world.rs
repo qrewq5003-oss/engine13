@@ -20,6 +20,19 @@ pub struct FamilyState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadActor {
     pub id: String,
+    /// Display name at the moment of death.
+    ///
+    /// Carried here because `world.actors` — the only place an actor's name lives at
+    /// runtime — drops the entry on collapse, and `scenario.actors` does not always
+    /// have it: actors created by `SpawnActorConfig` (`wallachia`, `poland_lithuania`,
+    /// `mamluks`, `france`) take their name from the milestone's `label` and have no
+    /// scenario template at all. Without this field the chronicler's list of fallen
+    /// powers reads `wallachia` next to `Византийская Империя`.
+    ///
+    /// `#[serde(default)]` so saves written before the field existed still load; they
+    /// come back with an empty name and fall back to the id, as they did before.
+    #[serde(default)]
+    pub name: String,
     pub tick_death: u32,
     pub year_death: i32,
     pub final_metrics: HashMap<String, f64>,

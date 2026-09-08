@@ -67,8 +67,16 @@ pub struct NarrativeWorldSnapshot {
     pub narrative_axes: Vec<String>,
     pub tone_tags: Vec<String>,
     pub game_mode: crate::core::GameMode,
-    /// Actors that collapsed this tick: (actor_name, successor_ids)
-    pub collapsed_this_tick: Vec<(String, Vec<String>)>,
+    /// Actor lifecycle transitions of the half-year that just concluded:
+    /// `(engine-authored description, display names of the heirs)`.
+    ///
+    /// Renamed from `collapsed_this_tick`, which was neither "collapsed" nor
+    /// "this tick": it filtered `EventType::Collapse`, which in this engine is
+    /// emitted only for a *scenario* milestone carrying `triggers_collapse`
+    /// (the `Scenario → Consequences` mode switch, `actor_id = "scenario"`), and
+    /// it scanned the whole log rather than the current period. Actor death is
+    /// `EventType::Death`; the birth of an heir had no event at all.
+    pub period_lifecycle: Vec<(String, Vec<String>)>,
 }
 
 /// Minimal narrative memory for anti-repetition across turns
@@ -213,8 +221,30 @@ pub fn build_snapshot(
     alive_actors.sort();
     
     // Dead actors — `world.dead_actors` is a Vec in collapse order, already deterministic.
+    //
+    // Carries the display name and the year of the fall, not the bare engine id.
+    // The bare id is what produced §5.3 of the task-31 report: the fallen list is the
+    // only place a past death appears after its own half-year, it is static, and with
+    // no date attached the model is free to announce any of them as fresh news — it
+    // announced `wallachia` (fell 1448) as breaking news in 1480, 1481 and 1504, and
+    // `savoy` (fell 1514) as "the first casualty of the era" in 1551 and 1552. The
+    // year is the fact that makes those sentences checkable; supplying it is a
+    // precondition for the period block below meaning anything.
+    // The half-year is printed alongside the year on purpose. The chronicle's own
+    // dateline is `HalfYear::from_tick(world.tick)`, read after `phase_advance` has
+    // already incremented the tick, so a prompt is always dated one half-year later
+    // than the period whose events it carries — a power that fell in tick 27 is
+    // recorded by the engine in 1443 and narrated in a prompt headed 1444. Printing
+    // the year alone would put "пала в 1443 г." under a 1444 heading with nothing to
+    // explain the gap. That offset is a separate, pre-existing defect of the dateline
+    // (it applies to every prompt, not just these lines) and is deliberately NOT fixed
+    // here; naming the half-year makes the fallen list exact and legible under it.
     let dead_actors: Vec<String> = world.dead_actors.iter()
-        .map(|a| a.id.clone())
+        .map(|a| {
+            let name = if a.name.is_empty() { a.id.clone() } else { a.name.clone() };
+            format!("{} (пала: {} г., {})",
+                name, a.year_death, HalfYear::from_tick(a.tick_death).display_name())
+        })
         .collect();
     
     // Foreground actors. Sorted for the same reason as `alive_actors` above:
@@ -347,27 +377,83 @@ pub fn build_snapshot(
     let narrative_axes = scenario.narrative_config.narrative_axes.clone();
     let tone_tags = scenario.narrative_config.tone_tags.clone();
 
-    // Collapsed actors this tick: filter event_log for EventType::Collapse
-    // Deduplicate by actor_id, get successor_ids from world.dead_actors
-    let mut collapsed_this_tick: Vec<(String, Vec<String>)> = Vec::new();
-    let mut seen_collapse_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    
-    for event in &event_log.events {
-        if event.event_type == crate::core::EventType::Collapse 
-            && !seen_collapse_ids.contains(&event.actor_id) 
-        {
-            seen_collapse_ids.insert(event.actor_id.clone());
-            
-            // Get successor_ids from dead_actors
-            let successor_ids: Vec<String> = world.dead_actors.iter()
-                .find(|d| d.id == event.actor_id)
-                .map(|d| d.successor_ids.iter().map(|s| s.id.clone()).collect())
-                .unwrap_or_default();
-            
-            // Get actor name from event description or use actor_id
-            let actor_name = event.actor_id.clone();
-            
-            collapsed_this_tick.push((actor_name, successor_ids));
+    // Actor lifecycle events of the half-year that just concluded.
+    //
+    // What this replaces, and why each part of it was wrong (task 31, plan item (B)):
+    //
+    //   1. It filtered `EventType::Collapse`. In this engine that variant has exactly
+    //      one producer — `engine::check_milestone_events`, for a milestone whose
+    //      `triggers_collapse` flag is set — and that flag means "the scenario's
+    //      premise has run its course, switch `GameMode::Scenario` → `Consequences`"
+    //      (`engine::check_game_mode_transitions`, `application/modes.rs`). Its
+    //      `actor_id` is the literal string `"scenario"` by construction. Actor death
+    //      is written as `EventType::Death` and was never read anywhere.
+    //   2. It scanned the entire log, not the current period, despite being named
+    //      `collapsed_this_tick`. Once the milestone fired, the line was re-emitted
+    //      into every prompt for the rest of the game — measured 64 half-years in
+    //      constantinople/diplomacy and 74 in milan/aggressive.
+    //   3. It printed the raw engine id (`actor_name = event.actor_id`); the comment
+    //      promising to take the name from the description was never implemented.
+    //
+    // Measured on the seven games of §14.3: the block fired 138 times out of 1050
+    // half-years, 0 of them correct, and missed all 14 real deaths.
+    //
+    // NOT routed through `db::select_relevant_events`: that function answers "what is
+    // worth recalling out of the whole history", and its 15/5/key budget can and does
+    // drop individual events. This block answers a different question — "everything
+    // that happened to the roster in this one period" — which is a projection by tick,
+    // not a selection by relevance. Feeding it through the ranking would reintroduce
+    // exactly the failure it exists to fix: a death that loses its slot. The canonical
+    // path stays the single owner of *relevance*; it is not asked a question it does
+    // not answer.
+    //
+    // `phase_advance` increments `world.tick` at the end of the tick, so the events of
+    // the period the chronicler is about to narrate carry `tick == world.tick - 1`.
+    // At `world.tick == 0` no period has concluded yet and the block stays empty.
+    let mut period_lifecycle: Vec<(String, Vec<String>)> = Vec::new();
+    if world.tick > 0 {
+        let period_tick = world.tick - 1;
+        let heir_name = |id: &str| -> String {
+            scenario.actors.iter()
+                .find(|a| a.id == id)
+                .map(|a| a.name.clone())
+                .unwrap_or_else(|| id.to_string())
+        };
+
+        for event in &event_log.events {
+            if event.tick != period_tick {
+                continue;
+            }
+            match event.event_type {
+                crate::core::EventType::Death => {
+                    // Heirs come from `world.dead_actors`, the same record the engine
+                    // wrote when it processed the collapse, resolved to display names —
+                    // and filtered to the heirs that actually exist in the world.
+                    //
+                    // The filter is not defensive tidying. `DeadActor.successor_ids` is
+                    // copied from `on_collapse` unconditionally, while the engine only
+                    // creates a successor if `scenario.actors` holds a template for it
+                    // (`engine::check_collapses`), and it fails silently when there is
+                    // none. Of the 13 heirs declared across the three scenarios, the 5
+                    // ottoman successor states of constantinople_1430 have no template
+                    // at all: `byzantium` falling used to tell the chronicler its lands
+                    // passed to `ottoman_byzantium`, a power that does not exist, has
+                    // never existed, and never will. Announcing an unfalsifiable heir is
+                    // the same class of defect as the block this rewrite is fixing.
+                    let successors: Vec<String> = world.dead_actors.iter()
+                        .find(|d| d.id == event.actor_id)
+                        .map(|d| d.successor_ids.iter()
+                            .filter(|s| world.actors.contains_key(&s.id))
+                            .map(|s| heir_name(&s.id))
+                            .collect())
+                        .unwrap_or_default();
+                    period_lifecycle.push((event.description.clone(), successors));
+                }
+                crate::core::EventType::Birth => {
+                    period_lifecycle.push((event.description.clone(), Vec::new()));
+                }
+                _ => {}
+            }
         }
     }
 
@@ -385,7 +471,7 @@ pub fn build_snapshot(
         narrative_axes,
         tone_tags,
         game_mode: world.game_mode,
-        collapsed_this_tick,
+        period_lifecycle,
     }
 }
 
@@ -597,16 +683,19 @@ pub fn generate_narrative_prompt(
     prompt.push_str(&factual_rules);
 
     // ========================================================================
-    // Section 2b: Events This Period — Collapses with Successors
+    // Section 2b: Events This Period — actor deaths and heir births, with successors
     // ========================================================================
-    if !snapshot.collapsed_this_tick.is_empty() {
+    if !snapshot.period_lifecycle.is_empty() {
         prompt.push_str("=== СОБЫТИЯ ЭТОГО ПЕРИОДА ===\n");
-        for (actor_name, successors) in &snapshot.collapsed_this_tick {
+        // The sentence itself is the engine's, authored where the transition happened
+        // (`engine::check_collapses`), so the chronicle and the event window say the
+        // same thing about the same event instead of two layers wording it twice.
+        for (description, successors) in &snapshot.period_lifecycle {
             if successors.is_empty() {
-                prompt.push_str(&format!("{} прекратил существование.\n", actor_name));
+                prompt.push_str(&format!("{}.\n", description));
             } else {
-                prompt.push_str(&format!("{} прекратил существование. Наследники: {}.\n", 
-                    actor_name, successors.join(", ")));
+                prompt.push_str(&format!("{}. Наследники: {}.\n",
+                    description, successors.join(", ")));
             }
         }
         prompt.push('\n');
