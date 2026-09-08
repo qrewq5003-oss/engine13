@@ -50,7 +50,6 @@ pub struct SaveData {
 pub struct AdvanceTickResponse {
     pub world_state: WorldState,
     pub events: Vec<Event>,
-    pub llm_trigger: Option<crate::llm::LlmTrigger>,
 }
 
 /// Response from advance_tick_silent (no LLM trigger)
@@ -67,7 +66,6 @@ pub struct SubmitActionResponse {
     pub effects: HashMap<String, f64>,
     pub costs: HashMap<String, f64>,
     pub new_state: WorldState,
-    pub llm_trigger: Option<crate::llm::LlmTrigger>,
     pub error: Option<String>,
 }
 
@@ -113,30 +111,20 @@ pub struct PlayerActionInput {
 // Core Command Functions (delegate to application modules)
 // ============================================================================
 
-/// (action, effects, costs) triple tracked for LLM trigger evaluation
-type ActionTriggerInfo = (crate::core::PatronAction, HashMap<String, f64>, HashMap<String, f64>);
-
 /// Advance simulation by one tick
 pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> Result<AdvanceTickResponse, String> {
-    use crate::application::{apply_player_action, check_llm_trigger_with_data};
-
-    // Track action info for trigger
-    let mut action_info: Option<ActionTriggerInfo> = None;
+    use crate::application::apply_player_action;
 
     if let Some(action_input) = action {
-        let action_id = action_input.action_id.clone();
         // Convert commands::PlayerActionInput to application::actions::PlayerActionInput
         let app_action_input = crate::application::actions::PlayerActionInput {
             action_id: action_input.action_id,
             target_actor_id: action_input.target_actor_id,
         };
-        let (effects, costs) = apply_player_action(state, &app_action_input)?;
-
-        // Get action details for trigger
-        let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-        if let Some(action) = scenario.patron_actions.iter().find(|a| a.id == action_id) {
-            action_info = Some((action.clone(), effects, costs));
-        }
+        // Effects and costs were collected here only to feed the LLM trigger; the
+        // action itself is applied by this call and its return value has no other
+        // reader (see the note on `llm_trigger` below).
+        apply_player_action(state, &app_action_input)?;
     }
 
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
@@ -145,18 +133,19 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
 
     tick(world_state, scenario, &mut state.event_log, rng);
 
-    let scenario_clone = scenario.clone();
-    let event_log_clone = state.event_log.clone();
-
-    // Pass action info to trigger check - this will reset ticks_since_last_narrative if trigger fires
-    let action_info_ref = action_info.as_ref().map(|(a, e, c)| (a, e, c));
-    let llm_trigger = check_llm_trigger_with_data(world_state, &scenario_clone, &event_log_clone, action_info_ref);
+    // `llm_trigger` removed. `check_llm_trigger_with_data` used to run here on every
+    // tick, building a whole second prompt — with its own copy of `scenario.llm_context`
+    // and its own `Год: {} (тик {})` heading, i.e. its own copy of both defects fixed in
+    // §17 and §19 — and handing it to the frontend in `AdvanceTickResponse.llm_trigger`.
+    // A sweep of the frontend found the field's only occurrences to be the two
+    // declarations in `types/index.ts`: `App.tsx` reads `world_state`, `events` and
+    // `new_state`, and nothing anywhere reads `llm_trigger`. Two prompt builders, one
+    // of them unreachable, is the shape invariant 2 of `AGENTS.md` forbids.
     let events = state.event_log.events.clone();
 
     Ok(AdvanceTickResponse {
         world_state: world_state.clone(),
         events,
-        llm_trigger,
     })
 }
 

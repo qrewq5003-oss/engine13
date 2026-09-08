@@ -271,7 +271,6 @@ pub fn submit_action(state: &mut AppState, action_input: PlayerActionInput) -> R
         effects,
         costs,
         new_state: world_state.clone(),
-        llm_trigger: None,
         error: None,
     })
 }

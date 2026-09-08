@@ -458,11 +458,25 @@ fn main() {
         // чьи события в нём лежат (§15.8 п.3). Считается отдельно ИМЕННО чтобы
         // показать, что это другой дефект: движковый год тика T равен
         // start_year + T/2, а снапшот берёт world.year уже после phase_advance.
-        let head_ahead = records.iter()
+        //
+        // Меряется ДВЕ величины, а не одна. Год расходится только на нечётных тиках
+        // (`T/2` против `(T+1)/2`), поэтому «половина промптов» — это НЕ вся глубина
+        // дефекта: ярлык полугодия («первая»/«вторая») сдвинут на КАЖДОМ тике, потому
+        // что `HalfYear::from_tick` меняется с каждой единицей тика. Считать только
+        // год — недооценить дефект вдвое.
+        let head_year_ahead = records.iter()
             .filter(|r| r.year != scenario.start_year + (r.tick / 2) as i32)
             .count();
-        println!("промптов, где шапка датирована ПОЗЖЕ своего полугодия: {} из {} (§15.8 п.3)",
-            head_ahead, records.len());
+        let head_half_wrong = records.iter()
+            .filter(|r| {
+                let want = if r.tick % 2 == 0 { "FirstHalf" } else { "SecondHalf" };
+                r.half_year != want
+            })
+            .count();
+        println!("промптов, где ГОД шапки позже своего полугодия:        {} из {} (§15.8 п.3)",
+            head_year_ahead, records.len());
+        println!("промптов, где ЯРЛЫК полугодия не тот:                  {} из {} (§15.8 п.3)",
+            head_half_wrong, records.len());
 
         println!("АНАХРОНИЧНЫХ ПОЛУГОДИЙ ВСЕГО:          {}", anach_total);
         println!("  из них с ретракцией в том же промпте: {}", contra_total);
