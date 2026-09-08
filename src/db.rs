@@ -518,6 +518,15 @@ impl Db {
 
     /// Get relevant events with temporal decay and thematic scoring
     /// Returns events sorted by relevance (thematic_similarity × temporal_coefficient)
+    ///
+    /// Thin wrapper: it only *fetches* candidates from the events table and hands them
+    /// to [`select_relevant_events`], which owns the selection rules. Splitting the two
+    /// was forced by measurement (task 31, plan item (A)): the events table is never
+    /// written outside `budget_probe` — `insert_event` / `insert_events_batch` have no
+    /// other callers, and `save_load.rs` only *deletes* from it — so in the product this
+    /// method reads an empty store. The narrative layer holds the same events in memory
+    /// and needs the same rules, and inventing a second set of rules for it is exactly
+    /// what invariant 2 of `AGENTS.md` forbids. Hence: one selection, two feeders.
     pub fn get_relevant_events_scored(
         &self,
         current_tick: u32,
@@ -541,74 +550,12 @@ impl Db {
             }
         }
 
-        // Calculate relevance score for each event
-        let mut scored_events: Vec<(Event, f64)> = all_events
-            .into_iter()
-            .map(|event| {
-                let ticks_ago = current_tick.saturating_sub(event.tick);
-                let temporal_coeff = Self::temporal_coefficient(ticks_ago, event.is_key);
-                let thematic_sim = Self::thematic_similarity(&event.tags, query_tags);
-                let relevance = thematic_sim * temporal_coeff;
-                (event, relevance)
-            })
-            .collect();
-
-        // Sort by relevance descending
-        scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Apply selection rules:
-        // 1. Top 15 by relevance
-        // 2. Last 5 events always (regardless of relevance)
-        // 3. All is_key events from narrative actors always
-
-        // Get last 5 events (most recent by tick)
-        let mut by_tick = scored_events.clone();
-        by_tick.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
-        let _last_5: HashSet<String> = by_tick.iter().take(5).map(|(e, _)| e.id.clone()).collect();
-
-        // Get all is_key events from narrative actors
-        let key_from_narrative: HashSet<String> = scored_events
-            .iter()
-            .filter(|(e, _)| e.is_key && narrative_actor_ids.contains(&e.actor_id))
-            .map(|(e, _)| e.id.clone())
-            .collect();
-
-        // Build final list with deduplication
-        let mut final_events: Vec<(Event, f64)> = Vec::new();
-        let mut seen_ids: HashSet<String> = HashSet::new();
-
-        // Add top 15 by relevance
-        for (event, score) in scored_events.iter() {
-            if final_events.len() >= 15 {
-                break;
-            }
-            if !seen_ids.contains(&event.id) {
-                seen_ids.insert(event.id.clone());
-                final_events.push((event.clone(), *score));
-            }
-        }
-
-        // Add last 5 (if not already included)
-        for (event, score) in by_tick.iter().take(5) {
-            if !seen_ids.contains(&event.id) {
-                seen_ids.insert(event.id.clone());
-                final_events.push((event.clone(), *score));
-            }
-        }
-
-        // Add is_key events from narrative actors (if not already included)
-        for (event, score) in scored_events.iter() {
-            if key_from_narrative.contains(&event.id) && !seen_ids.contains(&event.id) {
-                seen_ids.insert(event.id.clone());
-                final_events.push((event.clone(), *score));
-            }
-        }
-
-        // Sort final list by tick descending (most recent first) for presentation
-        final_events.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
-
-        // Return just the events (scores are logged for debugging)
-        Ok(final_events.into_iter().map(|(e, _)| e).collect())
+        Ok(select_relevant_events(
+            &all_events,
+            current_tick,
+            query_tags,
+            narrative_actor_ids,
+        ))
     }
 
     /// Get all key events from database
@@ -687,7 +634,16 @@ impl Db {
     /// Calculate thematic similarity between event tags and query tags
     /// similarity = matching_tags / max(event_tags.len(), query_tags.len())
     pub fn thematic_similarity(event_tags: &[String], query_tags: &[String]) -> f64 {
-        if event_tags.is_empty() && query_tags.is_empty() {
+        // An empty query means "no thematic preference", so every event matches it
+        // equally. Before this, only an *untagged* event scored 1.0 against an empty
+        // query while a *tagged* one scored 0.0 — the ranking was inverted exactly on
+        // the events that bothered to carry tags. In this corpus those are the death
+        // events (`with_tags(["collapse", actor_id])` is the only `with_tags` call in
+        // the engine), so with an empty query the collapse of a state sank below every
+        // routine metric dump and was never shown: measured 0 death events reaching the
+        // chronicler across a 150-half-year game, on the very tick a state died.
+        // See §14.3 of the task-31 write-up.
+        if query_tags.is_empty() {
             return 1.0;
         }
 
@@ -936,4 +892,101 @@ impl Db {
             _ => crate::core::EventType::Threshold,
         }
     }
+}
+
+// ============================================================================
+// Canonical relevance selection
+// ============================================================================
+
+/// The canonical relevance selection rules (`AGENTS.md`, invariant 2).
+///
+/// Pure: takes the candidate events, returns the chosen ones, most recent first.
+/// `Db::get_relevant_events_scored` feeds it from the events table;
+/// `llm::build_snapshot` feeds it from the in-memory `EventLog`. There is one
+/// implementation of the rules, not two.
+///
+/// Rules, unchanged from the original method:
+///   1. top 15 by relevance (`thematic_similarity` × `temporal_coefficient`);
+///   2. the last 5 events by tick, regardless of relevance;
+///   3. every `is_key` event belonging to a narrative actor.
+///
+/// Known blind spot, measured and deliberately NOT fixed here (task 31 §14.4):
+/// rule 3 tests `narrative_actor_ids.contains(&event.actor_id)`, and engine
+/// milestones — `generation_transfer` among them — carry `actor_id = "scenario"`,
+/// which is never a narrative actor. They reach the output only through rules 1–2.
+pub fn select_relevant_events(
+    candidates: &[Event],
+    current_tick: u32,
+    query_tags: &[String],
+    narrative_actor_ids: &[String],
+) -> Vec<Event> {
+    // Calculate relevance score for each event
+    let mut scored_events: Vec<(Event, f64)> = candidates
+        .iter()
+        .map(|event| {
+            let ticks_ago = current_tick.saturating_sub(event.tick);
+            let temporal_coeff = Db::temporal_coefficient(ticks_ago, event.is_key);
+            let thematic_sim = Db::thematic_similarity(&event.tags, query_tags);
+            let relevance = thematic_sim * temporal_coeff;
+            (event.clone(), relevance)
+        })
+        .collect();
+
+    // Sort by relevance descending.
+    //
+    // Deliberately NO extra tiebreak, so this stays the original rule. `sort_by` is
+    // stable, so ties fall through to the caller's input order — and that is fine:
+    // each feeder's input is deterministic on its own (the snapshot feeder's is the
+    // append-only log, and its `narrative_actor_ids` are sorted by plan item (C)).
+    // An earlier draft added `.then(tick desc).then(id)` to make the two feeders agree
+    // with *each other*, which nothing requires; it was dropped so that plan item (A)
+    // reaches this selection without altering it.
+    scored_events.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Get last 5 events (most recent by tick)
+    let mut by_tick = scored_events.clone();
+    by_tick.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
+
+    // Get all is_key events from narrative actors
+    let key_from_narrative: HashSet<String> = scored_events
+        .iter()
+        .filter(|(e, _)| e.is_key && narrative_actor_ids.contains(&e.actor_id))
+        .map(|(e, _)| e.id.clone())
+        .collect();
+
+    // Build final list with deduplication
+    let mut final_events: Vec<(Event, f64)> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+
+    // Rule 1: top 15 by relevance
+    for (event, score) in scored_events.iter() {
+        if final_events.len() >= 15 {
+            break;
+        }
+        if !seen_ids.contains(&event.id) {
+            seen_ids.insert(event.id.clone());
+            final_events.push((event.clone(), *score));
+        }
+    }
+
+    // Rule 2: last 5 (if not already included)
+    for (event, score) in by_tick.iter().take(5) {
+        if !seen_ids.contains(&event.id) {
+            seen_ids.insert(event.id.clone());
+            final_events.push((event.clone(), *score));
+        }
+    }
+
+    // Rule 3: is_key events from narrative actors (if not already included)
+    for (event, score) in scored_events.iter() {
+        if key_from_narrative.contains(&event.id) && !seen_ids.contains(&event.id) {
+            seen_ids.insert(event.id.clone());
+            final_events.push((event.clone(), *score));
+        }
+    }
+
+    // Sort final list by tick descending (most recent first) for presentation
+    final_events.sort_by(|a, b| b.0.tick.cmp(&a.0.tick));
+
+    final_events.into_iter().map(|(e, _)| e).collect()
 }
