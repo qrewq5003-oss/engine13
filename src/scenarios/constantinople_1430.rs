@@ -817,10 +817,11 @@ FEDERATION_PROGRESS (0-100):
 }
 
 fn create_consequence_context() -> String {
+    // No alternatives: whether Constantinople fell, how far the federation got
+    // and how large the Ottoman army is are all in the same prompt — dead
+    // actors, `global:federation_progress`, `ottomans.military_size`
+    // (docs/investigation_consequence_context.md §2.3).
     r#"Сценарный период завершён. Симуляция продолжается.
-Константинополь выжил или пал — история продолжается.
-Федерация итальянских государств либо сложилась либо распалась.
-Османская империя продолжает экспансию или остановлена.
 Нарратив охватывает более широкий период истории."#.to_string()
 }
 

@@ -929,11 +929,11 @@ fn create_llm_context() -> String {
 }
 
 fn create_consequence_context() -> String {
+    // No alternatives: `milan.legitimacy` answers the regency, the very
+    // milestone that switched the mode (`italy_unified`) answers Italy, and
+    // `naples.external_pressure` plus the Otranto milestones answer the Ottoman
+    // threat — all in the same prompt (docs/investigation_consequence_context.md §2.3).
     r#"Сценарный период завершён. Симуляция продолжается.
-Регентство в Милане либо укрепилось, либо распалось.
-Италия либо движется к объединению, либо остаётся раздробленной
-россыпью соперничающих держав. Османская угроза на юге
-продолжает нарастать или была остановлена.
 Нарратив охватывает более широкий период истории."#.to_string()
 }
 

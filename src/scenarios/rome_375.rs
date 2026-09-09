@@ -1714,8 +1714,9 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
 }
 
 fn create_consequence_context() -> String {
+    // No "survived — or did not": the family metrics that answer it are in the
+    // same prompt (docs/investigation_consequence_context.md §2.3).
     r#"Сценарный период завершён. Симуляция продолжается.
-Семья Ди Милано пережила первый кризис — или не пережила.
 Нарратив охватывает более широкий период истории.
 Роль игрока — наблюдатель с ограниченным влиянием.
 Семья продолжает существовать в том мире который сложился."#.to_string()
