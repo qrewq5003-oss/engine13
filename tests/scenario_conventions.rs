@@ -840,3 +840,24 @@ fn event_addressing_check_catches_a_new_violator() {
     )
     .is_empty());
 }
+
+/// `consequence_context` must not be written as alternatives ("either held or
+/// fell"). The prompt that carries it also carries the metrics, the fired
+/// milestones and the dead-actor list that answer every such sentence, so an
+/// alternative adds no fact and reads as the chronicler not knowing its own
+/// world. Measured before the rule: 94 % of rome prompts and 72 % of milan
+/// prompts carried them (docs/investigation_consequence_context.md §2).
+#[test]
+fn consequence_context_states_no_alternatives() {
+    for entry in engine13::scenarios::registry::get_registry() {
+        let scenario = (entry.loader)();
+        let text = scenario.consequence_context.to_lowercase();
+        for marker in ["либо", " или "] {
+            assert!(
+                !text.contains(marker),
+                "{}: consequence_context contains an alternative ({marker:?}): {text}",
+                entry.id
+            );
+        }
+    }
+}

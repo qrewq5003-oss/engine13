@@ -855,6 +855,20 @@ pub fn generate_narrative_prompt(
     );
     match snapshot.game_mode {
         crate::core::GameMode::Consequences => {
+            // The premise stays. It used to be REPLACED by `consequence_context`
+            // here, which made sense when the premise was a claim about "now":
+            // after the scenario's turning point it could not be left standing.
+            // Since (F) the premise is labelled as the starting state and is true
+            // for the whole game, and dropping it cost the chronicler 2.6–3.3 KB
+            // and every actor name for 94 % of a rome game (the switch fires on
+            // tick 7–28) and 72 % of a milan game — while the replacement text
+            // said things like "the regency either held or fell", eight lines
+            // above the metric that answers it. The consequence text now follows
+            // the premise as a mode marker, stripped of its alternatives.
+            // See docs/investigation_consequence_context.md.
+            prompt.push_str(&start_frame);
+            prompt.push_str(&scenario.llm_context);
+            prompt.push_str("\n\n");
             prompt.push_str(&scenario.consequence_context);
             prompt.push_str("\n\n");
         }
