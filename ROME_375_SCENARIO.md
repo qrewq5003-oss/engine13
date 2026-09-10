@@ -480,8 +480,8 @@ milestone_events: [
     id: "rome_splits",
     condition: { metric: "cohesion", actor_id: "rome", operator: "<", value: 30, duration: 5 },
     is_key: true,
-    triggers_collapse: true,  // запускает on_collapse Рима
-    llm_context_shift: "Империя раскололась. Западная и Восточная части теперь идут разными путями."
+    triggers_collapse: true,  // завершает сценарный период (режим Consequences); on_collapse Рима НЕ вызывается
+    llm_context_shift: "Сплочённость империи рухнула. Запад и Восток всё ещё одна держава, но держатся вместе лишь по инерции."
   },
 
   // Адрианополь
