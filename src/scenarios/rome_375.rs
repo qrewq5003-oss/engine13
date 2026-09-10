@@ -1458,7 +1458,14 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             },
             is_key: true,
             triggers_collapse: true,
-            llm_context_shift: "Империя раскололась. Западная и Восточная части теперь идут разными путями.".to_string(),
+            // States what the condition guarantees (cohesion < 30 for five ticks) and
+            // nothing the engine does not do: `triggers_collapse` switches the game
+            // mode and does NOT run `on_collapse`, so the empire stays whole. The old
+            // text ("Империя раскололась…") reached the chronicler in 2815 of 3000
+            // half-years while Rome lived on in every one of them
+            // (docs/investigation_triggers_collapse.md §2). The split itself is
+            // (A₃) there — a separate task.
+            llm_context_shift: "Сплочённость империи рухнула. Запад и Восток всё ещё одна держава, но держатся вместе лишь по инерции.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
         },
