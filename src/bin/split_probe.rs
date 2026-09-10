@@ -17,6 +17,20 @@
 //!                 entry;
 //!   split_link  — `split` + each heir's authored edges written back into the
 //!                 neighbours' lists (the spawn rule of PR #52 applied to heirs).
+//!   shrink_formula — (A₃) "split as shrink": the condition actor STAYS as the
+//!                 western heir (renamed after the `rome_west` template), its
+//!                 metrics cut to the 0.45 share by the architecture's split
+//!                 formula (cohesion 20, legitimacy 30, ep × 1.3 included); only
+//!                 `rome_east` is born, by the same formula with share 0.55 from
+//!                 the LIVING parent's metrics, with its authored edges written
+//!                 back to the neighbours. Every content site addressing `rome`
+//!                 keeps addressing the West; the limes edges survive.
+//!   shrink_keep — as shrink_formula, but the West keeps its own cohesion,
+//!                 legitimacy and external_pressure (only the shares — population,
+//!                 military, treasury, economy, quality — are cut).
+//!
+//! In the `none` variant the probe also prints `COH` rows (rome.cohesion per
+//! tick) so the trigger's threshold/duration can be replayed offline.
 //!
 //! Read-only with respect to the engine: the emulation edits the world between
 //! ticks the way the engine's own successor branch does. RNG is drawn only by the
@@ -37,13 +51,31 @@ fn fmt(m: &HashMap<String, f64>) -> String {
     KEYS.iter().map(|k| format!("{}={:.1}", k, m.get(*k).copied().unwrap_or(0.0))).collect::<Vec<_>>().join(" ")
 }
 
+/// The architecture's split formula («Формула раскола»), applied to a parent's metrics
+/// with a given share.
+fn split_share(parent: &HashMap<String, f64>, share: f64, trauma: bool) -> HashMap<String, f64> {
+    let g = |k: &str| parent.get(k).copied().unwrap_or(0.0);
+    let mut m = parent.clone();
+    m.insert("population".into(), g("population") * share);
+    m.insert("military_size".into(), g("military_size") * share * 0.7);
+    m.insert("treasury".into(), g("treasury") * share * 0.5);
+    m.insert("military_quality".into(), g("military_quality") * 0.8);
+    m.insert("economic_output".into(), g("economic_output") * 0.7);
+    if trauma {
+        m.insert("cohesion".into(), 20.0);
+        m.insert("legitimacy".into(), 30.0);
+        m.insert("external_pressure".into(), (g("external_pressure") * 1.3).min(100.0));
+    }
+    m
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let scenario_id = args.get(1).map(|s| s.as_str()).unwrap_or("rome_375");
     let ticks: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(300);
     let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(42);
     let variant = args.get(4).map(|s| s.as_str()).unwrap_or("none");
-    assert!(["none", "split", "split_link"].contains(&variant), "variant must be none|split|split_link");
+    assert!(["none", "split", "split_link", "shrink_formula", "shrink_keep"].contains(&variant), "variant must be none|split|split_link|shrink_formula|shrink_keep");
 
     let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
     let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -98,6 +130,62 @@ fn main() {
         }
         alive = now;
 
+        if variant == "none" {
+            if let Some(r) = world.actors.get("rome") {
+                println!("COH\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}", scenario_id, seed, t, r.get_metric("cohesion"), r.get_metric("military_size"), r.get_metric("external_pressure"), r.get_metric("legitimacy"));
+            }
+        }
+        // (A₃) shrink: parent stays, one heir is born from the living parent's metrics.
+        if variant.starts_with("shrink") && !split_done && fired_tick.is_some() {
+            let (_, actor_id) = &triggers[0];
+            if let Some(actor_id) = actor_id {
+                if world.actors.contains_key(actor_id) {
+                    split_done = true;
+                    split_tick = Some(t);
+                    let parent_metrics = world.actors[actor_id].metrics.clone();
+                    let heirs = world.actors[actor_id].on_collapse.clone();
+                    let west_w = heirs.iter().find(|h| h.id == "rome_west").map(|h| h.weight).unwrap_or(0.45);
+                    let east = heirs.iter().find(|h| h.id != "rome_west").cloned().expect("an eastern heir");
+                    let sum: f64 = heirs.iter().map(|h| h.weight).sum();
+                    let (ws, es) = (west_w / sum, east.weight / sum);
+                    // West = the parent, shrunk (and renamed after its template).
+                    if let Some(tpl) = scenario.actors.iter().find(|a| a.id == "rome_west") {
+                        let p = world.actors.get_mut(actor_id).unwrap();
+                        p.name = tpl.name.clone(); p.name_short = tpl.name_short.clone();
+                    }
+                    {
+                        let p = world.actors.get_mut(actor_id).unwrap();
+                        p.metrics = split_share(&parent_metrics, ws, variant == "shrink_formula");
+                    }
+                    println!("SPLIT\t{}\t{}\t{}\t{}\t{}\theirs={}\t{}", scenario_id, seed, variant, t, actor_id, east.id, fmt(&parent_metrics));
+                    println!("WEST\t{}\t{}\t{}\t{}\t{}\t{}", scenario_id, seed, variant, t, actor_id, fmt(&world.actors[actor_id].metrics));
+                    // East = born from the living parent by the formula.
+                    if let Some(tpl) = scenario.actors.iter().find(|a| a.id == east.id) {
+                        let mut new_actor = tpl.clone();
+                        new_actor.metrics = split_share(&parent_metrics, es, true);
+                        engine13::core::actor::ensure_default_metrics(&mut new_actor.metrics);
+                        new_actor.narrative_status = engine13::core::NarrativeStatus::Foreground;
+                        new_actor.is_successor_template = false;
+                        let edges = new_actor.neighbors.clone();
+                        let name = new_actor.name.clone();
+                        world.actors.insert(east.id.clone(), new_actor);
+                        event_log.add(Event::new(format!("birth_{}", east.id), t, world.year, east.id.clone(), EventType::Birth, true,
+                            format!("Держава {} возникла: восточная половина державы {}", name, world.actors[actor_id].name)));
+                        for edge in &edges {
+                            if let Some(other) = world.actors.get_mut(&edge.id) {
+                                if !other.neighbors.iter().any(|n| n.id == east.id) {
+                                    other.neighbors.push(engine13::core::Neighbor { id: east.id.clone(), distance: edge.distance, border_type: edge.border_type.clone() });
+                                }
+                            }
+                        }
+                        born_tick.insert(east.id.clone(), t);
+                        let a = &world.actors[&east.id];
+                        println!("BIRTH\t{}\t{}\t{}\t{}\t{}\tneighbors={}\t{}", scenario_id, seed, variant, t, east.id, a.neighbors.len(), fmt(&a.metrics));
+                    }
+                    alive = world.actors.keys().cloned().collect();
+                }
+            }
+        }
         // The emulated split, once, on the tick the trigger milestone has fired.
         if fired_tick.is_none() {
             if let Some((mid, _)) = triggers.iter().find(|(mid, _)| world.milestone_events_fired.contains(mid)) {
@@ -105,7 +193,7 @@ fn main() {
                 println!("FIRED\t{}\t{}\t{}\t{}\t{}", scenario_id, seed, variant, t, mid);
             }
         }
-        if variant != "none" && !split_done && fired_tick.is_some() {
+        if (variant == "split" || variant == "split_link") && !split_done && fired_tick.is_some() {
             let (_, actor_id) = &triggers[0];
             if let Some(actor_id) = actor_id {
                 if let Some(parent) = world.actors.remove(actor_id) {
@@ -166,6 +254,12 @@ fn main() {
         }
         let death = world.dead_actors.iter().find(|d| &d.id == id).map(|d| d.tick_death);
         println!("FATE\t{}\t{}\t{}\t{}\tborn={}\tdeath={}", scenario_id, seed, variant, id, bt, death.map(|d| d.to_string()).unwrap_or_else(|| "-".into()));
+    }
+    if variant.starts_with("shrink") {
+        if let Some(a) = world.actors.get("rome") {
+            let living_d1 = a.neighbors.iter().filter(|n| n.distance == 1 && world.actors.contains_key(&n.id)).count();
+            println!("ALIVE\t{}\t{}\t{}\trome\tborn=0\tneighbors={}\tliving_d1={}\t{}", scenario_id, seed, variant, a.neighbors.len(), living_d1, fmt(&a.metrics));
+        }
     }
     // Who still lists the dead parent at distance 1 (dangling) at the end.
     if let Some((_, Some(pid))) = triggers.first() {
