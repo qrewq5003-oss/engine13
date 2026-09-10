@@ -385,8 +385,10 @@ milestone_event: {
     duration: 5               // тиков подряд (опционально)
   },
   is_key: true,               // записывается как is_key событие в хранилище
-  triggers_collapse: false,   // если true — запускает on_collapse актора
-  llm_context_shift: "Империя раскололась. Западная и Восточная части теперь идут разными путями."
+  triggers_collapse: false,   // если true — веха завершает сценарный период: событие типа Collapse
+                              // и переход Scenario → Consequences. on_collapse актора НЕ вызывается —
+                              // раскол живой державы не реализован (docs/investigation_triggers_collapse.md)
+  llm_context_shift: "Сплочённость империи рухнула. Запад и Восток всё ещё одна держава, но держатся вместе лишь по инерции."
 }
 ```
 
@@ -395,7 +397,7 @@ Milestone events проверяются на шаге 6 порядка опер�
 При срабатывании:
 - Записывается is_key событие в хранилище
 - LLM получает llm_context_shift в следующем промпте
-- Если triggers_collapse — запускается on_collapse актора
+- Если triggers_collapse — режим игры переходит в Consequences; on_collapse актора **не вызывается** (см. docs/investigation_triggers_collapse.md §5–6: буквальная реализация измеримо ухудшает мир, раскол живой державы — отдельная задача (A₃))
 - Симуляция продолжается
 
 **Что сценарий НЕ определяет:**
