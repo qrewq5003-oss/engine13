@@ -235,6 +235,23 @@ pub fn calculate_interactions(
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
 ) {
+    // NOT FOR MERGE — stage-1 measuring device: E13_REGEN=<rate> lets every actor's
+    // military_size recover toward its scenario start value by `rate` of the deficit
+    // per tick (the "limiter" the flow-without-limiter class lacks). No RNG.
+    if let Ok(r) = std::env::var("E13_REGEN") {
+        if let Ok(rate) = r.parse::<f64>() {
+            let mut ids: Vec<String> = world.actors.keys().cloned().collect();
+            ids.sort();
+            for id in ids {
+                let target = scenario.actors.iter().find(|a| a.id == id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+                if let Some(a) = world.actors.get_mut(&id) {
+                    let cur = a.get_metric("military_size");
+                    if cur < target { a.set_metric("military_size", cur + (target - cur) * rate); }
+                }
+            }
+        }
+    }
+
     let current_tick = world.tick;
     let current_year = world.year;
 
@@ -454,14 +471,34 @@ fn calculate_military_interaction(
     let cohesion_loss = 10.0 + rng.gen::<f64>() * 10.0;  // 10-20
     let pressure_gain = 15.0 + rng.gen::<f64>() * 10.0;  // 15-25
 
+    // NOT FOR MERGE — stage-1 measuring device of the combat-loss-model task.
+    // E13_LOSS_MODEL selects the loss FORM; the four RNG draws above are made
+    // unconditionally so every variant consumes the identical random sequence.
+    //   v0 (unset) — as is: each side loses a share of its OWN army;
+    //   v1 — ratio-scaled: the stronger side's share is scaled by (weaker/stronger);
+    //   v2 — exchange: each side loses a share of the ENEMY's army (capped at own).
+    let model = std::env::var("E13_LOSS_MODEL").unwrap_or_default();
+    let att_mil0 = world.actors.get(&attacker_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+    let def_mil0 = world.actors.get(&defender_id).map(|a| a.get_metric("military_size")).unwrap_or(0.0);
+    let (att_new, def_new) = match model.as_str() {
+        "v1" => {
+            let ratio = if att_mil0 > 0.0 { (def_mil0 / att_mil0).min(1.0) } else { 1.0 };
+            let ratio_d = if def_mil0 > 0.0 { (att_mil0 / def_mil0).min(1.0) } else { 1.0 };
+            (att_mil0 * (1.0 - attacker_loss * ratio), def_mil0 * (1.0 - defender_loss * ratio_d))
+        }
+        "v2" => (
+            (att_mil0 - attacker_loss * def_mil0).max(0.0),
+            (def_mil0 - defender_loss * att_mil0).max(0.0),
+        ),
+        _ => (att_mil0 * (1.0 - attacker_loss), def_mil0 * (1.0 - defender_loss)),
+    };
+
     if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
-        let mil = attacker_actor.get_metric("military_size");
-        attacker_actor.set_metric("military_size", mil * (1.0 - attacker_loss));
+        attacker_actor.set_metric("military_size", att_new);
     }
 
     if let Some(defender_actor) = world.actors.get_mut(&defender_id) {
-        let mil = defender_actor.get_metric("military_size");
-        defender_actor.set_metric("military_size", mil * (1.0 - defender_loss));
+        defender_actor.set_metric("military_size", def_new);
         let coh = defender_actor.get_metric("cohesion");
         defender_actor.set_metric("cohesion", (coh - cohesion_loss).max(0.0));
         defender_actor.add_metric("external_pressure", pressure_gain);
