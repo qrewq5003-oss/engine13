@@ -139,6 +139,15 @@ fn main() {
             [own(1), own(2), own(1) || rev(1), own(2) || rev(2), heir]
         };
 
+        // Protagonist trajectory every 10 ticks (combat-loss-model task).
+        if t % 10 == 0 {
+            for pid in ["rome", "byzantium", "milan", "ottomans", "alamanni", "visigoths"] {
+                if let Some(a) = world.actors.get(pid) {
+                    println!("TRAJ\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}", scenario_id, seed, t, pid,
+                        a.get_metric("military_size"), a.get_metric("cohesion"), a.get_metric("legitimacy"), a.get_metric("external_pressure"));
+                }
+            }
+        }
         // Living actors: update last-seen lists, then evaluate.
         let mut snapshot: Vec<Snap> = Vec::new();
         for (aid, a) in &world.actors {
