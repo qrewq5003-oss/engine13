@@ -235,6 +235,31 @@ pub fn calculate_interactions(
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
 ) {
+    // NOT FOR MERGE — stage-1 measuring device of the military-source task.
+    // E13_SRC=<k>:<a>:<rate> gives `military_size` a source: a capacity derived
+    // from the actor's own population, `capacity = k * pop^a`, recovered toward at
+    // `rate` of the deficit per tick. k and a are DERIVED (least squares over the
+    // 37 authored actors of the three scenarios), not swept. No RNG is drawn, and
+    // actors are visited in id order, so the sequence the engine sees is unchanged.
+    if let Ok(spec) = std::env::var("E13_SRC") {
+        let parts: Vec<f64> = spec.split(':').filter_map(|x| x.parse().ok()).collect();
+        if parts.len() == 3 {
+            let (k, a, rate) = (parts[0], parts[1], parts[2]);
+            let mut ids: Vec<String> = world.actors.keys().cloned().collect();
+            ids.sort();
+            for id in ids {
+                if let Some(actor) = world.actors.get_mut(&id) {
+                    let pop = actor.get_metric("population").max(0.0);
+                    let capacity = k * pop.powf(a);
+                    let cur = actor.get_metric("military_size");
+                    if cur < capacity {
+                        actor.set_metric("military_size", cur + (capacity - cur) * rate);
+                    }
+                }
+            }
+        }
+    }
+
     let current_tick = world.tick;
     let current_year = world.year;
 
