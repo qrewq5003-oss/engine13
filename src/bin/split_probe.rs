@@ -77,7 +77,30 @@ fn main() {
     let variant = args.get(4).map(|s| s.as_str()).unwrap_or("none");
     assert!(["none", "split", "split_link", "shrink_formula", "shrink_keep"].contains(&variant), "variant must be none|split|split_link|shrink_formula|shrink_keep");
 
-    let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    let mut scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    // Threshold sweep for the `rome_splits` calibration check: E13_SPLIT_T / E13_SPLIT_D
+    // override the value and duration of the `triggers_collapse` milestone's condition.
+    // Done here rather than in the engine — the probe already owns the scenario object,
+    // so no engine code is touched and no RNG draw moves.
+    {
+        let t: Option<f64> = std::env::var("E13_SPLIT_T").ok().and_then(|v| v.parse().ok());
+        let d: Option<u32> = std::env::var("E13_SPLIT_D").ok().and_then(|v| v.parse().ok());
+        if t.is_some() || d.is_some() {
+            for m in scenario.milestone_events.iter_mut().filter(|m| m.triggers_collapse) {
+                if let Some(d) = d {
+                    m.condition.duration = Some(d);
+                }
+                if let Some(t) = t {
+                    if let engine13::core::EventConditionType::Metric { value, .. } =
+                        &mut m.condition.condition_type
+                    {
+                        *value = t;
+                    }
+                }
+            }
+        }
+    }
+    let scenario = scenario;
     let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
