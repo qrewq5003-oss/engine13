@@ -116,6 +116,22 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Check the seat marker. At most one heir per actor may keep the seat, and the
+    // marker only means anything when there is something to split off — a lone heir
+    // that keeps the seat would shrink its parent and bear nobody.
+    for actor in &scenario.actors {
+        let seats = actor.on_collapse.iter().filter(|h| h.keeps_seat).count();
+        if seats > 1 {
+            errors.push(format!("actor '{}': {} heirs claim keeps_seat, at most one may", actor.id, seats));
+        }
+        if seats == 1 && actor.on_collapse.len() < 2 {
+            errors.push(format!(
+                "actor '{}': keeps_seat on a lone heir — nothing would separate",
+                actor.id
+            ));
+        }
+    }
+
     // Check dependency thresholds. Centralized here so every scenario routed
     // through `load_by_id` is checked even if it omits a per-scenario
     // `validate_dependencies` call. Metric-name checks (from/to) stay per-scenario
@@ -224,7 +240,7 @@ mod tests {
     fn validate_rejects_unknown_heir() {
         let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
         let savoy = scenario.actors.iter_mut().find(|a| a.id == "savoy").unwrap();
-        savoy.on_collapse = vec![Successor { id: "ghost".to_string(), weight: 1.0 }];
+        savoy.on_collapse = vec![Successor { id: "ghost".to_string(), weight: 1.0, keeps_seat: false }];
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(
             errors.iter().any(|e| e.contains("'savoy'") && e.contains("'ghost'")),
@@ -233,10 +249,29 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_two_seat_keepers_and_a_lone_seat() {
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        {
+            let rome = scenario.actors.iter_mut().find(|a| a.id == "rome").unwrap();
+            rome.on_collapse[1].keeps_seat = true;
+        }
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("keeps_seat") && e.contains("at most one")), "{errors:?}");
+
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        {
+            let visigoths = scenario.actors.iter_mut().find(|a| a.id == "visigoths").unwrap();
+            visigoths.on_collapse[0].keeps_seat = true;
+        }
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("lone heir")), "{errors:?}");
+    }
+
+    #[test]
     fn validate_rejects_self_heir() {
         let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
         let savoy = scenario.actors.iter_mut().find(|a| a.id == "savoy").unwrap();
-        savoy.on_collapse = vec![Successor { id: "savoy".to_string(), weight: 1.0 }];
+        savoy.on_collapse = vec![Successor { id: "savoy".to_string(), weight: 1.0, keeps_seat: false }];
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("names itself")), "{errors:?}");
     }

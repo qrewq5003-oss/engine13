@@ -789,7 +789,7 @@ fn create_savoy() -> Actor {
         // military_size alone decides the Milan-vs-Savoy conflict). Milan is
         // already alive, so this feeds the heir-absorption branch of
         // check_collapses (expansion_count), not a fresh successor template.
-        on_collapse: vec![Successor { id: "milan".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "milan".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.07, lng: 7.69 }),
         is_successor_template: false,

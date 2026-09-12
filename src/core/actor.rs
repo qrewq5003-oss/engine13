@@ -52,6 +52,19 @@ pub enum BorderType {
 pub struct Successor {
     pub id: String,
     pub weight: f64,
+    /// This heir does not get born — it *is* the parent, continued under a new name
+    /// and a reduced share ("split as shrink", docs/investigation_split_as_shrink.md).
+    ///
+    /// Which of two heirs keeps the seat cannot be derived from the content: neither
+    /// `region` (rome `mediterranean` vs heirs `mediterranean_west`/`_east`) nor the
+    /// weights (0.45 / 0.55) carry it, and declaration order is not a statement of
+    /// intent. So it is stated. At most one heir per actor may set it, and only a
+    /// milestone with `triggers_collapse` acts on it — the ordinary death path in
+    /// `check_collapses` ignores the flag entirely.
+    ///
+    /// `#[serde(default)]` so saves written before the field existed still load.
+    #[serde(default)]
+    pub keeps_seat: bool,
 }
 
 /// Actor tag with metrics modifier and spread mechanics

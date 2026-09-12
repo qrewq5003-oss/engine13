@@ -363,7 +363,7 @@ fn create_byzantium() -> Actor {
         // `ottoman_byzantium` had no template and was never created — in 30/30
         // no-player runs and 3/3 scripted-diplomacy runs Byzantium fell to nobody.
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0, keeps_seat: false },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 28.9 }),
@@ -668,7 +668,7 @@ fn create_serbia() -> Actor {
         // had no template. Serbia never dies in the measured runs, so this is
         // declared for completeness of the rule, not for a measured effect.
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0, keeps_seat: false },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 21.0 }),
@@ -711,7 +711,7 @@ fn create_trebizond() -> Actor {
         ],
         // Falls to the Ottomans (absorption); `ottoman_trebizond` had no template.
         on_collapse: vec![
-            Successor { id: "ottomans".to_string(), weight: 1.0 },
+            Successor { id: "ottomans".to_string(), weight: 1.0, keeps_seat: false },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.0, lng: 39.7 }),
