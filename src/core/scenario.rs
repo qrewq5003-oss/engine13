@@ -195,11 +195,23 @@ pub struct NarrativeConfig {
     pub tone_tags: Vec<String>,
     /// Claims the chronicler should NOT make (anti-hallucination guards)
     pub forbidden_claims: Vec<String>,
-    /// Target paragraph count for generation
+    /// Lower bound of the chronicle's paragraph range; the upper bound is
+    /// `paragraph_target + 2`. Read by `generate_narrative_prompt` through
+    /// [`NarrativeConfig::paragraph_range`] — the **only** place the requirement is
+    /// stated, deliberately: it used to be stated four times, twice inside one prompt
+    /// and with different numbers (docs/investigation_paragraph_contract.md).
     pub paragraph_target: u32,
     /// Output length hint for model (e.g., "long-form chronicle", "detailed account")
     pub output_length_hint: String,
 }
+
+impl NarrativeConfig {
+    /// The paragraph requirement as written into the prompt, e.g. `"3–5"`.
+    pub fn paragraph_range(&self) -> String {
+        format!("{}–{}", self.paragraph_target, self.paragraph_target + 2)
+    }
+}
+
 
 /// Main Scenario configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

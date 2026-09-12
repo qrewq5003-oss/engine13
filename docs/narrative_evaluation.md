@@ -18,7 +18,7 @@ For each narrative output, evaluate the following criteria:
 | **Scenario voice**: tone feels appropriate to scenario | | |
 | **Strategy reflection**: player strategy is felt in text | | |
 | **Repetition low vs previous output**: fresh framing | | |
-| **Paragraph quality**: 2-4 substantial paragraphs | | |
+| **Paragraph quality**: within the scenario's `paragraph_target` range (`docs/investigation_paragraph_contract.md`) | | |
 
 ### Scoring Scale
 
@@ -39,7 +39,7 @@ Evaluate each narrative individually:
 2. **No hallucination** — no false collapse/victory/death
 3. **World-first focus** — world state described before actors
 4. **Scenario voice** — tone matches scenario context
-5. **Paragraph quality** — 2-4 substantial paragraphs
+5. **Paragraph quality** — within the scenario's `paragraph_target` range: rome `3–5`, constantinople and milan `4–6`. The requirement lives in `NarrativeConfig` alone (`docs/investigation_paragraph_contract.md`); this document must not restate a number.
 
 ### B. Across-Turn Quality
 
@@ -84,7 +84,7 @@ A good narrative output:
 - ✓ Does not invent events (collapse, victory, death)
 - ✓ Reflects actual player strategy
 - ✓ Does not devolve into journal replay or UI-log
-- ✓ Delivers 2-4 substantial paragraphs
+- ✓ Delivers as many substantial paragraphs as the scenario's `paragraph_target` range asks
 - ✓ Shifts emphasis between adjacent half-years when state has genuinely changed
 - ✓ Uses tone_tags and narrative_axes as felt framing, not just labels
 

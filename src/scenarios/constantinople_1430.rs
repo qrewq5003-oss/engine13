@@ -292,8 +292,10 @@ pub fn load_constantinople_1430() -> Scenario {
                 "Do not mention specific numbers, percentages, or game metrics".to_string(),
                 "Do not claim the Ottomans have won unless the scenario explicitly states so".to_string(),
             ],
-            paragraph_target: 6,
-            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+            paragraph_target: 4,
+            // Число абзацев живёт только в `paragraph_target`; подсказка его больше
+            // не повторяет (docs/investigation_paragraph_contract.md).
+            output_length_hint: "detailed half-year chronicle".to_string(),
         },
         dependencies,
         patron_actions,
@@ -806,7 +808,7 @@ FEDERATION_PROGRESS (0-100):
 Итальянский прагматизм против византийской гордости.
 Хроника охватывает весь регион — переговоры, морские сражения,
 осадные работы, придворные интриги, бегство учёных.
-4-6 абзацев за тик.
+
 
 НЕ ДЕЛАТЬ:
 - Не предрешать падение города
