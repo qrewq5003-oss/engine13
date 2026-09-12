@@ -287,10 +287,10 @@ pub fn load_constantinople_1430() -> Scenario {
                 "tragic grandeur".to_string(),
             ],
             forbidden_claims: vec![
-                "Do not claim Byzantium has fallen unless byzantium is in dead_actors".to_string(),
-                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
-                "Do not mention specific numbers, percentages, or game metrics".to_string(),
-                "Do not claim the Ottomans have won unless the scenario explicitly states so".to_string(),
+                "Не утверждать, что Византия пала, если её нет в списке павших".to_string(),
+                "Не утверждать, что победа достигнута, если состояние мира этого не говорит".to_string(),
+                "Не называть числа, проценты и игровые величины — ни «коэффициент сплочённости», ни «легитимность» как измеряемый показатель, ни английские имена метрик".to_string(),
+                "Не утверждать, что османы победили, если этого не говорит состояние мира".to_string(),
             ],
             paragraph_target: 4,
             // Число абзацев живёт только в `paragraph_target`; подсказка его больше

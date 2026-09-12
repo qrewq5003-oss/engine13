@@ -231,10 +231,10 @@ pub fn load_rome_375() -> Scenario {
                 "intimate family drama".to_string(),
             ],
             forbidden_claims: vec![
-                "Do not claim any actor has died unless they are in dead_actors list".to_string(),
-                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
-                "Do not mention specific numbers, percentages, or game metrics".to_string(),
-                "Do not claim Rome has fallen unless rome is in dead_actors".to_string(),
+                "Не утверждать, что держава погибла, если её нет в списке павших".to_string(),
+                "Не утверждать, что победа достигнута, если состояние мира этого не говорит".to_string(),
+                "Не называть числа, проценты и игровые величины — ни «коэффициент сплочённости», ни «легитимность» как измеряемый показатель, ни английские имена метрик".to_string(),
+                "Не утверждать, что Рим пал, если он не в списке павших".to_string(),
             ],
             paragraph_target: 3,
             // Число абзацев живёт только в `paragraph_target`; подсказка его больше
