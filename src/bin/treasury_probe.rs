@@ -324,7 +324,6 @@ fn run(
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     let priorities = priority_actions(scenario_id, strategy);

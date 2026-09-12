@@ -161,7 +161,6 @@ fn main() {
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     let prio = priority_actions(&scenario_id, &strategy);
@@ -231,7 +230,7 @@ fn main() {
         let ws = state.world_state.as_ref().unwrap();
         let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
         let prompt = engine13::llm::generate_narrative_prompt(
-            &snapshot, &scenario, &db, &state.narrative_memory,
+            &snapshot, &scenario, &db,
         );
 
         if snapshot.victory_achieved && victory_tick.is_none() {
@@ -635,7 +634,6 @@ fn main() {
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         // Непустой запрос как вариант отбора отпал: он делает релевантность нулевой
         // у ВСЕХ событий, а нужный эффект дала правка `thematic_similarity` (§14.4),
