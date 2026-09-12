@@ -240,10 +240,10 @@ pub fn load_milan_1477() -> Scenario {
                 "cynical realism".to_string(),
             ],
             forbidden_claims: vec![
-                "Do not claim Milan has fallen unless milan is in dead_actors".to_string(),
-                "Do not claim victory has been achieved unless victory_achieved is true".to_string(),
-                "Do not mention specific numbers, percentages, or game metrics".to_string(),
-                "Do not claim Italy has been unified unless the scenario explicitly states so".to_string(),
+                "Не утверждать, что Милан пал, если его нет в списке павших".to_string(),
+                "Не утверждать, что победа достигнута, если состояние мира этого не говорит".to_string(),
+                "Не называть числа, проценты и игровые величины — ни «коэффициент сплочённости», ни «легитимность» как измеряемый показатель, ни английские имена метрик".to_string(),
+                "Не утверждать, что Италия объединена, если этого не говорит состояние мира".to_string(),
             ],
             paragraph_target: 4,
             // Число абзацев живёт только в `paragraph_target`; подсказка его больше

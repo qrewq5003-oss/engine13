@@ -853,6 +853,22 @@ pub fn generate_narrative_prompt(
     prompt.push_str("- Будь ярким, но конкретным. Не заполняй объём абстрактной \"исторической\" водой.\n");
     prompt.push_str("- Каждый абзац должен добавлять новый смысл, основанный на snapshot.\n");
     prompt.push_str("- НЕ повторяй одни и те же эмоции или формулировки.\n\n");
+    // The scenario's own prohibitions. They were authored per scenario in
+    // `NarrativeConfig.forbidden_claims` and **nobody read the field** — so the only
+    // prohibitions that ever reached the model were the four about form below, and
+    // nothing forbade stating a death, a victory or a game metric that the world does
+    // not support. Measured on ten real chronicles: six use engine-metric vocabulary,
+    // two unambiguously — one calls cohesion a "коэффициент", another leaves the raw
+    // identifier `cohesion` in Russian prose.
+    // See docs/investigation_forbidden_claims.md.
+    if !scenario.narrative_config.forbidden_claims.is_empty() {
+        prompt.push_str("НЕЛЬЗЯ УТВЕРЖДАТЬ (сверяй с состоянием мира выше):\n");
+        for claim in &scenario.narrative_config.forbidden_claims {
+            prompt.push_str(&format!("- {}\n", claim));
+        }
+        prompt.push('\n');
+    }
+
     prompt.push_str("ЗАПРЕЩЕНО:\n");
     prompt.push_str("- Один короткий абзац.\n");
     prompt.push_str("- Слепленный моноблок без структуры.\n");
