@@ -85,29 +85,30 @@ pub fn apply_player_action(
         applied_effects.insert(metric.to_string(), weighted_effect);
     }
 
-    // Record event — the first foreground actor **in id order**, or a default.
+    // Record event — attributed to the scenario's own player actor.
     //
-    // "First" used to mean "first in `world_state.actors`", and that map's iteration
-    // order is per-instance, so the same action in the same seed was attributed to a
-    // different actor from run to run. The attribution reaches the chronicler: it
-    // decides whether the event counts as belonging to a narrative actor when the
-    // canonical selection picks the five it shows, which is why one rome narrative in
-    // roughly ten carried a different fifth event.
-    // See docs/investigation_event_log_order.md.
+    // It used to be "the first foreground actor", which meant the Huns in rome and
+    // Florence in milan: a hostile steppe confederation and a rival city carrying the
+    // player's deeds. (Before PR #69 "first" also meant "first in the HashMap", so the
+    // attribution moved between runs; sorting made it reproducible but no less
+    // arbitrary.) `scenario.player_actor_id` states the answer and was itself read by
+    // nobody — the fourth authored field found dead in this cycle.
     //
-    // Ordering by id only makes the existing choice reproducible. *Which* actor a
-    // player action should be attributed to — arguably `scenario.player_actor_id`,
-    // which is `Some("rome")` here and `None` in constantinople — is a separate
-    // question, recorded in that write-up and deliberately not decided here.
-    let mut foreground_ids: Vec<&str> = world_state.actors.values()
-        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
-        .map(|a| a.id.as_str())
-        .collect();
-    foreground_ids.sort_unstable();
-    let event_actor = foreground_ids
-        .first()
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    // The attribution is not cosmetic: `db::select_relevant_events` promotes `is_key`
+    // events **of narrative actors** into the chronicler's recent-events block, so it
+    // decided whether a player action was shown as part of some actor's story — and
+    // stopped promoting it once that accidental actor died.
+    //
+    // `None` means the player has no actor in this scenario (constantinople: the
+    // player is the coalition). Then the event belongs to the scenario, the same
+    // literal the mode-change and milestone events use — and it is right that no
+    // actor's story absorbs it. The action still reaches the prompt through its own
+    // "ДЕЙСТВИЯ ИГРОКА" block, which never read the attribution.
+    // See docs/investigation_player_action_attribution.md.
+    let event_actor = scenario
+        .player_actor_id
+        .clone()
+        .unwrap_or_else(|| "scenario".to_string());
 
     // Serialize effects to metadata for action history
     let effects_json = serde_json::to_string(&applied_effects).unwrap_or_default();
@@ -291,4 +292,29 @@ pub fn submit_action(state: &mut AppState, action_input: PlayerActionInput) -> R
         new_state: world_state.clone(),
         error: None,
     })
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use super::*;
+
+    /// A player action belongs to the scenario's own player actor — not to whichever
+    /// foreground actor happens to sort first. Before this rule rome attributed the
+    /// player's deeds to `huns` and milan to `florence`
+    /// (docs/investigation_player_action_attribution.md).
+    #[test]
+    fn player_action_is_attributed_to_the_scenarios_player_actor() {
+        for (id, expected) in [
+            ("rome_375", "rome"),
+            ("milan_1477", "milan"),
+            ("constantinople_1430", "scenario"),
+        ] {
+            let scenario = crate::scenarios::registry::load_by_id(id).expect("scenario");
+            let actor = scenario
+                .player_actor_id
+                .clone()
+                .unwrap_or_else(|| "scenario".to_string());
+            assert_eq!(actor, expected, "{id}");
+        }
+    }
 }
