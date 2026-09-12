@@ -330,8 +330,8 @@ fn create_rome() -> Actor {
             Neighbor { id: "armenia".to_string(), distance: 2, border_type: BorderType::Land },
         ],
         on_collapse: vec![
-            Successor { id: "rome_west".to_string(), weight: 0.45 },
-            Successor { id: "rome_east".to_string(), weight: 0.55 },
+            Successor { id: "rome_west".to_string(), weight: 0.45, keeps_seat: true },
+            Successor { id: "rome_east".to_string(), weight: 0.55, keeps_seat: false },
         ],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 41.9, lng: 12.5 }),
@@ -415,7 +415,7 @@ fn create_visigoths() -> Actor {
             Neighbor { id: "ostrogoths".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "burgundians".to_string(), distance: 2, border_type: BorderType::Land },
         ],
-        on_collapse: vec![Successor { id: "visigoth_kingdom".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "visigoth_kingdom".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 44.0, lng: 25.0 }),
         is_successor_template: false,
@@ -455,7 +455,7 @@ fn create_ostrogoths() -> Actor {
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "rome".to_string(), distance: 3, border_type: BorderType::Land },
         ],
-        on_collapse: vec![Successor { id: "ostrogoth_kingdom".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "ostrogoth_kingdom".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 47.0, lng: 32.0 }),
         is_successor_template: false,
@@ -498,7 +498,7 @@ fn create_sassanids() -> Actor {
             Neighbor { id: "kushans".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "guptas".to_string(), distance: 3, border_type: BorderType::Land },
         ],
-        on_collapse: vec![Successor { id: "late_sassanids".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "late_sassanids".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 33.0, lng: 44.0 }),
         is_successor_template: false,
@@ -537,7 +537,7 @@ fn create_vandals() -> Actor {
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
-        on_collapse: vec![Successor { id: "vandal_kingdom_africa".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "vandal_kingdom_africa".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 45.0, lng: 25.0 }),
         is_successor_template: false,
@@ -615,7 +615,7 @@ fn create_franks() -> Actor {
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
-        on_collapse: vec![Successor { id: "frankish_kingdom".to_string(), weight: 1.0 }],
+        on_collapse: vec![Successor { id: "frankish_kingdom".to_string(), weight: 1.0, keeps_seat: false }],
         actor_tags: HashMap::new(),
         center: Some(crate::core::GeoCoordinate { lat: 50.0, lng: 6.0 }),
         is_successor_template: false,
@@ -1458,14 +1458,12 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             },
             is_key: true,
             triggers_collapse: true,
-            // States what the condition guarantees (cohesion < 30 for five ticks) and
-            // nothing the engine does not do: `triggers_collapse` switches the game
-            // mode and does NOT run `on_collapse`, so the empire stays whole. The old
-            // text ("Империя раскололась…") reached the chronicler in 2815 of 3000
-            // half-years while Rome lived on in every one of them
-            // (docs/investigation_triggers_collapse.md §2). The split itself is
-            // (A₃) there — a separate task.
-            llm_context_shift: "Сплочённость империи рухнула. Запад и Восток всё ещё одна держава, но держатся вместе лишь по инерции.".to_string(),
+            // The split is now real: this milestone shrinks Rome to its western
+            // share and separates the East (`keeps_seat`, docs/investigation_split_as_shrink.md
+            // §11). The wording says exactly that and nothing more — between
+            // 2026-09-11 and this change it deliberately claimed no split, because
+            // the engine performed none (docs/investigation_triggers_collapse.md §2).
+            llm_context_shift: "Империя разделилась. Запад удержал прежнюю столицу и меньшую половину, Восток пошёл своим путём.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
         },
