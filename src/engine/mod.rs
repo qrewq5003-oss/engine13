@@ -554,11 +554,21 @@ fn phase_era_progression(world: &mut WorldState, scenario: &Scenario, event_log:
         // Skip ancient (starting era)
         if era_def.era == crate::core::Era::Ancient { continue; }
 
-        for actor in world.actors.values_mut() {
+        // Sorted: the event log must not inherit `world.actors`' per-instance hash order.
+        // A shuffled log changes which events tie at the cut-off of the chronicler's
+        // "last five", so one narrative run in roughly ten showed a different fifth
+        // event for the same seed. None of the appending phases draws RNG, so ordering
+        // them changes the log and nothing else.
+        // See docs/investigation_event_log_order.md.
+        let mut era_ids: Vec<String> = world.actors.keys().cloned().collect();
+        era_ids.sort();
+        let (tick_now, year_now) = (world.tick, world.year);
+        for era_actor_id in &era_ids {
+            let Some(actor) = world.actors.get_mut(era_actor_id) else { continue };
             // Skip if already at or past this era
             if actor.era >= era_def.era { continue; }
             // Skip if tick too early
-            if world.tick < era_def.min_tick { continue; }
+            if tick_now < era_def.min_tick { continue; }
 
             // Count matching tags
             let matching = actor.tags.iter()
@@ -571,8 +581,8 @@ fn phase_era_progression(world: &mut WorldState, scenario: &Scenario, event_log:
 
                 let event = Event::new(
                     format!("era_{}_{}", actor.id, format!("{:?}", era_def.era).to_lowercase()),
-                    world.tick,
-                    world.year,
+                    tick_now,
+                    year_now,
                     actor.id.clone(),
                     crate::core::EventType::Milestone,
                     true,
@@ -742,7 +752,14 @@ fn check_threshold_effects(
     let current_tick = world.tick;
     let current_year = world.year;
 
-    for actor in world.actors.values() {
+    // Sorted: the event log must not inherit `world.actors`' per-instance hash order —
+    // a shuffled log changes which events tie at the cut-off of the chronicler's "last
+    // five". None of the appending phases draws RNG, so this changes the log and nothing
+    // else. See docs/investigation_event_log_order.md.
+    let mut threshold_ids: Vec<String> = world.actors.keys().cloned().collect();
+    threshold_ids.sort();
+    for threshold_id in &threshold_ids {
+        let Some(actor) = world.actors.get(threshold_id) else { continue };
         // cohesion < 25 → any legitimacy fall is doubled
         if actor.get_metric("cohesion") < 25.0 {
             // This is handled in the dependency graph step
@@ -1236,15 +1253,24 @@ fn check_relevance_thresholds(
         .sum::<f64>() / world.actors.len().max(1) as f64;
 
     // Get list of narrative actor IDs for contact check (collect as owned Strings to avoid borrow issues)
-    let narrative_actor_ids: Vec<String> = world.actors.iter()
+    let mut narrative_actor_ids: Vec<String> = world.actors.iter()
         .filter(|(_, a)| a.narrative_status == crate::core::NarrativeStatus::Foreground)
         .map(|(id, _)| id.clone())
         .collect();
+    narrative_actor_ids.sort();
+
+    // Sorted: the event log must not inherit `world.actors`' per-instance hash order —
+    // a shuffled log changes which events tie at the cut-off of the chronicler's "last
+    // five". None of the appending phases draws RNG, so this changes the log and nothing
+    // else. See docs/investigation_event_log_order.md.
+    let mut relevance_ids: Vec<String> = world.actors.keys().cloned().collect();
+    relevance_ids.sort();
 
     // Check each background actor for potential promotion to foreground
     let mut to_promote: Vec<String> = Vec::new();
 
-    for (actor_id, actor) in &world.actors {
+    for actor_id in &relevance_ids {
+        let Some(actor) = world.actors.get(actor_id) else { continue };
         if actor.narrative_status != crate::core::NarrativeStatus::Background {
             continue; // Already foreground
         }
@@ -1313,7 +1339,8 @@ fn check_relevance_thresholds(
     // Check foreground actors for potential demotion to background
     let mut to_demote: Vec<String> = Vec::new();
 
-    for (actor_id, actor) in &world.actors {
+    for actor_id in &relevance_ids {
+        let Some(actor) = world.actors.get(actor_id) else { continue };
         if actor.narrative_status != crate::core::NarrativeStatus::Foreground {
             continue; // Already background
         }
@@ -1916,7 +1943,14 @@ fn record_metric_changes(
     year: i32,
     event_log: &mut EventLog,
 ) {
-    for (actor_id, actor) in &world.actors {
+    // Sorted: the event log must not inherit `world.actors`' per-instance hash order —
+    // a shuffled log changes which events tie at the cut-off of the chronicler's "last
+    // five". None of the appending phases draws RNG, so this changes the log and nothing
+    // else. See docs/investigation_event_log_order.md.
+    let mut record_ids: Vec<String> = world.actors.keys().cloned().collect();
+    record_ids.sort();
+    for actor_id in &record_ids {
+        let Some(actor) = world.actors.get(actor_id) else { continue };
         if let Some(initial) = initial_states.get(actor_id) {
             let changes = calculate_metric_changes(&actor.metrics, initial);
 
@@ -2046,6 +2080,44 @@ mod tests {
             map: None,
             tag_definitions: vec![],
             era_definitions: vec![],
+        }
+    }
+
+    /// Two identical worlds, same seed, **same process**: the event log must come out
+    /// in the same order. `std::collections::HashMap` derives each instance's iteration
+    /// order from a per-instance key, so two worlds built in one process iterate their
+    /// actors differently — which is exactly the shuffle a second process would see.
+    /// That makes this a deterministic probe for a defect that otherwise shows up in
+    /// roughly one narrative run out of ten.
+    #[test]
+    fn event_log_order_is_independent_of_actor_hash_order() {
+        fn run(seed: u64, ticks: u32) -> Vec<String> {
+            let scenario = crate::scenarios::registry::load_by_id("rome_375").expect("scenario");
+            let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
+            for actor in &scenario.actors {
+                if !actor.is_successor_template {
+                    world.actors.insert(actor.id.clone(), actor.clone());
+                }
+            }
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+            for _ in 0..ticks {
+                tick(&mut world, &scenario, &mut log, &mut rng);
+            }
+            log.events.iter().map(|e| format!("{}@{}", e.id, e.tick)).collect()
+        }
+        for (seed, ticks) in [(1u64, 300u32), (2, 300), (42, 300)] {
+            let a = run(seed, ticks);
+            let b = run(seed, ticks);
+            assert_eq!(a.len(), b.len(), "seed {seed}: same seed must produce the same number of events");
+            let first_diff = a.iter().zip(b.iter()).position(|(x, y)| x != y);
+            assert!(
+                first_diff.is_none(),
+                "seed {seed}: event log order differs between two worlds in one process at index {:?}: {:?} vs {:?}",
+                first_diff,
+                first_diff.map(|i| &a[i]),
+                first_diff.map(|i| &b[i])
+            );
         }
     }
 

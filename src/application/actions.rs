@@ -85,10 +85,28 @@ pub fn apply_player_action(
         applied_effects.insert(metric.to_string(), weighted_effect);
     }
 
-    // Record event - use first foreground actor or default
-    let event_actor = world_state.actors.values()
-        .find(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
-        .map(|a| a.id.clone())
+    // Record event — the first foreground actor **in id order**, or a default.
+    //
+    // "First" used to mean "first in `world_state.actors`", and that map's iteration
+    // order is per-instance, so the same action in the same seed was attributed to a
+    // different actor from run to run. The attribution reaches the chronicler: it
+    // decides whether the event counts as belonging to a narrative actor when the
+    // canonical selection picks the five it shows, which is why one rome narrative in
+    // roughly ten carried a different fifth event.
+    // See docs/investigation_event_log_order.md.
+    //
+    // Ordering by id only makes the existing choice reproducible. *Which* actor a
+    // player action should be attributed to — arguably `scenario.player_actor_id`,
+    // which is `Some("rome")` here and `None` in constantinople — is a separate
+    // question, recorded in that write-up and deliberately not decided here.
+    let mut foreground_ids: Vec<&str> = world_state.actors.values()
+        .filter(|a| a.narrative_status == crate::core::NarrativeStatus::Foreground)
+        .map(|a| a.id.as_str())
+        .collect();
+    foreground_ids.sort_unstable();
+    let event_actor = foreground_ids
+        .first()
+        .map(|id| id.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     // Serialize effects to metadata for action history
