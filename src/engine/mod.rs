@@ -1050,6 +1050,96 @@ fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
 
 /// Check and handle game mode transitions
 /// Scenario → Consequences: automatic when milestone with triggers_collapse fires
+/// NOT FOR MERGE — see the call site. Emulates (A₃): the condition actor shrinks to
+/// its share and stays; a single heir is born from its living metrics.
+fn apply_shrink_split(
+    world: &mut WorldState,
+    scenario: &Scenario,
+    milestone: &crate::core::MilestoneEvent,
+    event_log: &mut EventLog,
+) {
+    let actor_id = match &milestone.condition.condition_type {
+        crate::core::EventConditionType::Metric { actor_id, .. } => actor_id.clone(),
+        crate::core::EventConditionType::ActorState { actor_id, .. } => Some(actor_id.clone()),
+        crate::core::EventConditionType::Tick { .. } => None,
+    };
+    let Some(actor_id) = actor_id else { return };
+    let Some(parent) = world.actors.get(&actor_id) else { return };
+    let heirs = parent.on_collapse.clone();
+    if heirs.len() != 2 {
+        return; // only the two-way split is modelled
+    }
+    let parent_metrics = parent.metrics.clone();
+    let parent_name = parent.name.clone();
+    let total: f64 = heirs.iter().map(|h| h.weight).sum();
+    // The heir that keeps the seat is the one whose template id the scenario marks
+    // as a successor template AND whose share is the smaller-numbered entry; here it
+    // is simply the first declared heir.
+    let (stay, born) = (heirs[0].clone(), heirs[1].clone());
+    let share_stay = stay.weight / total;
+    let share_born = born.weight / total;
+
+    let cut = |src: &HashMap<String, f64>, share: f64, trauma: bool| -> HashMap<String, f64> {
+        let g = |k: &str| src.get(k).copied().unwrap_or(0.0);
+        let mut m = src.clone();
+        m.insert("population".into(), g("population") * share);
+        m.insert("military_size".into(), g("military_size") * share * 0.7);
+        m.insert("treasury".into(), g("treasury") * share * 0.5);
+        m.insert("military_quality".into(), g("military_quality") * 0.8);
+        m.insert("economic_output".into(), g("economic_output") * 0.7);
+        if trauma {
+            m.insert("cohesion".into(), 20.0);
+            m.insert("legitimacy".into(), 30.0);
+            m.insert("external_pressure".into(), (g("external_pressure") * 1.3).min(100.0));
+        }
+        m
+    };
+
+    if let Some(tpl) = scenario.actors.iter().find(|a| a.id == stay.id) {
+        let (name, short) = (tpl.name.clone(), tpl.name_short.clone());
+        if let Some(p) = world.actors.get_mut(&actor_id) {
+            p.name = name;
+            p.name_short = short;
+            p.metrics = cut(&parent_metrics, share_stay, true);
+        }
+    }
+    if !world.actors.contains_key(&born.id) && !world.dead_actor_ids.contains(&born.id) {
+        if let Some(tpl) = scenario.actors.iter().find(|a| a.id == born.id) {
+            let mut heir = tpl.clone();
+            heir.metrics = cut(&parent_metrics, share_born, true);
+            crate::core::actor::ensure_default_metrics(&mut heir.metrics);
+            heir.narrative_status = crate::core::NarrativeStatus::Foreground;
+            heir.is_successor_template = false;
+            let edges = heir.neighbors.clone();
+            let heir_name = heir.name.clone();
+            world.actors.insert(born.id.clone(), heir);
+            for edge in &edges {
+                if let Some(other) = world.actors.get_mut(&edge.id) {
+                    if !other.neighbors.iter().any(|n| n.id == born.id) {
+                        other.neighbors.push(crate::core::Neighbor {
+                            id: born.id.clone(),
+                            distance: edge.distance,
+                            border_type: edge.border_type.clone(),
+                        });
+                    }
+                }
+            }
+            event_log.add(
+                Event::new(
+                    format!("birth_{}", born.id),
+                    world.tick,
+                    world.year,
+                    born.id.clone(),
+                    EventType::Birth,
+                    true,
+                    format!("Держава {} отделилась от державы {}", heir_name, parent_name),
+                )
+                .with_tags(vec!["birth".to_string(), born.id.clone()]),
+            );
+        }
+    }
+}
+
 fn check_game_mode_transitions(
     world: &mut WorldState,
     scenario: &Scenario,
@@ -1065,6 +1155,15 @@ fn check_game_mode_transitions(
         if world.milestone_events_fired.contains(&milestone.id) 
             && milestone.triggers_collapse 
         {
+            // NOT FOR MERGE — stage-1 measuring device of (A₃) "split as shrink".
+            // E13_SHRINK=1: the actor the milestone's condition names stays in the
+            // world as the western heir, its metrics cut to its share by the
+            // architecture's split formula; only the other heir is born, from the
+            // LIVING parent's metrics. No RNG is drawn; ids are visited in order.
+            if std::env::var("E13_SHRINK").is_ok() {
+                apply_shrink_split(world, scenario, milestone, event_log);
+            }
+
             // Transition to Consequences mode
             world.game_mode = crate::core::GameMode::Consequences;
             
