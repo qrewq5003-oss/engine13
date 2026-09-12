@@ -201,8 +201,6 @@ pub struct NarrativeConfig {
     /// stated, deliberately: it used to be stated four times, twice inside one prompt
     /// and with different numbers (docs/investigation_paragraph_contract.md).
     pub paragraph_target: u32,
-    /// Output length hint for model (e.g., "long-form chronicle", "detailed account")
-    pub output_length_hint: String,
 }
 
 impl NarrativeConfig {

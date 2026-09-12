@@ -861,3 +861,105 @@ fn consequence_context_states_no_alternatives() {
         }
     }
 }
+
+/// Fields authored in `Scenario` / `NarrativeConfig` must have a reader.
+///
+/// Four authored fields were found dead in a single cycle: the paragraph target and
+/// its length hint, the forbidden-claims list, and the player's own actor id. The
+/// shape is always the same: an author states an intention in content, no code
+/// connects it, and
+/// nothing fails. Rust cannot catch it (the fields are `pub` and are constructed), so
+/// this test reads the crate's own sources and asks, for every declared field, whether
+/// anything outside the declaration and outside the scenario files ever touches it.
+///
+/// It is a **lexical** check and says so: it looks for `.field` in Rust and TypeScript
+/// sources. That is enough for the shape it guards, and the allow-list below carries a
+/// written reason for every field that legitimately has no reader — including one that
+/// is a known live defect rather than an exemption.
+/// See docs/investigation_dead_authored_fields.md.
+#[test]
+fn authored_scenario_fields_have_readers() {
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    // field -> why it may stay unread
+    const ALLOWED: &[(&str, &str)] = &[
+        ("tempo", "serialized shape only: declared in types/index.ts, never read; pacing is fixed at two ticks per year"),
+        ("tick_span", "DEAD, recorded: the engine computes `year = start_year + tick / 2`, so the authored `tick_span: 5` is ignored — docs/investigation_dead_authored_fields.md §3"),
+        ("tick_label", "serialized shape only: the UI writes its own half-year label"),
+        ("features", "LIVE DEFECT, recorded: `WorldState` carries no `features`, so `worldState.features?.…` in App.tsx is always undefined and three panels never render — docs/investigation_dead_authored_fields.md §4"),
+    ];
+
+    fn collect(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect(&p, exts, out);
+            } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| exts.contains(&x)) {
+                out.push(p);
+            }
+        }
+    }
+
+    let decl_path = Path::new("src/core/scenario.rs");
+    let decl_src = std::fs::read_to_string(decl_path).expect("scenario.rs");
+
+    let struct_block = |name: &str| -> (String, Vec<String>) {
+        let head = format!("pub struct {name} {{");
+        let start = decl_src.find(&head).unwrap_or_else(|| panic!("struct {name} not found"));
+        let end = decl_src[start..].find("\n}").expect("struct end") + start + 2;
+        let block = decl_src[start..end].to_string();
+        let fields = block
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split(':').next())
+            .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()))
+            .map(|s| s.to_string())
+            .collect();
+        (block, fields)
+    };
+
+    let mut sources = Vec::new();
+    collect(Path::new("src"), &["rs", "ts", "tsx"], &mut sources);
+    collect(Path::new("src-tauri/src"), &["rs"], &mut sources);
+
+    let mut dead: BTreeSet<String> = BTreeSet::new();
+    for name in ["Scenario", "NarrativeConfig"] {
+        let (block, fields) = struct_block(name);
+        for field in fields {
+            let needle = format!(".{field}");
+            let mut has_reader = false;
+            for path in &sources {
+                let sp = path.to_string_lossy().replace('\\', "/");
+                // scenario files construct the fields; probes are not the product
+                if (sp.starts_with("src/scenarios/") && !sp.ends_with("registry.rs"))
+                    || sp.starts_with("src/bin/")
+                {
+                    continue;
+                }
+                let Ok(mut text) = std::fs::read_to_string(path) else { continue };
+                if sp == "src/core/scenario.rs" {
+                    text = text.replace(&block, "");
+                }
+                if text
+                    .lines()
+                    .filter(|l| !l.trim_start().starts_with("//"))
+                    .any(|l| l.contains(&needle))
+                {
+                    has_reader = true;
+                    break;
+                }
+            }
+            if !has_reader && !ALLOWED.iter().any(|(f, _)| *f == field) {
+                dead.insert(format!("{name}.{field}"));
+            }
+        }
+    }
+
+    assert!(
+        dead.is_empty(),
+        "authored fields with no reader outside content: {dead:?}\n\
+         Either connect them, delete them, or add them to ALLOWED with a written reason."
+    );
+}
