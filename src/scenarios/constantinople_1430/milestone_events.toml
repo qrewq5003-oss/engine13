@@ -162,7 +162,7 @@ color = "#5d4037"
 # Три остальных ключа НЕ дописываются намеренно: `external_pressure` работает только
 # при значении вне шкалы игры, `treasury` имеет практически пустой интервал, а
 # `population` открывает гейт `plague`. Разбор — docs/investigation_spawn_completeness.md.
-initial_metrics = { cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0, military_quality = 50.0 }
+initial_metrics = { population = 250.0, cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0, military_quality = 50.0 }
 
 [[milestone_events]]
 id = "poland_lithuania_intervenes"
@@ -179,7 +179,7 @@ label = "Польша-Литва"
 lat = 52.2
 lng = 21.0
 color = "#bf360c"
-initial_metrics = { cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0, military_quality = 50.0 }
+initial_metrics = { population = 700.0, cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0, military_quality = 50.0 }
 
 [[milestone_events]]
 id = "mamluks_watch"
@@ -199,4 +199,4 @@ label = "Мамлюки"
 lat = 30.0
 lng = 31.2
 color = "#f9a825"
-initial_metrics = { cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0, military_quality = 50.0 }
+initial_metrics = { population = 800.0, cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0, military_quality = 50.0 }
