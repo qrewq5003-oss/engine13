@@ -241,37 +241,6 @@ fn cmd_list_saves_with_slots(
     result
 }
 
-#[tauri::command]
-fn cmd_get_relevant_events(
-    state: State<Mutex<AppState>>,
-    db: State<Mutex<Db>>,
-    actor_ids: Vec<String>,
-) -> Result<Vec<engine13::Event>, String> {
-    eprintln!("[RUST] cmd_get_relevant_events - acquiring lock");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let current_tick = s.world_state.as_ref().map(|ws| ws.tick).unwrap_or(0);
-    
-    // Build query_tags from narrative actors (id, name, region - lowercase, deduplicated)
-    let query_tags: Vec<String> = s.world_state.as_ref()
-        .map(|ws| {
-            use std::collections::HashSet;
-            let mut tags_set: HashSet<String> = HashSet::new();
-            for actor in ws.actors.values() {
-                if actor.narrative_status == engine13::NarrativeStatus::Foreground {
-                    tags_set.insert(actor.id.to_lowercase());
-                    tags_set.insert(actor.name.to_lowercase());
-                    tags_set.insert(actor.region.to_lowercase());
-                }
-            }
-            tags_set.into_iter().collect()
-        })
-        .unwrap_or_default();
-    
-    let result = commands::get_relevant_events(&*db_guard, actor_ids, current_tick, query_tags);
-    eprintln!("[RUST] cmd_get_relevant_events - result: {:?}", result.as_ref().map(|e| e.len()));
-    result
-}
 
 #[tauri::command]
 fn cmd_get_action_history(
@@ -447,7 +416,6 @@ fn main() {
             cmd_load_game,
             cmd_list_saves,
             cmd_list_saves_with_slots,
-            cmd_get_relevant_events,
             cmd_get_action_history,
             cmd_get_tick_explanation,
             cmd_load_scenario,

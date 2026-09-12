@@ -24,7 +24,6 @@ import {
   getActionsWithAvailability,
   advanceTick,
   submitAction,
-  getRelevantEvents,
   getNarrative,
   getScenarioList,
   listSaves,
@@ -33,7 +32,7 @@ import {
   saveGame,
   getStatusIndicators,
 } from './api';
-import type { WorldState, Actor, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, HalfYear, ActionInfo } from './types';
+import type { WorldState, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, HalfYear, ActionInfo } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -170,13 +169,13 @@ const App: React.FC = () => {
           prevWorldStateRef.current = worldState;
         }
         setWorldState(world);
-        // Get recent events for narrative actors
-        const actors = Object.values(world.actors) as Actor[];
-        const narrativeActorIds = actors
-          .filter(a => a.narrative_status === 'foreground')
-          .map(a => a.id);
-        const events = await getRelevantEvents(narrativeActorIds);
-        setRecentEvents(events);
+        // `recentEvents` is deliberately NOT refreshed here. It used to be filled from
+        // `cmd_get_relevant_events`, which scores the `events` table — a table nothing
+        // in the product ever writes (`insert_event` has no caller outside a probe), so
+        // the call always answered with an empty list and, having no length guard,
+        // wiped the real events `advanceTick` had just delivered. The panel showing the
+        // last three events was empty for that reason alone.
+        // See docs/investigation_third_relevance_path.md.
 
         // Get status indicators
         try {
