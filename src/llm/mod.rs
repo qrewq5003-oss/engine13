@@ -829,7 +829,19 @@ pub fn generate_narrative_prompt(
     // Section 9: Output Instructions — World-First, 2-4 Paragraphs
     // ========================================================================
     prompt.push_str("=== ИНСТРУКЦИИ ПО ВЫВОДУ ===\n");
-    prompt.push_str("Напиши хронику этой половины года в формате 2–4 содержательных абзацев.\n\n");
+    // The paragraph count comes from the scenario, not from here.
+    //
+    // It used to be hardcoded while every scenario's own premise text — which reaches
+    // the model in the same prompt, 41 lines above — asked for a different number
+    // ("3–5" in rome, "4–6" in milan and constantinople). The model was handed two
+    // requirements in one message, and two more sat unread in `NarrativeConfig`
+    // (`paragraph_target: 6`, `output_length_hint: "6-8 paragraphs"`): four statements,
+    // two of them live and contradicting each other.
+    // See docs/investigation_paragraph_contract.md.
+    prompt.push_str(&format!(
+        "Напиши хронику этой половины года в формате {} содержательных абзацев.\n\n",
+        scenario.narrative_config.paragraph_range()
+    ));
     prompt.push_str("Предпочтительная структура:\n");
     prompt.push_str("1. Первый абзац — что изменилось в общей картине мира за эту половину года.\n");
     prompt.push_str("2. Второй абзац — что это значит политически / социально / военным образом.\n");

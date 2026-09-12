@@ -236,8 +236,10 @@ pub fn load_rome_375() -> Scenario {
                 "Do not mention specific numbers, percentages, or game metrics".to_string(),
                 "Do not claim Rome has fallen unless rome is in dead_actors".to_string(),
             ],
-            paragraph_target: 6,
-            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+            paragraph_target: 3,
+            // Число абзацев живёт только в `paragraph_target`; подсказка его больше
+            // не повторяет (docs/investigation_paragraph_contract.md).
+            output_length_hint: "detailed half-year chronicle".to_string(),
         },
         dependencies,
         patron_actions,
@@ -1689,7 +1691,7 @@ Patriarch начинает в 42 года. При ~75 — передача вл�
 Поздняя античность. Латынь живая. Христианство новое но уже власть.
 Рим ещё существует — но что-то изменилось, люди это чувствуют.
 Нарратив от третьего лица, через конкретные сцены жизни семьи.
-Имена персонажей латинские. 3–5 абзацев за тик.
+Имена персонажей латинские.
 
 НЕ ДЕЛАТЬ:
 - Не предрешать падение Рима

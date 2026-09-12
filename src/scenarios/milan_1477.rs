@@ -245,8 +245,10 @@ pub fn load_milan_1477() -> Scenario {
                 "Do not mention specific numbers, percentages, or game metrics".to_string(),
                 "Do not claim Italy has been unified unless the scenario explicitly states so".to_string(),
             ],
-            paragraph_target: 6,
-            output_length_hint: "detailed half-year chronicle, 6-8 paragraphs".to_string(),
+            paragraph_target: 4,
+            // Число абзацев живёт только в `paragraph_target`; подсказка его больше
+            // не повторяет (docs/investigation_paragraph_contract.md).
+            output_length_hint: "detailed half-year chronicle".to_string(),
         },
         dependencies,
         patron_actions,
@@ -916,7 +918,7 @@ fn create_llm_context() -> String {
 Деньги важнее меча — но меч всегда под рукой у того, кто платит.
 Хроника охватывает весь регион — переговоры, браки, банковские
 интриги, наём кондотьеров, придворные заговоры.
-4-6 абзацев за тик.
+
 
 НЕ ДЕЛАТЬ:
 - Не предрешать судьбу регентства в Милане
