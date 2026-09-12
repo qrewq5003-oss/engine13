@@ -5,7 +5,6 @@ import type {
   WorldState,
   Actor,
   PatronAction,
-  Event,
   SaveData,
   SaveSlotList,
   ScenarioMeta,
@@ -139,10 +138,6 @@ export async function listSavesWithSlots(scenarioId: string): Promise<SaveSlotLi
 // ============================================================================
 // History Commands
 // ============================================================================
-
-export async function getRelevantEvents(actorIds: string[]): Promise<Event[]> {
-  return invoke<Event[]>('cmd_get_relevant_events', { actorIds });
-}
 
 // ============================================================================
 // Scenario Commands
