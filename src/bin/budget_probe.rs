@@ -1319,7 +1319,6 @@ fn attractor(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         // priced from the loaded scenario, so the decomposition is valid in both worlds
@@ -1640,7 +1639,6 @@ fn popevents(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let pop_rules: Vec<DependencyRule> = state
@@ -1983,7 +1981,6 @@ fn decisive23(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         // Every action-availability gate that reads a `treasury`, taken off the
@@ -2469,7 +2466,6 @@ fn cohevents(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let sc = state.current_scenario.as_ref().unwrap();
@@ -2921,7 +2917,6 @@ fn decisive24(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let sc = state.current_scenario.as_ref().unwrap();
@@ -3463,7 +3458,6 @@ fn spawnwalk(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let sc = state.current_scenario.as_ref().unwrap();
@@ -3854,7 +3848,6 @@ fn decisive25(
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let sc = state.current_scenario.as_ref().unwrap();
@@ -4256,7 +4249,6 @@ fn poolcut(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>,
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc = state.current_scenario.as_ref().unwrap();
         let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
@@ -4715,7 +4707,6 @@ fn evtarget(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let sc = state.current_scenario.as_ref().unwrap();
@@ -5241,7 +5232,6 @@ fn migwalk(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>)
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let mut acc: BTreeMap<String, MigActor> = BTreeMap::new();
@@ -5636,7 +5626,6 @@ fn decisive26(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc = state.current_scenario.as_ref().unwrap();
         let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
@@ -6117,7 +6106,6 @@ fn migvariants(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc = state.current_scenario.as_ref().unwrap();
         let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
@@ -6548,7 +6536,6 @@ fn epratchet(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc = state.current_scenario.as_ref().unwrap();
         let by_id: BTreeMap<String, (engine13::core::RandomEvent, bool)> = pool_of(sc)
@@ -7177,7 +7164,6 @@ fn epvalves(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc_owned = state.current_scenario.as_ref().unwrap().clone();
         let cands = build_ep_candidates(&sc_owned);
@@ -8505,7 +8491,6 @@ fn epnominal(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc_owned = state.current_scenario.as_ref().unwrap().clone();
         let sc_ref = &sc_owned;
@@ -9393,7 +9378,6 @@ fn tagdiff(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>)
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc = state.current_scenario.as_ref().unwrap().clone();
         let tag_ids: Vec<String> = sc.tag_definitions.iter().map(|t| t.id.clone()).collect();
@@ -9834,7 +9818,6 @@ fn tagshadow(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
         let sc_owned = state.current_scenario.as_ref().unwrap().clone();
         let sc_ref = &sc_owned;
@@ -10433,7 +10416,6 @@ fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) 
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         for t in 0..ticks {
@@ -10698,7 +10680,6 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
             event_log: EventLog::new(),
             current_scenario: Some(scenario.clone()),
             rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-            narrative_memory: engine13::llm::NarrativeMemory::default(),
         };
 
         let et = et0.clone();

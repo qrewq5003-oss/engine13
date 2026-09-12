@@ -17,7 +17,7 @@ pub async fn cmd_get_narrative(
 
     let config = llm::get_llm_config();
     // Pass narrative memory for anti-repetition
-    let prompt = llm::generate_narrative_prompt(&snapshot, scenario, db, &state.narrative_memory);
+    let prompt = llm::generate_narrative_prompt(&snapshot, scenario, db);
 
     // Generate placeholder narrative for when LLM is unavailable
     let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);

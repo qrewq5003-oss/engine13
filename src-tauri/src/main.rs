@@ -309,7 +309,7 @@ async fn cmd_get_narrative(
         let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
         
         // Generate prompt using snapshot and narrative memory
-        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard, &s.narrative_memory);
+        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard);
         let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
         let config = engine13::llm::get_llm_config();
         let year = snapshot.year;

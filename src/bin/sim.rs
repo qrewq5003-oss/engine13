@@ -214,7 +214,6 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
@@ -264,7 +263,6 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
             &snapshot,
             &scenario,
             &db,
-            &state.narrative_memory,
         );
 
         let narrative_text = if live {
@@ -583,7 +581,6 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
@@ -623,7 +620,6 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
             &snapshot,
             &scenario,
             &db,
-            &state.narrative_memory,
         );
 
         // Key metrics: the scenario's own declared narrative metrics, resolved at
@@ -1443,7 +1439,6 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     // ========================================================================

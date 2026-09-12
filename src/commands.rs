@@ -15,9 +15,6 @@ pub struct AppState {
     pub event_log: EventLog,
     pub current_scenario: Option<Scenario>,
     pub rng: Option<rand_chacha::ChaCha8Rng>,
-    /// Narrative memory for anti-repetition across turns
-    /// This does NOT affect simulation logic - only used for prompt generation
-    pub narrative_memory: crate::llm::NarrativeMemory,
 }
 
 impl Default for AppState {
@@ -27,7 +24,6 @@ impl Default for AppState {
             event_log: EventLog::new(),
             current_scenario: None,
             rng: None,
-            narrative_memory: crate::llm::NarrativeMemory::default(),
         }
     }
 }

@@ -99,7 +99,6 @@ fn main() {
         event_log: EventLog::new(),
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED)),
-        narrative_memory: engine13::llm::NarrativeMemory::default(),
     };
 
     // The value the engine tests, reached the way the engine reaches it.
