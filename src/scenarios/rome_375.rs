@@ -1454,7 +1454,22 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
                     operator: ComparisonOperator::Less,
                     value: 30.0,
                 },
-                duration: Some(5),
+                // Ten years of broken cohesion, not two and a half. `duration = 5`
+                // fired on a *temporary* dip: 9 of 27 no-player runs split the empire
+                // within a decade, and 3 of 10 played runs switched out of the scenario
+                // period before 385 — before the player has played "Rome 375" at all.
+                //
+                // The threshold is deliberately NOT touched: a sweep of 15
+                // combinations showed it is not the lever. Coverage is 27/30 for every
+                // pair and the median firing tick stays in 79…100 while the threshold
+                // moves from 35 to 15 — because once rome's cohesion falls below 30 it
+                // stays there for a median of 216 ticks, so any level is eventually
+                // crossed and only the trajectory decides when. Duration separates a
+                // temporary dip from a durable collapse, and since the real collapse
+                // lasts four times the decade required, the tightening costs no
+                // coverage at all (27/30 at both values).
+                // See docs/investigation_rome_splits_threshold.md §2–§5.
+                duration: Some(20),
             },
             is_key: true,
             triggers_collapse: true,
