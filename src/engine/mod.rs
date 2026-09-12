@@ -258,6 +258,12 @@ pub fn tick(
     phase_region_ranks(world, scenario);
 
     // Phase 3: Dependency graph and interactions
+    // Step 3b: mobilisation recovery — armies regrow toward the capacity their
+    // population supports, before this tick's fighting. Placed here, immediately
+    // ahead of the interaction phase, because that is where it was measured; moving
+    // it changes the numbers in docs/investigation_military_source.md §4.
+    phase_military_recovery(world);
+
     phase_interactions(world, scenario, event_log, rng);
 
     // Phase 3: Random events
@@ -375,6 +381,10 @@ fn phase_region_ranks(world: &mut WorldState, scenario: &Scenario) {
 // ============================================================================
 // Phase 3: Dependency graph and interactions
 // ============================================================================
+
+fn phase_military_recovery(world: &mut WorldState) {
+    interactions::apply_military_recovery(world);
+}
 
 fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
     // Apply dependency rules from scenario
@@ -2319,6 +2329,55 @@ mod tests {
 
         assert!(neighbor_ids(&world, "heir").is_empty());
         assert_eq!(neighbor_ids(&world, "huns"), ["parent"]);
+    }
+
+    // ------------------------------------------------------------------
+    // Mobilisation capacity and recovery (docs/investigation_military_source.md)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn army_recovers_toward_capacity_but_never_above_it() {
+        use crate::engine::interactions::{military_capacity, MILITARY_RECOVERY_RATE};
+        let mut world = WorldState::new("test".into(), 375);
+        // pop 8000 -> capacity 0.767 * 8000^(2/3) = 306.8 (rome's authored army is 350)
+        let mut spent = vassalage_actor("spent", 2.0, 30.0, 60.0, 60.0, &[]);
+        spent.set_metric("population", 8000.0);
+        let capacity = military_capacity(&spent);
+        assert!((capacity - 306.8).abs() < 0.5, "capacity {capacity}");
+        world.actors.insert("spent".into(), spent);
+
+        // An actor already above capacity keeps its army untouched.
+        let mut over = vassalage_actor("over", 350.0, 30.0, 60.0, 60.0, &[]);
+        over.set_metric("population", 8000.0);
+        world.actors.insert("over".into(), over);
+
+        // No population, no recruits.
+        let mut empty = vassalage_actor("empty", 0.0, 30.0, 60.0, 60.0, &[]);
+        empty.set_metric("population", 0.0);
+        world.actors.insert("empty".into(), empty);
+
+        interactions::apply_military_recovery(&mut world);
+
+        let expected = 2.0 + (capacity - 2.0) * MILITARY_RECOVERY_RATE;
+        assert!((world.actors["spent"].get_metric("military_size") - expected).abs() < 1e-9);
+        assert_eq!(world.actors["over"].get_metric("military_size"), 350.0, "above capacity is left alone");
+        assert_eq!(world.actors["empty"].get_metric("military_size"), 0.0, "no population, no recovery");
+    }
+
+    #[test]
+    fn recovery_converges_to_capacity_and_stops() {
+        use crate::engine::interactions::military_capacity;
+        let mut world = WorldState::new("test".into(), 375);
+        let mut a = vassalage_actor("a", 0.0, 30.0, 60.0, 60.0, &[]);
+        a.set_metric("population", 250.0);
+        let capacity = military_capacity(&a);
+        world.actors.insert("a".into(), a);
+        for _ in 0..400 {
+            interactions::apply_military_recovery(&mut world);
+        }
+        let mil = world.actors["a"].get_metric("military_size");
+        assert!(mil <= capacity, "never exceeds capacity: {mil} > {capacity}");
+        assert!((mil - capacity).abs() < 1e-6, "converges: {mil} vs {capacity}");
     }
 
     #[test]

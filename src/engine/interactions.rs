@@ -99,6 +99,63 @@ pub fn affinity(a: &crate::core::Actor, b: &crate::core::Actor) -> f64 {
 /// investigation measured (81–95% of all fights).
 pub const MIN_DEFENSIBLE_MILITARY: f64 = 0.01;
 
+/// Mobilisation capacity and recovery — the source `military_size` never had.
+///
+/// Until this, exactly one engine site wrote `military_size` (the combat function
+/// below) and it only ever subtracted, from both sides; the sole structural inflow
+/// in the whole project was one ottoman `auto_delta` (+0.5/tick), while the
+/// `external_pressure → military_size` dependency drains 0.5/tick from every actor
+/// at saturated pressure. Armies were a one-way ratchet down: a quarter of all
+/// living actor-ticks in rome and constantinople were spent by powers with no army,
+/// no legitimacy and saturated pressure, alive only because nobody could reach them.
+/// See docs/investigation_combat_loss_model.md.
+///
+/// `capacity = K * population^EXPONENT` is not a guess. Least squares through the
+/// origin over all 37 authored actors of the three scenarios: population with a
+/// sublinear exponent reproduces the authored military balance (R² = 0.925, median
+/// error 13.2 %, 26 of 37 actors within 25 %), while `economic_output` does not
+/// (R² = 0.027 — it is clamped to 0..100 and saturates, so it cannot tell Rome from
+/// Urbino) and neither does `treasury` (R² = 0.63). An exponent sweep puts the
+/// optimum at 0.66, so 2/3 is the rounded optimum rather than a fitted knob.
+///
+/// `RECOVERY_RATE` comes from the engine's own combat constants, not from taste:
+/// with a 5-tick cooldown per pair and a mean defender loss of 22.5 %, the steady
+/// state of an actor under constant attack from one neighbour solves
+/// `(1 - rate)^5 = (C - m) / (C - 0.775 m)`. Holding half of capacity on one front
+/// gives 0.040, 55 % gives 0.047. 0.05 is that statement, rounded — the deliberate
+/// conservative end: at 0.10 (three quarters) the world becomes markedly softer
+/// (visigoths fall in 1 run of 30 instead of 15). See
+/// docs/investigation_military_source.md §3, §7.
+pub const MILITARY_CAPACITY_K: f64 = 0.767;
+pub const MILITARY_CAPACITY_EXPONENT: f64 = 2.0 / 3.0;
+pub const MILITARY_RECOVERY_RATE: f64 = 0.05;
+
+/// Mobilisation capacity of an actor: what it could put in the field, not what it has.
+pub fn military_capacity(actor: &crate::core::Actor) -> f64 {
+    MILITARY_CAPACITY_K * actor.get_metric("population").max(0.0).powf(MILITARY_CAPACITY_EXPONENT)
+}
+
+/// Recover every actor's army toward its mobilisation capacity. Never above it, so a
+/// power that lost its population cannot re-raise the army it used to have — the
+/// capacity is read from the world, never from the scenario template (that read is
+/// the defect class PR #47 removed from successor entry).
+///
+/// Actors are visited in id order and no RNG is drawn, so the random sequence the
+/// rest of the tick sees is unchanged.
+pub fn apply_military_recovery(world: &mut WorldState) {
+    let mut ids: Vec<String> = world.actors.keys().cloned().collect();
+    ids.sort();
+    for id in ids {
+        if let Some(actor) = world.actors.get_mut(&id) {
+            let capacity = military_capacity(actor);
+            let current = actor.get_metric("military_size");
+            if current < capacity {
+                actor.set_metric("military_size", current + (capacity - current) * MILITARY_RECOVERY_RATE);
+            }
+        }
+    }
+}
+
 /// Effective military strength accounting for force projection through neighbors
 pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
     let active_neighbors = neighbors.len().max(1);
