@@ -237,9 +237,6 @@ pub fn load_rome_375() -> Scenario {
                 "Не утверждать, что Рим пал, если он не в списке павших".to_string(),
             ],
             paragraph_target: 3,
-            // Число абзацев живёт только в `paragraph_target`; подсказка его больше
-            // не повторяет (docs/investigation_paragraph_contract.md).
-            output_length_hint: "detailed half-year chronicle".to_string(),
         },
         dependencies,
         patron_actions,

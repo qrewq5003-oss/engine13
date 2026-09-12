@@ -293,9 +293,6 @@ pub fn load_constantinople_1430() -> Scenario {
                 "Не утверждать, что османы победили, если этого не говорит состояние мира".to_string(),
             ],
             paragraph_target: 4,
-            // Число абзацев живёт только в `paragraph_target`; подсказка его больше
-            // не повторяет (docs/investigation_paragraph_contract.md).
-            output_length_hint: "detailed half-year chronicle".to_string(),
         },
         dependencies,
         patron_actions,
