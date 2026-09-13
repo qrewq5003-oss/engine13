@@ -1799,8 +1799,17 @@ fn check_collapses(
                     })
                     .unwrap_or(false)
         });
+        // NOT FOR MERGE — counterfactual for the mortality coupling found in stage 2 of
+        // docs/investigation_pressure_military_form.md. `E13_CONQ_SHARE=<x>` replaces the
+        // absolute "cannot fight" threshold with a share of the actor's own mobilisation
+        // capacity, on this clause only (the combat guard and the besieged clause keep
+        // the absolute test). Unset = authored behaviour, byte-identical.
+        let conquest_floor = match std::env::var("E13_CONQ_SHARE").ok().and_then(|v| v.parse::<f64>().ok()) {
+            Some(share) => share * crate::engine::interactions::military_capacity(actor),
+            None => crate::engine::interactions::MIN_DEFENSIBLE_MILITARY,
+        };
         let conquest_collapse =
-            actor.get_metric("military_size") < crate::engine::interactions::MIN_DEFENSIBLE_MILITARY
+            actor.get_metric("military_size") < conquest_floor
             && actor.get_metric("legitimacy") < 10.0
             && actor.get_metric("external_pressure") > 85.0
             && besieged;
