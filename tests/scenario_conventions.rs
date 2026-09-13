@@ -887,7 +887,7 @@ fn authored_scenario_fields_have_readers() {
         ("tempo", "serialized shape only: declared in types/index.ts, never read; pacing is fixed at two ticks per year"),
         ("tick_span", "DEAD, recorded: the engine computes `year = start_year + tick / 2`, so the authored `tick_span: 5` is ignored — docs/investigation_dead_authored_fields.md §3"),
         ("tick_label", "serialized shape only: the UI writes its own half-year label"),
-        ("features", "LIVE DEFECT, recorded: `WorldState` carries no `features`, so `worldState.features?.…` in App.tsx is always undefined and three panels never render — docs/investigation_dead_authored_fields.md §4"),
+        ("features", "read off `WorldState`, which now carries a copy taken from the scenario at load — docs/investigation_world_features.md"),
     ];
 
     fn collect(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
@@ -961,5 +961,73 @@ fn authored_scenario_fields_have_readers() {
         dead.is_empty(),
         "authored fields with no reader outside content: {dead:?}\n\
          Either connect them, delete them, or add them to ALLOWED with a written reason."
+    );
+}
+
+/// Every property the frontend's `WorldState` type promises must exist on the Rust
+/// `WorldState` that the backend actually sends.
+///
+/// This locks the hole the field guard above admits it cannot see: a field that **is**
+/// read, just not off the object that carries it. `Scenario.features` was authored in
+/// all three scenarios and read in `App.tsx` as `worldState.features?.…`, while the
+/// Rust `WorldState` had no such field — so the expression was always `undefined` and
+/// the family panel in rome, the global-metrics panel in constantinople and the action
+/// history never rendered. Nothing failed: `tsc` was satisfied by the TypeScript
+/// interface, which promised a property the backend never sent.
+///
+/// Only one direction is checked. A Rust field the frontend does not know about is
+/// fine; a TypeScript property with no Rust field behind it is a lie in the type.
+/// See docs/investigation_world_features.md.
+#[test]
+fn frontend_world_state_type_matches_the_rust_struct() {
+    use std::collections::BTreeSet;
+
+    fn braced_block<'a>(src: &'a str, header: &str) -> &'a str {
+        let start = src.find(header).unwrap_or_else(|| panic!("{header} not found"));
+        let open = src[start..].find('{').expect("opening brace") + start + 1;
+        let mut depth = 1usize;
+        for (i, c) in src[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &src[open..open + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unbalanced braces after {header}");
+    }
+
+    let ts = std::fs::read_to_string("src/types/index.ts").expect("types/index.ts");
+    let rs = std::fs::read_to_string("src/core/world.rs").expect("core/world.rs");
+
+    let ts_props: BTreeSet<String> = braced_block(&ts, "interface WorldState")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("*") && !l.starts_with("/*"))
+        .filter_map(|l| l.split(':').next())
+        .map(|n| n.trim_end_matches('?').trim().to_string())
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .collect();
+
+    let rs_fields: BTreeSet<String> = braced_block(&rs, "pub struct WorldState")
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("pub "))
+        .filter_map(|l| l.split(':').next())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+        .collect();
+
+    assert!(!ts_props.is_empty() && !rs_fields.is_empty(), "parsing produced nothing: {ts_props:?} / {rs_fields:?}");
+
+    let promised_but_absent: Vec<&String> = ts_props.difference(&rs_fields).collect();
+    assert!(
+        promised_but_absent.is_empty(),
+        "the frontend's WorldState type promises properties the backend never sends: {promised_but_absent:?}\n\
+         Either add them to the Rust struct (and fill them) or drop them from the TypeScript type."
     );
 }
