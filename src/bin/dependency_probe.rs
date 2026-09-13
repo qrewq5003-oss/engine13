@@ -36,7 +36,7 @@ const BOUNDED_0_100: [&str; 5] = [
 /// every actor. `treasury` is clamped at neither end.
 const UNBOUNDED: [&str; 3] = ["military_size", "population", "treasury"];
 
-fn quantiles(v: &mut Vec<f64>) -> (f64, f64, f64, f64, f64) {
+fn quantiles(v: &mut [f64]) -> (f64, f64, f64, f64, f64) {
     if v.is_empty() {
         return (f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN);
     }
