@@ -150,6 +150,24 @@ pub struct WorldState {
     pub family_state: Option<FamilyState>,
     /// Global metrics display configuration (from scenario)
     pub global_metrics_display: Vec<crate::core::MetricDisplay>,
+    /// Scenario feature flags, copied here at load for the same reason
+    /// `global_metrics_display` is: the frontend reads the world state, not the
+    /// scenario. `App.tsx` gates three panels on `worldState.features?.…`, and until
+    /// this field existed that expression was always `undefined` — the family panel in
+    /// rome, the global-metrics panel in constantinople and the action history never
+    /// rendered. See docs/investigation_world_features.md.
+    ///
+    /// `#[serde(default)]` so saves written before the field existed still load; they
+    /// come back with every flag `false` until the scenario is loaded over them.
+    #[serde(default)]
+    pub features: crate::core::ScenarioFeatures,
+    /// Per-tick action budget, copied from the scenario for the same reason.
+    /// `ControlPanel.tsx` reads `worldState.actions_per_tick` to disable the action
+    /// control at the limit and to render the "used / allowed" counter; while the
+    /// field did not exist, `undefined > 0` was false, so the counter never appeared
+    /// and the limit never showed — the backend refused the action instead.
+    #[serde(default)]
+    pub actions_per_tick: u32,
     /// Generation mechanics (from scenario, for family scenarios)
     pub generation_mechanics: Option<crate::core::GenerationMechanics>,
     /// Tag spread cooldowns - key: "tag_{id}_{sorted_pair}", value: last tick
@@ -202,6 +220,8 @@ impl WorldState {
             victory_sustained_ticks: 0,
             family_state: None,
             global_metrics_display: vec![],
+            features: crate::core::ScenarioFeatures::default(),
+            actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             cultural_displacement_progress: HashMap::new(),
@@ -244,6 +264,8 @@ impl WorldState {
             victory_sustained_ticks: 0,
             family_state: None,
             global_metrics_display: vec![],
+            features: crate::core::ScenarioFeatures::default(),
+            actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             cultural_displacement_progress: HashMap::new(),

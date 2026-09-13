@@ -98,6 +98,13 @@ pub fn load_game(
         .ok_or_else(|| format!("Unknown scenario: {}", scenario_id))?;
     world_state.year = scenario.start_year as i32 + (world_state.tick / 2) as i32;
 
+    // Scenario-derived view data is re-taken from the scenario, not from the save:
+    // a save written before these fields existed carries defaults, and the scenario is
+    // the authority for them anyway (docs/investigation_world_features.md).
+    world_state.features = scenario.features.clone();
+    world_state.global_metrics_display = scenario.global_metrics_display.clone();
+    world_state.actions_per_tick = scenario.actions_per_tick;
+
     // Initialize RNG from world state seed
     // NOTE: RNG sequence restarts from seed after load, not from exact saved position.
     // This is an accepted limitation — save/load does not guarantee identical continuation.
@@ -155,6 +162,11 @@ pub fn load_scenario(
 
     // Set global_metrics_display from scenario
     world_state.global_metrics_display = scenario.global_metrics_display.clone();
+
+    // Feature flags travel with the world for the same reason: the frontend never sees
+    // the scenario (docs/investigation_world_features.md).
+    world_state.features = scenario.features.clone();
+    world_state.actions_per_tick = scenario.actions_per_tick;
 
     // Set generation_mechanics from scenario
     world_state.generation_mechanics = scenario.generation_mechanics.clone();
