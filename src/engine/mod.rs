@@ -38,11 +38,13 @@ pub fn validate_dependency_thresholds(rules: &[DependencyRule]) -> Result<(), Ve
         // other mode accepts as an ordinary comparison point — would be a silent
         // infinity here. Rejected at load rather than guarded in the hot path, so the
         // hot path keeps exactly one branch per mode.
-        if matches!(rule.mode, DependencyMode::DeficitProportional)
-            && matches!(rule.threshold, Some(t) if t <= 0.0)
+        if matches!(
+            rule.mode,
+            DependencyMode::DeficitProportional | DependencyMode::ExcessProportional
+        ) && matches!(rule.threshold, Some(t) if t <= 0.0)
         {
             errors.push(format!(
-                "dependency rule '{}': mode DeficitProportional requires threshold > 0 (got {:?})",
+                "dependency rule '{}': proportional mode requires threshold > 0 (got {:?})",
                 rule.id, rule.threshold
             ));
         }
@@ -91,10 +93,48 @@ pub fn validate_dependencies(
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// NOT FOR MERGE — measuring instrument for the investigation into the *form* of
+// the `external_pressure → military_size` dependency.
+//
+// A thread-local sink, off by default. When it is `None` the whole cost is one
+// thread-local read per rule application: no allocation, no RNG draw, no state
+// change, so simulation output stays byte-identical with the sink disabled. It
+// records what the engine actually applied, at the moment it applied it, which
+// is the only way to see the mid-tick values (the dependency phase runs inside
+// `phase_interactions`, after auto-deltas, region ranks and military recovery,
+// so a tick-boundary snapshot is NOT what the rules see).
+// ---------------------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct DepTraceRow {
+    pub tick: u32,
+    pub actor: String,
+    pub rule: String,
+    pub from_val: f64,
+    pub to_before: f64,
+    pub delta: f64,
+}
+
+thread_local! {
+    pub static DEP_TRACE: std::cell::RefCell<Option<Vec<DepTraceRow>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Start recording. Rows accumulate until `dep_trace_take`.
+pub fn dep_trace_enable() {
+    DEP_TRACE.with(|t| *t.borrow_mut() = Some(Vec::new()));
+}
+
+/// Drain everything recorded so far, leaving recording on.
+pub fn dep_trace_take() -> Vec<DepTraceRow> {
+    DEP_TRACE.with(|t| t.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+}
+
 /// Apply a single dependency rule to an actor
 /// Sequential mutation semantics - each rule reads the current state
 /// of the actor (already modified by previous rules).
-fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
+fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32) {
     let from_val = actor.get_metric(rule.from.as_str());
     // Non-Linear modes require `threshold`. `validate_dependency_thresholds` runs
     // centrally at load (`load_by_id` -> `validate_scenario`) for every scenario,
@@ -137,7 +177,30 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
             }
             _ => 0.0,
         },
+        // NOT FOR MERGE — see `DependencyMode::ExcessProportional`.
+        DependencyMode::ExcessProportional => match rule.threshold {
+            Some(threshold) if threshold > 0.0 && from_val > threshold => {
+                -(actor.get_metric(rule.to.as_str()) * rule.coefficient
+                    * (from_val - threshold)
+                    / threshold)
+            }
+            _ => 0.0,
+        },
     };
+    // NOT FOR MERGE — see `DEP_TRACE`. Rows are recorded even when `delta == 0.0`,
+    // so the share of actor-ticks on which a rule fires at all is measurable.
+    DEP_TRACE.with(|t| {
+        if let Some(rows) = t.borrow_mut().as_mut() {
+            rows.push(DepTraceRow {
+                tick,
+                actor: actor.id.clone(),
+                rule: rule.id.clone(),
+                from_val,
+                to_before: actor.get_metric(rule.to.as_str()),
+                delta,
+            });
+        }
+    });
     if delta != 0.0 {
         actor.add_metric(rule.to.as_str(), delta);
     }
@@ -146,9 +209,10 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
 /// Phase: Apply dependency rules to all actors
 /// Rules are applied in strict file order - order is part of simulation logic.
 fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
+    let tick = world.tick;
     for actor in world.actors.values_mut() {
         for rule in &scenario.dependencies {
-            apply_dependency_rule(actor, rule);
+            apply_dependency_rule(actor, rule, tick);
         }
     }
 }

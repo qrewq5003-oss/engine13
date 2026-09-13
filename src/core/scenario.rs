@@ -43,6 +43,19 @@ pub enum DependencyMode {
     /// Requires `threshold > 0` (it is the normalizer) — enforced at load by
     /// `engine::validate_dependency_thresholds`.
     DeficitProportional,
+    /// NOT FOR MERGE (investigation into the *form* of `external_pressure →
+    /// military_size`). Mirror of [`DependencyMode::DeficitProportional`] for the
+    /// `Excess` side: penalty when `from > threshold`, sized as a share of the
+    /// target's own stock rather than as an absolute amount.
+    ///
+    /// ```text
+    /// delta = -to * coefficient * (from - threshold) / threshold
+    /// ```
+    ///
+    /// No authored rule selects it, so adding the variant changes nothing the
+    /// engine does; it exists so the probe can rewrite one rule's mode and measure
+    /// the candidate instead of arguing about it.
+    ExcessProportional,
 }
 
 /// Dependency rule configuration

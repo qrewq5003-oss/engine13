@@ -26,6 +26,51 @@ use engine13::{
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
+/// NOT FOR MERGE — the same counterfactual switches `dependency_probe` carries, so a
+/// ratified gate (scripted victories) can be re-measured under an altered dependency
+/// rule without touching authored content. Empty environment = authored scenario,
+/// byte-identical.
+fn apply_dep_overrides(scenario: &mut engine13::core::Scenario) {
+    use std::collections::BTreeMap;
+    let mut coefs: BTreeMap<String, f64> = BTreeMap::new();
+    if let Ok(v) = std::env::var("E13_DEP_OFF") {
+        for id in v.split(',').filter(|s| !s.is_empty()) {
+            coefs.insert(id.to_string(), 0.0);
+        }
+    }
+    if let Ok(v) = std::env::var("E13_DEP_COEF") {
+        for pair in v.split(',').filter(|s| !s.is_empty()) {
+            let (id, val) = pair.split_once(':').expect("E13_DEP_COEF wants rule_id:value");
+            coefs.insert(id.to_string(), val.parse().expect("bad coefficient"));
+        }
+    }
+    let mut modes: BTreeMap<String, String> = BTreeMap::new();
+    if let Ok(v) = std::env::var("E13_DEP_MODE") {
+        for pair in v.split(',').filter(|s| !s.is_empty()) {
+            let (id, m) = pair.split_once(':').expect("E13_DEP_MODE wants rule_id:mode");
+            modes.insert(id.to_string(), m.to_string());
+        }
+    }
+    if coefs.is_empty() && modes.is_empty() {
+        return;
+    }
+    for rule in scenario.dependencies.iter_mut() {
+        if let Some(c) = coefs.get(&rule.id) {
+            rule.coefficient = *c;
+        }
+        if let Some(m) = modes.get(&rule.id) {
+            rule.mode = match m.as_str() {
+                "excess" => engine13::core::DependencyMode::Excess,
+                "excess_proportional" => engine13::core::DependencyMode::ExcessProportional,
+                "deficit" => engine13::core::DependencyMode::Deficit,
+                "deficit_proportional" => engine13::core::DependencyMode::DeficitProportional,
+                other => panic!("unknown mode {other}"),
+            };
+        }
+    }
+    eprintln!("[NOT FOR MERGE] dependency overrides applied: coefs={coefs:?} modes={modes:?}");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let scenario_id = args.get(1).map(|s| s.as_str()).unwrap_or("constantinople_1430");
@@ -64,8 +109,9 @@ fn main() {
 }
 
 fn run_single(scenario_id: &str, ticks: u32, seed: u64) {
-    let scenario = registry::load_by_id(scenario_id)
+    let mut scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
+    apply_dep_overrides(&mut scenario);
 
     let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
 
@@ -175,7 +221,8 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
     use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
-    let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    let mut scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    apply_dep_overrides(&mut scenario);
 
     println!("Running narrative evaluation mode");
     println!(
@@ -501,7 +548,8 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
     use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
-    let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    let mut scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
+    apply_dep_overrides(&mut scenario);
 
     // ------------------------------------------------------------------
     // Bound. Derived from measurement, not inherited.
@@ -1016,8 +1064,9 @@ fn run_batch(scenario_id: &str, ticks: u32) {
     println!("Running batch mode: 100 runs with seeds 0-99");
     println!();
 
-    let scenario = registry::load_by_id(scenario_id)
+    let mut scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
+    apply_dep_overrides(&mut scenario);
 
     // Scenario-specific batch stats
     let mut collapses: Vec<u32> = vec![];
@@ -1403,8 +1452,9 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
     println!("Running scripted mode with {} strategy (seed {})", strategy.name(), seed);
     println!();
 
-    let scenario = registry::load_by_id(scenario_id)
+    let mut scenario = registry::load_by_id(scenario_id)
         .expect("Unknown scenario");
+    apply_dep_overrides(&mut scenario);
 
     let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
 
