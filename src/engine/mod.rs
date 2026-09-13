@@ -38,12 +38,14 @@ pub fn validate_dependency_thresholds(rules: &[DependencyRule]) -> Result<(), Ve
         // other mode accepts as an ordinary comparison point — would be a silent
         // infinity here. Rejected at load rather than guarded in the hot path, so the
         // hot path keeps exactly one branch per mode.
-        if matches!(rule.mode, DependencyMode::DeficitProportional)
-            && matches!(rule.threshold, Some(t) if t <= 0.0)
+        if matches!(
+            rule.mode,
+            DependencyMode::DeficitProportional | DependencyMode::ExcessProportional
+        ) && matches!(rule.threshold, Some(t) if t <= 0.0)
         {
             errors.push(format!(
-                "dependency rule '{}': mode DeficitProportional requires threshold > 0 (got {:?})",
-                rule.id, rule.threshold
+                "dependency rule '{}': mode {:?} requires threshold > 0 (got {:?})",
+                rule.id, rule.mode, rule.threshold
             ));
         }
     }
@@ -133,6 +135,16 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
             Some(threshold) if threshold > 0.0 && from_val < threshold => {
                 -(actor.get_metric(rule.to.as_str()) * rule.coefficient
                     * (threshold - from_val)
+                    / threshold)
+            }
+            _ => 0.0,
+        },
+        // The `Excess` mirror of the arm above, priced on the target's stock for the
+        // same reason — see `DependencyMode::ExcessProportional`.
+        DependencyMode::ExcessProportional => match rule.threshold {
+            Some(threshold) if threshold > 0.0 && from_val > threshold => {
+                -(actor.get_metric(rule.to.as_str()) * rule.coefficient
+                    * (from_val - threshold)
                     / threshold)
             }
             _ => 0.0,
@@ -2536,6 +2548,73 @@ mod tests {
     // ------------------------------------------------------------------
     // Mobilisation capacity and recovery (docs/investigation_military_source.md)
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Dependency form (docs/investigation_pressure_military_form.md)
+    // ------------------------------------------------------------------
+
+    /// The property the mode exists for: a penalty priced on the target's own stock
+    /// costs the same *share* at every scale, where an absolute one costs the same
+    /// *amount*. Two armies 100x apart, same pressure.
+    ///
+    /// The `Excess` half of the assertion is not decoration — it is the measured
+    /// defect: the flat 0.5 is 0.5 % of the large army and 50 % of the small one.
+    #[test]
+    fn excess_proportional_charges_one_share_where_excess_charges_one_amount() {
+        use crate::core::{DependencyMode, DependencyRule, MetricName};
+        let rule = |mode: DependencyMode| DependencyRule {
+            id: "ep_to_mil".to_string(),
+            from: MetricName::new("external_pressure").unwrap(),
+            to: MetricName::new("military_size").unwrap(),
+            coefficient: 0.01,
+            threshold: Some(50.0),
+            mode,
+        };
+
+        // Saturated pressure, the case that holds on 84-98 % of actor-ticks.
+        let mut big = vassalage_actor("big", 100.0, 100.0, 60.0, 60.0, &[]);
+        let mut small = vassalage_actor("small", 1.0, 100.0, 60.0, 60.0, &[]);
+        apply_dependency_rule(&mut big, &rule(DependencyMode::Excess));
+        apply_dependency_rule(&mut small, &rule(DependencyMode::Excess));
+        assert!((big.get_metric("military_size") - 99.5).abs() < 1e-9);
+        assert!((small.get_metric("military_size") - 0.5).abs() < 1e-9, "half the small army");
+
+        let mut big = vassalage_actor("big", 100.0, 100.0, 60.0, 60.0, &[]);
+        let mut small = vassalage_actor("small", 1.0, 100.0, 60.0, 60.0, &[]);
+        apply_dependency_rule(&mut big, &rule(DependencyMode::ExcessProportional));
+        apply_dependency_rule(&mut small, &rule(DependencyMode::ExcessProportional));
+        assert!((big.get_metric("military_size") - 99.0).abs() < 1e-9);
+        assert!((small.get_metric("military_size") - 0.99).abs() < 1e-9, "same 1 %");
+
+        // Below the threshold the rule is silent, exactly as `Excess` is.
+        let mut calm = vassalage_actor("calm", 100.0, 50.0, 60.0, 60.0, &[]);
+        apply_dependency_rule(&mut calm, &rule(DependencyMode::ExcessProportional));
+        assert_eq!(calm.get_metric("military_size"), 100.0, "no excess, no penalty");
+    }
+
+    /// For `coefficient < 1` the target can never be driven to zero or below in one
+    /// tick at any scale. This is the structural floor the absolute form did not have:
+    /// a flat 0.5 against an army of 0.2 is a clamp to zero, and three such ticks are
+    /// a `conquest_collapse`.
+    #[test]
+    fn excess_proportional_cannot_zero_an_army_in_one_tick() {
+        use crate::core::{DependencyMode, DependencyRule, MetricName};
+        let rule = DependencyRule {
+            id: "ep_to_mil".to_string(),
+            from: MetricName::new("external_pressure").unwrap(),
+            to: MetricName::new("military_size").unwrap(),
+            coefficient: 0.01,
+            threshold: Some(50.0),
+            mode: DependencyMode::ExcessProportional,
+        };
+        for army in [1000.0, 10.0, 0.2, 0.001] {
+            let mut a = vassalage_actor("a", army, 100.0, 60.0, 60.0, &[]);
+            apply_dependency_rule(&mut a, &rule);
+            let left = a.get_metric("military_size");
+            assert!(left > 0.0, "army {army} was zeroed in one tick, left {left}");
+            assert!((left / army - 0.99).abs() < 1e-9, "army {army}: share must not depend on scale");
+        }
+    }
 
     #[test]
     fn army_recovers_toward_capacity_but_never_above_it() {

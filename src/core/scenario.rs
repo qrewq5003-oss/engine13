@@ -43,6 +43,39 @@ pub enum DependencyMode {
     /// Requires `threshold > 0` (it is the normalizer) — enforced at load by
     /// `engine::validate_dependency_thresholds`.
     DeficitProportional,
+    /// Penalty when from > threshold, sized as a *share of the target's own stock*:
+    ///
+    /// ```text
+    /// delta = -to * coefficient * (from - threshold) / threshold
+    /// ```
+    ///
+    /// The `Excess` mirror of [`DependencyMode::DeficitProportional`], and it exists
+    /// for the same measured reason. `external_pressure_to_military_size` charged a
+    /// flat `0.01 * (ep - 50)` — exactly `0.5` per tick for everyone once pressure
+    /// saturates, which it does on 84–98 % of actor-ticks. Against armies that span
+    /// two orders of magnitude that one number cost `eastern_jin` 0.23 % of its army
+    /// per tick and `mantua` 208 % of its army per tick: the relative price varied
+    /// 190x in rome, 124x in constantinople and 234x in milan.
+    ///
+    /// The consequence was structural, not cosmetic. With mobilisation recovery
+    /// (`interactions::apply_military_recovery`) an actor settles where inflow meets
+    /// outflow, `(C - m) * rate = d`, i.e. `m* = C - d/rate`. A flat `d = 0.5` against
+    /// `rate = 0.05` puts that floor at `C - 10`, so every actor whose capacity was
+    /// under 10 — population under 47 — had its army pinned at zero permanently.
+    ///
+    /// Priced on the target's stock the equilibrium becomes `f = 1/(1 + coefficient/rate)`,
+    /// the same fraction of capacity for everyone, and `coefficient` reads as the share
+    /// of the standing army lost per tick at saturated pressure.
+    ///
+    /// **Not selected by any authored rule.** Measurement showed the uniformity that
+    /// removes the price asymmetry also removes the engine's conquest mortality: an
+    /// army that decays proportionally never reaches `MIN_DEFENSIBLE_MILITARY`, and
+    /// `conquest_collapse` stops firing at all. See
+    /// `docs/investigation_pressure_military_form.md` §13.
+    ///
+    /// Requires `threshold > 0` (it is the normalizer) — enforced at load by
+    /// `engine::validate_dependency_thresholds`.
+    ExcessProportional,
 }
 
 /// Dependency rule configuration

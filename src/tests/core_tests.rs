@@ -917,6 +917,39 @@ fn test_validate_dependencies_missing_threshold_is_load_error() {
     }
 }
 
+/// Both proportional modes divide by `threshold`, so `Some(0.0)` — which every other
+/// mode accepts as an ordinary comparison point — would be a silent infinity in the
+/// per-tick hot path. It is rejected at load instead of guarded there.
+#[test]
+fn test_validate_dependencies_proportional_modes_require_positive_threshold() {
+    use crate::core::DependencyMode;
+    let metrics = ["legitimacy", "cohesion"];
+    for mode in [
+        DependencyMode::DeficitProportional,
+        DependencyMode::ExcessProportional,
+    ] {
+        for bad in [Some(0.0), Some(-5.0)] {
+            let rules = vec![dep_rule("bad_rule", mode.clone(), bad)];
+            let errors = crate::engine::validate_dependencies(&rules, &metrics)
+                .expect_err("a non-positive normalizer must be a load error");
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("bad_rule") && e.contains("threshold > 0")),
+                "error should name the rule and the requirement, got: {errors:?}"
+            );
+        }
+        assert!(
+            crate::engine::validate_dependencies(
+                &[dep_rule("good_rule", mode.clone(), Some(50.0))],
+                &metrics
+            )
+            .is_ok(),
+            "a positive normalizer is valid"
+        );
+    }
+}
+
 #[test]
 fn test_validate_dependencies_valid_rules_ok() {
     use crate::core::DependencyMode;

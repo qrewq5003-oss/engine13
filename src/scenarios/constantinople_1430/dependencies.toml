@@ -58,13 +58,22 @@ coefficient = 0.02
 threshold = 50.0
 mode = "excess"
 
+# Форма выведена измерением, не вкусом. `excess` заряжал ровно 0.5 армии за тик
+# одинаково всем, потому что `external_pressure` насыщается: та же величина стоила
+# `eastern_jin` 0.23 % армии, а `mantua` — 208 % от неё. Разброс цены по акторам
+# составлял 190x / 124x / 234x в трёх сценариях, а с источником армии из PR #62 это
+# давало структурный порог: население ниже 47 означало армию, приколоченную к нулю
+# навсегда. `coefficient` не менялся — он лишь стал читаться иначе: не «0.01 за
+# единицу давления сверх порога», а «1 % армии за полугодие при насыщенном давлении»,
+# что даёт всем одинаковое равновесие 0.833 ёмкости.
+# Разбор — docs/investigation_pressure_military_form.md.
 [[dependencies]]
 id = "external_pressure_to_military_size"
 from = "external_pressure"
 to = "military_size"
 coefficient = 0.01
 threshold = 50.0
-mode = "excess"
+mode = "excess_proportional"
 
 [[dependencies]]
 id = "economic_output_to_treasury"

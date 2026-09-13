@@ -2359,6 +2359,20 @@ fn price_dep_metric(
                 }
                 _ => 0.0,
             },
+            // Mirrors the engine's `ExcessProportional`. That this arm had to be
+            // hand-written here — twice — is a finding in its own right: this file keeps
+            // two independent copies of `engine::apply_dependency_rule`, and only the
+            // compiler noticed when the engine grew a mode. See
+            // docs/investigation_pressure_military_form.md §10 п. 1.
+            DependencyMode::ExcessProportional => match rule.threshold {
+                Some(t) if t > 0.0 && from_val > t => {
+                    -(m.get(rule.to.as_str()).copied().unwrap_or(0.0)
+                        * rule.coefficient
+                        * (from_val - t)
+                        / t)
+                }
+                _ => 0.0,
+            },
         };
         if delta != 0.0 {
             let cur = m.get(rule.to.as_str()).copied().unwrap_or(0.0);
@@ -3690,6 +3704,20 @@ fn apply_deps_in_place(rules: &[DependencyRule], m: &mut std::collections::HashM
                     -(m.get(rule.to.as_str()).copied().unwrap_or(0.0)
                         * rule.coefficient
                         * (t - from_val)
+                        / t)
+                }
+                _ => 0.0,
+            },
+            // Mirrors the engine's `ExcessProportional`. That this arm had to be
+            // hand-written here — twice — is a finding in its own right: this file keeps
+            // two independent copies of `engine::apply_dependency_rule`, and only the
+            // compiler noticed when the engine grew a mode. See
+            // docs/investigation_pressure_military_form.md §10 п. 1.
+            DependencyMode::ExcessProportional => match rule.threshold {
+                Some(t) if t > 0.0 && from_val > t => {
+                    -(m.get(rule.to.as_str()).copied().unwrap_or(0.0)
+                        * rule.coefficient
+                        * (from_val - t)
                         / t)
                 }
                 _ => 0.0,
