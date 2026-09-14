@@ -1569,6 +1569,14 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
 
     println!("=== SCRIPTED SIMULATION: {} ===", strategy.name().to_uppercase());
 
+    // NOT FOR MERGE — extremes of every milestone gate metric, sampled in the PLAYED
+    // world. The no-player census says which content never fires; this says what the
+    // player's own actions do to the gate that was supposed to open.
+    let mut gate_seen: std::collections::BTreeMap<(String, String), (f64, f64)> =
+        std::collections::BTreeMap::new();
+    let mut gate_run: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut gate_now: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+
     for tick_num in 0..ticks {
         // Capture before values
         let fed_before = state.world_state.as_ref().unwrap()
@@ -1675,6 +1683,38 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
         let scenario_ref = state.current_scenario.as_ref().unwrap();
         let rng = state.rng.as_mut().unwrap();
         tick(world_state, scenario_ref, &mut state.event_log, rng);
+
+        {
+            let w = state.world_state.as_ref().unwrap();
+            let sc = state.current_scenario.as_ref().unwrap();
+            for m in &sc.milestone_events {
+                let engine13::core::EventConditionType::Metric { metric, operator, value, .. } =
+                    &m.condition.condition_type
+                else {
+                    continue;
+                };
+                let engine13::core::MetricRef::Actor { actor_id, metric: bare } = metric else {
+                    continue;
+                };
+                if let Some(a) = w.actors.get(actor_id.as_str()) {
+                    let v = a.get_metric(bare.as_str());
+                    let e = gate_seen
+                        .entry((actor_id.to_string(), bare.as_str().to_string()))
+                        .or_insert((f64::MAX, f64::MIN));
+                    e.0 = e.0.min(v);
+                    e.1 = e.1.max(v);
+                    let r = gate_now.entry(m.id.clone()).or_insert(0);
+                    if operator.evaluate(v, *value) {
+                        *r += 1;
+                        let b = gate_run.entry(m.id.clone()).or_insert(0);
+                        if *r > *b { *b = *r; }
+                    } else {
+                        *r = 0;
+                    }
+                }
+            }
+        }
+
 
         // Print tick summary - Rome-specific vs Constantinople-specific
         if scenario_id == "rome_375" {
@@ -1864,6 +1904,26 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
             .collect();
         never_ev.sort_unstable();
         never_ev.dedup();
+        for m in &scenario.milestone_events {
+            if fired.contains(m.id.as_str()) {
+                continue;
+            }
+            if let engine13::core::EventConditionType::Metric { metric, operator, value, .. } =
+                &m.condition.condition_type
+            {
+                if let engine13::core::MetricRef::Actor { actor_id, metric: bare } = metric {
+                    let k = (actor_id.to_string(), bare.as_str().to_string());
+                    if let Some((lo, hi)) = gate_seen.get(&k) {
+                        let dur = m.condition.duration.unwrap_or(1);
+                        let run = gate_run.get(&m.id).copied().unwrap_or(0);
+                        println!(
+                            "[NOT FOR MERGE]   gate of {}: {}.{} {:?} {} for {} | observed {:.2} .. {:.2} | longest run {}",
+                            m.id, actor_id, bare.as_str(), operator, value, dur, lo, hi, run
+                        );
+                    }
+                }
+            }
+        }
         println!("[NOT FOR MERGE] random events that did NOT fire in this run: {}",
             if never_ev.is_empty() { "(none)".to_string() } else { never_ev.join(", ") });
     }
