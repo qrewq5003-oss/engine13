@@ -245,10 +245,19 @@ fn main() {
                 }
             }
 
-            // Spawn-gate metrics, sampled at the same tick boundary. NOTE: the engine
-            // evaluates milestones inside the tick (`phase_events`), so this sample is
-            // one phase later than the engine's; for reachability over 300 ticks the
-            // difference is immaterial, for an exact duration replay it would not be.
+            // Spawn-gate metrics, sampled at the tick boundary. The engine evaluates
+            // milestones inside the tick (`phase_events`), so this sample is later than
+            // the engine's read. What makes that safe is the DIRECTION of what lies
+            // between them, not its size: the only metric writer reachable from
+            // `phase_events` is `apply_milestone_effects`, and it only LOWERS
+            // `ottomans.cohesion` (by 10 — larger than the 7.97 margin of the mamluks
+            // finding, so "the difference is small" was the wrong argument). Because the
+            // write goes down, this sample is a LOWER bound on what the engine saw, and
+            // "the gate was never crossed" only gets stronger. That set of writers is
+            // pinned by `phase_events_world_writers_are_the_expected_set`.
+            //
+            // Independently: the `entered N/30` column is the engine's own decision, not
+            // an inference from these samples, so it does not depend on any of this.
             for m in &scenario.milestone_events {
                 let Some(spawn) = &m.spawn_actor else { continue };
                 let engine13::core::EventConditionType::Metric { metric, .. } = &m.condition.condition_type
