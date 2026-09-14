@@ -1835,6 +1835,38 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
             println!("  - {}: {}", action_id, count);
         }
     }
+
+    // NOT FOR MERGE — which authored gated objects fired in THIS played run. The
+    // no-player census (dependency_probe Part 7) cannot see content whose gate only a
+    // player can open, and three of the five never-firing milestones gate on the
+    // protagonist's legitimacy, which player actions raise.
+    {
+        use std::collections::BTreeSet;
+        let fired: BTreeSet<&str> = state.event_log.events.iter().map(|e| e.id.as_str()).collect();
+        let mut never: Vec<&str> = scenario
+            .milestone_events
+            .iter()
+            .map(|m| m.id.as_str())
+            .filter(|id| !fired.contains(id))
+            .collect();
+        never.sort_unstable();
+        println!("\n[NOT FOR MERGE] milestones that did NOT fire in this run: {}",
+            if never.is_empty() { "(none)".to_string() } else { never.join(", ") });
+        let pool: Vec<String> = engine13::events::common_events()
+            .into_iter()
+            .map(|e| e.id)
+            .chain(scenario.random_events.iter().map(|e| e.id.clone()))
+            .collect();
+        let mut never_ev: Vec<&str> = pool
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|id| !fired.contains(id))
+            .collect();
+        never_ev.sort_unstable();
+        never_ev.dedup();
+        println!("[NOT FOR MERGE] random events that did NOT fire in this run: {}",
+            if never_ev.is_empty() { "(none)".to_string() } else { never_ev.join(", ") });
+    }
 }
 
 #[derive(Default)]

@@ -174,6 +174,12 @@ fn main() {
     // length exists anywhere. So the longest run is measured too, per milestone, using
     // the engine's own `ComparisonOperator::evaluate` rather than a re-implementation.
     let mut gate_longest_run: BTreeMap<String, u32> = BTreeMap::new();
+    // Part 7: does every authored gated object ever fire? Milestones and random events
+    // both put their own authored id into the event log, so the log is the census: an id
+    // that never appears is content that was written, validated, shipped — and never
+    // reached a single player. Counted per seed, so "fires in 1 of 30" is visible as
+    // distinct from "never".
+    let mut fired_seeds: BTreeMap<String, usize> = BTreeMap::new();
     // Two different questions, and they gave different answers on the first run:
     // "did it ever enter the world" is not "was it alive at the end".
     let mut spawned_seeds: BTreeMap<String, usize> = BTreeMap::new();
@@ -203,6 +209,7 @@ fn main() {
 
         let start_ids: Vec<String> = world.actors.keys().cloned().collect();
         let mut ever_seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut fired_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut run_now: BTreeMap<String, u32> = BTreeMap::new();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
@@ -211,6 +218,9 @@ fn main() {
         for _ in 0..ticks {
             tick(&mut world, &scenario, &mut event_log, &mut rng);
             let rows: Vec<DepTraceRow> = dep_trace_take();
+            for e in &event_log.events {
+                fired_ids.insert(e.id.clone());
+            }
             for row in rows {
                 let e = fired_by_rule.entry(row.rule.clone()).or_insert((0, 0));
                 e.1 += 1;
@@ -259,7 +269,6 @@ fn main() {
             // Independently: the `entered N/30` column is the engine's own decision, not
             // an inference from these samples, so it does not depend on any of this.
             for m in &scenario.milestone_events {
-                let Some(spawn) = &m.spawn_actor else { continue };
                 let engine13::core::EventConditionType::Metric { metric, .. } = &m.condition.condition_type
                 else {
                     continue;
@@ -270,7 +279,6 @@ fn main() {
                     }
                     _ => continue,
                 };
-                let _ = &spawn.actor_id;
                 if let Some(a) = world.actors.get(&gate_actor) {
                     let v = a.get_metric(&bare);
                     let e = gate_extremes
@@ -315,6 +323,9 @@ fn main() {
                     z.0 += 1;
                 }
             }
+        }
+        for id in &fired_ids {
+            *fired_seeds.entry(id.clone()).or_default() += 1;
         }
         for m in &scenario.milestone_events {
             if let Some(spawn) = &m.spawn_actor {
@@ -532,6 +543,82 @@ fn main() {
     }
     if !any_spawn {
         println!("  (this scenario spawns no actors)");
+    }
+
+    println!("\n--- Part 7: authored gated content — does it ever fire? ---");
+    let mut never: Vec<String> = Vec::new();
+    let mut rare: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    let mut report = |kind: &str, id: &str, never: &mut Vec<String>, rare: &mut Vec<String>| {
+        let n = fired_seeds.get(id).copied().unwrap_or(0);
+        if n == 0 {
+            never.push(format!("  {kind:10} {id:34} NEVER in {seed_count} seeds"));
+        } else if n * 10 <= seed_count as usize {
+            rare.push(format!("  {kind:10} {id:34} {n}/{seed_count} seeds"));
+        }
+    };
+    for m in &scenario.milestone_events {
+        total += 1;
+        report("milestone", &m.id, &mut never, &mut rare);
+    }
+    let pool: Vec<engine13::core::RandomEvent> = engine13::events::common_events()
+        .into_iter()
+        .chain(scenario.random_events.iter().cloned())
+        .collect();
+    for e in &pool {
+        total += 1;
+        report("random", &e.id, &mut never, &mut rare);
+    }
+    println!("  authored gated objects checked: {total} ({} milestones, {} random events)", scenario.milestone_events.len(), pool.len());
+    if never.is_empty() {
+        println!("  never fires: none");
+    } else {
+        println!("  never fires ({}):", never.len());
+        for l in &never {
+            println!("{l}");
+        }
+    }
+    if !rare.is_empty() {
+        println!("  fires in 10 % of seeds or fewer ({}):", rare.len());
+        for l in &rare {
+            println!("{l}");
+        }
+    }
+
+    println!("\n--- Part 8: gate of every milestone, fired or not ---");
+    for m in &scenario.milestone_events {
+        let n = fired_seeds.get(&m.id).copied().unwrap_or(0);
+        let dur = m.condition.duration.unwrap_or(1);
+        let longest = gate_longest_run.get(&m.id).copied().unwrap_or(0);
+        let flag = if n == 0 { "   <-- NEVER" } else { "" };
+        match &m.condition.condition_type {
+            engine13::core::EventConditionType::Metric { metric, operator, value, .. } => {
+                let key = match metric {
+                    engine13::core::MetricRef::Actor { actor_id, metric } => {
+                        Some((actor_id.to_string(), metric.as_str().to_string()))
+                    }
+                    _ => None,
+                };
+                match key.and_then(|k| gate_extremes.get(&k).copied().map(|v| (k, v))) {
+                    Some(((ga, gm), (lo, hi))) => println!(
+                        "  {:28} fired {n:>2}/{seed_count} | {ga}.{gm} {operator:?} {value} for {dur} | observed {lo:.2} .. {hi:.2} | longest run {longest}{flag}",
+                        m.id
+                    ),
+                    None => println!(
+                        "  {:28} fired {n:>2}/{seed_count} | gate not actor-scoped: {metric:?} {operator:?} {value}{flag}",
+                        m.id
+                    ),
+                }
+            }
+            engine13::core::EventConditionType::Tick { tick } => println!(
+                "  {:28} fired {n:>2}/{seed_count} | gate tick == {tick}{flag}",
+                m.id
+            ),
+            engine13::core::EventConditionType::ActorState { actor_id, state } => println!(
+                "  {:28} fired {n:>2}/{seed_count} | gate {actor_id} state {state:?}{flag}",
+                m.id
+            ),
+        }
     }
 
     let mut world_mil: Vec<f64> = mil_by_actor.values().flatten().copied().collect();
