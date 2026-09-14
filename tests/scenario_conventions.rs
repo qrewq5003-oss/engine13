@@ -1286,11 +1286,24 @@ fn production_string_literals(src: &str) -> Vec<String> {
                     i += 1; // a lifetime
                 }
             }
-            // Raw strings: `r"..."`, `r#"..."#`, `r##"..."##`. The closing quote needs
-            // the same number of hashes, so an inner `"` does not end them.
+            // Raw strings: `r"..."`, `r#"..."#`, `r##"..."##`, and the byte-string forms
+            // `br"..."` / `br#"..."#`. The closing quote needs the same number of
+            // hashes, so an inner `"` does not end them.
+            //
+            // The `b` prefix has to be allowed explicitly: without it the token boundary
+            // check sees `b` as an identifier character, rejects the raw string, and the
+            // first inner `"` closes a plain string — blinding the scanner from there on.
+            // Measured: `br#"raw byte with a " quote"#` swallowed the next three literals.
             'r' if i + 1 < b.len()
                 && (b[i + 1] == '"' || b[i + 1] == '#')
-                && (i == 0 || !(b[i - 1].is_alphanumeric() || b[i - 1] == '_')) =>
+                && {
+                    let prev_is_b = i > 0 && b[i - 1] == 'b';
+                    let boundary = if prev_is_b { i.checked_sub(2) } else { i.checked_sub(1) };
+                    match boundary {
+                        None => true,
+                        Some(k) => !(b[k].is_alphanumeric() || b[k] == '_'),
+                    }
+                } =>
             {
                 let mut j = i + 1;
                 let mut hashes = 0usize;
@@ -1516,6 +1529,12 @@ fn hazards() {
     let after_backslash = "name_after_backslash";
     let raw = r#"a raw string with a " quote and a // slash"#;
     let after_raw = "name_after_raw";
+    let byte_string = b"a byte string";
+    let after_byte_string = "name_after_byte_string";
+    let raw_byte = br#"a raw byte string with a " quote"#;
+    let after_raw_byte = "name_after_raw_byte";
+    let byte_char = b'"';
+    let after_byte_char = "name_after_byte_char";
     let lifetime: &'static str = "name_after_lifetime";
     let nested = /* outer /* inner "hidden_in_nested" */ still comment */ "name_after_nested";
 }
@@ -1526,6 +1545,9 @@ fn hazards() {
         "name_after_escape",
         "name_after_backslash",
         "name_after_raw",
+        "name_after_byte_string",
+        "name_after_raw_byte",
+        "name_after_byte_char",
         "name_after_lifetime",
         "name_after_nested",
     ] {
