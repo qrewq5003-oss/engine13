@@ -1031,3 +1031,197 @@ fn frontend_world_state_type_matches_the_rust_struct() {
          Either add them to the Rust struct (and fill them) or drop them from the TypeScript type."
     );
 }
+
+/// Bug class: a measuring device that samples world state at the tick boundary is
+/// only as honest as what happens between the moment the engine reads a value and
+/// the moment the probe reads it.
+///
+/// This was not hypothetical. `docs/investigation_pressure_military_form.md` §16.4
+/// rests on `ottomans.cohesion` never reaching the `< 40` that would spawn `mamluks`;
+/// the observed minimum is `47.97`, a margin of `7.97`. Inside `phase_events` —
+/// between the engine's own evaluation of that gate and the probe's sample — sits
+/// `apply_milestone_effects`, which lowers `ottomans.cohesion` by **10**. The
+/// conclusion survives only because that write goes *down*, which makes the probe a
+/// lower bound on what the engine saw. A second writer, or the same one with the
+/// opposite sign, would quietly invalidate the measurement with no test failing.
+///
+/// So the invariant is not "phase_events writes little" (a size claim, and the wrong
+/// kind) but "the set of things reachable from `phase_events` that change the world
+/// is exactly this list" (a membership claim, mechanically checkable). The list is
+/// keyed on *changing the world*, not only on writing metrics: the traversal also
+/// found two functions that insert actors, which is precisely the mechanism the spawn
+/// census measures.
+const PHASE_EVENTS_MUTATORS: &[&str] = &[
+    ".set_metric(",
+    ".add_metric(",
+    ".clamp_metric(",
+    "actors.insert(",
+    "actors.remove(",
+    ".metrics.insert(",
+];
+
+/// Lexical: index every top-level `fn` in `src`, take the transitive closure of calls
+/// starting at `entry`, and return those reachable functions whose body contains one of
+/// the world-changing calls. Split out of the test so the companion test can feed it a
+/// synthetic file and prove the guard actually fires.
+fn world_writers_reachable_from(
+    src: &str,
+    entry: &str,
+) -> std::collections::BTreeMap<String, Vec<&'static str>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut bodies: BTreeMap<String, String> = BTreeMap::new();
+    let mut idx = 0usize;
+    while let Some(rel) = src[idx..].find("fn ") {
+        let at = idx + rel;
+        let line_start = src[..at].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let prefix = &src[line_start..at];
+        if !prefix.trim_start().is_empty() && prefix.trim_start() != "pub " {
+            idx = at + 3;
+            continue;
+        }
+        let rest = &src[at + 3..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if name.is_empty() {
+            idx = at + 3;
+            continue;
+        }
+        let Some(open_rel) = src[at..].find('{') else { break };
+        let open = at + open_rel;
+        let mut depth = 0i32;
+        let mut close = open;
+        for (i, c) in src[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        bodies.insert(name, src[open..=close].to_string());
+        idx = open + 1;
+    }
+
+    let mut reached: BTreeSet<String> = BTreeSet::new();
+    let mut stack = vec![entry.to_string()];
+    while let Some(f) = stack.pop() {
+        if !reached.insert(f.clone()) {
+            continue;
+        }
+        let Some(body) = bodies.get(&f) else { continue };
+        for name in bodies.keys() {
+            if body.contains(&format!("{name}(")) && !reached.contains(name) {
+                stack.push(name.clone());
+            }
+        }
+    }
+
+    let mut found: BTreeMap<String, Vec<&'static str>> = BTreeMap::new();
+    for f in &reached {
+        let Some(body) = bodies.get(f) else { continue };
+        let hits: Vec<&'static str> = PHASE_EVENTS_MUTATORS
+            .iter()
+            .copied()
+            .filter(|m| body.contains(m))
+            .collect();
+        if !hits.is_empty() {
+            found.insert(f.clone(), hits);
+        }
+    }
+    found
+}
+
+#[test]
+fn phase_events_world_writers_are_the_expected_set() {
+    use std::collections::BTreeSet;
+
+    // function -> why it is allowed to change the world from inside `phase_events`
+    const EXPECTED: &[(&str, &str)] = &[
+        (
+            "apply_milestone_effects",
+            "the only metric writer: `mehmed_accelerates` lowers ottomans military_quality/treasury/cohesion. \
+             Every write here must be a DECREASE for the boundary sample to stay a lower bound — \
+             see docs/investigation_pressure_military_form.md §18",
+        ),
+        (
+            "check_milestone_events",
+            "inserts spawned actors: this is the mechanism the spawn census measures, not a side effect",
+        ),
+        (
+            "apply_seat_split",
+            "inserts the heir seat when a scenario splits — docs/investigation_split_as_shrink.md",
+        ),
+    ];
+
+    let src = std::fs::read_to_string("src/engine/mod.rs").expect("src/engine/mod.rs");
+    let found = world_writers_reachable_from(&src, "phase_events");
+    assert!(
+        !found.is_empty(),
+        "the lexical scan in this guard found nothing at all — it has drifted from the file"
+    );
+
+    let expected: BTreeSet<&str> = EXPECTED.iter().map(|(f, _)| *f).collect();
+    let actual: BTreeSet<&str> = found.keys().map(|s| s.as_str()).collect();
+
+    let unexpected: Vec<String> = actual
+        .difference(&expected)
+        .map(|f| format!("  {f} changes the world via {:?} and is not in the expected list", found[*f]))
+        .collect();
+    let gone: Vec<String> = expected
+        .difference(&actual)
+        .map(|f| format!("  {f} no longer changes the world — drop it from the list and say so"))
+        .collect();
+
+    assert!(
+        unexpected.is_empty() && gone.is_empty(),
+        "the set of world-changing functions reachable from `phase_events` has changed.\n\
+         Every measuring device that samples at the tick boundary depends on this set, and on the \
+         SIGN of what it writes: see docs/investigation_pressure_military_form.md §18.\n\
+         Update the list here with a written reason, and re-check any conclusion that rests on a \
+         boundary sample.\n{}{}",
+        unexpected.join("\n"),
+        gone.join("\n")
+    );
+}
+
+
+/// The other half: prove the guard fires. A synthetic file whose `phase_events` reaches
+/// a new writer two calls deep must be reported — otherwise the green test above means
+/// only that the scan found nothing.
+#[test]
+fn phase_events_writer_check_catches_a_new_violator() {
+    let synthetic = r#"
+fn phase_events(world: &mut W) {
+    check_threshold_effects(world);
+}
+
+fn check_threshold_effects(world: &mut W) {
+    newly_added_helper(world);
+}
+
+fn newly_added_helper(world: &mut W) {
+    world.actors.get_mut("ottomans").unwrap().add_metric("cohesion", 12.0);
+}
+
+fn not_reachable(world: &mut W) {
+    world.actors.insert("x".to_string(), y);
+}
+"#;
+    let found = world_writers_reachable_from(synthetic, "phase_events");
+    assert!(
+        found.contains_key("newly_added_helper"),
+        "a writer two calls below phase_events was not reported: {found:?}"
+    );
+    assert!(
+        !found.contains_key("not_reachable"),
+        "a writer that phase_events cannot reach must not be reported: {found:?}"
+    );
+}
