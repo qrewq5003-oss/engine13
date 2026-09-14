@@ -1924,6 +1924,32 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
                 }
             }
         }
+        // NOT FOR MERGE — spawned actors in the PLAYED world: the no-player census
+        // measured them only where nobody plays, which is the axis that invalidated the
+        // mamluks finding.
+        {
+            let w = state.world_state.as_ref().unwrap();
+            for m in &scenario.milestone_events {
+                let Some(sp) = &m.spawn_actor else { continue };
+                let present = w.actors.get(sp.actor_id.as_str());
+                match present {
+                    Some(a) => println!(
+                        "[NOT FOR MERGE]   spawn {:18} ALIVE at end | population {:.1} | capacity {:.2} | army {:.2} | ratio {:.2}",
+                        sp.actor_id,
+                        a.get_metric("population"),
+                        engine13::engine::interactions::military_capacity(a),
+                        a.get_metric("military_size"),
+                        a.get_metric("military_size")
+                            / engine13::engine::interactions::military_capacity(a).max(1e-9)
+                    ),
+                    None => println!(
+                        "[NOT FOR MERGE]   spawn {:18} {} at end",
+                        sp.actor_id,
+                        if fired.contains(m.id.as_str()) { "ENTERED then DIED" } else { "never entered" }
+                    ),
+                }
+            }
+        }
         println!("[NOT FOR MERGE] random events that did NOT fire in this run: {}",
             if never_ev.is_empty() { "(none)".to_string() } else { never_ev.join(", ") });
     }

@@ -184,6 +184,10 @@ fn main() {
     // "did it ever enter the world" is not "was it alive at the end".
     let mut spawned_seeds: BTreeMap<String, usize> = BTreeMap::new();
     let mut alive_end_seeds: BTreeMap<String, usize> = BTreeMap::new();
+    // End-of-run values for spawned actors, so the no-player world reports the SAME
+    // statistic as the played world (`sim`). Comparing a median-over-run here against an
+    // end-of-run there is the median-of-ratio mistake wearing a different hat.
+    let mut spawn_end: BTreeMap<String, Vec<(f64, f64, f64)>> = BTreeMap::new();
 
     for seed in seed_from..seed_from + seed_count {
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -332,8 +336,13 @@ fn main() {
                 if ever_seen.contains(&spawn.actor_id) {
                     *spawned_seeds.entry(spawn.actor_id.clone()).or_default() += 1;
                 }
-                if world.actors.contains_key(&spawn.actor_id) {
+                if let Some(a) = world.actors.get(&spawn.actor_id) {
                     *alive_end_seeds.entry(spawn.actor_id.clone()).or_default() += 1;
+                    spawn_end.entry(spawn.actor_id.clone()).or_default().push((
+                        a.get_metric("population"),
+                        interactions::military_capacity(a),
+                        a.get_metric("military_size"),
+                    ));
                 }
             }
         }
@@ -543,6 +552,26 @@ fn main() {
     }
     if !any_spawn {
         println!("  (this scenario spawns no actors)");
+    }
+
+    println!("\n--- Part 6b: spawned actors AT END OF RUN (same statistic as `sim` prints) ---");
+    for m in &scenario.milestone_events {
+        let Some(sp) = &m.spawn_actor else { continue };
+        let entered = spawned_seeds.get(&sp.actor_id).copied().unwrap_or(0);
+        let alive = alive_end_seeds.get(&sp.actor_id).copied().unwrap_or(0);
+        let rows = spawn_end.get(&sp.actor_id).cloned().unwrap_or_default();
+        if rows.is_empty() {
+            println!("  {:18} entered {entered}/{seed_count}, alive at end 0/{seed_count}", sp.actor_id);
+            continue;
+        }
+        let mut pops: Vec<f64> = rows.iter().map(|r| r.0).collect();
+        let mut arms: Vec<f64> = rows.iter().map(|r| r.2).collect();
+        let (_, _, p50, _, _) = quantiles(&mut pops);
+        let (_, _, a50, _, _) = quantiles(&mut arms);
+        println!(
+            "  {:18} entered {entered}/{seed_count}, alive at end {alive}/{seed_count} | at end: population median {p50:.1} | army median {a50:.2}",
+            sp.actor_id
+        );
     }
 
     println!("\n--- Part 7: authored gated content — does it ever fire? ---");
