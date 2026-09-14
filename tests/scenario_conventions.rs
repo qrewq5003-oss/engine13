@@ -1264,6 +1264,58 @@ fn production_string_literals(src: &str) -> Vec<String> {
                     }
                 }
             }
+            // A char literal containing a quote — `'"'` — desynchronises a naive
+            // scanner: the quote opens a string and everything up to the next quote
+            // becomes invisible. Measured: with `let _q = '"';` placed AFTER the last
+            // expected name, a real hard-coded actor id went unreported and the guard
+            // stayed green. The two-sided check only saves the case where the blind
+            // spot swallows an expected name too.
+            //
+            // A lifetime (`&'a str`) starts the same way and must NOT be treated as a
+            // literal, so the two are told apart by what closes them.
+            '\'' => {
+                if i + 1 < b.len() && b[i + 1] == '\\' {
+                    i += 2;
+                    while i < b.len() && b[i] != '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                } else if i + 2 < b.len() && b[i + 2] == '\'' {
+                    i += 3;
+                } else {
+                    i += 1; // a lifetime
+                }
+            }
+            // Raw strings: `r"..."`, `r#"..."#`, `r##"..."##`. The closing quote needs
+            // the same number of hashes, so an inner `"` does not end them.
+            'r' if i + 1 < b.len()
+                && (b[i + 1] == '"' || b[i + 1] == '#')
+                && (i == 0 || !(b[i - 1].is_alphanumeric() || b[i - 1] == '_')) =>
+            {
+                let mut j = i + 1;
+                let mut hashes = 0usize;
+                while j < b.len() && b[j] == '#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == '"' {
+                    j += 1;
+                    let start = j;
+                    let closing: String =
+                        std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                    let rest: String = b[j..].iter().collect();
+                    match rest.find(&closing) {
+                        Some(off) => {
+                            let end = start + rest[..off].chars().count();
+                            out.push(b[start..end].iter().collect());
+                            i = end + closing.chars().count();
+                        }
+                        None => i = b.len(),
+                    }
+                } else {
+                    i += 1;
+                }
+            }
             '"' => {
                 i += 1;
                 let mut lit = String::new();
@@ -1440,4 +1492,51 @@ mod tests {
             "{hidden} came from a comment or a test module: {lits:?}"
         );
     }
+}
+
+/// The dangerous direction: not "the scanner sees too much" but "the scanner goes
+/// blind from line N onward and reports nothing after it".
+///
+/// `assert!(!found.is_empty())` in the guard above catches a scanner that died
+/// completely; it cannot catch one that died halfway. This test puts each
+/// resynchronisation hazard in the MIDDLE and an expected name AFTER it, so a scanner
+/// that loses its place fails here instead of silently passing the real guard.
+///
+/// Measured before the fix: `let _q = '"';` placed after the last expected name made a
+/// genuine hard-coded actor id invisible and left the guard green.
+#[test]
+fn literal_scan_resynchronises_after_char_literals_and_raw_strings() {
+    let synthetic = r##"
+fn hazards() {
+    let quote_char = '"';
+    let after_char_literal = "name_after_char";
+    let escaped = ''';
+    let after_escaped = "name_after_escape";
+    let backslash = '\';
+    let after_backslash = "name_after_backslash";
+    let raw = r#"a raw string with a " quote and a // slash"#;
+    let after_raw = "name_after_raw";
+    let lifetime: &'static str = "name_after_lifetime";
+    let nested = /* outer /* inner "hidden_in_nested" */ still comment */ "name_after_nested";
+}
+"##;
+    let lits = production_string_literals(synthetic);
+    for expected in [
+        "name_after_char",
+        "name_after_escape",
+        "name_after_backslash",
+        "name_after_raw",
+        "name_after_lifetime",
+        "name_after_nested",
+    ] {
+        assert!(
+            lits.contains(&expected.to_string()),
+            "scanner lost its place before `{expected}` — it goes blind from there on, \
+             and the main guard would stay green while real hard-coded names slip past: {lits:?}"
+        );
+    }
+    assert!(
+        !lits.contains(&"hidden_in_nested".to_string()),
+        "a name inside a nested block comment must not be reported: {lits:?}"
+    );
 }
