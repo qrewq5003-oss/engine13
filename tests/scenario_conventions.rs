@@ -1225,3 +1225,219 @@ fn not_reachable(world: &mut W) {
         "a writer that phase_events cannot reach must not be reported: {found:?}"
     );
 }
+
+/// Strip Rust comments and the trailing `#[cfg(test)]` module, then return every
+/// string literal left in the production code.
+///
+/// One scanner does both jobs because they are the same job: a `//` inside a string
+/// is not a comment, and a `"` inside a comment does not open a string. Doing it with
+/// two regexes gets this wrong in both directions — the first cross-check written by
+/// hand for this guard reported `"rome"` and `"rome_375"` as engine knowledge of
+/// content, and both were examples inside doc comments.
+fn production_string_literals(src: &str) -> Vec<String> {
+    let src = match src.find("#[cfg(test)]") {
+        Some(i) => &src[..i],
+        None => src,
+    };
+    let b: Vec<char> = src.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            '/' if i + 1 < b.len() && b[i + 1] == '/' => {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if i + 1 < b.len() && b[i + 1] == '*' => {
+                i += 2;
+                let mut depth = 1;
+                while i < b.len() && depth > 0 {
+                    if b[i] == '/' && i + 1 < b.len() && b[i + 1] == '*' {
+                        depth += 1;
+                        i += 2;
+                    } else if b[i] == '*' && i + 1 < b.len() && b[i + 1] == '/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            '"' => {
+                i += 1;
+                let mut lit = String::new();
+                while i < b.len() && b[i] != '"' {
+                    if b[i] == '\\' {
+                        i += 1;
+                        if i < b.len() {
+                            lit.push(b[i]);
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    lit.push(b[i]);
+                    i += 1;
+                }
+                i += 1;
+                out.push(lit);
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// Bug class: the engine deciding membership by **enumerating authored names** instead
+/// of asking for a property.
+///
+/// Found in the wild: `EventTarget::SeaActors` resolves "is this actor maritime" as
+/// `tags.contains("maritime") || tags.contains("trade_empire")`. Rome's `saxons` carry
+/// `seafaring` — a fully authored tag with its own `metrics_modifier` and `spreads_via`
+/// — and the two vocabularies do not intersect, so the `piracy` event targets an empty
+/// set in rome and cannot fire at all. No test failed; the content simply never reached
+/// a player. See docs/investigation_dead_authored_content.md §7.
+///
+/// The class is small and closed, which is exactly why it is worth pinning: a fifth
+/// name added tomorrow silently repeats the same failure.
+#[test]
+fn engine_knows_authored_content_only_by_these_names() {
+    use std::collections::BTreeSet;
+
+    // literal -> why the engine is allowed to know this authored name
+    const EXPECTED: &[(&str, &str)] = &[
+        (
+            "maritime",
+            "EventTarget::SeaActors, mod.rs — KNOWN DEFECT: enumerates names instead of asking \
+             the tag for a property, which is why rome's `seafaring` actor is invisible to it",
+        ),
+        (
+            "trade_empire",
+            "the second half of the same SeaActors predicate, same defect",
+        ),
+        (
+            "mehmed_accelerates",
+            "apply_milestone_effects, mod.rs — one scenario's milestone hard-coded in the engine",
+        ),
+        (
+            "ottomans",
+            "the actor that same milestone writes to",
+        ),
+    ];
+
+    // Authored vocabulary: ids of tags, actors, milestones, events.
+    let mut authored: BTreeSet<String> = BTreeSet::new();
+    fn walk(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            for line in text.lines() {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("id = \"") {
+                    if let Some(name) = rest.split('"').next() {
+                        out.insert(name.to_string());
+                    }
+                } else if let Some(rest) = t.strip_prefix("id: \"") {
+                    if let Some(name) = rest.split('"').next() {
+                        out.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    walk(std::path::Path::new("src/scenarios"), &mut authored);
+    walk(std::path::Path::new("src/events"), &mut authored);
+    assert!(
+        authored.len() > 50,
+        "authored vocabulary came out at {} names — the scan has drifted",
+        authored.len()
+    );
+
+    // The engine's own metric vocabulary is not authored content: every scenario uses
+    // the same words, and the engine is entitled to know them.
+    let metrics: BTreeSet<&str> = [
+        "population",
+        "military_size",
+        "military_quality",
+        "economic_output",
+        "cohesion",
+        "legitimacy",
+        "external_pressure",
+        "treasury",
+        "expansion_count",
+        "federation_progress",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for dir in ["src/engine", "src/core"] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            panic!("{dir} not readable")
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&p).expect("engine source");
+            for lit in production_string_literals(&src) {
+                if authored.contains(&lit) && !metrics.contains(lit.as_str()) {
+                    found.insert(lit);
+                }
+            }
+        }
+    }
+
+    let expected: BTreeSet<&str> = EXPECTED.iter().map(|(n, _)| *n).collect();
+    let actual: BTreeSet<&str> = found.iter().map(|s| s.as_str()).collect();
+    let extra: Vec<&&str> = actual.difference(&expected).collect();
+    let gone: Vec<&&str> = expected.difference(&actual).collect();
+
+    assert!(
+        extra.is_empty() && gone.is_empty(),
+        "the set of authored names hard-coded in the engine has changed.\n\
+         Deciding membership by enumerating names is how `piracy` came to target an empty \
+         set in rome (docs/investigation_dead_authored_content.md §7). Prefer asking the \
+         content for a property.\n\
+         newly hard-coded: {extra:?}\n\
+         no longer present (drop from the list and say so): {gone:?}"
+    );
+}
+
+/// The other half: the scanner must see code and must NOT see comments — the exact
+/// trap that produced two false positives when this cross-check was first written by
+/// hand.
+#[test]
+fn literal_scan_ignores_comments_and_test_modules() {
+    let synthetic = r#"
+/// A doc comment mentioning "rome_375" as an example.
+// A line comment mentioning "ottomans".
+/* A block comment mentioning "maritime". */
+fn real_code() {
+    let a = "seafaring";
+    let url = "https://example.invalid//not-a-comment";
+}
+#[cfg(test)]
+mod tests {
+    const HIDDEN: &str = "trade_empire";
+}
+"#;
+    let lits = production_string_literals(synthetic);
+    assert!(lits.contains(&"seafaring".to_string()), "real literal missed: {lits:?}");
+    assert!(
+        lits.contains(&"https://example.invalid//not-a-comment".to_string()),
+        "a `//` inside a string must not start a comment: {lits:?}"
+    );
+    for hidden in ["rome_375", "ottomans", "maritime", "trade_empire"] {
+        assert!(
+            !lits.contains(&hidden.to_string()),
+            "{hidden} came from a comment or a test module: {lits:?}"
+        );
+    }
+}
