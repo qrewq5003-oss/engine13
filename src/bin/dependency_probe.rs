@@ -163,6 +163,16 @@ fn main() {
 
     const SUBJECT: &str = "external_pressure_to_military_size";
 
+    // Part 6: can each spawn milestone's gate ever be crossed in this world?
+    // Authored content that never enters the world is invisible to every balance
+    // measure in the project — it shows up as an actor that simply is not there.
+    // Measured over the same runs, per (actor, metric) named by the gate.
+    let mut gate_extremes: BTreeMap<(String, String), (f64, f64)> = BTreeMap::new();
+    // Two different questions, and they gave different answers on the first run:
+    // "did it ever enter the world" is not "was it alive at the end".
+    let mut spawned_seeds: BTreeMap<String, usize> = BTreeMap::new();
+    let mut alive_end_seeds: BTreeMap<String, usize> = BTreeMap::new();
+
     for seed in seed_from..seed_from + seed_count {
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
         for actor in &scenario.actors {
@@ -186,6 +196,7 @@ fn main() {
         world.generation_length = scenario.generation_length;
 
         let start_ids: Vec<String> = world.actors.keys().cloned().collect();
+        let mut ever_seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
@@ -219,6 +230,38 @@ fn main() {
                     }
                 }
             }
+            for m in &scenario.milestone_events {
+                if let Some(spawn) = &m.spawn_actor {
+                    if world.actors.contains_key(&spawn.actor_id) {
+                        ever_seen.insert(spawn.actor_id.clone());
+                    }
+                }
+            }
+
+            // Spawn-gate metrics, sampled at the same tick boundary.
+            for m in &scenario.milestone_events {
+                let Some(spawn) = &m.spawn_actor else { continue };
+                let engine13::core::EventConditionType::Metric { metric, .. } = &m.condition.condition_type
+                else {
+                    continue;
+                };
+                let (gate_actor, bare) = match metric {
+                    engine13::core::MetricRef::Actor { actor_id, metric } => {
+                        (actor_id.to_string(), metric.as_str().to_string())
+                    }
+                    _ => continue,
+                };
+                let _ = &spawn.actor_id;
+                if let Some(a) = world.actors.get(&gate_actor) {
+                    let v = a.get_metric(&bare);
+                    let e = gate_extremes
+                        .entry((gate_actor.clone(), bare.clone()))
+                        .or_insert((f64::MAX, f64::MIN));
+                    e.0 = e.0.min(v);
+                    e.1 = e.1.max(v);
+                }
+            }
+
             // End-of-tick state per actor.
             for (id, actor) in world.actors.iter() {
                 let mil = actor.get_metric("military_size");
@@ -236,6 +279,16 @@ fn main() {
                 z.1 += 1;
                 if mil < interactions::MIN_DEFENSIBLE_MILITARY {
                     z.0 += 1;
+                }
+            }
+        }
+        for m in &scenario.milestone_events {
+            if let Some(spawn) = &m.spawn_actor {
+                if ever_seen.contains(&spawn.actor_id) {
+                    *spawned_seeds.entry(spawn.actor_id.clone()).or_default() += 1;
+                }
+                if world.actors.contains_key(&spawn.actor_id) {
+                    *alive_end_seeds.entry(spawn.actor_id.clone()).or_default() += 1;
                 }
             }
         }
@@ -401,6 +454,50 @@ fn main() {
         "  actor-ticks below a capacity-relative floor: 0.10 -> {:.2}%  0.25 -> {:.2}%  0.40 -> {:.2}%  0.60 -> {:.2}%",
         below(0.10), below(0.25), below(0.40), below(0.60)
     );
+    println!("\n--- Part 6: spawn milestones — is the gate reachable at all? ---");
+    let mut any_spawn = false;
+    for m in &scenario.milestone_events {
+        let Some(spawn) = &m.spawn_actor else { continue };
+        any_spawn = true;
+        let seeds = spawned_seeds.get(&spawn.actor_id).copied().unwrap_or(0);
+        let alive = alive_end_seeds.get(&spawn.actor_id).copied().unwrap_or(0);
+        match &m.condition.condition_type {
+            engine13::core::EventConditionType::Metric { metric, operator, value, .. } => {
+                let gate = match metric {
+                    engine13::core::MetricRef::Actor { actor_id, metric } => {
+                        Some((actor_id.to_string(), metric.as_str().to_string()))
+                    }
+                    _ => None,
+                };
+                let seen = gate
+                    .as_ref()
+                    .and_then(|k| gate_extremes.get(&(k.0.clone(), k.1.clone())).copied());
+                match (gate, seen) {
+                    (Some((ga, gm)), Some((lo, hi))) => println!(
+                        "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate {ga}.{gm} {operator:?} {value} | observed {lo:.2} .. {hi:.2}{}",
+                        spawn.actor_id,
+                        if seeds == 0 { "   <-- NEVER ENTERS THE WORLD" } else if alive == 0 { "   <-- enters, never survives" } else { "" }
+                    ),
+                    _ => println!(
+                        "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate not an actor metric",
+                        spawn.actor_id
+                    ),
+                }
+            }
+            engine13::core::EventConditionType::Tick { tick } => println!(
+                "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate tick == {tick}",
+                spawn.actor_id
+            ),
+            engine13::core::EventConditionType::ActorState { actor_id, state } => println!(
+                "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate {actor_id} state {state:?}",
+                spawn.actor_id
+            ),
+        }
+    }
+    if !any_spawn {
+        println!("  (this scenario spawns no actors)");
+    }
+
     let mut world_mil: Vec<f64> = mil_by_actor.values().flatten().copied().collect();
     let (_, w10, w50, w90, _) = quantiles(&mut world_mil);
     println!("  military_size across all actor-ticks: p10 {w10:.2}  median {w50:.2}  p90 {w90:.2}");
