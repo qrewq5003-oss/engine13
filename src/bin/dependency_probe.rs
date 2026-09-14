@@ -180,6 +180,16 @@ fn main() {
     // reached a single player. Counted per seed, so "fires in 1 of 30" is visible as
     // distinct from "never".
     let mut fired_seeds: BTreeMap<String, usize> = BTreeMap::new();
+    // Part 9: the authored content the event log cannot see, because it is applied
+    // silently — tags, region-rank bonuses, eras, auto-deltas. Measured from world
+    // state, with one deliberate difference: auto-delta conditions are sampled BEFORE
+    // the tick, because `phase_auto_deltas` is the first phase, so the pre-tick state
+    // is exactly what it reads. No direction caveat is needed for that one.
+    let mut tag_ticks: BTreeMap<String, usize> = BTreeMap::new();
+    let mut tag_spread_seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut ranks_seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut eras_seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut autodelta_fired: BTreeMap<(usize, usize), usize> = BTreeMap::new();
     // Two different questions, and they gave different answers on the first run:
     // "did it ever enter the world" is not "was it alive at the end".
     let mut spawned_seeds: BTreeMap<String, usize> = BTreeMap::new();
@@ -218,8 +228,32 @@ fn main() {
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
+        // Tags carried at tick 0: everything beyond this set was acquired by spread.
+        let mut initial_tags: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        for (id, a) in world.actors.iter() {
+            for t in &a.tags {
+                initial_tags.insert((id.clone(), t.clone()));
+            }
+        }
+
         dep_trace_enable();
         for _ in 0..ticks {
+            // BEFORE the tick: exactly the state `phase_auto_deltas` will read.
+            // Conditions of an auto-delta are ADDITIVE MODIFIERS, not gates: the engine
+            // starts from `base` and adds each satisfied condition's own delta
+            // (`phase_auto_deltas`, mod.rs). So the question is not "does the auto-delta
+            // fire" — it always does — but "does this particular modifier ever apply".
+            // Measured per (auto-delta, condition) pair, with the engine's own reader
+            // (`MetricRef::get`, which defaults an absent container to 0.0) and the
+            // engine's own comparison, rather than a re-implementation.
+            for (i, ad) in scenario.auto_deltas.iter().enumerate() {
+                for (j, c) in ad.conditions.iter().enumerate() {
+                    if c.operator.evaluate(c.metric.get(&world), c.value) {
+                        *autodelta_fired.entry((i, j)).or_default() += 1;
+                    }
+                }
+            }
             tick(&mut world, &scenario, &mut event_log, &mut rng);
             let rows: Vec<DepTraceRow> = dep_trace_take();
             for e in &event_log.events {
@@ -304,6 +338,17 @@ fn main() {
                         }
                     } else {
                         *run = 0;
+                    }
+                }
+            }
+
+            for (id, a) in world.actors.iter() {
+                *ranks_seen.entry(format!("{:?}", a.region_rank)).or_default() += 1;
+                *eras_seen.entry(format!("{:?}", a.era)).or_default() += 1;
+                for t in &a.tags {
+                    *tag_ticks.entry(t.clone()).or_default() += 1;
+                    if !initial_tags.contains(&(id.clone(), t.clone())) {
+                        *tag_spread_seen.entry(t.clone()).or_default() += 1;
                     }
                 }
             }
@@ -649,6 +694,65 @@ fn main() {
             ),
         }
     }
+
+    println!("\n--- Part 9: authored content the event log cannot see ---");
+    println!("  tags ({} authored):", scenario.tag_definitions.len());
+    let mut dead_tags = 0usize;
+    for t in &scenario.tag_definitions {
+        let carried = tag_ticks.get(&t.id).copied().unwrap_or(0);
+        let spread = tag_spread_seen.get(&t.id).copied().unwrap_or(0);
+        if carried == 0 {
+            dead_tags += 1;
+            println!("    {:26} NEVER carried by anyone", t.id);
+        } else if !t.spreads_via.is_empty() && spread == 0 {
+            println!("    {:26} carried {carried} actor-ticks, but NEVER spread (spreads_via {:?})", t.id, t.spreads_via);
+        }
+    }
+    if dead_tags == 0 {
+        println!("    (every authored tag is carried by someone)");
+    }
+    println!("  region ranks held by living actors: {ranks_seen:?}");
+    println!("  rank-bonus rules ({} authored):", scenario.rank_bonuses.len());
+    for r in &scenario.rank_bonuses {
+        let key = format!("{:?}", r.rank);
+        let held = ranks_seen.get(&key).copied().unwrap_or(0);
+        println!(
+            "    rank {key:8} {} effect(s) | rank held {held} actor-ticks{}",
+            r.effects.len(),
+            if held == 0 { "   <-- NOBODY EVER HOLDS THIS RANK" } else { "" }
+        );
+    }
+    println!("  eras reached: {eras_seen:?}");
+    println!("  era definitions ({} authored):", scenario.era_definitions.len());
+    for e in &scenario.era_definitions {
+        let key = format!("{:?}", e.era);
+        let seen = eras_seen.get(&key).copied().unwrap_or(0);
+        println!(
+            "    {key:16} min_tick {} | seen {seen} actor-ticks{}",
+            e.min_tick,
+            if seen == 0 { "   <-- NEVER REACHED" } else { "" }
+        );
+    }
+    let total_conds: usize = scenario.auto_deltas.iter().map(|a| a.conditions.len()).sum();
+    println!(
+        "  auto-delta condition modifiers ({} across {} auto-deltas; conditions are ADDITIVE, not gates; sampled pre-tick):",
+        total_conds,
+        scenario.auto_deltas.len()
+    );
+    let mut dead_mods = 0usize;
+    for (i, ad) in scenario.auto_deltas.iter().enumerate() {
+        for (j, c) in ad.conditions.iter().enumerate() {
+            let n = autodelta_fired.get(&(i, j)).copied().unwrap_or(0);
+            if n == 0 {
+                dead_mods += 1;
+                println!(
+                    "    #{i}.{j} on {} | {:?} {:?} {} adds {} | NEVER APPLIES",
+                    ad.metric, c.metric, c.operator, c.value, c.delta
+                );
+            }
+        }
+    }
+    println!("    dead modifiers: {dead_mods} of {total_conds}");
 
     let mut world_mil: Vec<f64> = mil_by_actor.values().flatten().copied().collect();
     let (_, w10, w50, w90, _) = quantiles(&mut world_mil);

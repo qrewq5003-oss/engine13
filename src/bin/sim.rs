@@ -1572,6 +1572,19 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
     // NOT FOR MERGE — extremes of every milestone gate metric, sampled in the PLAYED
     // world. The no-player census says which content never fires; this says what the
     // player's own actions do to the gate that was supposed to open.
+    // NOT FOR MERGE — the silent-content census in the PLAYED world: rank/era occupancy
+    // and auto-delta condition modifiers. Sampled BEFORE the tick, because
+    // `phase_auto_deltas` is the first phase and pre-tick state is exactly what it reads.
+    // Availability is not the same question as being chosen: a scripted strategy is a
+    // fixed policy, not a player exploring the option space. Counted separately.
+    let mut action_available: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut ad_fired: std::collections::BTreeMap<(usize, usize), usize> =
+        std::collections::BTreeMap::new();
+    let mut ranks_seen: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut eras_seen: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
     let mut gate_seen: std::collections::BTreeMap<(String, String), (f64, f64)> =
         std::collections::BTreeMap::new();
     let mut gate_run: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
@@ -1678,9 +1691,38 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
         total_actions_applied += applied_this_tick;
         total_actions_rejected += rejected_this_tick;
 
+
+        {
+            let w = state.world_state.as_ref().unwrap();
+            let sc = state.current_scenario.as_ref().unwrap();
+            for (ai, ad) in sc.auto_deltas.iter().enumerate() {
+                for (ci, c) in ad.conditions.iter().enumerate() {
+                    if c.operator.evaluate(c.metric.get(w), c.value) {
+                        *ad_fired.entry((ai, ci)).or_default() += 1;
+                    }
+                }
+            }
+            for a in w.actors.values() {
+                *ranks_seen.entry(format!("{:?}", a.region_rank)).or_default() += 1;
+                *eras_seen.entry(format!("{:?}", a.era)).or_default() += 1;
+            }
+            for act in sc.universal_actions.iter().chain(sc.patron_actions.iter()) {
+                let ok = match &act.available_if {
+                    engine13::core::ActionCondition::Always => true,
+                    engine13::core::ActionCondition::Metric { metric, operator, value } => {
+                        operator.evaluate(metric.get(w), *value)
+                    }
+                };
+                if ok {
+                    *action_available.entry(act.id.clone()).or_default() += 1;
+                }
+            }
+        }
+
         // Run tick
         let world_state = state.world_state.as_mut().unwrap();
         let scenario_ref = state.current_scenario.as_ref().unwrap();
+
         let rng = state.rng.as_mut().unwrap();
         tick(world_state, scenario_ref, &mut state.event_log, rng);
 
@@ -1949,6 +1991,37 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
                     ),
                 }
             }
+        }
+        {
+            let mut dead = 0usize;
+            let mut total = 0usize;
+            for (ai, ad) in scenario.auto_deltas.iter().enumerate() {
+                for (ci, c) in ad.conditions.iter().enumerate() {
+                    total += 1;
+                    if ad_fired.get(&(ai, ci)).copied().unwrap_or(0) == 0 {
+                        dead += 1;
+                        println!(
+                            "[NOT FOR MERGE]   dead modifier #{ai}.{ci} on {} | {:?} {:?} {} adds {}",
+                            ad.metric, c.metric, c.operator, c.value, c.delta
+                        );
+                    }
+                }
+            }
+            println!("[NOT FOR MERGE] dead auto-delta modifiers: {dead} of {total}");
+            println!("[NOT FOR MERGE] ranks {ranks_seen:?} | eras {eras_seen:?}");
+            let mut never_avail: Vec<&str> = scenario
+                .universal_actions
+                .iter()
+                .chain(scenario.patron_actions.iter())
+                .filter(|a| action_available.get(&a.id).copied().unwrap_or(0) == 0)
+                .map(|a| a.id.as_str())
+                .collect();
+            never_avail.sort_unstable();
+            never_avail.dedup();
+            println!(
+                "[NOT FOR MERGE] actions NEVER available in this run: {}",
+                if never_avail.is_empty() { "(none)".to_string() } else { never_avail.join(", ") }
+            );
         }
         println!("[NOT FOR MERGE] random events that did NOT fire in this run: {}",
             if never_ev.is_empty() { "(none)".to_string() } else { never_ev.join(", ") });
