@@ -381,11 +381,18 @@ fn main() {
         })
         .collect();
     per_actor_fill.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    if let (Some(lo), Some(hi)) = (per_actor_fill.first(), per_actor_fill.last()) {
-        println!(
-            "  per-actor median army/capacity: {:.3} ({}) .. {:.3} ({})",
-            lo.1, lo.0, hi.1, hi.0
-        );
+    // Printed in full, and next to the ratio of the two medians Part 3 reports, because
+    // the two are different statistics: `median(m/C)` is not `median(m)/median(C)` when
+    // both move. Two adjacent numbers about one actor with no note is how a reader is
+    // sent looking for a regime difference that is not there.
+    println!("  per-actor army/capacity — median of the ratio vs ratio of the medians:");
+    for (id, med_ratio) in &per_actor_fill {
+        let mut m = mil_by_actor.get(id).cloned().unwrap_or_default();
+        let mut c = cap_by_actor.get(id).cloned().unwrap_or_default();
+        let (_, _, m50, _, _) = quantiles(&mut m);
+        let (_, _, c50, _, _) = quantiles(&mut c);
+        let ratio_of_medians = if c50 > 1e-9 { m50 / c50 } else { f64::NAN };
+        println!("    {id:18} median(m/C) {med_ratio:>9.3}   median(m)/median(C) {ratio_of_medians:>9.3}");
     }
     let below = |t: f64| {
         100.0 * pooled_fill.iter().filter(|x| **x < t).count() as f64 / pooled_fill.len() as f64
