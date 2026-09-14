@@ -152,6 +152,12 @@ fn main() {
     let mut pop_by_actor: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut cap_by_actor: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut zero_army: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    // Army as a share of the actor's own mobilisation capacity. Under a penalty priced
+    // on the stock every actor has the SAME equilibrium share — but equilibrium is not
+    // identity: combat, events and recovery keep actors scattered around it. The width
+    // of that scatter is what decides whether a capacity-relative threshold can
+    // discriminate at all, so it is measured rather than assumed.
+    let mut fill_by_actor: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut deaths: BTreeMap<String, usize> = BTreeMap::new();
     let mut alive_end: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -222,6 +228,10 @@ fn main() {
                     .entry(id.clone())
                     .or_default()
                     .push(interactions::military_capacity(actor));
+                let cap_now = interactions::military_capacity(actor);
+                if cap_now > 1e-9 {
+                    fill_by_actor.entry(id.clone()).or_default().push(mil / cap_now);
+                }
                 let z = zero_army.entry(id.clone()).or_insert((0, 0));
                 z.1 += 1;
                 if mil < interactions::MIN_DEFENSIBLE_MILITARY {
@@ -356,6 +366,33 @@ fn main() {
         all_zero,
         all_ticks,
         100.0 * all_zero as f64 / all_ticks as f64
+    );
+    let mut pooled_fill: Vec<f64> = fill_by_actor.values().flatten().copied().collect();
+    let (fmin, f10, f50, f90, fmax) = quantiles(&mut pooled_fill);
+    println!(
+        "  army / capacity over all actor-ticks: min {fmin:.3}  p10 {f10:.3}  median {f50:.3}  p90 {f90:.3}  max {fmax:.3}"
+    );
+    let mut per_actor_fill: Vec<(String, f64)> = fill_by_actor
+        .iter()
+        .map(|(id, v)| {
+            let mut v = v.clone();
+            let (_, _, m, _, _) = quantiles(&mut v);
+            (id.clone(), m)
+        })
+        .collect();
+    per_actor_fill.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    if let (Some(lo), Some(hi)) = (per_actor_fill.first(), per_actor_fill.last()) {
+        println!(
+            "  per-actor median army/capacity: {:.3} ({}) .. {:.3} ({})",
+            lo.1, lo.0, hi.1, hi.0
+        );
+    }
+    let below = |t: f64| {
+        100.0 * pooled_fill.iter().filter(|x| **x < t).count() as f64 / pooled_fill.len() as f64
+    };
+    println!(
+        "  actor-ticks below a capacity-relative floor: 0.10 -> {:.2}%  0.25 -> {:.2}%  0.40 -> {:.2}%  0.60 -> {:.2}%",
+        below(0.10), below(0.25), below(0.40), below(0.60)
     );
     let mut world_mil: Vec<f64> = mil_by_actor.values().flatten().copied().collect();
     let (_, w10, w50, w90, _) = quantiles(&mut world_mil);
