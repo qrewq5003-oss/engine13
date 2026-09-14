@@ -168,6 +168,12 @@ fn main() {
     // measure in the project — it shows up as an actor that simply is not there.
     // Measured over the same runs, per (actor, metric) named by the gate.
     let mut gate_extremes: BTreeMap<(String, String), (f64, f64)> = BTreeMap::new();
+    // A range answers "is the gate reachable" only for an instantaneous gate. A gate
+    // with `duration` asks whether the value HOLDS past the threshold for that many
+    // ticks in a row, and a range can contain the threshold while no run of the needed
+    // length exists anywhere. So the longest run is measured too, per milestone, using
+    // the engine's own `ComparisonOperator::evaluate` rather than a re-implementation.
+    let mut gate_longest_run: BTreeMap<String, u32> = BTreeMap::new();
     // Two different questions, and they gave different answers on the first run:
     // "did it ever enter the world" is not "was it alive at the end".
     let mut spawned_seeds: BTreeMap<String, usize> = BTreeMap::new();
@@ -197,6 +203,7 @@ fn main() {
 
         let start_ids: Vec<String> = world.actors.keys().cloned().collect();
         let mut ever_seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut run_now: BTreeMap<String, u32> = BTreeMap::new();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
@@ -238,7 +245,10 @@ fn main() {
                 }
             }
 
-            // Spawn-gate metrics, sampled at the same tick boundary.
+            // Spawn-gate metrics, sampled at the same tick boundary. NOTE: the engine
+            // evaluates milestones inside the tick (`phase_events`), so this sample is
+            // one phase later than the engine's; for reachability over 300 ticks the
+            // difference is immaterial, for an exact duration replay it would not be.
             for m in &scenario.milestone_events {
                 let Some(spawn) = &m.spawn_actor else { continue };
                 let engine13::core::EventConditionType::Metric { metric, .. } = &m.condition.condition_type
@@ -259,6 +269,21 @@ fn main() {
                         .or_insert((f64::MAX, f64::MIN));
                     e.0 = e.0.min(v);
                     e.1 = e.1.max(v);
+                    let engine13::core::EventConditionType::Metric { operator, value, .. } =
+                        &m.condition.condition_type
+                    else {
+                        continue;
+                    };
+                    let run = run_now.entry(m.id.clone()).or_insert(0);
+                    if operator.evaluate(v, *value) {
+                        *run += 1;
+                        let best = gate_longest_run.entry(m.id.clone()).or_insert(0);
+                        if *run > *best {
+                            *best = *run;
+                        }
+                    } else {
+                        *run = 0;
+                    }
                 }
             }
 
@@ -472,9 +497,11 @@ fn main() {
                 let seen = gate
                     .as_ref()
                     .and_then(|k| gate_extremes.get(&(k.0.clone(), k.1.clone())).copied());
+                let dur = m.condition.duration.unwrap_or(1);
+                let longest = gate_longest_run.get(&m.id).copied().unwrap_or(0);
                 match (gate, seen) {
                     (Some((ga, gm)), Some((lo, hi))) => println!(
-                        "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate {ga}.{gm} {operator:?} {value} | observed {lo:.2} .. {hi:.2}{}",
+                        "  {:18} entered {seeds:>2}/{seed_count}, alive at end {alive:>2}/{seed_count} | gate {ga}.{gm} {operator:?} {value} for {dur} tick(s) | observed {lo:.2} .. {hi:.2} | longest run past it {longest}{}",
                         spawn.actor_id,
                         if seeds == 0 { "   <-- NEVER ENTERS THE WORLD" } else if alive == 0 { "   <-- enters, never survives" } else { "" }
                     ),
