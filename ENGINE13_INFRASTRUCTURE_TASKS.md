@@ -42,7 +42,7 @@
 | E | **Механика спавна**: держава живёт без населения с авторской армией | `dead_authored_content.md` §10 | измерено по обеим осям, все три спавна |
 | F | `economic_output_to_treasury` — второй член класса «безграничная цель, абсолютная дельта» | `pressure_military_form.md` §10 п. 2 | **не измерялось**; p90 цены `34 %` запаса |
 | G | `budget_probe` держит **две рукописные копии** `apply_dependency_rule` | `pressure_military_form.md` §10 п. 1 | найдено компилятором; кандидат в конвенционный гард |
-| H | **~150 гейтированных объектов** (теги, действия, ранговые бонусы, эры, авто-дельты) | `dead_authored_content.md` §6 | **не измерялось**: журнал событий их не видит, они применяются молча |
+| H | ~~**~150 гейтированных объектов**~~ — **ЗАКРЫТА стадией 1** | `investigation_silent_authored_content.md` | измерено 187 объектов по обеим осям: мертвы 16, из них ворота `recruit_soldiers` и `senator_bribe` стоят **выше потолка клампа**; отдельно — `scripted` задействует половину действий |
 | I | `tick_span` / `tempo` / `tick_label` инертны | `dead_authored_fields.md` §3 | перепроверено 2026-09-15: движок хардкодит `world.tick / 2` (`mod.rs:683`), контент объявляет `tick_span: 5`; закреплено гардом в ALLOWED |
 | J | Дублирующая мёртвая точка входа нарратива | `update_memory.md` | перепроверено: `commands::cmd_get_narrative` и `application::narrative::cmd_get_narrative` существуют оба |
 | K | Таблица `events` **без писателей в продукте** | `third_relevance_path.md` | перепроверено: `insert_events_batch` зовётся только из `budget_probe` |
