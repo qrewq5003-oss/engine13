@@ -192,7 +192,13 @@ name = "Нанять солдат"
 [universal_actions.available_if]
 type = "metric"
 metric = "family:family_wealth"
-operator = "greater"
+# `greater` здесь было невыполнимо по построению: family-метрики клампятся 0..100
+# (`MetricRef::add`), а порог равен цене действия ровно — требовалось иметь СТРОГО
+# больше, чем потолок шкалы. Действие не могло стать доступным ни при каком состоянии
+# мира. `greater_or_equal` — единственное выполнимое чтение, сохраняющее смысл
+# «хватает на оплату»: цена ниже равна тем же 100.
+# Разбор: docs/investigation_dead_authored_content.md §13.
+operator = "greater_or_equal"
 value = 100.0
 
 [universal_actions.effects]

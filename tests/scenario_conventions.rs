@@ -2152,3 +2152,116 @@ fn engine_arithmetic_is_re_implemented_only_where_listed() {
         failures.join("\n")
     );
 }
+
+/// Bug class: an authored condition on a clamped metric whose threshold lies outside the
+/// clamp — a gate that no state of the world can open.
+///
+/// Two were found, both in rome and both by the same arithmetic: the threshold equals (or
+/// doubles) the action's own cost, while family metrics are clamped to `0..100` on every
+/// write (`MetricRef::add`). `recruit_soldiers` demanded *strictly more than* `100` and
+/// cost exactly `100`; `senator_bribe` demanded `> 200`. Neither could ever fire, and
+/// neither failed a test: the content was simply never reachable.
+///
+/// The predicate distinguishes `>` from `>=` deliberately. `federation_progress >= 100`
+/// (constantinople's `outcome_best`) sits exactly on the ceiling and **is** satisfiable —
+/// it fires in 20 of 30 runs. A guard that flagged it would be noise.
+#[test]
+fn authored_gates_on_clamped_metrics_are_satisfiable() {
+    use engine13::core::{ComparisonOperator, MetricRef};
+
+    // metric -> why an out-of-range threshold on it is tolerated
+    const ALLOWED: &[(&str, &str)] = &[(
+        "senator_bribe",
+        "threshold `family:wealth > 200` is twice the 0..100 ceiling and twice the event's own \
+         cost (-100). Unlike `recruit_soldiers`, where the threshold equalled the cost and `>=` \
+         was the one satisfiable reading, any fix here invents a number the author did not \
+         write — it is an authored decision. See docs/investigation_dead_authored_content.md §13",
+    )];
+
+    const CLAMPED: &[&str] = &[
+        "legitimacy",
+        "cohesion",
+        "military_quality",
+        "economic_output",
+        "external_pressure",
+        "federation_progress",
+        "influence",
+        "knowledge",
+        "wealth",
+        "connections",
+    ];
+    fn bare(name: &str) -> String {
+        let tail = name.rsplit([':', '.']).next().unwrap_or(name);
+        tail.strip_prefix("family_").unwrap_or(tail).to_string()
+    }
+    fn unsatisfiable(metric: &str, op: &ComparisonOperator, value: f64) -> Option<String> {
+        if !CLAMPED.contains(&bare(metric).as_str()) {
+            return None;
+        }
+        match op {
+            _ if value > 100.0 => Some(format!("{metric} {op:?} {value}: above the 0..100 ceiling")),
+            _ if value < 0.0 => Some(format!("{metric} {op:?} {value}: below the 0..100 floor")),
+            ComparisonOperator::Greater if value >= 100.0 => {
+                Some(format!("{metric} > {value}: strictly above the ceiling"))
+            }
+            ComparisonOperator::Less if value <= 0.0 => {
+                Some(format!("{metric} < {value}: strictly below the floor"))
+            }
+            _ => None,
+        }
+    }
+
+    let mut failures = Vec::new();
+    for &id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+
+        for action in scenario.universal_actions.iter().chain(scenario.patron_actions.iter()) {
+            if ALLOWED.iter().any(|(a, _)| *a == action.id) {
+                continue;
+            }
+            if let engine13::core::ActionCondition::Metric { metric, operator, value } =
+                &action.available_if
+            {
+                if let Some(why) = unsatisfiable(&metric.to_string(), operator, *value) {
+                    failures.push(format!("  {id} action `{}`: {why}", action.id));
+                }
+            }
+        }
+
+        for event in &scenario.random_events {
+            if ALLOWED.iter().any(|(a, _)| *a == event.id) {
+                continue;
+            }
+            for cond in &event.conditions {
+                if let Some(why) =
+                    unsatisfiable(&cond.metric.to_string(), &cond.operator, cond.value)
+                {
+                    failures.push(format!("  {id} event `{}`: {why}", event.id));
+                }
+            }
+        }
+
+        for m in &scenario.milestone_events {
+            if let engine13::core::EventConditionType::Metric { metric, operator, value, .. } =
+                &m.condition.condition_type
+            {
+                let name = match metric {
+                    MetricRef::Actor { metric, .. } => metric.as_str().to_string(),
+                    MetricRef::Family { key } => key.as_str().to_string(),
+                    MetricRef::Global { key } => key.as_str().to_string(),
+                };
+                if let Some(why) = unsatisfiable(&name, operator, *value) {
+                    failures.push(format!("  {id} milestone `{}`: {why}", m.id));
+                }
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "an authored gate stands outside the clamp of the metric it reads — no state of the \
+         world can open it, and nothing else will notice. Either move the threshold inside \
+         `0..100`, or add the gate here with a written reason.\n{}",
+        failures.join("\n")
+    );
+}
