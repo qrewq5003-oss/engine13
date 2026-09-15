@@ -9,6 +9,7 @@ use crate::core::{
 use serde::Serialize;
 
 pub mod interactions;
+pub mod trace;
 
 /// Validate that every non-Linear dependency rule carries the threshold its mode
 /// needs.
@@ -94,7 +95,7 @@ pub fn validate_dependencies(
 /// Apply a single dependency rule to an actor
 /// Sequential mutation semantics - each rule reads the current state
 /// of the actor (already modified by previous rules).
-fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) {
+fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32) {
     let from_val = actor.get_metric(rule.from.as_str());
     // Non-Linear modes require `threshold`. `validate_dependency_thresholds` runs
     // centrally at load (`load_by_id` -> `validate_scenario`) for every scenario,
@@ -138,6 +139,16 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
             _ => 0.0,
         },
     };
+    // Emitted even when `delta == 0.0`: the share of actor-ticks on which a rule fires at
+    // all is a question probes ask, and a zero is an answer to it.
+    trace::record_dependency(|| trace::DependencyRow {
+        tick,
+        actor: actor.id.clone(),
+        rule: rule.id.clone(),
+        from_val,
+        to_before: actor.get_metric(rule.to.as_str()),
+        delta,
+    });
     if delta != 0.0 {
         actor.add_metric(rule.to.as_str(), delta);
     }
@@ -146,9 +157,10 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule) 
 /// Phase: Apply dependency rules to all actors
 /// Rules are applied in strict file order - order is part of simulation logic.
 fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
+    let tick = world.tick;
     for actor in world.actors.values_mut() {
         for rule in &scenario.dependencies {
-            apply_dependency_rule(actor, rule);
+            apply_dependency_rule(actor, rule, tick);
         }
     }
 }
@@ -304,7 +316,7 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
     apply_treasury(world);
 
     // Apply auto_deltas via MetricRef - unified for actor/family/global
-    for auto_delta in &scenario.auto_deltas {
+    for (index, auto_delta) in scenario.auto_deltas.iter().enumerate() {
         // Check conditions
         let mut delta = auto_delta.base;
         for cond in &auto_delta.conditions {
@@ -333,6 +345,17 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         // Apply noise
         let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
         let final_delta = delta + noise;
+
+        // The number the engine is about to use, emitted where it is already computed —
+        // nothing is recalculated alongside it. See `engine::trace`.
+        trace::record_auto_delta(|| trace::AutoDeltaRow {
+            tick: world.tick,
+            index,
+            metric: auto_delta.metric.to_string(),
+            base: auto_delta.base,
+            authored: delta,
+            applied: final_delta,
+        });
 
         // Apply via MetricRef - scope to actor if actor_id is set
         auto_delta.metric.apply(world, final_delta);

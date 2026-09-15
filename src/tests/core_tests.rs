@@ -1114,3 +1114,78 @@ delta = -0.2
     assert!(toml::from_str::<AutoDeltasFileForTest>(bad_condition).is_err());
 }
 
+
+/// The trace sink is off unless asked for, and when asked for it carries the numbers the
+/// engine used — not numbers a reader could have recomputed.
+///
+/// `to_before` is the point of the dependency row: the target's value **mid-tick**, at the
+/// moment the rule read it. The dependency phase runs inside `phase_interactions`, after
+/// auto-deltas, region ranks and military recovery, so a tick-boundary snapshot is a
+/// different number. `authored` vs `applied` is the point of the auto-delta row: what the
+/// content asked for, and what the world got after noise.
+#[test]
+fn trace_sink_is_off_by_default_and_records_what_the_engine_applied() {
+    use crate::engine::trace;
+
+    let scenario = registry::load_by_id("constantinople_1430").unwrap();
+    let build = || {
+        let mut w = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                w.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        w
+    };
+
+    // Off by default: a tick records nothing, and taking yields nothing.
+    let mut world = build();
+    let mut log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut log, &mut rng);
+    assert!(
+        trace::take_dependencies().is_empty() && trace::take_auto_deltas().is_empty(),
+        "the sink recorded something without being enabled"
+    );
+
+    // Enabled: both kinds arrive, and the numbers are the engine's own.
+    trace::enable();
+    let mut world = build();
+    let mut log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut log, &mut rng);
+    let deps = trace::take_dependencies();
+    let autos = trace::take_auto_deltas();
+    trace::disable();
+
+    // One row per rule per actor present when the phase ran. The actor count is NOT taken
+    // from the world afterwards: collapses and spawns change it within the same tick, and
+    // an assertion against the post-tick count measures the wrong moment — the same class
+    // of error the sink exists to remove.
+    assert!(
+        !deps.is_empty() && deps.len() % scenario.dependencies.len() == 0,
+        "expected a whole number of rule-sweeps, got {} rows for {} rules",
+        deps.len(),
+        scenario.dependencies.len()
+    );
+    assert!(
+        deps.iter().any(|r| r.delta != 0.0),
+        "no rule fired at all in a whole tick — the sink is wired to the wrong place"
+    );
+    assert_eq!(
+        autos.len(),
+        scenario.auto_deltas.len(),
+        "one row per auto-delta block per tick"
+    );
+    assert!(
+        autos.iter().any(|r| (r.applied - r.authored).abs() > f64::EPSILON),
+        "authored and applied never differ — the noise term is not reaching the row"
+    );
+
+    // And the sink really is off again.
+    let mut world = build();
+    let mut log = crate::engine::EventLog::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
+    crate::engine::tick(&mut world, &scenario, &mut log, &mut rng);
+    assert!(trace::take_dependencies().is_empty(), "`disable` did not stop recording");
+}
