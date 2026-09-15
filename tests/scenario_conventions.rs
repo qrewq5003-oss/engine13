@@ -2265,3 +2265,28 @@ fn authored_gates_on_clamped_metrics_are_satisfiable() {
         failures.join("\n")
     );
 }
+
+/// The refusal in `docs/investigation_dead_authored_content.md` §12 rests on one line.
+///
+/// `treasury` is unclamped and goes negative for up to a quarter of the actors, and its
+/// scale spread across actors is the largest in its class (`1630x`). The rule that reads
+/// it is nevertheless left alone, because the one behavioural consumer —
+/// `Actor::power_projection`, where treasury carries 20 % of the weight and decides who
+/// stands in the foreground — reads it through `.clamp(0.0, 1.0)`. **Debt and destitution
+/// are indistinguishable to it**, so the negative range reaches nothing.
+///
+/// Removing that clamp is a one-line change that revives a `1630x` spread, in a file that
+/// has nothing to do with dependency rules. This guard is the note that says so.
+#[test]
+fn power_projection_clamps_the_treasury_term() {
+    let src = std::fs::read_to_string("src/core/actor.rs").expect("src/core/actor.rs");
+    assert!(
+        src.contains(r#"(self.get_metric("treasury") / TREASURY_NORM_CAP).clamp(0.0, 1.0)"#),
+        "the treasury term of `power_projection` is no longer clamped to 0..1. Treasury is \
+         unclamped and negative for real actors; without this clamp a debtor's power \
+         projection goes negative and the refusal recorded in \
+         docs/investigation_dead_authored_content.md §12/§14 stops holding — the 1630x \
+         spread becomes observable. If the clamp is being removed on purpose, re-measure \
+         that refusal first."
+    );
+}
