@@ -2002,6 +2002,30 @@ fn effect_sign_check_rejects_a_hard_coded_plus() {
 /// body mentions the enum is a place that has to be kept in step with the engine,
 /// whatever shape its arms take. A `match` on something else entirely (`match mode` over
 /// a CLI string) mentions nothing and is not counted.
+///
+/// # Boundary — what this predicate does NOT see
+///
+/// It matches an **idiom**, not the fact of dispatching. Three shapes pass it, all
+/// verified green against an injected copy that prices unknown modes as zero:
+///
+/// * `use DependencyMode::*` with unqualified arms (`Excess => …`) — the body never
+///   spells `DependencyMode::`;
+/// * `if let DependencyMode::Excess = m { … }` — no `match`;
+/// * `matches!(m, DependencyMode::Excess)` — no `match`.
+///
+/// The predicate is deliberately **not** widened to cover them. The bypass it was
+/// widened for was real — `budget_probe:8447` was in the file and invisible — while
+/// these three are not written anywhere in the project as a *mirror*. Chasing the last
+/// idiom costs more than it buys.
+///
+/// But the boundary is named here rather than left implicit, because two of the three
+/// are not hypothetical as *idioms*: `engine/mod.rs` already uses `matches!` over the
+/// mode twice (the proportional-threshold check and the hot-path `debug_assert`). Both
+/// are in the engine, so they mirror nothing — but they are mode-dependent logic that a
+/// new variant has to be considered against, and they are **outside the count below**.
+///
+/// So: an author writing a mirror through `if let`, `matches!` or a glob import is
+/// **outside this guard**, and should know it from here instead of assuming coverage.
 fn dependency_mode_dispatch_sites(text: &str) -> usize {
     let chars: Vec<char> = text.chars().collect();
     let mut count = 0usize;
