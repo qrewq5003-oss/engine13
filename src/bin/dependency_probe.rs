@@ -207,6 +207,7 @@ fn main() {
     // statistic as the played world (`sim`). Comparing a median-over-run here against an
     // end-of-run there is the median-of-ratio mistake wearing a different hat.
     let mut spawn_end: BTreeMap<String, Vec<(f64, f64, f64)>> = BTreeMap::new();
+    let mut spawn_keys: BTreeMap<String, Vec<(f64, f64, f64, f64)>> = BTreeMap::new();
 
     for seed in seed_from..seed_from + seed_count {
         let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
@@ -396,6 +397,12 @@ fn main() {
                         a.get_metric("population"),
                         interactions::military_capacity(a),
                         a.get_metric("military_size"),
+                    ));
+                    spawn_keys.entry(spawn.actor_id.clone()).or_default().push((
+                        a.get_metric("economic_output"),
+                        a.get_metric("external_pressure"),
+                        a.get_metric("treasury"),
+                        a.neighbors.len() as f64,
                     ));
                 }
             }
@@ -622,8 +629,16 @@ fn main() {
         let mut arms: Vec<f64> = rows.iter().map(|r| r.2).collect();
         let (_, _, p50, _, _) = quantiles(&mut pops);
         let (_, _, a50, _, _) = quantiles(&mut arms);
+        let kr = spawn_keys.get(&sp.actor_id).cloned().unwrap_or_default();
+        let mut eo: Vec<f64> = kr.iter().map(|r| r.0).collect();
+        let mut ep: Vec<f64> = kr.iter().map(|r| r.1).collect();
+        let mut tr: Vec<f64> = kr.iter().map(|r| r.2).collect();
+        let nb = kr.first().map(|r| r.3).unwrap_or(0.0);
+        let (_, _, eo50, _, _) = quantiles(&mut eo);
+        let (_, _, ep50, _, _) = quantiles(&mut ep);
+        let (_, _, tr50, _, _) = quantiles(&mut tr);
         println!(
-            "  {:18} entered {entered}/{seed_count}, alive at end {alive}/{seed_count} | at end: population median {p50:.1} | army median {a50:.2}",
+            "  {:18} entered {entered}/{seed_count}, alive {alive}/{seed_count} | end: pop {p50:.1} army {a50:.2} | eo {eo50:.1} ep {ep50:.1} treas {tr50:.0} | соседей {nb:.0}",
             sp.actor_id
         );
     }
@@ -768,3 +783,5 @@ fn main() {
     println!("  military_size across all actor-ticks: p10 {w10:.2}  median {w50:.2}  p90 {w90:.2}");
     let _: HashMap<(), ()> = HashMap::new();
 }
+
+// NOT FOR MERGE — per-spawn trace of the two keys the constantinople spawns omit.
