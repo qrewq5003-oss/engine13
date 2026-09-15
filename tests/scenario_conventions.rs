@@ -1562,3 +1562,79 @@ fn hazards() {
         "a name inside a nested block comment must not be reported: {lits:?}"
     );
 }
+
+/// Returns the inheritance coefficients that exceed `1.0`, with their metric keys.
+///
+/// Split out so the companion test can feed it a synthetic map: the real scenarios
+/// currently pass, and a guard that has never been seen to fail is not a guard.
+fn inheritance_coefficients_over_one(
+    coefficients: &std::collections::HashMap<String, f64>,
+) -> Vec<String> {
+    let mut over: Vec<String> = coefficients
+        .iter()
+        .filter(|(_, c)| **c > 1.0)
+        .map(|(k, c)| format!("{k} = {c}"))
+        .collect();
+    over.sort();
+    over
+}
+
+/// Bug class: an invariant that holds because of the *values* in content, while the
+/// *code* that would enforce it does not exist.
+///
+/// Family metrics are clamped to `0..100` on the canonical write path
+/// (`MetricRef::add`, `metric_ref.rs`). They are **not** clamped on the second write
+/// path — generation inheritance multiplies every family metric by its coefficient and
+/// inserts the product directly (`engine/mod.rs`, `check_generation_transfer`). The
+/// ceiling therefore holds only while every coefficient is `<= 1.0`; rome's are
+/// `0.85, 1.0, 1.0, 0.8` and the engine's default for an unlisted metric is `0.7`.
+///
+/// This is load-bearing, not cosmetic. `docs/investigation_silent_authored_content.md`
+/// §7 concludes that `recruit_soldiers` (`family_wealth > 100`) and `senator_bribe`
+/// (`> 200`) are dead **structurally** — gated above a ceiling no state can reach. A
+/// coefficient of `1.2` written tomorrow lifts family metrics past `100` on a path with
+/// no clamp, and that conclusion silently becomes false with no test failing.
+#[test]
+fn inheritance_coefficients_never_exceed_one() {
+    let mut failures = Vec::new();
+    for &id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+        let Some(gen) = &scenario.generation_mechanics else {
+            continue;
+        };
+        let over = inheritance_coefficients_over_one(&gen.inheritance_coefficients);
+        if !over.is_empty() {
+            failures.push(format!("{id}: {}", over.join(", ")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "an inheritance coefficient above 1.0 lifts a family metric on the ONE write path \
+         that does not clamp (`check_generation_transfer` inserts `value * coefficient` \
+         directly). The `0..100` ceiling is what makes `recruit_soldiers` and \
+         `senator_bribe` structurally dead — see \
+         docs/investigation_silent_authored_content.md §7. If a coefficient above 1.0 is \
+         intended, that conclusion has to be re-measured first.\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The other half: the guard must fire. Fed a map with a coefficient above one.
+#[test]
+fn inheritance_coefficient_check_catches_a_new_violator() {
+    use std::collections::HashMap;
+    let mut coefficients: HashMap<String, f64> = HashMap::new();
+    coefficients.insert("family_influence".to_string(), 0.85);
+    coefficients.insert("family_wealth".to_string(), 1.0);
+    assert!(
+        inheritance_coefficients_over_one(&coefficients).is_empty(),
+        "coefficients at or below 1.0 must pass"
+    );
+    coefficients.insert("family_connections".to_string(), 1.2);
+    let over = inheritance_coefficients_over_one(&coefficients);
+    assert_eq!(
+        over,
+        vec!["family_connections = 1.2".to_string()],
+        "a coefficient above 1.0 must be reported, and named"
+    );
+}
