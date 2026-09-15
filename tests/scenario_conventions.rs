@@ -1927,3 +1927,64 @@ fn scenario_specifications_quote_numbers_that_still_match() {
         failures.join("\n")
     );
 }
+
+/// Bug class: a renderer that assumes the sign of a number the content is free to make
+/// negative.
+///
+/// `ControlPanel.tsx` shows a player the cost and the effects of an action before they
+/// choose it. The cost block computed the sign; the effects block hard-coded a plus.
+/// Fifteen actions across the three scenarios carry negative values in `effects`, so the
+/// card rendered `+-50`, `+-80`, `+-15`. The cheapest example is `raise_taxes`, the one
+/// unconditional source of family wealth: it showed `Cohesion: +-3`.
+///
+/// This is the first member of the "works and lies" class that a guard can catch at all
+/// — unlike a family named after the wrong city, it needs no knowledge of the world
+/// outside the repository. The predicate is: either no authored effect is negative, or
+/// the renderer computes the sign. The first disjunct is content's business and changes
+/// freely; the second is checkable here.
+#[test]
+fn action_effects_are_rendered_with_a_computed_sign() {
+    let panel = std::fs::read_to_string("src/components/ControlPanel.tsx")
+        .expect("src/components/ControlPanel.tsx");
+
+    // How many authored effects are negative — the reason the guard exists.
+    let mut negative = 0usize;
+    for &id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+        for action in scenario.universal_actions.iter().chain(scenario.patron_actions.iter()) {
+            if action.effects.values().any(|v| *v < 0.0) {
+                negative += 1;
+            }
+        }
+    }
+
+    let hard_coded_plus = panel.contains(": +{value.toFixed(0)}");
+    assert!(
+        !hard_coded_plus,
+        "the action card hard-codes a leading `+` for effects while {negative} authored \
+         actions carry negative values there — the player is shown `+-50`. Compute the \
+         sign, as the cost block does."
+    );
+
+    let computed = panel.matches("value > 0 ? '+' : ''").count();
+    assert!(
+        computed >= 2,
+        "expected the sign to be computed in both the cost and the effects block, found \
+         {computed} site(s) — the guard has drifted from the component"
+    );
+}
+
+/// The other half: the predicate must reject the shape that shipped.
+#[test]
+fn effect_sign_check_rejects_a_hard_coded_plus() {
+    let broken = "{formatMetricName(metric)}: +{value.toFixed(0)}";
+    assert!(
+        broken.contains(": +{value.toFixed(0)}"),
+        "the pattern the guard looks for must match the shape that actually shipped"
+    );
+    let fixed = "{formatMetricName(metric)}: {value > 0 ? '+' : ''}{value.toFixed(0)}";
+    assert!(
+        !fixed.contains(": +{value.toFixed(0)}"),
+        "the corrected shape must not match"
+    );
+}
