@@ -1989,6 +1989,56 @@ fn effect_sign_check_rejects_a_hard_coded_plus() {
     );
 }
 
+/// Count `match` expressions that dispatch on `DependencyMode`.
+///
+/// The first version of this predicate counted the literal `DependencyMode::Deficit =>`
+/// and therefore counted **three** of the five sites in `budget_probe`: it missed a tuple
+/// match (`match (&r.mode, r.threshold)`, whose arms are written
+/// `(&DependencyMode::Deficit, Some(t))`) and a match with no `Deficit` arm at all. A
+/// fourth copy that simply never mentioned `Deficit` in that spelling appeared with the
+/// guard staying green — the claim "a fourth one cannot appear unnoticed" was false.
+///
+/// Counting the *dispatch* instead of one variant name closes both: any `match` whose
+/// body mentions the enum is a place that has to be kept in step with the engine,
+/// whatever shape its arms take. A `match` on something else entirely (`match mode` over
+/// a CLI string) mentions nothing and is not counted.
+fn dependency_mode_dispatch_sites(text: &str) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut count = 0usize;
+    let mut i = 0usize;
+    while let Some(rel) = text[i..].find("match ") {
+        let at = i + rel;
+        // byte index -> char index is avoided by scanning on the char vector from a
+        // recomputed position; `find` gives bytes, so re-derive the char offset.
+        let char_at = text[..at].chars().count();
+        let Some(open_rel) = chars[char_at..].iter().position(|c| *c == '{') else {
+            break;
+        };
+        let open = char_at + open_rel;
+        let mut depth = 0i32;
+        let mut close = open;
+        for (k, c) in chars[open..].iter().enumerate() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let body: String = chars[open..=close].iter().collect();
+        if body.contains("DependencyMode::") {
+            count += 1;
+        }
+        i = at + "match ".len();
+    }
+    count
+}
+
 /// Bug class: the engine's arithmetic re-implemented outside the engine.
 ///
 /// `budget_probe` prices dependency rules offline, and to do it, it keeps its own
@@ -2011,15 +2061,25 @@ fn engine_arithmetic_is_re_implemented_only_where_listed() {
     const EXPECTED: &[(&str, usize, &str)] = &[
         (
             "src/engine/mod.rs",
-            1,
-            "the original: `apply_dependency_rule`",
+            2,
+            "the original arithmetic (`apply_dependency_rule`) plus the load-time validator \
+             (`validate_dependency_thresholds`), which dispatches on the mode to decide whether a \
+             threshold is required. Both are in the engine and are the thing everything else must \
+             be kept in step with; the widened predicate counts the validator too, and that is \
+             correct — a new mode has to be considered there as well",
         ),
         (
             "src/bin/budget_probe.rs",
-            3,
-            "offline pricing of dependency rules for the treasury/population investigations; \
-             two full copies and one partial, all pre-dating the rule that a probe must call \
-             the engine rather than mirror it — see docs/investigation_pressure_military_form.md §10",
+            5,
+            "offline pricing of dependency rules for the treasury/population investigations. \
+             FIVE sites, not the three the first version of this guard could see: three flat \
+             `match rule.mode`, one tuple `match (&r.mode, r.threshold)`, and one that arms only \
+             `Excess` and `Bonus` behind `_ => 0.0`. That last one prices every other mode — \
+             `Deficit`, `Linear`, both proportional forms — as ZERO, silently, and it is the very \
+             shape this guard's own text warned about. It is filtered to `external_pressure` \
+             rules, all of which are `excess`/`bonus` today, so nothing merged is contaminated; \
+             a proportional `ep` rule would have been priced as zero. \
+             See docs/investigation_silent_authored_content.md §16",
         ),
     ];
 
@@ -2041,8 +2101,7 @@ fn engine_arithmetic_is_re_implemented_only_where_listed() {
     let mut found: BTreeMap<String, usize> = BTreeMap::new();
     for f in &files {
         let Ok(text) = std::fs::read_to_string(f) else { continue };
-        // A `match` arm over the enum, not a construction of it: the arrow is the tell.
-        let sites = text.matches("DependencyMode::Deficit =>").count();
+        let sites = dependency_mode_dispatch_sites(&text);
         if sites > 0 {
             found.insert(f.to_string_lossy().replace('\\', "/"), sites);
         }
