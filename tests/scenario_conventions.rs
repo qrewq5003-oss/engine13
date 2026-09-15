@@ -1988,3 +1988,92 @@ fn effect_sign_check_rejects_a_hard_coded_plus() {
         "the corrected shape must not match"
     );
 }
+
+/// Bug class: the engine's arithmetic re-implemented outside the engine.
+///
+/// `budget_probe` prices dependency rules offline, and to do it, it keeps its own
+/// `match` over `DependencyMode` — three of them. That is not a style complaint: when the
+/// engine grew `ExcessProportional`, none of those copies knew, and the only thing that
+/// noticed was the compiler refusing a non-exhaustive match. A copy that had used a
+/// catch-all arm would have kept running and quietly priced the new mode as zero.
+///
+/// The measuring devices of this project decide what gets merged, so a probe that
+/// computes something *close to* what the engine computes is worse than no probe. The
+/// rule the project already follows is "call the engine, do not re-derive it"
+/// (`dependency_probe` reads the engine's own trace; `spec` guards load through
+/// `registry`). Where a copy is unavoidable, it is listed here with a reason, and a
+/// fourth one cannot appear unnoticed.
+#[test]
+fn engine_arithmetic_is_re_implemented_only_where_listed() {
+    use std::collections::BTreeMap;
+
+    // file -> (match sites, why a copy is tolerated here)
+    const EXPECTED: &[(&str, usize, &str)] = &[
+        (
+            "src/engine/mod.rs",
+            1,
+            "the original: `apply_dependency_rule`",
+        ),
+        (
+            "src/bin/budget_probe.rs",
+            3,
+            "offline pricing of dependency rules for the treasury/population investigations; \
+             two full copies and one partial, all pre-dating the rule that a probe must call \
+             the engine rather than mirror it — see docs/investigation_pressure_military_form.md §10",
+        ),
+    ];
+
+    fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect(&p, out);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(std::path::Path::new("src"), &mut files);
+    files.sort();
+
+    let mut found: BTreeMap<String, usize> = BTreeMap::new();
+    for f in &files {
+        let Ok(text) = std::fs::read_to_string(f) else { continue };
+        // A `match` arm over the enum, not a construction of it: the arrow is the tell.
+        let sites = text.matches("DependencyMode::Deficit =>").count();
+        if sites > 0 {
+            found.insert(f.to_string_lossy().replace('\\', "/"), sites);
+        }
+    }
+
+    let mut failures = Vec::new();
+    for (path, expected_sites, _why) in EXPECTED {
+        match found.get(*path) {
+            Some(n) if n == expected_sites => {}
+            Some(n) => failures.push(format!(
+                "  {path}: {n} match site(s) over DependencyMode, expected {expected_sites}"
+            )),
+            None => failures.push(format!(
+                "  {path}: no longer matches over DependencyMode — drop it from the list and say so"
+            )),
+        }
+    }
+    for (path, n) in &found {
+        if !EXPECTED.iter().any(|(p, _, _)| p == path) {
+            failures.push(format!(
+                "  {path}: {n} new match site(s) over DependencyMode — call the engine instead of \
+                 mirroring it, or add an entry here with a written reason"
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "the engine's dependency arithmetic is mirrored somewhere new, or an existing mirror \
+         changed shape. A mirror that drifts prices the world differently from the engine, and \
+         the measurements built on it decide what gets merged.\n{}",
+        failures.join("\n")
+    );
+}
