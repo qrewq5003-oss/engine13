@@ -275,7 +275,7 @@ fn test_generation_mechanics_has_era_texts() {
     assert!(scenario.generation_mechanics.is_some(), "Rome 375 should have generation_mechanics");
     
     let gen = scenario.generation_mechanics.as_ref().unwrap();
-    assert_eq!(gen.panel_label, "Семья Ди Милано");
+    assert_eq!(gen.panel_label, "Семья Анициев");
     assert!(!gen.era_texts.is_empty(), "Should have era texts");
 }
 

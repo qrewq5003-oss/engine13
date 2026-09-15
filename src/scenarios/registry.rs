@@ -15,7 +15,7 @@ pub fn get_registry() -> Vec<ScenarioEntry> {
     vec![
         ScenarioEntry {
             id: "rome_375",
-            name: "Rome 375 — Семья Ди Милано",
+            name: "Rome 375 — Семья Анициев",
             year: 375,
             description: "375 год. Медиолан — фактическая столица Западной Империи.",
             loader: crate::scenarios::rome_375::load_rome_375,
