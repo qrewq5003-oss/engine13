@@ -181,8 +181,8 @@ pub fn build_snapshot(
     // describing what it changed.
     //
     // Ordered by firing tick, not by definition order. The list is append-only and a
-    // milestone never retracts an earlier one, so rome can hold both "Семья Ди Милано
-    // стала одной из значимых сил" and "Семья Ди Милано потеряла всё что нажила" at
+    // milestone never retracts an earlier one, so rome can hold both "Семья Анициев
+    // стала одной из значимых сил" and "Семья Анициев потеряла всё что нажила" at
     // once; without a time order those two lines are simply contradictory. The year
     // comes from the milestone's own event in the log — the same record the engine
     // wrote when it fired — and it is what lets the chronicler place each change
