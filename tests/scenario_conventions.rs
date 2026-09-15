@@ -1638,3 +1638,117 @@ fn inheritance_coefficient_check_catches_a_new_violator() {
         "a coefficient above 1.0 must be reported, and named"
     );
 }
+
+/// Returns the authored strings a specification quotes that no longer exist in the
+/// scenario's content. Split out so the companion test can feed it synthetic input.
+///
+/// "Authored string" is narrow on purpose: a quoted run of at least 16 characters
+/// containing Cyrillic. Everything else a specification quotes — `region_rank: "S"`,
+/// `id: "rome"`, prose in its own pseudo-notation — is **not** a verbatim quote of code
+/// and never was. Measured before the guard was written: over the whole file, 92 of 158
+/// quoted lines differ by notation alone, while of the 16 authored strings exactly 3
+/// had drifted, and all 3 were real.
+fn spec_strings_missing_from_content(spec: &str, content: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let bytes: Vec<char> = spec.chars().collect();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == '"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != '"' && bytes[j] != '\n' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == '"' {
+                let lit: String = bytes[start..j].iter().collect();
+                let cyrillic = lit.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+                if lit.chars().count() >= 16 && cyrillic && !content.contains(&lit) {
+                    out.push(lit);
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Bug class: a **specification** drifting from the code it specifies.
+///
+/// A record ("here is what was generated") stays true untouched; a specification ("here
+/// is what the scenario is") becomes false the moment the code changes under it, and the
+/// next reader takes the stale value from the normative source rather than from an
+/// archive. `ROME_375_SCENARIO.md` had drifted in three authored strings across three
+/// separate merged tasks — the family name, the `rome_splits` narrative text, and (found
+/// alongside, not covered by this guard) its `duration`.
+///
+/// Only one root document is checked, and that is deliberate: the other two are prose
+/// design discussions whose quotation marks carry emphasis, not content. Running this
+/// predicate over `ENGINE13_SCENARIO3_DESIGN.md` reports 16 of 18 "missing" strings, all
+/// false. A guard is worth having only where it is precise.
+#[test]
+fn scenario_specifications_quote_content_that_still_exists() {
+    // spec file -> (scenario id, why this file is a specification and not a record)
+    const SPECS: &[(&str, &str, &str)] = &[(
+        "ROME_375_SCENARIO.md",
+        "rome_375",
+        "quotes authored content verbatim and is used as the normative description of the scenario",
+    )];
+
+    let mut failures = Vec::new();
+    for (spec_path, scenario_id, _why) in SPECS {
+        let Ok(spec) = std::fs::read_to_string(spec_path) else {
+            failures.push(format!("{spec_path}: not readable"));
+            continue;
+        };
+        let mut content =
+            std::fs::read_to_string(format!("src/scenarios/{scenario_id}.rs")).unwrap_or_default();
+        if let Ok(dir) = std::fs::read_dir(format!("src/scenarios/{scenario_id}")) {
+            for e in dir.flatten() {
+                if e.path().extension().and_then(|x| x.to_str()) == Some("toml") {
+                    content.push_str(&std::fs::read_to_string(e.path()).unwrap_or_default());
+                }
+            }
+        }
+        assert!(
+            content.len() > 1000,
+            "{spec_path}: scenario content for {scenario_id} came out empty — the guard has drifted"
+        );
+        for missing in spec_strings_missing_from_content(&spec, &content) {
+            failures.push(format!("  {spec_path}: {missing}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a specification quotes authored text the scenario no longer contains. Either the \
+         code changed and the specification was not updated, or the quotation was never \
+         accurate. A stale specification is worse than a stale record: the next reader \
+         takes the old value from the normative source.\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The other half: the guard must fire, and must stay silent on notation.
+#[test]
+fn spec_drift_check_catches_a_changed_string_and_ignores_notation() {
+    let spec = r#"
+    region_rank: "S"
+    id: "rome"
+    llm_context_shift: "Семья Анициев стала одной из значимых сил города."
+    llm_context_shift: "Строка, которой в контенте нет совсем."
+    "#;
+    let content = r#"
+        region_rank: RegionRank::S,
+        id: "rome".to_string(),
+        llm_context_shift: "Семья Анициев стала одной из значимых сил города.".to_string(),
+    "#;
+    let missing = spec_strings_missing_from_content(spec, content);
+    assert_eq!(
+        missing,
+        vec!["Строка, которой в контенте нет совсем.".to_string()],
+        "the guard must report the drifted authored string and nothing else: {missing:?}"
+    );
+}
