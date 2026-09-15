@@ -123,7 +123,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                       <span className="effect-label">Effects:</span>
                       {Object.entries(actionInfo.action.effects).map(([metric, value]) => (
                         <span key={metric} className="effect-item">
-                          {formatMetricName(metric)}: +{value.toFixed(0)}
+                          {/* Sign is computed, not assumed: 15 actions across the three
+                              scenarios carry NEGATIVE values in `effects`, and a hard-coded
+                              plus rendered them as `+-50`. `raise_taxes` showed the player
+                              `Cohesion: +-3`. See docs/investigation_silent_authored_content.md §15. */}
+                          {formatMetricName(metric)}: {value > 0 ? '+' : ''}{value.toFixed(0)}
                         </span>
                       ))}
                     </div>
