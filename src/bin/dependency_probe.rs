@@ -161,7 +161,16 @@ fn main() {
     let mut deaths: BTreeMap<String, usize> = BTreeMap::new();
     let mut alive_end: BTreeMap<String, usize> = BTreeMap::new();
 
-    const SUBJECT: &str = "external_pressure_to_military_size";
+    // The rule under the microscope. Hard-coding one rule id in a measuring device is the
+    // same smell the engine was just guarded against, so it is a switch with a default.
+    let subject: String = std::env::var("E13_SUBJECT")
+        .unwrap_or_else(|_| "external_pressure_to_military_size".to_string());
+    let subject_metric: String = scenario
+        .dependencies
+        .iter()
+        .find(|r| r.id == subject)
+        .map(|r| r.to.as_str().to_string())
+        .unwrap_or_else(|| "military_size".to_string());
 
     // Part 6: can each spawn milestone's gate ever be crossed in this world?
     // Authored content that never enters the world is invisible to every balance
@@ -275,7 +284,7 @@ fn main() {
                         .or_default()
                         .push(row.delta.abs() / row.to_before.abs());
                 }
-                if row.rule == SUBJECT {
+                if row.rule == subject {
                     drain_by_actor.entry(row.actor.clone()).or_default().push(row.delta.abs());
                     if row.to_before.abs() > 1e-12 {
                         rel_by_actor
@@ -355,7 +364,7 @@ fn main() {
 
             // End-of-tick state per actor.
             for (id, actor) in world.actors.iter() {
-                let mil = actor.get_metric("military_size");
+                let mil = actor.get_metric(&subject_metric);
                 mil_by_actor.entry(id.clone()).or_default().push(mil);
                 pop_by_actor.entry(id.clone()).or_default().push(actor.get_metric("population"));
                 cap_by_actor
@@ -427,7 +436,7 @@ fn main() {
     println!();
 
     // ---- Part 3: the subject rule, per actor --------------------------------
-    println!("--- Part 3: {SUBJECT}, per actor ---");
+    println!("--- Part 3: {subject} (target `{subject_metric}`), per actor ---");
     println!(
         "{:16} {:>9} {:>9} {:>9} {:>9} {:>10} {:>9} {:>8} {:>7}",
         "actor", "pop med", "cap med", "mil med", "drain med", "drain/mil", "m* pred", "army=0%", "deaths"
