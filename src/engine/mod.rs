@@ -487,8 +487,16 @@ fn phase_random_events(
     shuffled_events.shuffle(rng);
 
     // Get sea actor IDs for SeaActors target
+    // Membership is a property the tag declares (`sea_going` in `tags.toml`), not a name
+    // the engine knows. See `TagDefinition::sea_going`.
+    let sea_tags: std::collections::HashSet<&str> = scenario
+        .tag_definitions
+        .iter()
+        .filter(|t| t.sea_going)
+        .map(|t| t.id.as_str())
+        .collect();
     let sea_actor_ids: std::collections::HashSet<String> = scenario.actors.iter()
-        .filter(|a| a.tags.contains(&"maritime".to_string()) || a.tags.contains(&"trade_empire".to_string()))
+        .filter(|a| a.tags.iter().any(|t| sea_tags.contains(t.as_str())))
         .map(|a| a.id.clone())
         .collect();
 

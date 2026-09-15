@@ -175,6 +175,19 @@ pub struct TagDefinition {
     pub spread_cooldown_ticks: u32,
     #[serde(default = "default_spread_chance")]
     pub spread_chance: f64,
+    /// Does carrying this tag make an actor a sea power?
+    ///
+    /// The engine used to answer that by enumerating two tag names (`maritime`,
+    /// `trade_empire`) inside `EventTarget::SeaActors`. Rome's `saxons` carry
+    /// `seafaring` — a fully authored tag with its own modifier and spread — and the two
+    /// vocabularies do not intersect, so the `piracy` event targeted an **empty set** in
+    /// rome and could not fire at all. No test failed; the content simply never reached a
+    /// player. See docs/investigation_dead_authored_content.md §7.
+    ///
+    /// Asking the tag for a property instead of asking the engine for a name means the
+    /// next sea tag joins by declaring itself, not by being added to a list in Rust.
+    #[serde(default)]
+    pub sea_going: bool,
     #[serde(default)]
     pub requires_era: Option<Era>,
     #[serde(default)]

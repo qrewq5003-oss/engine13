@@ -167,7 +167,7 @@ pub fn load_rome_375() -> Scenario {
 
     let scenario = Scenario {
         id: "rome_375".to_string(),
-        label: "Rome 375 — Семья Ди Милано".to_string(),
+        label: "Rome 375 — Семья Анициев".to_string(),
         description: "375 год. Медиолан — фактическая столица Западной Империи. Гунны за горизонтом давят на готов.".to_string(),
         start_year: 375,
         tempo: 0.7,
@@ -198,7 +198,7 @@ pub fn load_rome_375() -> Scenario {
             metric: crate::core::MetricRef::literal("family:influence"),
             threshold: 90.0,
             title: "Семья достигла величия".to_string(),
-            description: "Ди Милано стали опорой угасающей империи.".to_string(),
+            description: "Аниции стали опорой угасающей империи.".to_string(),
             minimum_tick: 30,  // 15 years × 2 ticks/year
             additional_conditions: vec![],
             sustained_ticks_required: 1,
@@ -1440,7 +1440,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             },
             is_key: true,
             triggers_collapse: false,
-            llm_context_shift: "Семья Ди Милано стала одной из значимых сил города. Их больше не игнорируют.".to_string(),
+            llm_context_shift: "Семья Анициев стала одной из значимых сил города. Их больше не игнорируют.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
         },
@@ -1528,7 +1528,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             },
             is_key: true,
             triggers_collapse: false,
-            llm_context_shift: "Семья Ди Милано потеряла всё что нажила. Они снова никто.".to_string(),
+            llm_context_shift: "Семья Анициев потеряла всё что нажила. Они снова никто.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
         },
@@ -1629,7 +1629,7 @@ fn create_generation_mechanics() -> GenerationMechanics {
         patriarch_end_age: 75,
         generation_length: 33,
         inheritance_coefficients,
-        panel_label: "Семья Ди Милано".to_string(),
+        panel_label: "Семья Анициев".to_string(),
         era_texts: vec![
             crate::core::EraText { from_year: 375, to_year: 410, text: "Рим трещит по швам. Семья держит позиции при дворе.".to_string() },
             crate::core::EraText { from_year: 410, to_year: 455, text: "Западная империя агонизирует. Влияние семьи — последний якорь.".to_string() },
@@ -1655,7 +1655,7 @@ fn create_generation_mechanics() -> GenerationMechanics {
 // ============================================================================
 
 fn create_llm_context() -> String {
-    r#"СЦЕНАРИЙ: Рим 375 — Семья Ди Милано
+    r#"СЦЕНАРИЙ: Рим 375 — Семья Анициев
 РОЛЬ ИГРОКА: Глава незаметной семьи в Медиолане. Не Валент, не Амброзий. Человек который видит.
 
 КОНТЕКСТ:
@@ -1720,7 +1720,7 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
             ],
         },
         StatusIndicator {
-            label: "Семья Ди Милано".to_string(),
+            label: "Семья Анициев".to_string(),
             metric: crate::core::MetricRef::literal("family:family_influence"),
             invert: false,
             thresholds: vec![

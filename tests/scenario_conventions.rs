@@ -181,6 +181,7 @@ fn contagious_tag_check_catches_a_new_violator() {
         spread_chance: chance,
         requires_era: None,
         unlocks: Vec::new(),
+            sea_going: false,
     };
 
     // clean: writes a guarded metric but does not spread
@@ -1029,5 +1030,1125 @@ fn frontend_world_state_type_matches_the_rust_struct() {
         promised_but_absent.is_empty(),
         "the frontend's WorldState type promises properties the backend never sends: {promised_but_absent:?}\n\
          Either add them to the Rust struct (and fill them) or drop them from the TypeScript type."
+    );
+}
+
+/// Bug class: a measuring device that samples world state at the tick boundary is
+/// only as honest as what happens between the moment the engine reads a value and
+/// the moment the probe reads it.
+///
+/// This was not hypothetical. `docs/investigation_pressure_military_form.md` §16.4
+/// rests on `ottomans.cohesion` never reaching the `< 40` that would spawn `mamluks`;
+/// the observed minimum is `47.97`, a margin of `7.97`. Inside `phase_events` —
+/// between the engine's own evaluation of that gate and the probe's sample — sits
+/// `apply_milestone_effects`, which lowers `ottomans.cohesion` by **10**. The
+/// conclusion survives only because that write goes *down*, which makes the probe a
+/// lower bound on what the engine saw. A second writer, or the same one with the
+/// opposite sign, would quietly invalidate the measurement with no test failing.
+///
+/// So the invariant is not "phase_events writes little" (a size claim, and the wrong
+/// kind) but "the set of things reachable from `phase_events` that change the world
+/// is exactly this list" (a membership claim, mechanically checkable). The list is
+/// keyed on *changing the world*, not only on writing metrics: the traversal also
+/// found two functions that insert actors, which is precisely the mechanism the spawn
+/// census measures.
+const PHASE_EVENTS_MUTATORS: &[&str] = &[
+    ".set_metric(",
+    ".add_metric(",
+    ".clamp_metric(",
+    "actors.insert(",
+    "actors.remove(",
+    ".metrics.insert(",
+];
+
+/// Lexical: index every top-level `fn` in `src`, take the transitive closure of calls
+/// starting at `entry`, and return those reachable functions whose body contains one of
+/// the world-changing calls. Split out of the test so the companion test can feed it a
+/// synthetic file and prove the guard actually fires.
+fn world_writers_reachable_from(
+    src: &str,
+    entry: &str,
+) -> std::collections::BTreeMap<String, Vec<&'static str>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut bodies: BTreeMap<String, String> = BTreeMap::new();
+    let mut idx = 0usize;
+    while let Some(rel) = src[idx..].find("fn ") {
+        let at = idx + rel;
+        let line_start = src[..at].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let prefix = &src[line_start..at];
+        if !prefix.trim_start().is_empty() && prefix.trim_start() != "pub " {
+            idx = at + 3;
+            continue;
+        }
+        let rest = &src[at + 3..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if name.is_empty() {
+            idx = at + 3;
+            continue;
+        }
+        let Some(open_rel) = src[at..].find('{') else { break };
+        let open = at + open_rel;
+        let mut depth = 0i32;
+        let mut close = open;
+        for (i, c) in src[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        bodies.insert(name, src[open..=close].to_string());
+        idx = open + 1;
+    }
+
+    let mut reached: BTreeSet<String> = BTreeSet::new();
+    let mut stack = vec![entry.to_string()];
+    while let Some(f) = stack.pop() {
+        if !reached.insert(f.clone()) {
+            continue;
+        }
+        let Some(body) = bodies.get(&f) else { continue };
+        for name in bodies.keys() {
+            if body.contains(&format!("{name}(")) && !reached.contains(name) {
+                stack.push(name.clone());
+            }
+        }
+    }
+
+    let mut found: BTreeMap<String, Vec<&'static str>> = BTreeMap::new();
+    for f in &reached {
+        let Some(body) = bodies.get(f) else { continue };
+        let hits: Vec<&'static str> = PHASE_EVENTS_MUTATORS
+            .iter()
+            .copied()
+            .filter(|m| body.contains(m))
+            .collect();
+        if !hits.is_empty() {
+            found.insert(f.clone(), hits);
+        }
+    }
+    found
+}
+
+#[test]
+fn phase_events_world_writers_are_the_expected_set() {
+    use std::collections::BTreeSet;
+
+    // function -> why it is allowed to change the world from inside `phase_events`
+    const EXPECTED: &[(&str, &str)] = &[
+        (
+            "apply_milestone_effects",
+            "the only metric writer: `mehmed_accelerates` lowers ottomans military_quality/treasury/cohesion. \
+             Every write here must be a DECREASE for the boundary sample to stay a lower bound — \
+             see docs/investigation_pressure_military_form.md §18",
+        ),
+        (
+            "check_milestone_events",
+            "inserts spawned actors: this is the mechanism the spawn census measures, not a side effect",
+        ),
+        (
+            "apply_seat_split",
+            "inserts the heir seat when a scenario splits — docs/investigation_split_as_shrink.md",
+        ),
+    ];
+
+    let src = std::fs::read_to_string("src/engine/mod.rs").expect("src/engine/mod.rs");
+    let found = world_writers_reachable_from(&src, "phase_events");
+    assert!(
+        !found.is_empty(),
+        "the lexical scan in this guard found nothing at all — it has drifted from the file"
+    );
+
+    let expected: BTreeSet<&str> = EXPECTED.iter().map(|(f, _)| *f).collect();
+    let actual: BTreeSet<&str> = found.keys().map(|s| s.as_str()).collect();
+
+    let unexpected: Vec<String> = actual
+        .difference(&expected)
+        .map(|f| format!("  {f} changes the world via {:?} and is not in the expected list", found[*f]))
+        .collect();
+    let gone: Vec<String> = expected
+        .difference(&actual)
+        .map(|f| format!("  {f} no longer changes the world — drop it from the list and say so"))
+        .collect();
+
+    assert!(
+        unexpected.is_empty() && gone.is_empty(),
+        "the set of world-changing functions reachable from `phase_events` has changed.\n\
+         Every measuring device that samples at the tick boundary depends on this set, and on the \
+         SIGN of what it writes: see docs/investigation_pressure_military_form.md §18.\n\
+         Update the list here with a written reason, and re-check any conclusion that rests on a \
+         boundary sample.\n{}{}",
+        unexpected.join("\n"),
+        gone.join("\n")
+    );
+}
+
+
+/// The other half: prove the guard fires. A synthetic file whose `phase_events` reaches
+/// a new writer two calls deep must be reported — otherwise the green test above means
+/// only that the scan found nothing.
+#[test]
+fn phase_events_writer_check_catches_a_new_violator() {
+    let synthetic = r#"
+fn phase_events(world: &mut W) {
+    check_threshold_effects(world);
+}
+
+fn check_threshold_effects(world: &mut W) {
+    newly_added_helper(world);
+}
+
+fn newly_added_helper(world: &mut W) {
+    world.actors.get_mut("ottomans").unwrap().add_metric("cohesion", 12.0);
+}
+
+fn not_reachable(world: &mut W) {
+    world.actors.insert("x".to_string(), y);
+}
+"#;
+    let found = world_writers_reachable_from(synthetic, "phase_events");
+    assert!(
+        found.contains_key("newly_added_helper"),
+        "a writer two calls below phase_events was not reported: {found:?}"
+    );
+    assert!(
+        !found.contains_key("not_reachable"),
+        "a writer that phase_events cannot reach must not be reported: {found:?}"
+    );
+}
+
+/// Strip Rust comments and the trailing `#[cfg(test)]` module, then return every
+/// string literal left in the production code.
+///
+/// One scanner does both jobs because they are the same job: a `//` inside a string
+/// is not a comment, and a `"` inside a comment does not open a string. Doing it with
+/// two regexes gets this wrong in both directions — the first cross-check written by
+/// hand for this guard reported `"rome"` and `"rome_375"` as engine knowledge of
+/// content, and both were examples inside doc comments.
+fn production_string_literals(src: &str) -> Vec<String> {
+    let src = match src.find("#[cfg(test)]") {
+        Some(i) => &src[..i],
+        None => src,
+    };
+    let b: Vec<char> = src.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            '/' if i + 1 < b.len() && b[i + 1] == '/' => {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if i + 1 < b.len() && b[i + 1] == '*' => {
+                i += 2;
+                let mut depth = 1;
+                while i < b.len() && depth > 0 {
+                    if b[i] == '/' && i + 1 < b.len() && b[i + 1] == '*' {
+                        depth += 1;
+                        i += 2;
+                    } else if b[i] == '*' && i + 1 < b.len() && b[i + 1] == '/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            // A char literal containing a quote — `'"'` — desynchronises a naive
+            // scanner: the quote opens a string and everything up to the next quote
+            // becomes invisible. Measured: with `let _q = '"';` placed AFTER the last
+            // expected name, a real hard-coded actor id went unreported and the guard
+            // stayed green. The two-sided check only saves the case where the blind
+            // spot swallows an expected name too.
+            //
+            // A lifetime (`&'a str`) starts the same way and must NOT be treated as a
+            // literal, so the two are told apart by what closes them.
+            '\'' => {
+                if i + 1 < b.len() && b[i + 1] == '\\' {
+                    i += 2;
+                    while i < b.len() && b[i] != '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                } else if i + 2 < b.len() && b[i + 2] == '\'' {
+                    i += 3;
+                } else {
+                    i += 1; // a lifetime
+                }
+            }
+            // Raw strings: `r"..."`, `r#"..."#`, `r##"..."##`, and the byte-string forms
+            // `br"..."` / `br#"..."#`. The closing quote needs the same number of
+            // hashes, so an inner `"` does not end them.
+            //
+            // The `b` prefix has to be allowed explicitly: without it the token boundary
+            // check sees `b` as an identifier character, rejects the raw string, and the
+            // first inner `"` closes a plain string — blinding the scanner from there on.
+            // Measured: `br#"raw byte with a " quote"#` swallowed the next three literals.
+            'r' if i + 1 < b.len()
+                && (b[i + 1] == '"' || b[i + 1] == '#')
+                && {
+                    let prev_is_b = i > 0 && b[i - 1] == 'b';
+                    let boundary = if prev_is_b { i.checked_sub(2) } else { i.checked_sub(1) };
+                    match boundary {
+                        None => true,
+                        Some(k) => !(b[k].is_alphanumeric() || b[k] == '_'),
+                    }
+                } =>
+            {
+                let mut j = i + 1;
+                let mut hashes = 0usize;
+                while j < b.len() && b[j] == '#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == '"' {
+                    j += 1;
+                    let start = j;
+                    let closing: String =
+                        std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                    let rest: String = b[j..].iter().collect();
+                    match rest.find(&closing) {
+                        Some(off) => {
+                            let end = start + rest[..off].chars().count();
+                            out.push(b[start..end].iter().collect());
+                            i = end + closing.chars().count();
+                        }
+                        None => i = b.len(),
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            '"' => {
+                i += 1;
+                let mut lit = String::new();
+                while i < b.len() && b[i] != '"' {
+                    if b[i] == '\\' {
+                        i += 1;
+                        if i < b.len() {
+                            lit.push(b[i]);
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    lit.push(b[i]);
+                    i += 1;
+                }
+                i += 1;
+                out.push(lit);
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// Bug class: the engine deciding membership by **enumerating authored names** instead
+/// of asking for a property.
+///
+/// Found in the wild: `EventTarget::SeaActors` resolves "is this actor maritime" as
+/// `tags.contains("maritime") || tags.contains("trade_empire")`. Rome's `saxons` carry
+/// `seafaring` — a fully authored tag with its own `metrics_modifier` and `spreads_via`
+/// — and the two vocabularies do not intersect, so the `piracy` event targets an empty
+/// set in rome and cannot fire at all. No test failed; the content simply never reached
+/// a player. See docs/investigation_dead_authored_content.md §7.
+///
+/// The class is small and closed, which is exactly why it is worth pinning: a fifth
+/// name added tomorrow silently repeats the same failure.
+#[test]
+fn engine_knows_authored_content_only_by_these_names() {
+    use std::collections::BTreeSet;
+
+    // literal -> why the engine is allowed to know this authored name
+    const EXPECTED: &[(&str, &str)] = &[
+        (
+            "mehmed_accelerates",
+            "apply_milestone_effects, mod.rs — one scenario's milestone hard-coded in the engine",
+        ),
+        (
+            "ottomans",
+            "the actor that same milestone writes to",
+        ),
+    ];
+
+    // Authored vocabulary: ids of tags, actors, milestones, events.
+    let mut authored: BTreeSet<String> = BTreeSet::new();
+    fn walk(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            for line in text.lines() {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("id = \"") {
+                    if let Some(name) = rest.split('"').next() {
+                        out.insert(name.to_string());
+                    }
+                } else if let Some(rest) = t.strip_prefix("id: \"") {
+                    if let Some(name) = rest.split('"').next() {
+                        out.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    walk(std::path::Path::new("src/scenarios"), &mut authored);
+    walk(std::path::Path::new("src/events"), &mut authored);
+    assert!(
+        authored.len() > 50,
+        "authored vocabulary came out at {} names — the scan has drifted",
+        authored.len()
+    );
+
+    // The engine's own metric vocabulary is not authored content: every scenario uses
+    // the same words, and the engine is entitled to know them.
+    let metrics: BTreeSet<&str> = [
+        "population",
+        "military_size",
+        "military_quality",
+        "economic_output",
+        "cohesion",
+        "legitimacy",
+        "external_pressure",
+        "treasury",
+        "expansion_count",
+        "federation_progress",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for dir in ["src/engine", "src/core"] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            panic!("{dir} not readable")
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&p).expect("engine source");
+            for lit in production_string_literals(&src) {
+                if authored.contains(&lit) && !metrics.contains(lit.as_str()) {
+                    found.insert(lit);
+                }
+            }
+        }
+    }
+
+    let expected: BTreeSet<&str> = EXPECTED.iter().map(|(n, _)| *n).collect();
+    let actual: BTreeSet<&str> = found.iter().map(|s| s.as_str()).collect();
+    let extra: Vec<&&str> = actual.difference(&expected).collect();
+    let gone: Vec<&&str> = expected.difference(&actual).collect();
+
+    assert!(
+        extra.is_empty() && gone.is_empty(),
+        "the set of authored names hard-coded in the engine has changed.\n\
+         Deciding membership by enumerating names is how `piracy` came to target an empty \
+         set in rome (docs/investigation_dead_authored_content.md §7). Prefer asking the \
+         content for a property.\n\
+         newly hard-coded: {extra:?}\n\
+         no longer present (drop from the list and say so): {gone:?}"
+    );
+}
+
+/// The other half: the scanner must see code and must NOT see comments — the exact
+/// trap that produced two false positives when this cross-check was first written by
+/// hand.
+#[test]
+fn literal_scan_ignores_comments_and_test_modules() {
+    let synthetic = r#"
+/// A doc comment mentioning "rome_375" as an example.
+// A line comment mentioning "ottomans".
+/* A block comment mentioning "maritime". */
+fn real_code() {
+    let a = "seafaring";
+    let url = "https://example.invalid//not-a-comment";
+}
+#[cfg(test)]
+mod tests {
+    const HIDDEN: &str = "trade_empire";
+}
+"#;
+    let lits = production_string_literals(synthetic);
+    assert!(lits.contains(&"seafaring".to_string()), "real literal missed: {lits:?}");
+    assert!(
+        lits.contains(&"https://example.invalid//not-a-comment".to_string()),
+        "a `//` inside a string must not start a comment: {lits:?}"
+    );
+    for hidden in ["rome_375", "ottomans", "maritime", "trade_empire"] {
+        assert!(
+            !lits.contains(&hidden.to_string()),
+            "{hidden} came from a comment or a test module: {lits:?}"
+        );
+    }
+}
+
+/// The dangerous direction: not "the scanner sees too much" but "the scanner goes
+/// blind from line N onward and reports nothing after it".
+///
+/// `assert!(!found.is_empty())` in the guard above catches a scanner that died
+/// completely; it cannot catch one that died halfway. This test puts each
+/// resynchronisation hazard in the MIDDLE and an expected name AFTER it, so a scanner
+/// that loses its place fails here instead of silently passing the real guard.
+///
+/// Measured before the fix: `let _q = '"';` placed after the last expected name made a
+/// genuine hard-coded actor id invisible and left the guard green.
+#[test]
+fn literal_scan_resynchronises_after_char_literals_and_raw_strings() {
+    let synthetic = r##"
+fn hazards() {
+    let quote_char = '"';
+    let after_char_literal = "name_after_char";
+    let escaped = ''';
+    let after_escaped = "name_after_escape";
+    let backslash = '\';
+    let after_backslash = "name_after_backslash";
+    let raw = r#"a raw string with a " quote and a // slash"#;
+    let after_raw = "name_after_raw";
+    let byte_string = b"a byte string";
+    let after_byte_string = "name_after_byte_string";
+    let raw_byte = br#"a raw byte string with a " quote"#;
+    let after_raw_byte = "name_after_raw_byte";
+    let byte_char = b'"';
+    let after_byte_char = "name_after_byte_char";
+    let lifetime: &'static str = "name_after_lifetime";
+    let nested = /* outer /* inner "hidden_in_nested" */ still comment */ "name_after_nested";
+}
+"##;
+    let lits = production_string_literals(synthetic);
+    for expected in [
+        "name_after_char",
+        "name_after_escape",
+        "name_after_backslash",
+        "name_after_raw",
+        "name_after_byte_string",
+        "name_after_raw_byte",
+        "name_after_byte_char",
+        "name_after_lifetime",
+        "name_after_nested",
+    ] {
+        assert!(
+            lits.contains(&expected.to_string()),
+            "scanner lost its place before `{expected}` — it goes blind from there on, \
+             and the main guard would stay green while real hard-coded names slip past: {lits:?}"
+        );
+    }
+    assert!(
+        !lits.contains(&"hidden_in_nested".to_string()),
+        "a name inside a nested block comment must not be reported: {lits:?}"
+    );
+}
+
+/// Returns the inheritance coefficients that exceed `1.0`, with their metric keys.
+///
+/// Split out so the companion test can feed it a synthetic map: the real scenarios
+/// currently pass, and a guard that has never been seen to fail is not a guard.
+fn inheritance_coefficients_over_one(
+    coefficients: &std::collections::HashMap<String, f64>,
+) -> Vec<String> {
+    let mut over: Vec<String> = coefficients
+        .iter()
+        .filter(|(_, c)| **c > 1.0)
+        .map(|(k, c)| format!("{k} = {c}"))
+        .collect();
+    over.sort();
+    over
+}
+
+/// Bug class: an invariant that holds because of the *values* in content, while the
+/// *code* that would enforce it does not exist.
+///
+/// Family metrics are clamped to `0..100` on the canonical write path
+/// (`MetricRef::add`, `metric_ref.rs`). They are **not** clamped on the second write
+/// path — generation inheritance multiplies every family metric by its coefficient and
+/// inserts the product directly (`engine/mod.rs`, `check_generation_transfer`). The
+/// ceiling therefore holds only while every coefficient is `<= 1.0`; rome's are
+/// `0.85, 1.0, 1.0, 0.8` and the engine's default for an unlisted metric is `0.7`.
+///
+/// This is load-bearing, not cosmetic. `docs/investigation_silent_authored_content.md`
+/// §7 concludes that `recruit_soldiers` (`family_wealth > 100`) and `senator_bribe`
+/// (`> 200`) are dead **structurally** — gated above a ceiling no state can reach. A
+/// coefficient of `1.2` written tomorrow lifts family metrics past `100` on a path with
+/// no clamp, and that conclusion silently becomes false with no test failing.
+#[test]
+fn inheritance_coefficients_never_exceed_one() {
+    let mut failures = Vec::new();
+    for &id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+        let Some(gen) = &scenario.generation_mechanics else {
+            continue;
+        };
+        let over = inheritance_coefficients_over_one(&gen.inheritance_coefficients);
+        if !over.is_empty() {
+            failures.push(format!("{id}: {}", over.join(", ")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "an inheritance coefficient above 1.0 lifts a family metric on the ONE write path \
+         that does not clamp (`check_generation_transfer` inserts `value * coefficient` \
+         directly). The `0..100` ceiling is what makes `recruit_soldiers` and \
+         `senator_bribe` structurally dead — see \
+         docs/investigation_silent_authored_content.md §7. If a coefficient above 1.0 is \
+         intended, that conclusion has to be re-measured first.\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The other half: the guard must fire. Fed a map with a coefficient above one.
+#[test]
+fn inheritance_coefficient_check_catches_a_new_violator() {
+    use std::collections::HashMap;
+    let mut coefficients: HashMap<String, f64> = HashMap::new();
+    coefficients.insert("family_influence".to_string(), 0.85);
+    coefficients.insert("family_wealth".to_string(), 1.0);
+    assert!(
+        inheritance_coefficients_over_one(&coefficients).is_empty(),
+        "coefficients at or below 1.0 must pass"
+    );
+    coefficients.insert("family_connections".to_string(), 1.2);
+    let over = inheritance_coefficients_over_one(&coefficients);
+    assert_eq!(
+        over,
+        vec!["family_connections = 1.2".to_string()],
+        "a coefficient above 1.0 must be reported, and named"
+    );
+}
+
+/// Returns the authored strings a specification quotes that no longer exist in the
+/// scenario's content. Split out so the companion test can feed it synthetic input.
+///
+/// "Authored string" is narrow on purpose: a quoted run of at least 16 characters
+/// containing Cyrillic. Everything else a specification quotes — `region_rank: "S"`,
+/// `id: "rome"`, prose in its own pseudo-notation — is **not** a verbatim quote of code
+/// and never was. Measured before the guard was written: over the whole file, 92 of 158
+/// quoted lines differ by notation alone, while of the 16 authored strings exactly 3
+/// had drifted, and all 3 were real.
+fn spec_strings_missing_from_content(spec: &str, content: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let bytes: Vec<char> = spec.chars().collect();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == '"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != '"' && bytes[j] != '\n' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == '"' {
+                let lit: String = bytes[start..j].iter().collect();
+                let cyrillic = lit.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+                if lit.chars().count() >= 16 && cyrillic && !content.contains(&lit) {
+                    out.push(lit);
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Bug class: a **specification** drifting from the code it specifies.
+///
+/// A record ("here is what was generated") stays true untouched; a specification ("here
+/// is what the scenario is") becomes false the moment the code changes under it, and the
+/// next reader takes the stale value from the normative source rather than from an
+/// archive. `ROME_375_SCENARIO.md` had drifted in three authored strings across three
+/// separate merged tasks — the family name, the `rome_splits` narrative text, and (found
+/// alongside, not covered by this guard) its `duration`.
+///
+/// Only one root document is checked, and that is deliberate: the other two are prose
+/// design discussions whose quotation marks carry emphasis, not content. Running this
+/// predicate over `ENGINE13_SCENARIO3_DESIGN.md` reports 16 of 18 "missing" strings, all
+/// false. A guard is worth having only where it is precise.
+#[test]
+fn scenario_specifications_quote_content_that_still_exists() {
+    // spec file -> (scenario id, why this file is a specification and not a record)
+    const SPECS: &[(&str, &str, &str)] = &[(
+        "ROME_375_SCENARIO.md",
+        "rome_375",
+        "quotes authored content verbatim and is used as the normative description of the scenario",
+    )];
+
+    let mut failures = Vec::new();
+    for (spec_path, scenario_id, _why) in SPECS {
+        let Ok(spec) = std::fs::read_to_string(spec_path) else {
+            failures.push(format!("{spec_path}: not readable"));
+            continue;
+        };
+        let mut content =
+            std::fs::read_to_string(format!("src/scenarios/{scenario_id}.rs")).unwrap_or_default();
+        if let Ok(dir) = std::fs::read_dir(format!("src/scenarios/{scenario_id}")) {
+            for e in dir.flatten() {
+                if e.path().extension().and_then(|x| x.to_str()) == Some("toml") {
+                    content.push_str(&std::fs::read_to_string(e.path()).unwrap_or_default());
+                }
+            }
+        }
+        assert!(
+            content.len() > 1000,
+            "{spec_path}: scenario content for {scenario_id} came out empty — the guard has drifted"
+        );
+        for missing in spec_strings_missing_from_content(&spec, &content) {
+            failures.push(format!("  {spec_path}: {missing}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a specification quotes authored text the scenario no longer contains. Either the \
+         code changed and the specification was not updated, or the quotation was never \
+         accurate. A stale specification is worse than a stale record: the next reader \
+         takes the old value from the normative source.\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The other half: the guard must fire, and must stay silent on notation.
+#[test]
+fn spec_drift_check_catches_a_changed_string_and_ignores_notation() {
+    let spec = r#"
+    region_rank: "S"
+    id: "rome"
+    llm_context_shift: "Семья Анициев стала одной из значимых сил города."
+    llm_context_shift: "Строка, которой в контенте нет совсем."
+    "#;
+    let content = r#"
+        region_rank: RegionRank::S,
+        id: "rome".to_string(),
+        llm_context_shift: "Семья Анициев стала одной из значимых сил города.".to_string(),
+    "#;
+    let missing = spec_strings_missing_from_content(spec, content);
+    assert_eq!(
+        missing,
+        vec!["Строка, которой в контенте нет совсем.".to_string()],
+        "the guard must report the drifted authored string and nothing else: {missing:?}"
+    );
+}
+
+/// Parse the numeric blocks of a scenario specification: per actor id, the `metrics:`
+/// section, plus the single `scenario_metrics:` block if present.
+///
+/// Returns `(actor metrics, family metrics)`. Notation-tolerant by construction: it
+/// reads only `key: number` lines inside the named sections, so the pseudo-notation the
+/// specification uses elsewhere (`region_rank: "S"`, tag modifier tables) cannot leak in.
+/// A cruder predicate that scanned every `key: number` in the file reported 39
+/// discrepancies, all false — it was picking up tag modifiers as actor metrics.
+#[allow(clippy::type_complexity)]
+fn spec_numbers(
+    spec: &str,
+) -> (
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
+    std::collections::BTreeMap<String, f64>,
+) {
+    use std::collections::BTreeMap;
+    let mut actors: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut family: BTreeMap<String, f64> = BTreeMap::new();
+
+    let mut current_id: Option<String> = None;
+    let mut section: Option<&str> = None;
+    for line in spec.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("### ") {
+            current_id = None;
+            section = None;
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("id: \"") {
+            if let Some(id) = rest.split('"').next() {
+                current_id = Some(id.to_string());
+            }
+            section = None;
+            continue;
+        }
+        if trimmed == "metrics:" {
+            section = Some("metrics");
+            continue;
+        }
+        if trimmed == "scenario_metrics:" {
+            section = Some("family");
+            continue;
+        }
+        // A line that is not indented under a section ends it.
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if !indented {
+            section = None;
+            continue;
+        }
+        let Some(sec) = section else { continue };
+        let Some((key, rest)) = trimmed.split_once(':') else {
+            section = None;
+            continue;
+        };
+        let value_text: String = rest
+            .trim()
+            .split("//")
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let Ok(value) = value_text.parse::<f64>() else {
+            continue;
+        };
+        match sec {
+            "metrics" => {
+                if let Some(id) = &current_id {
+                    actors.entry(id.clone()).or_default().insert(key.trim().to_string(), value);
+                }
+            }
+            _ => {
+                family.insert(key.trim().to_string(), value);
+            }
+        }
+    }
+    (actors, family)
+}
+
+/// Bug class, numeric half: a specification whose **numbers** have drifted from the code.
+///
+/// The string half is `scenario_specifications_quote_content_that_still_exists`. Numbers
+/// are the more expensive half and were left unguarded at first: a drifted name a reader
+/// notices, a drifted `duration` they do not — and a stale number is exactly what someone
+/// will compute from. Kept separate because the two predicates fail for different reasons
+/// and should say so separately.
+///
+/// Authoritative by construction: the code side comes from `registry::load_by_id`, not
+/// from parsing the source.
+#[test]
+fn scenario_specifications_quote_numbers_that_still_match() {
+    let spec = std::fs::read_to_string("ROME_375_SCENARIO.md").expect("ROME_375_SCENARIO.md");
+    let scenario = registry::load_by_id("rome_375").expect("rome_375");
+    let (spec_actors, spec_family) = spec_numbers(&spec);
+
+    assert!(
+        spec_actors.len() >= 10,
+        "parsed only {} actor blocks out of the specification — the parser has drifted",
+        spec_actors.len()
+    );
+
+    let mut failures = Vec::new();
+    for (id, metrics) in &spec_actors {
+        let Some(actor) = scenario.actors.iter().find(|a| a.id == *id) else {
+            failures.push(format!("  actor `{id}` is specified but absent from the scenario"));
+            continue;
+        };
+        for (key, spec_value) in metrics {
+            let code_value = actor.metrics.get(key.as_str()).copied();
+            match code_value {
+                Some(v) if (v - spec_value).abs() < 1e-9 => {}
+                Some(v) => failures.push(format!(
+                    "  {id}.{key}: specification says {spec_value}, code has {v}"
+                )),
+                None => failures.push(format!(
+                    "  {id}.{key}: specified as {spec_value}, absent from the actor"
+                )),
+            }
+        }
+    }
+    // The family block is a KNOWN, unresolved disagreement, and it is pinned rather than
+    // hidden. The specification says `8 / 12 / 22 / 15`; the code says `0 / 0 / 0 / 0`;
+    // and the first version of the code said `60 / 40 / 50 / 45` before a commit about
+    // tag spreading zeroed it (`e235fb8`, unrelated to families). Three different sets:
+    // the two were never in agreement, so this is not drift from a merged decision.
+    //
+    // It is not silently reconciled here because which side is right is a content
+    // question with measured consequences: starting at zero is consistent with
+    // `family_rises` (`influence >= 60`) never firing without a player, with
+    // `senator_bribe` (`wealth > 200`) never firing, with `recruit_soldiers`
+    // (`wealth > 100`) never being available, and with the four family-conditioned
+    // auto-delta modifiers that never apply — see
+    // docs/investigation_silent_authored_content.md §12.
+    //
+    // Pinning both sides means the test fires the moment either changes, which forces the
+    // decision to be made rather than absorbed.
+    {
+        const SPEC_SIDE: [(&str, f64); 4] = [
+            ("family_influence", 8.0),
+            ("family_knowledge", 12.0),
+            ("family_wealth", 22.0),
+            ("family_connections", 15.0),
+        ];
+        let authored = scenario.initial_family_metrics.clone().unwrap_or_default();
+        for (key, expected_spec) in SPEC_SIDE {
+            let in_spec = spec_family.get(key).copied();
+            let in_code = authored
+                .iter()
+                .find(|(k, _)| k.ends_with(key))
+                .map(|(_, v)| *v);
+            if in_spec != Some(expected_spec) {
+                failures.push(format!(
+                    "  family {key}: the specification changed ({in_spec:?} instead of \
+                     {expected_spec}) — resolve the disagreement recorded in \
+                     docs/investigation_silent_authored_content.md §12 instead of editing one side"
+                ));
+            }
+            if in_code != Some(0.0) {
+                failures.push(format!(
+                    "  family {key}: the code changed ({in_code:?} instead of 0.0) — if the \
+                     starting values are being restored, the specification and the measured \
+                     consequences in §12 both need updating"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "the specification's numbers no longer match the scenario. A stale number in a \
+         normative document is worse than a stale name: nobody notices it, and it is what \
+         the next reader will compute from.\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Bug class: a renderer that assumes the sign of a number the content is free to make
+/// negative.
+///
+/// `ControlPanel.tsx` shows a player the cost and the effects of an action before they
+/// choose it. The cost block computed the sign; the effects block hard-coded a plus.
+/// Fifteen actions across the three scenarios carry negative values in `effects`, so the
+/// card rendered `+-50`, `+-80`, `+-15`. The cheapest example is `raise_taxes`, the one
+/// unconditional source of family wealth: it showed `Cohesion: +-3`.
+///
+/// This is the first member of the "works and lies" class that a guard can catch at all
+/// — unlike a family named after the wrong city, it needs no knowledge of the world
+/// outside the repository. The predicate is: either no authored effect is negative, or
+/// the renderer computes the sign. The first disjunct is content's business and changes
+/// freely; the second is checkable here.
+#[test]
+fn action_effects_are_rendered_with_a_computed_sign() {
+    let panel = std::fs::read_to_string("src/components/ControlPanel.tsx")
+        .expect("src/components/ControlPanel.tsx");
+
+    // How many authored effects are negative — the reason the guard exists.
+    let mut negative = 0usize;
+    for &id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
+        for action in scenario.universal_actions.iter().chain(scenario.patron_actions.iter()) {
+            if action.effects.values().any(|v| *v < 0.0) {
+                negative += 1;
+            }
+        }
+    }
+
+    let hard_coded_plus = panel.contains(": +{value.toFixed(0)}");
+    assert!(
+        !hard_coded_plus,
+        "the action card hard-codes a leading `+` for effects while {negative} authored \
+         actions carry negative values there — the player is shown `+-50`. Compute the \
+         sign, as the cost block does."
+    );
+
+    let computed = panel.matches("value > 0 ? '+' : ''").count();
+    assert!(
+        computed >= 2,
+        "expected the sign to be computed in both the cost and the effects block, found \
+         {computed} site(s) — the guard has drifted from the component"
+    );
+}
+
+/// The other half: the predicate must reject the shape that shipped.
+#[test]
+fn effect_sign_check_rejects_a_hard_coded_plus() {
+    let broken = "{formatMetricName(metric)}: +{value.toFixed(0)}";
+    assert!(
+        broken.contains(": +{value.toFixed(0)}"),
+        "the pattern the guard looks for must match the shape that actually shipped"
+    );
+    let fixed = "{formatMetricName(metric)}: {value > 0 ? '+' : ''}{value.toFixed(0)}";
+    assert!(
+        !fixed.contains(": +{value.toFixed(0)}"),
+        "the corrected shape must not match"
+    );
+}
+
+/// Count `match` expressions that dispatch on `DependencyMode`.
+///
+/// The first version of this predicate counted the literal `DependencyMode::Deficit =>`
+/// and therefore counted **three** of the five sites in `budget_probe`: it missed a tuple
+/// match (`match (&r.mode, r.threshold)`, whose arms are written
+/// `(&DependencyMode::Deficit, Some(t))`) and a match with no `Deficit` arm at all. A
+/// fourth copy that simply never mentioned `Deficit` in that spelling appeared with the
+/// guard staying green — the claim "a fourth one cannot appear unnoticed" was false.
+///
+/// Counting the *dispatch* instead of one variant name closes both: any `match` whose
+/// body mentions the enum is a place that has to be kept in step with the engine,
+/// whatever shape its arms take. A `match` on something else entirely (`match mode` over
+/// a CLI string) mentions nothing and is not counted.
+///
+/// # Boundary — what this predicate does NOT see
+///
+/// It matches an **idiom**, not the fact of dispatching. Three shapes pass it, all
+/// verified green against an injected copy that prices unknown modes as zero:
+///
+/// * `use DependencyMode::*` with unqualified arms (`Excess => …`) — the body never
+///   spells `DependencyMode::`;
+/// * `if let DependencyMode::Excess = m { … }` — no `match`;
+/// * `matches!(m, DependencyMode::Excess)` — no `match`.
+///
+/// The predicate is deliberately **not** widened to cover them. The bypass it was
+/// widened for was real — `budget_probe:8447` was in the file and invisible — while
+/// these three are not written anywhere in the project as a *mirror*. Chasing the last
+/// idiom costs more than it buys.
+///
+/// But the boundary is named here rather than left implicit, because two of the three
+/// are not hypothetical as *idioms*: `engine/mod.rs` already uses `matches!` over the
+/// mode twice (the proportional-threshold check and the hot-path `debug_assert`). Both
+/// are in the engine, so they mirror nothing — but they are mode-dependent logic that a
+/// new variant has to be considered against, and they are **outside the count below**.
+///
+/// So: an author writing a mirror through `if let`, `matches!` or a glob import is
+/// **outside this guard**, and should know it from here instead of assuming coverage.
+fn dependency_mode_dispatch_sites(text: &str) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut count = 0usize;
+    let mut i = 0usize;
+    while let Some(rel) = text[i..].find("match ") {
+        let at = i + rel;
+        // byte index -> char index is avoided by scanning on the char vector from a
+        // recomputed position; `find` gives bytes, so re-derive the char offset.
+        let char_at = text[..at].chars().count();
+        let Some(open_rel) = chars[char_at..].iter().position(|c| *c == '{') else {
+            break;
+        };
+        let open = char_at + open_rel;
+        let mut depth = 0i32;
+        let mut close = open;
+        for (k, c) in chars[open..].iter().enumerate() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let body: String = chars[open..=close].iter().collect();
+        if body.contains("DependencyMode::") {
+            count += 1;
+        }
+        i = at + "match ".len();
+    }
+    count
+}
+
+/// Bug class: the engine's arithmetic re-implemented outside the engine.
+///
+/// `budget_probe` prices dependency rules offline, and to do it, it keeps its own
+/// `match` over `DependencyMode` — three of them. That is not a style complaint: when the
+/// engine grew `ExcessProportional`, none of those copies knew, and the only thing that
+/// noticed was the compiler refusing a non-exhaustive match. A copy that had used a
+/// catch-all arm would have kept running and quietly priced the new mode as zero.
+///
+/// The measuring devices of this project decide what gets merged, so a probe that
+/// computes something *close to* what the engine computes is worse than no probe. The
+/// rule the project already follows is "call the engine, do not re-derive it"
+/// (`dependency_probe` reads the engine's own trace; `spec` guards load through
+/// `registry`). Where a copy is unavoidable, it is listed here with a reason, and a
+/// fourth one cannot appear unnoticed.
+#[test]
+fn engine_arithmetic_is_re_implemented_only_where_listed() {
+    use std::collections::BTreeMap;
+
+    // file -> (match sites, why a copy is tolerated here)
+    const EXPECTED: &[(&str, usize, &str)] = &[
+        (
+            "src/engine/mod.rs",
+            2,
+            "the original arithmetic (`apply_dependency_rule`) plus the load-time validator \
+             (`validate_dependency_thresholds`), which dispatches on the mode to decide whether a \
+             threshold is required. Both are in the engine and are the thing everything else must \
+             be kept in step with; the widened predicate counts the validator too, and that is \
+             correct — a new mode has to be considered there as well",
+        ),
+        (
+            "src/bin/budget_probe.rs",
+            5,
+            "offline pricing of dependency rules for the treasury/population investigations. \
+             FIVE sites, not the three the first version of this guard could see: three flat \
+             `match rule.mode`, one tuple `match (&r.mode, r.threshold)`, and one that arms only \
+             `Excess` and `Bonus` behind `_ => 0.0`. That last one prices every other mode — \
+             `Deficit`, `Linear`, both proportional forms — as ZERO, silently, and it is the very \
+             shape this guard's own text warned about. It is filtered to `external_pressure` \
+             rules, all of which are `excess`/`bonus` today, so nothing merged is contaminated; \
+             a proportional `ep` rule would have been priced as zero. \
+             See docs/investigation_silent_authored_content.md §16",
+        ),
+    ];
+
+    fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect(&p, out);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(std::path::Path::new("src"), &mut files);
+    files.sort();
+
+    let mut found: BTreeMap<String, usize> = BTreeMap::new();
+    for f in &files {
+        let Ok(text) = std::fs::read_to_string(f) else { continue };
+        let sites = dependency_mode_dispatch_sites(&text);
+        if sites > 0 {
+            found.insert(f.to_string_lossy().replace('\\', "/"), sites);
+        }
+    }
+
+    let mut failures = Vec::new();
+    for (path, expected_sites, _why) in EXPECTED {
+        match found.get(*path) {
+            Some(n) if n == expected_sites => {}
+            Some(n) => failures.push(format!(
+                "  {path}: {n} match site(s) over DependencyMode, expected {expected_sites}"
+            )),
+            None => failures.push(format!(
+                "  {path}: no longer matches over DependencyMode — drop it from the list and say so"
+            )),
+        }
+    }
+    for (path, n) in &found {
+        if !EXPECTED.iter().any(|(p, _, _)| p == path) {
+            failures.push(format!(
+                "  {path}: {n} new match site(s) over DependencyMode — call the engine instead of \
+                 mirroring it, or add an entry here with a written reason"
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "the engine's dependency arithmetic is mirrored somewhere new, or an existing mirror \
+         changed shape. A mirror that drifts prices the world differently from the engine, and \
+         the measurements built on it decide what gets merged.\n{}",
+        failures.join("\n")
     );
 }
