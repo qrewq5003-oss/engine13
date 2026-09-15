@@ -28,6 +28,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "maritime"
+sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 5
@@ -35,6 +36,7 @@ spread_chance = 0.4
 
 [[tags]]
 id = "trade_empire"
+sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 5

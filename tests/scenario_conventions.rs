@@ -181,6 +181,7 @@ fn contagious_tag_check_catches_a_new_violator() {
         spread_chance: chance,
         requires_era: None,
         unlocks: Vec::new(),
+            sea_going: false,
     };
 
     // clean: writes a guarded metric but does not spread
@@ -1371,15 +1372,6 @@ fn engine_knows_authored_content_only_by_these_names() {
 
     // literal -> why the engine is allowed to know this authored name
     const EXPECTED: &[(&str, &str)] = &[
-        (
-            "maritime",
-            "EventTarget::SeaActors, mod.rs — KNOWN DEFECT: enumerates names instead of asking \
-             the tag for a property, which is why rome's `seafaring` actor is invisible to it",
-        ),
-        (
-            "trade_empire",
-            "the second half of the same SeaActors predicate, same defect",
-        ),
         (
             "mehmed_accelerates",
             "apply_milestone_effects, mod.rs — one scenario's milestone hard-coded in the engine",
