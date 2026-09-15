@@ -1752,3 +1752,178 @@ fn spec_drift_check_catches_a_changed_string_and_ignores_notation() {
         "the guard must report the drifted authored string and nothing else: {missing:?}"
     );
 }
+
+/// Parse the numeric blocks of a scenario specification: per actor id, the `metrics:`
+/// section, plus the single `scenario_metrics:` block if present.
+///
+/// Returns `(actor metrics, family metrics)`. Notation-tolerant by construction: it
+/// reads only `key: number` lines inside the named sections, so the pseudo-notation the
+/// specification uses elsewhere (`region_rank: "S"`, tag modifier tables) cannot leak in.
+/// A cruder predicate that scanned every `key: number` in the file reported 39
+/// discrepancies, all false — it was picking up tag modifiers as actor metrics.
+#[allow(clippy::type_complexity)]
+fn spec_numbers(
+    spec: &str,
+) -> (
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
+    std::collections::BTreeMap<String, f64>,
+) {
+    use std::collections::BTreeMap;
+    let mut actors: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut family: BTreeMap<String, f64> = BTreeMap::new();
+
+    let mut current_id: Option<String> = None;
+    let mut section: Option<&str> = None;
+    for line in spec.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("### ") {
+            current_id = None;
+            section = None;
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("id: \"") {
+            if let Some(id) = rest.split('"').next() {
+                current_id = Some(id.to_string());
+            }
+            section = None;
+            continue;
+        }
+        if trimmed == "metrics:" {
+            section = Some("metrics");
+            continue;
+        }
+        if trimmed == "scenario_metrics:" {
+            section = Some("family");
+            continue;
+        }
+        // A line that is not indented under a section ends it.
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if !indented {
+            section = None;
+            continue;
+        }
+        let Some(sec) = section else { continue };
+        let Some((key, rest)) = trimmed.split_once(':') else {
+            section = None;
+            continue;
+        };
+        let value_text: String = rest
+            .trim()
+            .split("//")
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let Ok(value) = value_text.parse::<f64>() else {
+            continue;
+        };
+        match sec {
+            "metrics" => {
+                if let Some(id) = &current_id {
+                    actors.entry(id.clone()).or_default().insert(key.trim().to_string(), value);
+                }
+            }
+            _ => {
+                family.insert(key.trim().to_string(), value);
+            }
+        }
+    }
+    (actors, family)
+}
+
+/// Bug class, numeric half: a specification whose **numbers** have drifted from the code.
+///
+/// The string half is `scenario_specifications_quote_content_that_still_exists`. Numbers
+/// are the more expensive half and were left unguarded at first: a drifted name a reader
+/// notices, a drifted `duration` they do not — and a stale number is exactly what someone
+/// will compute from. Kept separate because the two predicates fail for different reasons
+/// and should say so separately.
+///
+/// Authoritative by construction: the code side comes from `registry::load_by_id`, not
+/// from parsing the source.
+#[test]
+fn scenario_specifications_quote_numbers_that_still_match() {
+    let spec = std::fs::read_to_string("ROME_375_SCENARIO.md").expect("ROME_375_SCENARIO.md");
+    let scenario = registry::load_by_id("rome_375").expect("rome_375");
+    let (spec_actors, spec_family) = spec_numbers(&spec);
+
+    assert!(
+        spec_actors.len() >= 10,
+        "parsed only {} actor blocks out of the specification — the parser has drifted",
+        spec_actors.len()
+    );
+
+    let mut failures = Vec::new();
+    for (id, metrics) in &spec_actors {
+        let Some(actor) = scenario.actors.iter().find(|a| a.id == *id) else {
+            failures.push(format!("  actor `{id}` is specified but absent from the scenario"));
+            continue;
+        };
+        for (key, spec_value) in metrics {
+            let code_value = actor.metrics.get(key.as_str()).copied();
+            match code_value {
+                Some(v) if (v - spec_value).abs() < 1e-9 => {}
+                Some(v) => failures.push(format!(
+                    "  {id}.{key}: specification says {spec_value}, code has {v}"
+                )),
+                None => failures.push(format!(
+                    "  {id}.{key}: specified as {spec_value}, absent from the actor"
+                )),
+            }
+        }
+    }
+    // The family block is a KNOWN, unresolved disagreement, and it is pinned rather than
+    // hidden. The specification says `8 / 12 / 22 / 15`; the code says `0 / 0 / 0 / 0`;
+    // and the first version of the code said `60 / 40 / 50 / 45` before a commit about
+    // tag spreading zeroed it (`e235fb8`, unrelated to families). Three different sets:
+    // the two were never in agreement, so this is not drift from a merged decision.
+    //
+    // It is not silently reconciled here because which side is right is a content
+    // question with measured consequences: starting at zero is consistent with
+    // `family_rises` (`influence >= 60`) never firing without a player, with
+    // `senator_bribe` (`wealth > 200`) never firing, with `recruit_soldiers`
+    // (`wealth > 100`) never being available, and with the four family-conditioned
+    // auto-delta modifiers that never apply — see
+    // docs/investigation_silent_authored_content.md §12.
+    //
+    // Pinning both sides means the test fires the moment either changes, which forces the
+    // decision to be made rather than absorbed.
+    {
+        const SPEC_SIDE: [(&str, f64); 4] = [
+            ("family_influence", 8.0),
+            ("family_knowledge", 12.0),
+            ("family_wealth", 22.0),
+            ("family_connections", 15.0),
+        ];
+        let authored = scenario.initial_family_metrics.clone().unwrap_or_default();
+        for (key, expected_spec) in SPEC_SIDE {
+            let in_spec = spec_family.get(key).copied();
+            let in_code = authored
+                .iter()
+                .find(|(k, _)| k.ends_with(key))
+                .map(|(_, v)| *v);
+            if in_spec != Some(expected_spec) {
+                failures.push(format!(
+                    "  family {key}: the specification changed ({in_spec:?} instead of \
+                     {expected_spec}) — resolve the disagreement recorded in \
+                     docs/investigation_silent_authored_content.md §12 instead of editing one side"
+                ));
+            }
+            if in_code != Some(0.0) {
+                failures.push(format!(
+                    "  family {key}: the code changed ({in_code:?} instead of 0.0) — if the \
+                     starting values are being restored, the specification and the measured \
+                     consequences in §12 both need updating"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "the specification's numbers no longer match the scenario. A stale number in a \
+         normative document is worse than a stale name: nobody notices it, and it is what \
+         the next reader will compute from.\n{}",
+        failures.join("\n")
+    );
+}
