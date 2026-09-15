@@ -1113,3 +1113,4 @@ delta = -0.2
 "#;
     assert!(toml::from_str::<AutoDeltasFileForTest>(bad_condition).is_err());
 }
+
