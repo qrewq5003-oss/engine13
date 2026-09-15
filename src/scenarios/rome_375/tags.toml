@@ -133,6 +133,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "seafaring"
+sea_going = true
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 7
