@@ -1158,15 +1158,27 @@ fn trace_sink_is_off_by_default_and_records_what_the_engine_applied() {
     let autos = trace::take_auto_deltas();
     trace::disable();
 
-    // One row per rule per actor present when the phase ran. The actor count is NOT taken
-    // from the world afterwards: collapses and spawns change it within the same tick, and
-    // an assertion against the post-tick count measures the wrong moment — the same class
-    // of error the sink exists to remove.
-    assert!(
-        !deps.is_empty() && deps.len() % scenario.dependencies.len() == 0,
-        "expected a whole number of rule-sweeps, got {} rows for {} rules",
+    // One row per rule per actor present when the phase ran.
+    //
+    // The actor count is NOT taken from the world afterwards: collapses and spawns change
+    // it within the same tick, so a post-tick count measures the wrong moment — the class
+    // of error this sink exists to remove. It is taken from the trace itself.
+    //
+    // A divisibility check (`len % rules == 0`) was tried first and is a TAUTOLOGY here:
+    // the phase loops actors outside and rules inside, so every actor contributes exactly
+    // `rules` rows and the remainder is zero whatever happens to the actor count. It was
+    // insensitive to the very thing it replaced, while the sentence above it claimed
+    // otherwise — the quantifier rule, unapplied to an invariant.
+    let traced_actors: std::collections::BTreeSet<&str> =
+        deps.iter().map(|r| r.actor.as_str()).collect();
+    assert!(!traced_actors.is_empty(), "the trace named no actors at all");
+    assert_eq!(
         deps.len(),
-        scenario.dependencies.len()
+        scenario.dependencies.len() * traced_actors.len(),
+        "expected every traced actor to receive every rule: {} rows for {} rules and {} actors",
+        deps.len(),
+        scenario.dependencies.len(),
+        traced_actors.len()
     );
     assert!(
         deps.iter().any(|r| r.delta != 0.0),
