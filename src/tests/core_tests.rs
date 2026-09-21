@@ -1169,6 +1169,13 @@ fn trace_sink_is_off_by_default_and_records_what_the_engine_applied() {
     // `rules` rows and the remainder is zero whatever happens to the actor count. It was
     // insensitive to the very thing it replaced, while the sentence above it claimed
     // otherwise — the quantifier rule, unapplied to an invariant.
+    // Boundary, named rather than closed: an actor that produced NO rows at all is not in
+    // this set, so dropping one from the sweep entirely leaves the assertion satisfied.
+    // Closing it needs the live roster *at the moment the phase ran*, which is exactly the
+    // quantity that must not be read from the world afterwards — it would have to be
+    // emitted as its own row. Not worth it: a whole actor vanishing from a phase is a
+    // failure that shows up loudly in any measurement built on the sink. The message says
+    // "traced actor" for this reason, and means it.
     let traced_actors: std::collections::BTreeSet<&str> =
         deps.iter().map(|r| r.actor.as_str()).collect();
     assert!(!traced_actors.is_empty(), "the trace named no actors at all");
