@@ -162,6 +162,18 @@ color = "#5d4037"
 # Три остальных ключа НЕ дописываются намеренно: `external_pressure` работает только
 # при значении вне шкалы игры, `treasury` имеет практически пустой интервал, а
 # `population` открывает гейт `plague`. Разбор — docs/investigation_spawn_completeness.md.
+# Рёбра по истории 1430-х, в той же логике, что граф расстояния 1
+# (docs/investigation_d1_graph.md §2): Валахия — дунайское пограничье между двумя
+# дворами. Влад Дракул инвестирован Сигизмундом Венгерским в 1431 и приносит дань
+# Порте с 1436; Дунай — прямая османская граница. Сербское деспотство западнее по
+# тому же Дунаю, поэтому d2.
+# Тот же документ отклонил `hungary–ottomans` d1 ИМЕННО потому, что «между ними
+# Сербия и Валахия» — эти рёбра и есть то, что там названо.
+neighbors = [
+    { id = "ottomans", distance = 1, border_type = "land" },
+    { id = "hungary", distance = 1, border_type = "land" },
+    { id = "serbia", distance = 2, border_type = "land" },
+]
 initial_metrics = { population = 250.0, cohesion = 40.0, legitimacy = 35.0, military_size = 30.0, economic_output = 20.0, military_quality = 50.0 }
 
 [[milestone_events]]
@@ -179,6 +191,15 @@ label = "Польша-Литва"
 lat = 52.2
 lng = 21.0
 color = "#bf360c"
+# Рёбра по истории 1430-х. Карпатская граница с Венгрией — прямая, и династическая:
+# Владислав III занял венгерский трон в 1440. С Османами в 1430 общей границы НЕТ —
+# между ними Молдавия (в сценарии отсутствует) и Валахия; прямое соприкосновение
+# только после Килии и Аккермана 1484, поэтому d3.
+neighbors = [
+    { id = "hungary", distance = 1, border_type = "land" },
+    { id = "wallachia", distance = 2, border_type = "land" },
+    { id = "ottomans", distance = 3, border_type = "land" },
+]
 initial_metrics = { population = 700.0, cohesion = 65.0, legitimacy = 70.0, military_size = 60.0, economic_output = 50.0, military_quality = 50.0 }
 
 [[milestone_events]]
@@ -199,4 +220,16 @@ label = "Мамлюки"
 lat = 30.0
 lng = 31.2
 color = "#f9a825"
+# Рёбра по истории 1430-х. С Османами общей границы в 1430 ещё нет: между сирийскими
+# владениями султана и османской Анатолией лежат Караманиды и Дулкадириды, прямой
+# рубеж только после 1468–1485 — d2. Это ровно тот довод, по которому
+# docs/investigation_d1_graph.md §2 отклонил `ottomans–trebizond` d1 («между ними
+# Джандариды»).
+# Венеция — не сосед по суше, а торговый: александрийская монополия Барсбая
+# 1425–1428 била по венецианской торговле пряностями. Море, d2.
+neighbors = [
+    { id = "ottomans", distance = 2, border_type = "land" },
+    { id = "venice", distance = 2, border_type = "sea" },
+    { id = "trebizond", distance = 3, border_type = "sea" },
+]
 initial_metrics = { population = 800.0, cohesion = 55.0, legitimacy = 50.0, military_size = 65.0, economic_output = 45.0, military_quality = 50.0 }
