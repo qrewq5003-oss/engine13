@@ -1,7 +1,10 @@
 /target
 src-tauri/target/
-node_modules/
-/target
+# Без завершающего слеша: паттерн со слешем совпадает только с каталогом,
+# а в worktree `node_modules` бывает симлинком — тогда он НЕ игнорировался.
+# Проверено на пустом репозитории: с `node_modules/` симлинк попадает в
+# `git status`, с `node_modules` — нет, и обычный каталог по-прежнему скрыт.
+node_modules
 dist/
 digest.txt
 libpng16.pc

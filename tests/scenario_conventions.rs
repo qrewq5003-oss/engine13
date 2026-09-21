@@ -2437,3 +2437,74 @@ fn cargo_configs_contain_no_machine_specific_paths() {
         "абсолютный путь к домашнему каталогу в конфиге сборки: {offenders:?}"
     );
 }
+
+/// `ensure_default_metrics` зовут там, где она ничего не делает, и не зовут там,
+/// где актор строится из неполной карты.
+///
+/// Две точки вызова в движке (`engine/mod.rs` ~1183 и ~1879) получают актора из
+/// `scenario.actors`, а **все 44 авторских актора трёх сценариев несут все восемь
+/// ключей по умолчанию** — вставлять нечего. Единственное место, где карта неполная,
+/// — спавн: актор собирается из `cfg.initial_metrics`, и этот путь функцию не зовёт.
+///
+/// Три спавна constantinople не задают `external_pressure` и `treasury`, а
+/// `Actor::get_metric` на отсутствующем ключе возвращает `0.0`, не значение по
+/// умолчанию. Контрфакт (добавить вызов на пути спавна) — **не байт-в-байт**:
+/// в constantinople коллапсы `100 % → 99 %`, медиана гибели `44 → 40`, появляется
+/// гибель `ottomans`. Это правка баланса, а не уборка, и задача 25 уже отклонила
+/// `external_pressure` у спавнов как неверный рычаг. Поэтому здесь закреплено
+/// **обе стороны расхождения**: авторские акторы полны, спавны — нет, и ровно эти.
+#[test]
+fn default_metric_coverage_is_pinned_on_both_sides() {
+    let defaults = engine13::core::actor::default_metrics();
+    let mut authored_gaps: Vec<String> = Vec::new();
+    let mut spawn_gaps: Vec<String> = Vec::new();
+
+    for sid in SCENARIO_IDS {
+        let sc = registry::load_by_id(sid).expect("scenario");
+        for a in &sc.actors {
+            let mut miss: Vec<&str> = defaults
+                .keys()
+                .filter(|k| !a.metrics.contains_key(*k))
+                .map(|k| k.as_str())
+                .collect();
+            miss.sort_unstable();
+            if !miss.is_empty() {
+                authored_gaps.push(format!("{sid}/{}: {miss:?}", a.id));
+            }
+        }
+        for m in &sc.milestone_events {
+            let Some(cfg) = &m.spawn_actor else { continue };
+            let have: std::collections::BTreeSet<String> = cfg
+                .initial_metrics
+                .keys()
+                .map(|k| k.as_str().to_string())
+                .collect();
+            let mut miss: Vec<&str> = defaults
+                .keys()
+                .filter(|k| !have.contains(k.as_str()))
+                .map(|k| k.as_str())
+                .collect();
+            miss.sort_unstable();
+            if !miss.is_empty() {
+                spawn_gaps.push(format!("{}: {miss:?}", cfg.actor_id));
+            }
+        }
+    }
+
+    assert!(
+        authored_gaps.is_empty(),
+        "авторский актор без метрики по умолчанию — тогда вызовы \
+         ensure_default_metrics перестали быть инертными и это надо пересмотреть: \
+         {authored_gaps:?}"
+    );
+    spawn_gaps.sort();
+    assert_eq!(
+        spawn_gaps,
+        vec![
+            "mamluks: [\"external_pressure\", \"treasury\"]".to_string(),
+            "poland_lithuania: [\"external_pressure\", \"treasury\"]".to_string(),
+            "wallachia: [\"external_pressure\", \"treasury\"]".to_string(),
+        ],
+        "набор пробелов у спавнов изменился — это правка баланса, см. docs/TRIAGE.md B22"
+    );
+}
