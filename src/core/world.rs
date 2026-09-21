@@ -120,8 +120,6 @@ pub struct WorldState {
     pub rng_seed: u64,
     /// Previous tick metrics for each actor - for calculating deltas
     pub prev_metrics: HashMap<String, HashMap<String, f64>>,
-    /// Ticks since last narrative trigger - for time-based trigger
-    pub ticks_since_last_narrative: u32,
     /// Interaction cooldowns - key: "actor_a_vs_actor_b", value: last tick
     pub interaction_cooldowns: HashMap<String, u32>,
     /// Set of fired one-time random event IDs
@@ -206,7 +204,6 @@ impl WorldState {
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
             prev_metrics: HashMap::new(),
-            ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),
@@ -250,7 +247,6 @@ impl WorldState {
             actor_upheaval_ticks: HashMap::new(),
             rng_seed,
             prev_metrics: HashMap::new(),
-            ticks_since_last_narrative: 0,
             interaction_cooldowns: HashMap::new(),
             fired_events: HashSet::new(),
             milestone_cooldowns: HashMap::new(),

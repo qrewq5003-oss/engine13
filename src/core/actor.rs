@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 
 /// Default metric values for all actors
 pub fn default_metrics() -> HashMap<String, f64> {
@@ -23,12 +23,18 @@ pub fn ensure_default_metrics(metrics: &mut HashMap<String, f64>) {
 }
 
 /// Convert metrics to snapshot with sorted keys for deterministic output
+/// Copy an actor's metrics for an event snapshot.
+///
+/// This used to round-trip through a `BTreeMap` "to sort the keys". The sort was
+/// discarded on the next line: the return type is a `HashMap`, which keeps no order, so
+/// the only effect was two extra allocations. Removed rather than kept as decoration.
+///
+/// The intent behind it is real and NOT achieved here: `Event::metrics_snapshot` is a
+/// `HashMap`, so a serialized snapshot has no stable key order. Fixing that means
+/// changing the field's type through `Event` and the frontend, which is a separate job —
+/// recorded rather than silently half-done.
 pub fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
-    metrics.iter()
-        .map(|(k, v)| (k.clone(), *v))
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
-        .collect()
+    metrics.clone()
 }
 
 /// Neighbor relationship with distance and border type
