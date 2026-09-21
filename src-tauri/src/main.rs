@@ -294,7 +294,6 @@ async fn cmd_get_narrative(
     state: State<'_, Mutex<AppState>>,
     db: State<'_, Mutex<Db>>,
     app: tauri::AppHandle,
-    _half_year: engine13::llm::HalfYear,  // Kept for API compatibility, now derived from snapshot
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
 
@@ -317,7 +316,7 @@ async fn cmd_get_narrative(
     }; // All locks released here
 
     // Now do the async HTTP requests without holding any locks
-    eprintln!("[NARRATIVE] Getting narrative for year {} ({:?})", year, _half_year);
+    eprintln!("[NARRATIVE] Getting narrative for year {}", year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
     let result = if config.provider == "anthropic" {

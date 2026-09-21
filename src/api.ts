@@ -12,7 +12,6 @@ import type {
   SubmitActionResponse,
   SaveResponse,
   StatusIndicatorState,
-  HalfYear,
   ActionInfo,
   MapConfig,
 } from './types/index';
@@ -38,13 +37,15 @@ export async function getNarrativeActors(): Promise<Actor[]> {
 }
 
 // Streaming narrative - returns unsubscribe function
+// Полугодие сюда НЕ передаётся: движок выводит его из снимка мира сам
+// (`llm::build_snapshot`). Раньше фронтенд считал его вторым способом
+// (`tick % 2`) и слал в параметр, который команда игнорировала.
 export async function getNarrative(
   onChunk: (text: string) => void,
   onDone: () => void,
-  onError?: (error: string) => void,
-  halfYear?: HalfYear
+  onError?: (error: string) => void
 ): Promise<() => void> {
-  console.log('[API] Starting streaming narrative', halfYear ? `halfYear=${halfYear}` : '');
+  console.log('[API] Starting streaming narrative');
 
   // Listen for chunks
   const unlistenChunk = await listen<string>('narrative_chunk', (event) => {
@@ -60,9 +61,8 @@ export async function getNarrative(
     onDone();
   });
 
-  // Invoke the command with halfYear parameter
   try {
-    await invoke('cmd_get_narrative', { halfYear });
+    await invoke('cmd_get_narrative');
   } catch (err) {
     console.error('[API] cmd_get_narrative error:', err);
     unlistenChunk();
