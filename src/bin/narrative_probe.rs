@@ -7,7 +7,7 @@
 //!                   ->  generate_narrative_prompt(snapshot, scenario, db, memory)
 //!                   ->  POST /v1/chat/completions
 //!
-//! (см. `application::narrative::cmd_get_narrative` и `App.tsx::handleAdvanceTick`,
+//! (см. `cmd_get_narrative` в `src-tauri/src/main.rs` и `App.tsx::handleAdvanceTick`,
 //! который зовёт `refreshNarrative` КАЖДЫЙ тик).
 //!
 //! Режимы:

@@ -96,6 +96,23 @@ Preserve canonical contracts. Do not "improve" adjacent systems while fixing a l
 
 ---
 
+## Where the product's code lives
+
+`src-tauri/` is a **separate crate, outside the cargo workspace**. `cargo test --workspace`,
+`cargo clippy --workspace` and every `grep` scoped to `src/` miss all of it, including the
+23 Tauri commands the application actually runs.
+
+- Any census of callers, writers or readers — «у этой функции нет вызовов», «в эту таблицу
+  никто не пишет» — must search `src-tauri/src` as well as `src/`. Two such claims were
+  recorded as measured fact and were false (`db.rs::get_relevant_events_scored`,
+  `llm/mod.rs`); both were corrected 2026-09-21.
+- A library function named like a registered Tauri command is a dead twin, not a shared
+  implementation: the live command implements itself. Guarded by
+  `library_defines_no_twin_of_a_live_tauri_command`.
+- The crate is compile-checked by the `tauri` CI job only. Nothing runs its code in tests.
+
+---
+
 ## Runtime verification rules
 
 When asked to verify a bug in the running app:

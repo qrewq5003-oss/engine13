@@ -421,43 +421,8 @@ pub fn get_scenario_list() -> Vec<ScenarioMeta> {
     crate::scenarios::registry::get_scenario_meta()
 }
 
-/// Get narrative from LLM - delegates to application::narrative
-pub async fn cmd_get_narrative(
-    state: &AppState,
-    db: &Db,
-    app: tauri::AppHandle,
-    half_year: crate::llm::HalfYear,
-) -> Result<(), String> {
-    crate::application::cmd_get_narrative(state, db, app, half_year).await
-}
-
-/// Get available models from LLM provider - delegates to llm module
-pub fn cmd_get_available_models(provider: String, base_url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
-    crate::llm::get_available_models(provider, base_url, api_key)
-}
-
-/// Save LLM config - delegates to llm module
-pub fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<String>, model: String) -> Result<(), String> {
-    let config = crate::llm::LlmConfig {
-        provider,
-        api_key,
-        model,
-        base_url,
-    };
-    crate::llm::save_llm_config(&config)
-}
-
 /// Get tick explanation for debug mode
 pub fn get_tick_explanation(state: &AppState) -> Result<crate::engine::TickExplanation, String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
     Ok(crate::engine::generate_tick_explanation(world_state, &state.event_log))
-}
-
-/// Get map configuration for current scenario
-#[tauri::command]
-pub async fn cmd_get_map_config(
-    state: tauri::State<'_, tokio::sync::Mutex<AppState>>,
-) -> Result<Option<crate::core::MapConfig>, String> {
-    let state = state.lock().await;
-    Ok(state.current_scenario.as_ref().and_then(|s| s.map.clone()))
 }

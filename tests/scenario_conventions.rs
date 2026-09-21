@@ -2290,3 +2290,150 @@ fn power_projection_clamps_the_treasury_term() {
          that refusal first."
     );
 }
+
+// ---------------------------------------------------------------------------
+// Живой крейт приложения: src-tauri
+// ---------------------------------------------------------------------------
+
+/// Имена команд, перечисленных в `tauri::generate_handler![...]`.
+fn registered_tauri_commands(main_src: &str) -> Vec<String> {
+    let start = match main_src.find("generate_handler![") {
+        Some(i) => i + "generate_handler![".len(),
+        None => return Vec::new(),
+    };
+    let end = match main_src[start..].find(']') {
+        Some(i) => start + i,
+        None => return Vec::new(),
+    };
+    main_src[start..end]
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !s.starts_with("//"))
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Функция библиотеки, названная как зарегистрированная команда Tauri.
+///
+/// Это форма дефекта, а не просто совпадение имён: живая команда в
+/// `src-tauri/src/main.rs` реализует логику сама и одноимённую функцию НЕ
+/// зовёт, поэтому библиотечная копия — мёртвая, но компилируемая; она
+/// проходит clippy и `cargo test`, создавая впечатление, что путь покрыт.
+/// Расхождение при этом накапливается молча: удалённая 2026-09-21
+/// `commands::cmd_get_map_config` ждала `tokio::sync::Mutex<AppState>`, а
+/// приложение регистрирует `std::sync::Mutex<AppState>`.
+fn library_twins_of_tauri_commands(main_src: &str, lib_sources: &[(String, String)]) -> Vec<String> {
+    let registered = registered_tauri_commands(main_src);
+    let mut out = Vec::new();
+    for (path, src) in lib_sources {
+        for (i, line) in src.lines().enumerate() {
+            let t = line.trim_start();
+            let name = t
+                .strip_prefix("pub async fn ")
+                .or_else(|| t.strip_prefix("pub fn "))
+                .map(|r| r.split(['(', '<', ' ']).next().unwrap_or(""));
+            if let Some(name) = name {
+                if registered.iter().any(|c| c == name) {
+                    out.push(format!("{path}:{}: {name}", i + 1));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Исходники библиотеки: всё под `src/`, кроме `src/bin` и `src/tests`.
+fn library_sources() -> Vec<(String, String)> {
+    fn walk(dir: &str, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            let s = p.to_string_lossy().to_string();
+            if p.is_dir() {
+                if !s.ends_with("/bin") && !s.ends_with("/tests") {
+                    walk(&s, out);
+                }
+            } else if s.ends_with(".rs") {
+                if let Ok(text) = std::fs::read_to_string(&p) {
+                    out.push((s, text));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk("src", &mut out);
+    out
+}
+
+#[test]
+fn library_defines_no_twin_of_a_live_tauri_command() {
+    let main_src = std::fs::read_to_string("src-tauri/src/main.rs").expect("src-tauri/src/main.rs");
+    let registered = registered_tauri_commands(&main_src);
+    assert!(
+        registered.len() >= 20,
+        "разбор generate_handler! сломался: найдено {} команд",
+        registered.len()
+    );
+    let twins = library_twins_of_tauri_commands(&main_src, &library_sources());
+    assert!(
+        twins.is_empty(),
+        "библиотека определяет функции, названные как живые команды Tauri; \
+         живая команда их не вызывает, значит это мёртвые копии: {twins:?}"
+    );
+}
+
+#[test]
+fn tauri_command_attribute_lives_only_in_the_tauri_crate() {
+    let offenders: Vec<String> = library_sources()
+        .into_iter()
+        .filter(|(_, src)| src.contains("#[tauri::command]"))
+        .map(|(p, _)| p)
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "`#[tauri::command]` в библиотеке: такая функция не попадает в \
+         generate_handler! и остаётся мёртвой — {offenders:?}"
+    );
+}
+
+#[test]
+fn twin_check_catches_a_reintroduced_wrapper() {
+    let main_src = "tauri::generate_handler![\n    cmd_get_narrative,\n    cmd_set_metric,\n]";
+    let lib = vec![(
+        "src/commands.rs".to_string(),
+        "pub async fn cmd_get_narrative(\n    state: &AppState,\n) -> Result<(), String> {}\n\
+         pub fn advance_tick(state: &mut AppState) {}\n"
+            .to_string(),
+    )];
+    let found = library_twins_of_tauri_commands(main_src, &lib);
+    assert_eq!(found.len(), 1, "должен найтись ровно дубль команды: {found:?}");
+    assert!(found[0].contains("cmd_get_narrative"));
+    assert!(
+        library_twins_of_tauri_commands(main_src, &[("src/x.rs".to_string(), "pub fn advance_tick() {}".to_string())])
+            .is_empty(),
+        "функция, не названная как команда, нарушением не является"
+    );
+}
+
+/// Конфиг крейта не должен привязывать сборку к одной машине.
+///
+/// До 2026-09-21 `src-tauri/.cargo/config.toml` задавал
+/// `rustc = "/home/deck/.cargo/bin/rustc"`, и живой крейт приложения не
+/// собирался нигде, кроме ноутбука владельца, — в том числе в CI.
+#[test]
+fn cargo_configs_contain_no_machine_specific_paths() {
+    let mut offenders = Vec::new();
+    for path in [".cargo/config.toml", "src-tauri/.cargo/config.toml"] {
+        let Ok(src) = std::fs::read_to_string(path) else { continue };
+        for (i, line) in src.lines().enumerate() {
+            let code = line.split('#').next().unwrap_or("");
+            if code.contains("/home/") || code.contains("/Users/") || code.contains(":\\") {
+                offenders.push(format!("{path}:{}: {}", i + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "абсолютный путь к домашнему каталогу в конфиге сборки: {offenders:?}"
+    );
+}

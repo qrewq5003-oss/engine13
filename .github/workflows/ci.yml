@@ -20,6 +20,28 @@ jobs:
       - run: cargo test --workspace
       - run: cargo clippy --workspace -- -D warnings
 
+  tauri:
+    # Крейт src-tauri не входит в воркспейс, поэтому `cargo test --workspace`
+    # его не видит. Это единственная проверка живого кода приложения.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # tauri-build читает frontendDist: ../dist — каталога нет в репозитории
+      - run: npm run build
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+
   frontend:
     runs-on: ubuntu-latest
     steps:
