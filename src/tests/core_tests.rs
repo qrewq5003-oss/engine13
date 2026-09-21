@@ -1208,3 +1208,4 @@ fn trace_sink_is_off_by_default_and_records_what_the_engine_applied() {
     crate::engine::tick(&mut world, &scenario, &mut log, &mut rng);
     assert!(trace::take_dependencies().is_empty(), "`disable` did not stop recording");
 }
+
