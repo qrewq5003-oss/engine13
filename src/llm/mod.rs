@@ -224,11 +224,15 @@ pub fn build_snapshot(
     // embassy) was ever shown.
     //
     // `select_relevant_events` is the selection `AGENTS.md` invariant 2 calls canonical.
-    // It was unreachable in the product: it lives behind `Db::get_relevant_events_scored`,
-    // which reads the `events` table, and nothing ever writes that table — `insert_event`
-    // has no callers outside `budget_probe`, and `save_load.rs` only deletes from it. So
-    // the rules are fed here from the in-memory log instead, through the same pure
-    // function the DB entry point uses. One selection, two feeders; no second path.
+    // Оно живёт за `Db::get_relevant_events_scored`, который читает таблицу `events`, а
+    // правила питаются здесь из журнала в памяти через ту же чистую функцию. Один отбор,
+    // два питателя; второго пути нет.
+    //
+    // Поправка 2026-09-21: обоснование, стоявшее здесь раньше — «таблицу не пишет никто,
+    // кроме `budget_probe`, поэтому путь через базу недостижим в продукте», — неверно.
+    // Писатели есть, и они в `src-tauri/src/main.rs` (три вызова `insert_events_batch`),
+    // то есть в крейте вне воркспейса, которого не видел поиск по `src/`. Выбор питателя
+    // из памяти этим не отменяется, но он теперь выбор, а не единственная возможность.
     //
     // `query_tags` is empty on purpose. Nothing in the narrative layer computes query
     // tags, and with an empty query `thematic_similarity` returns 1.0 for the untagged

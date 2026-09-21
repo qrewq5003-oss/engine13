@@ -520,13 +520,19 @@ impl Db {
     /// Returns events sorted by relevance (thematic_similarity × temporal_coefficient)
     ///
     /// Thin wrapper: it only *fetches* candidates from the events table and hands them
-    /// to [`select_relevant_events`], which owns the selection rules. Splitting the two
-    /// was forced by measurement (task 31, plan item (A)): the events table is never
-    /// written outside `budget_probe` — `insert_event` / `insert_events_batch` have no
-    /// other callers, and `save_load.rs` only *deletes* from it — so in the product this
-    /// method reads an empty store. The narrative layer holds the same events in memory
-    /// and needs the same rules, and inventing a second set of rules for it is exactly
-    /// what invariant 2 of `AGENTS.md` forbids. Hence: one selection, two feeders.
+    /// to [`select_relevant_events`], which owns the selection rules.
+    ///
+    /// **Поправка 2026-09-21.** Здесь стояло: «таблица `events` не пишется никем, кроме
+    /// `budget_probe`, поэтому в продукте этот метод читает пустое хранилище». Это
+    /// неверно. Утверждение получено поиском по `src/`, а писатели продукта живут в
+    /// `src-tauri/src/main.rs` — `cmd_advance_tick`, `cmd_advance_tick_silent` и
+    /// `cmd_submit_action` зовут `insert_events_batch` на каждом тике и на каждом
+    /// действии. Крейт `src-tauri` не входит в воркспейс, и поиск его не видел.
+    /// В живой партии хранилище непустое.
+    ///
+    /// Что остаётся в силе независимо от этого: нарративный слой держит те же события в
+    /// памяти и нуждается в тех же правилах, а второй набор правил для него запрещён
+    /// инвариантом 2 `AGENTS.md`. Отсюда форма: один отбор, два питателя.
     pub fn get_relevant_events_scored(
         &self,
         current_tick: u32,
