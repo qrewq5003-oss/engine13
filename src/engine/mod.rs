@@ -1027,16 +1027,25 @@ fn check_milestone_events(
                     // neighbour that already lists the spawn keeps its own entry.
                     link_spawn_back(world, &cfg.actor_id, &cfg.neighbors);
 
-                    // is_key event for spawn
+                    // Появление державы — это рождение, и типом события оно должно
+                    // совпадать с рождением наследника ниже (`EventType::Birth`,
+                    // строка ~1938): текст того же рода, блок промпта тот же.
+                    // Пока спавн был `Milestone`, он не попадал в блок «события
+                    // периода» вовсе — `key_milestones_fired` строится из
+                    // `scenario.milestone_events`, а синтетического `spawn_*` там нет,
+                    // так что до летописца он доходил только случайным попаданием в
+                    // окно релевантности. Теги — как у рождения наследника, чтобы
+                    // канонический отбор оценивал его так же.
                     let event = Event::new(
                         format!("spawn_{}", cfg.actor_id),
                         current_tick,
                         current_year,
                         cfg.actor_id.clone(),
-                        EventType::Milestone,
+                        EventType::Birth,
                         true,
                         format!("{} появился на сцене истории.", cfg.label),
-                    );
+                    )
+                    .with_tags(vec!["birth".to_string(), cfg.actor_id.clone()]);
                     event_log.add(event);
                 }
             }
@@ -2796,18 +2805,23 @@ pub fn generate_tick_explanation(
     world: &WorldState,
     event_log: &EventLog,
 ) -> TickExplanation {
-    let current_tick = world.tick;
-    let current_year = world.year;
+    // Объяснение описывает тик, который ТОЛЬКО ЧТО отработал, а `world.tick` к этому
+    // моменту уже увеличен фазой `phase_advance`. Фильтр по `world.tick` не совпадал
+    // ни с одним событием: журнал держит тики 0…59, когда `world.tick` уже 60.
+    // Замер до правки (milan_1477, 60 тиков): непустых объяснений **0 из 60** — все
+    // четыре списка структуры были пусты всегда. См. docs/TRIAGE.md, B15.
+    let explained_tick = world.tick.saturating_sub(1);
+    let explained_year = world.year;
 
     let mut explanation = TickExplanation {
-        tick: current_tick,
-        year: current_year,
+        tick: explained_tick,
+        year: explained_year,
         ..Default::default()
     };
 
-    // Get events from the last tick
+    // Get events from the tick that just finished
     let tick_events: Vec<&Event> = event_log.events.iter()
-        .filter(|e| e.tick == current_tick)
+        .filter(|e| e.tick == explained_tick)
         .collect();
 
     for event in tick_events {
@@ -2834,7 +2848,12 @@ pub fn generate_tick_explanation(
                     details: event.description.clone(),
                 });
             }
-            EventType::Collapse => {
+            // `EventType::Collapse` сюда НЕ годится: в этом движке этот вариант
+            // пишется ровно в одном месте — для вехи сценария с `triggers_collapse`,
+            // и `actor_id` там всегда литерал `"scenario"`. Поле `collapses`
+            // перечисляло строку `"scenario"` и никогда — актора. Гибель актора
+            // пишется как `EventType::Death` (строка ~1812).
+            EventType::Death => {
                 explanation.collapses.push(event.actor_id.clone());
             }
             _ => {}
