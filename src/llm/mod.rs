@@ -520,7 +520,7 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
 }
 
 /// System prompt for chronicler persona
-fn system_prompt(_half_year: HalfYear) -> &'static str {
+fn system_prompt() -> &'static str {
     // Generic chronicler persona - half-year specific framing done in prompt body
     "Ты летописец XIV-XV века. Пишешь подробную хронику событий.
 
@@ -561,7 +561,7 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     // Section 1: Identity / Role — Chronicler Persona
     // ========================================================================
-    prompt.push_str(system_prompt(snapshot.half_year));
+    prompt.push_str(system_prompt());
     prompt.push_str("\n\n");
 
     // ========================================================================

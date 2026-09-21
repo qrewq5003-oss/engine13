@@ -701,7 +701,6 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &Ha
     check_generation_transfer(world, scenario, event_log);
     update_metric_history(world);
     update_prev_metrics(world);
-    world.ticks_since_last_narrative += 1;
 }
 
 // ============================================================================
