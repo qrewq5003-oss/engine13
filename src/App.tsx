@@ -32,7 +32,7 @@ import {
   saveGame,
   getStatusIndicators,
 } from './api';
-import type { WorldState, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, HalfYear, ActionInfo } from './types';
+import type { WorldState, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, ActionInfo } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -202,9 +202,6 @@ const App: React.FC = () => {
       // Use provided state or fall back to current worldState
       const currentState = stateForNarrative ?? worldState;
 
-      // Determine half-year based on tick - even ticks are FirstHalf, odd are SecondHalf
-      const halfYear: HalfYear = currentState && currentState.tick % 2 === 0 ? 'first_half' : 'second_half';
-
       await getNarrative(
         (chunk) => {
           // Append each chunk to narrative
@@ -225,8 +222,7 @@ const App: React.FC = () => {
           setNarrative(placeholder);
           setNarrativeLoading(false);
           setIsGeneratingNarrative(false);
-        },
-        halfYear
+        }
       );
     } catch (err) {
       console.error('[Narrative] Error:', err);

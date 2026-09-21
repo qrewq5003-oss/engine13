@@ -1210,3 +1210,43 @@ fn trace_sink_is_off_by_default_and_records_what_the_engine_applied() {
 }
 
 
+
+/// `collapse_warning_ticks` must hold only living actors.
+///
+/// Счётчик выше по коду сбрасывается лишь тогда, когда актор ВЫШЕЛ из опасности;
+/// погибший из мира просто исчезает, и его запись оставалась навсегда. Это видно не
+/// только в размере сейва: ключи карты читает `sim.rs:636` и строит из них сигнал
+/// «кризис» для отбора случаев обзорной пачки. До правки на 3 сценариях × 5 сидах ×
+/// 300 тиках список был непуст 133…267 тиков, и **125…255 из них состояли только из
+/// погибших**.
+///
+/// Тест сначала утверждает, что гибели вообще были: без этого он проходит впустую
+/// в мире, где никто не умирает, и ничего не охраняет.
+#[test]
+fn test_collapse_warnings_hold_only_living_actors() {
+    let mut state = crate::AppState::default();
+    let db = crate::db::Db::open_in_memory().unwrap();
+    crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+
+    let mut stale_seen: Vec<String> = Vec::new();
+    for _ in 0..120 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+        let ws = state.world_state.as_ref().unwrap();
+        for id in ws.collapse_warning_ticks.keys() {
+            if !ws.actors.contains_key(id) {
+                stale_seen.push(id.clone());
+            }
+        }
+    }
+
+    let ws = state.world_state.as_ref().unwrap();
+    assert!(
+        !ws.dead_actor_ids.is_empty(),
+        "предпосылка теста не выполнена: за 120 тиков milan никто не погиб, \
+         значит проверка на осиротевшие записи ничего не проверяет"
+    );
+    assert!(
+        stale_seen.is_empty(),
+        "записи о погибших остались в collapse_warning_ticks: {stale_seen:?}"
+    );
+}

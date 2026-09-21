@@ -111,8 +111,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
         (err) => {
           setMessage({ type: 'error', text: `Test failed: ${err}` });
           setIsTesting(false);
-        },
-        'first_half' // Default half-year for test
+        }
       );
     } catch (err) {
       setMessage({ type: 'error', text: `Test failed: ${err}` });

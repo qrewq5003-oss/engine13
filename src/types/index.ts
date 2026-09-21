@@ -120,6 +120,10 @@ export interface WorldState {
 export interface FamilyState {
   metrics: Record<string, number>;
   patriarch_age: number;
+  /// Сколько раз сменилось поколение. Зеркалит `core::FamilyState`; ни одна
+  /// панель это поле пока не показывает — оно было пропущено в зеркале, а не
+  /// сознательно скрыто.
+  generation_count: number;
 }
 
 /// Metric display configuration for UI
