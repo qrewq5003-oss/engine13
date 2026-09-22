@@ -2672,3 +2672,132 @@ fn the_world_state_block_omits_a_fallen_power() {
         "живая держава пропала из блока: {block:?}"
     );
 }
+
+/// Панель и хроника, читая одно число, обязаны отвечать одинаково — включая молчание.
+///
+/// Гард `key_metric_bands_agree_with_status_indicators` сверяет **статический
+/// контент**: слова и имена в сценарии. Этого мало. После того как хроника перестала
+/// печатать метрику павшей державы, две стороны согласились в словах и разошлись в
+/// том, говорить ли вообще: измерено на 5 сидах × 300 тиков — в constantinople
+/// Византия гибнет 5 раз из 5, и панель во всех пяти сообщала «Константинополь:
+/// держится», в rome вестготы гибнут 2 раза из 5 и панель говорила «Натиск варваров:
+/// слабый». Расхождение возникло не в паре слов, а в паре потребителей, поэтому
+/// проверять надо их обоих на одном мире.
+#[test]
+fn both_consumers_of_a_metric_fall_silent_together() {
+    use rand::SeedableRng;
+
+    let scenario = registry::load_by_id("constantinople_1430").expect("scenario");
+    let mut world =
+        engine13::core::WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
+    for a in &scenario.actors {
+        if !a.is_successor_template {
+            world.actors.insert(a.id.clone(), a.clone());
+        }
+    }
+    let mut state = engine13::commands::AppState {
+        world_state: Some(world),
+        event_log: engine13::engine::EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(0)),
+    };
+
+    // Метрики, на которые смотрят оба потребителя.
+    let shared: Vec<(String, String)> = scenario
+        .narrative_config
+        .key_metrics
+        .iter()
+        .filter_map(|km| {
+            scenario
+                .status_indicators
+                .iter()
+                .find(|i| format!("{:?}", i.metric) == format!("{:?}", km.metric))
+                .map(|i| (km.label.clone(), format!("{:?}", i.metric)))
+        })
+        .collect();
+    assert!(
+        shared.len() >= 3,
+        "в constantinople ожидалось не меньше трёх общих метрик, найдено {}",
+        shared.len()
+    );
+
+    let mut both_spoke = 0u32;
+    let mut both_silent = 0u32;
+    for _ in 0..120 {
+        engine13::commands::advance_tick_silent(&mut state).expect("tick");
+        let ws = state.world_state.as_ref().unwrap();
+        let panel = engine13::commands::compute_status_indicators(ws, &scenario);
+        let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
+
+        for (label, _) in &shared {
+            let in_panel = panel.iter().find(|p| p.label == *label);
+            let in_chronicle = snapshot.key_metrics.iter().find(|r| r.label == *label);
+            match (in_panel, in_chronicle) {
+                (Some(p), Some(c)) => {
+                    both_spoke += 1;
+                    assert_eq!(
+                        p.status_text, c.band,
+                        "тик {}: панель говорит «{}», хроника «{}» об одном числе",
+                        ws.tick, p.status_text, c.band
+                    );
+                }
+                (None, None) => both_silent += 1,
+                (p, c) => panic!(
+                    "тик {}: о метрике «{label}» панель {} , а хроника {}",
+                    ws.tick,
+                    if p.is_some() { "говорит" } else { "молчит" },
+                    if c.is_some() { "говорит" } else { "молчит" }
+                ),
+            }
+        }
+    }
+
+    assert!(both_spoke > 0, "ни разу не заговорили оба — проверка вырождена");
+    assert!(
+        both_silent > 0,
+        "ни разу не замолчали оба: на сиде 0 к тику 120 индикаторная держава не погибла, \
+         и случай молчания не пройден"
+    );
+}
+
+/// Цвет полосы индикатора означает «насколько плохо», а не «насколько велико».
+///
+/// В `StatusPanel.tsx` стояло `invert ? 1.0 - progress : progress`, и это
+/// переворачивало цвет в **обе** стороны: при `invert: true` чем хуже, тем зеленее
+/// (`ep = 85`, текст «критическое положение», полоса зелёная), при `invert: false`
+/// наоборот (`federation_progress = 85`, текст «готова», полоса красная). Ширина
+/// полосы не инвертируется, так что два куска одного виджета противоречили друг другу.
+/// Девять индикаторов в трёх сценариях, все девять были окрашены неверно.
+#[test]
+fn indicator_colour_follows_badness_not_magnitude() {
+    let panel = std::fs::read_to_string("src/components/StatusPanel.tsx")
+        .expect("src/components/StatusPanel.tsx");
+
+    let inverted = scenario_indicator_count(|i| i.invert);
+    let plain = scenario_indicator_count(|i| !i.invert);
+    assert!(
+        inverted > 0 && plain > 0,
+        "в контенте должны быть индикаторы обоих видов, иначе ошибку не видно: \
+         invert={inverted}, обычных={plain}"
+    );
+
+    assert!(
+        !panel.contains("invert ? 1.0 - progress : progress"),
+        "цвет берётся от величины, а не от беды — перевёрнут для всех \
+         {} индикаторов с invert и всех {plain} без него",
+        inverted
+    );
+    assert!(
+        panel.contains("const badness = invert ? progress : 1.0 - progress;"),
+        "ожидалась мера «насколько плохо»: `invert ? progress : 1.0 - progress`"
+    );
+}
+
+fn scenario_indicator_count(pred: impl Fn(&engine13::core::StatusIndicator) -> bool) -> usize {
+    SCENARIO_IDS
+        .iter()
+        .filter_map(|id| registry::load_by_id(id))
+        .flat_map(|s| s.status_indicators.into_iter())
+        .filter(|i| pred(i))
+        .count()
+}

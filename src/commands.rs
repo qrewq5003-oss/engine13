@@ -372,7 +372,25 @@ pub fn compute_status_indicators(
     world_state: &WorldState,
     scenario: &Scenario,
 ) -> Vec<StatusIndicatorState> {
-    scenario.status_indicators.iter().map(|indicator| {
+    scenario.status_indicators.iter().filter_map(|indicator| {
+        // Индикатор павшей державы молчит — так же, как молчит о ней хроника.
+        //
+        // `MetricRef::Actor::get` на отсутствующем акторе возвращает `0.0`, а у
+        // перевёрнутой метрики ноль попадает в **благополучную** полосу. Измерено на
+        // 5 сидах × 300 тиков: в constantinople Византия гибнет в 5 случаях из 5 — и
+        // панель во всех пяти сообщает «Константинополь: держится»; в rome вестготы
+        // гибнут в 2 из 5, и панель говорит «Натиск варваров: слабый». После PR #123
+        // это касается и самого Рима: его индикатор читает `rome.external_pressure`,
+        // и мёртвый Рим дал бы «стабильна».
+        //
+        // Хроника такую строку уже не печатает (`llm::build_snapshot`), и пара
+        // потребителей одного числа обязана отвечать одинаково — включая молчание.
+        // Это проверяет `both_consumers_of_a_metric_fall_silent_together`.
+        if let crate::core::MetricRef::Actor { actor_id, .. } = &indicator.metric {
+            if !world_state.actors.contains_key(actor_id.as_str()) {
+                return None;
+            }
+        }
         let value = indicator.metric.get(world_state);
 
         // Find current status text - last threshold where value >= threshold
@@ -396,13 +414,13 @@ pub fn compute_status_indicators(
             0.0
         };
 
-        StatusIndicatorState {
+        Some(StatusIndicatorState {
             label: indicator.label.clone(),
             value,
             status_text,
             progress,
             invert: indicator.invert,
-        }
+        })
     }).collect()
 }
 
