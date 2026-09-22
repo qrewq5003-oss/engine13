@@ -11,7 +11,7 @@ pub mod db;
 mod tests;
 
 pub use core::*;
-pub use engine::{EventLog, TickExplanation, generate_tick_explanation};
+pub use engine::EventLog;
 pub use commands::{AppState, SaveData, AdvanceTickResponse, SubmitActionResponse, SaveResponse, LoadResponse, ScenarioMeta};
 pub use db::{Db, DbSave, DbDeadActor};
 pub use llm::{LlmConfig, HalfYear, NarrativeWorldSnapshot, PlayerActionSummary, build_snapshot, get_llm_config, save_llm_config, generate_narrative_prompt, generate_narrative_blocking, stream_narrative_anthropic, stream_narrative_openai, get_available_models};
