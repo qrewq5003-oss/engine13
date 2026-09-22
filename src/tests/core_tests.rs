@@ -1347,3 +1347,136 @@ fn test_spawned_power_reaches_the_lifecycle_block() {
     assert!(spawns > 0, "предпосылка не выполнена: за 300 тиков не появилось ни одной державы");
     assert_eq!(in_block, spawns, "спавнов {spawns}, в блоке «события периода» {in_block}");
 }
+
+/// Имя погибшей державы не должно одновременно стоять среди живых.
+///
+/// Летописцу выдают `alive_actors` и `dead_actors` как два непересекающихся списка
+/// фактов, и жёсткие анти-галлюцинационные правила промпта запрещают ему
+/// противоречить им. Одно имя в обоих списках делает любое утверждение о нём
+/// одновременно истинным и ложным.
+///
+/// Класс закрыт для `milan`/`savoy` в PR #47 гардом `dead_actor_ids`, но тот
+/// сравнивает **идентификаторы**, а место при расколе сохраняет id родителя. При
+/// поле легитимности 12 это давало 8 прогонов из 30, в которых мёртвый `rome` и
+/// живой `rome_west` носили имя «Западная Римская Империя» одновременно.
+/// См. `docs/investigation_rome_immortality.md` §9.
+#[test]
+fn test_no_living_actor_carries_a_dead_actors_name() {
+    for scenario_id in ["rome_375", "constantinople_1430", "milan_1477"] {
+        let mut state = crate::AppState::default();
+        let db = crate::db::Db::open_in_memory().unwrap();
+        crate::application::load_scenario(&mut state, &db, scenario_id.to_string()).unwrap();
+
+        let mut clashes: Vec<String> = Vec::new();
+        for _ in 0..200 {
+            crate::commands::advance_tick_silent(&mut state).unwrap();
+            let ws = state.world_state.as_ref().unwrap();
+            for actor in ws.actors.values() {
+                for dead in ws.dead_actors.iter() {
+                    if !dead.name.is_empty() && dead.name == actor.name {
+                        clashes.push(format!(
+                            "{scenario_id} тик {}: мёртв {} / жив {} — оба {:?}",
+                            ws.tick, dead.id, actor.id, actor.name
+                        ));
+                    }
+                }
+            }
+        }
+
+        let ws = state.world_state.as_ref().unwrap();
+        assert!(
+            !ws.dead_actors.is_empty(),
+            "{scenario_id}: за 200 тиков никто не погиб — проверка ничего не проверяет"
+        );
+        clashes.dedup();
+        assert!(
+            clashes.is_empty(),
+            "имя стоит и среди живых, и среди мёртвых: {:?}",
+            &clashes[..clashes.len().min(3)]
+        );
+    }
+}
+
+/// Тот же класс на пути, где он и жил: место раскола, пережившее свою гибель.
+///
+/// Предыдущий тест проверяет свойство в трёх мирах как они есть, но в rome_375 при
+/// нынешнем полe легитимности 20 место не гибнет **ни разу**, и путь остаётся
+/// непройденным. Здесь пол опускается до 12 в памяти сценария — ровно та правка,
+/// что рассматривается как стадия 2 A11, — и берётся сид, на котором дефект
+/// воспроизводился: мёртвый `rome` и живой `rome_west` под одним именем.
+#[test]
+fn test_split_seat_does_not_resurrect_itself_as_its_own_heir() {
+    use crate::core::{RegionRank, WorldState};
+    use rand::SeedableRng;
+
+    const SEED: u64 = 5;
+    let mut scenario = crate::scenarios::registry::load_by_id("rome_375").unwrap();
+    for rule in scenario.rank_bonuses.iter_mut() {
+        if rule.rank == RegionRank::S {
+            for effect in rule.effects.iter_mut() {
+                if effect.floor.is_some() {
+                    effect.floor = Some(12.0);
+                }
+            }
+        }
+    }
+
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, SEED);
+    for a in &scenario.actors {
+        if !a.is_successor_template {
+            world.actors.insert(a.id.clone(), a.clone());
+        }
+    }
+    if let Some(ref im) = scenario.initial_family_metrics {
+        let age = scenario
+            .generation_mechanics
+            .as_ref()
+            .map(|g| g.patriarch_start_age)
+            .unwrap_or(40) as u32;
+        world.family_state = Some(crate::core::FamilyState {
+            metrics: crate::core::normalize_family_metrics(im),
+            patriarch_age: age,
+            generation_count: 0,
+        });
+    }
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
+    let mut state = crate::AppState {
+        world_state: Some(world),
+        event_log: crate::engine::EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED)),
+    };
+
+    let mut clashes: Vec<String> = Vec::new();
+    for _ in 0..300 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+        let ws = state.world_state.as_ref().unwrap();
+        for actor in ws.actors.values() {
+            for dead in ws.dead_actors.iter() {
+                if !dead.name.is_empty() && dead.name == actor.name {
+                    clashes.push(format!(
+                        "тик {}: мёртв {} / жив {} — оба {:?}",
+                        ws.tick, dead.id, actor.id, actor.name
+                    ));
+                }
+            }
+        }
+    }
+
+    let ws = state.world_state.as_ref().unwrap();
+    assert!(
+        ws.milestone_events_fired.iter().any(|m| m == "rome_splits"),
+        "предпосылка не выполнена: раскол на сиде {SEED} не сработал"
+    );
+    assert!(
+        ws.dead_actor_ids.contains("rome"),
+        "предпосылка не выполнена: место не погибло на сиде {SEED}, путь не пройден"
+    );
+    clashes.dedup();
+    assert!(
+        clashes.is_empty(),
+        "место воскресло собственным наследником: {:?}",
+        &clashes[..clashes.len().min(2)]
+    );
+}
