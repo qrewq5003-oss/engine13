@@ -475,8 +475,10 @@ struct PackTurn {
     tick: u32,
     year: i32,
     half_year: String,
-    /// Scenario's own `narrative_config.key_metrics`, resolved at this tick.
-    key_metrics: Vec<(String, f64)>,
+    /// Scenario's own `narrative_config.key_metrics`, resolved at this tick:
+    /// `(имя в хронике, слово полосы, число)`. Число здесь — для проверяющего;
+    /// в промпт идёт только слово.
+    key_metrics: Vec<(String, String, f64)>,
     /// Actors the engine currently considers in danger, sorted.
     collapse_warnings: Vec<String>,
     dead_actors: Vec<String>,
@@ -623,14 +625,13 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
         );
 
         // Key metrics: the scenario's own declared narrative metrics, resolved at
-        // THIS tick. Sorted for the same reason the prompt sorts them — the source
-        // is a HashMap and the pack has to be reproducible run to run.
-        let mut key_metrics: Vec<(String, f64)> = snapshot
+        // THIS tick. Порядок авторский и детерминирован по построению — источник
+        // больше не `HashMap`, сортировать нечего.
+        let key_metrics: Vec<(String, String, f64)> = snapshot
             .key_metrics
             .iter()
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|r| (r.label.clone(), r.band.clone(), r.value))
             .collect();
-        key_metrics.sort_by(|a, b| a.0.cmp(&b.0));
 
         let mut collapse_warnings: Vec<String> =
             ws.collapse_warning_ticks.keys().cloned().collect();
@@ -867,9 +868,9 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
         ));
 
         md.push_str("**Ключевые метрики сценария на этом тике:**\n\n");
-        md.push_str("| Метрика | Значение |\n|---|---|\n");
-        for (k, v) in &t.key_metrics {
-            md.push_str(&format!("| `{}` | {:.1} |\n", k, v));
+        md.push_str("| Метрика | Что видит летописец | Число |\n|---|---|---|\n");
+        for (label, band, value) in &t.key_metrics {
+            md.push_str(&format!("| {} | {} | {:.1} |\n", label, band, value));
         }
         md.push('\n');
 

@@ -212,13 +212,68 @@ pub fn load_rome_375() -> Scenario {
         ])),
         max_random_events_per_tick: 2,
         narrative_config: crate::core::NarrativeConfig {
+            // Летописцу выдаётся слово, а не число: системная часть промпта запрещает
+            // называть числа, а этот блок печатал `actor:rome.legitimacy: 42.7`.
+            // Словарь полос принадлежит не метрике, а тому, о ком речь, — см.
+            // `core::KeyMetric`. Где на ту же метрику есть индикатор, слова совпадают
+            // с ним дословно, и это проверяет гард.
             key_metrics: vec![
-                crate::core::MetricRef::literal("family:family_influence"),
-                crate::core::MetricRef::literal("family:family_knowledge"),
-                crate::core::MetricRef::literal("family:family_wealth"),
-                crate::core::MetricRef::literal("family:family_connections"),
-                crate::core::MetricRef::literal("actor:rome.legitimacy"),
-                crate::core::MetricRef::literal("actor:rome.cohesion"),
+                crate::core::KeyMetric {
+                    label: "Семья Анициев".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_influence"),
+                    bands: vec![
+                        (0.0, "незначительна".to_string()),
+                        (30.0, "заметна".to_string()),
+                        (60.0, "влиятельна".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Учёность Анициев".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_knowledge"),
+                    bands: vec![
+                        (0.0, "скудна".to_string()),
+                        (30.0, "заметна".to_string()),
+                        (60.0, "обширна".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Богатство Анициев".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_wealth"),
+                    bands: vec![
+                        (0.0, "растрачено".to_string()),
+                        (30.0, "умеренно".to_string()),
+                        (60.0, "велико".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Связи Анициев".to_string(),
+                    metric: crate::core::MetricRef::literal("family:family_connections"),
+                    bands: vec![
+                        (0.0, "оборваны".to_string()),
+                        (30.0, "крепки".to_string()),
+                        (60.0, "обширны".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Власть Рима".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:rome.legitimacy"),
+                    bands: vec![
+                        (0.0, "не признаётся".to_string()),
+                        (25.0, "оспаривается".to_string()),
+                        (50.0, "признаётся".to_string()),
+                        (75.0, "тверда".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Единство Рима".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:rome.cohesion"),
+                    bands: vec![
+                        (0.0, "распадается".to_string()),
+                        (25.0, "трещит".to_string()),
+                        (50.0, "держится".to_string()),
+                        (75.0, "прочно".to_string()),
+                    ],
+                },
             ],
             narrative_axes: vec![
                 "stability vs ambition".to_string(),

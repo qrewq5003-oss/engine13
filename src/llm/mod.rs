@@ -48,6 +48,19 @@ pub struct PlayerActionSummary {
     pub key_effects: Vec<String>,
 }
 
+/// Одно показание ключевой метрики: как она называется, каким словом её читает
+/// хроника и какое число за этим стоит.
+///
+/// `value` в промпт **не идёт** — он нужен инструментам (обзорная пачка `sim`), и
+/// именно его печать была дефектом B19: системная часть промпта запрещает называть
+/// числа, а блок печатал их под этим запретом.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyMetricReading {
+    pub label: String,
+    pub band: String,
+    pub value: f64,
+}
+
 /// Complete narrative world snapshot for prompt generation
 ///
 /// This is the single source of truth for narrative generation.
@@ -72,7 +85,12 @@ pub struct NarrativeWorldSnapshot {
     pub key_milestones_fired: Vec<(String, String)>,
     pub recent_important_events: Vec<crate::core::Event>,
     pub recent_player_actions: Vec<PlayerActionSummary>,
-    pub key_metrics: HashMap<String, f64>,
+    /// Ключевые метрики как **слова**, в порядке, записанном автором сценария.
+    ///
+    /// Был `HashMap<String, f64>`: порядок обхода случаен на процесс, и блок
+    /// приходилось сортировать по ключу при каждом чтении. Порядок контента
+    /// детерминирован по построению, и сортировать больше нечего.
+    pub key_metrics: Vec<KeyMetricReading>,
     pub narrative_axes: Vec<String>,
     pub tone_tags: Vec<String>,
     pub game_mode: crate::core::GameMode,
@@ -322,16 +340,34 @@ pub fn build_snapshot(
         .collect();
     
     // Key metrics from narrative config
-    let mut key_metrics: HashMap<String, f64> = HashMap::new();
-    for metric_key in &scenario.narrative_config.key_metrics {
+    let mut key_metrics: Vec<KeyMetricReading> = Vec::new();
+    for key_metric in &scenario.narrative_config.key_metrics {
+        let metric_key = &key_metric.metric;
         // Resolve through MetricRef rather than re-deriving the parse rules here. The
         // hand-rolled copy this replaces got two of the four branches wrong, and both
         // failures were silent: it looked the *prefixed* string up in the target map
         // ("family:family_influence" in family_state.metrics, "global:federation_progress"
         // in global_metrics), while MetricRef strips the prefix before storing. Every
         // family: and global: key in the chronicler's prompt was therefore 0.0.
+        // Метрика погибшей державы — не положение дел, а отсутствие державы.
+        //
+        // `MetricRef::Actor::get` на отсутствующем акторе возвращает `0.0`, и у
+        // перевёрнутой метрики ноль попадает в благополучную полосу: на сиде 42,
+        // тик 40, Византия мертва, а блок сообщал «Константинополь: держится».
+        // Число `0.0` было равно бессмысленно, но словарь делает его **ложным
+        // утверждением** — ровно тем, что жёсткие правила промпта запрещают.
+        // Павшие державы у летописца и так есть отдельным списком.
+        if let crate::core::MetricRef::Actor { actor_id, .. } = metric_key {
+            if !world.actors.contains_key(actor_id.as_str()) {
+                continue;
+            }
+        }
         let value = metric_key.get(world);
-        key_metrics.insert(metric_key.to_string(), value);
+        key_metrics.push(KeyMetricReading {
+            label: key_metric.label.clone(),
+            band: key_metric.band_for(value).to_string(),
+            value,
+        });
     }
     
     // Narrative axes and tone tags from config
@@ -756,15 +792,20 @@ pub fn generate_narrative_prompt(
     prompt.push_str(&format!("Год: {}\n\n", snapshot.year));
 
     if !snapshot.key_metrics.is_empty() {
-        prompt.push_str("Ключевые метрики:\n");
-        // Sorted by key: `key_metrics` is a HashMap, so iterating it directly puts
-        // these lines in a per-process random order. They are the only part of the
-        // prompt that changes between adjacent half-years, so an unsorted order both
-        // breaks fixed-seed reproducibility and makes prompt diffs unreadable.
-        let mut metrics: Vec<(&String, &f64)> = snapshot.key_metrics.iter().collect();
-        metrics.sort_by(|a, b| a.0.cmp(b.0));
-        for (key, value) in metrics {
-            prompt.push_str(&format!("  {}: {:.1}\n", key, value));
+        prompt.push_str("Положение дел:\n");
+        // Слово, а не число, и человеческое имя, а не ключ движка.
+        //
+        // Здесь печаталось `actor:rome.legitimacy: 42.7` — прямо под системным
+        // запретом «НИКОГДА не называй числа и проценты» и «НИКОГДА не пиши
+        // „актор X имеет Y единиц"». Промпт выдавал ровно тот материал, который сам
+        // запрещал, и в запрещённом виде. Направление («много» это хорошо или плохо)
+        // из числа тоже не следовало: `external_pressure: 78.3` не говорит модели
+        // ничего, а «Константинополь: критическое положение» говорит всё.
+        //
+        // Порядок — авторский, из `narrative_config.key_metrics`. Сортировка здесь
+        // больше не нужна: список пришёл `Vec`, а не `HashMap`.
+        for reading in &snapshot.key_metrics {
+            prompt.push_str(&format!("  {}: {}\n", reading.label, reading.band));
         }
         prompt.push('\n');
     }

@@ -592,7 +592,7 @@ fn content_only_names_metrics_the_engine_knows() {
             check_name(id, &ind.metric, &format!("{id}: status_indicator"), &mut failures);
         }
         for m in &s.narrative_config.key_metrics {
-            check_name(id, m, &format!("{id}: narrative key_metric"), &mut failures);
+            check_name(id, &m.metric, &format!("{id}: narrative key_metric"), &mut failures);
         }
         if let Some(vc) = &s.victory_condition {
             check_name(id, &vc.metric, &format!("{id}: victory_condition"), &mut failures);
@@ -2506,5 +2506,169 @@ fn default_metric_coverage_is_pinned_on_both_sides() {
             "wallachia: [\"external_pressure\", \"treasury\"]".to_string(),
         ],
         "набор пробелов у спавнов изменился — это правка баланса, см. docs/TRIAGE.md B22"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Ключевые метрики хроники: слово вместо числа
+// ---------------------------------------------------------------------------
+
+/// Где на одну метрику смотрят и панель игрока, и хроника, слова должны совпадать.
+///
+/// Словарь полос принадлежит не метрике, а тому, о ком речь: в `milan_1477`
+/// индикатор «Баронская фронда» читает `naples.cohesion` и называет **высокое**
+/// значение «мятеж», тогда как для самого Неаполя то же число означало бы
+/// «единство держится». Поэтому вывести слова из имени метрики нельзя, и поэтому же
+/// нельзя дать двум потребителям одного числа разные словари: игрок увидит в панели
+/// одно, а в хронике прочтёт другое.
+#[test]
+fn key_metric_bands_agree_with_status_indicators() {
+    let mut pairs = 0;
+    let mut mismatches: Vec<String> = Vec::new();
+    for id in SCENARIO_IDS {
+        let s = registry::load_by_id(id).expect("scenario");
+        for km in &s.narrative_config.key_metrics {
+            let Some(ind) = s
+                .status_indicators
+                .iter()
+                .find(|i| format!("{:?}", i.metric) == format!("{:?}", km.metric))
+            else {
+                continue;
+            };
+            pairs += 1;
+            if km.bands != ind.thresholds {
+                mismatches.push(format!(
+                    "{id}: '{}' против индикатора '{}': {:?} ≠ {:?}",
+                    km.label, ind.label, km.bands, ind.thresholds
+                ));
+            }
+            if km.label != ind.label {
+                mismatches.push(format!(
+                    "{id}: имя расходится — хроника '{}', панель '{}'",
+                    km.label, ind.label
+                ));
+            }
+        }
+    }
+    assert!(
+        pairs >= 7,
+        "ожидалось не меньше семи метрик, которые читают оба потребителя, найдено {pairs} — \
+         проверка выродилась"
+    );
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// Блок «Положение дел» не должен нести ни цифр, ни движковых ключей.
+///
+/// Системная часть промпта запрещает летописцу «называть числа и проценты» и писать
+/// «актор X имеет Y единиц». До задачи B19 этот блок печатал ровно запрещённое и
+/// ровно в запрещённом виде: `actor:rome.legitimacy: 42.7`.
+#[test]
+fn the_world_state_block_carries_words_not_numbers() {
+    let db = engine13::db::Db::open_in_memory().expect("in-memory db");
+    for id in SCENARIO_IDS {
+        let scenario = registry::load_by_id(id).expect("scenario");
+        let mut world =
+            engine13::core::WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref im) = scenario.initial_family_metrics {
+            world.family_state = Some(engine13::core::FamilyState {
+                metrics: engine13::core::normalize_family_metrics(im),
+                patriarch_age: 40,
+                generation_count: 0,
+            });
+        }
+        let log = engine13::engine::EventLog::new();
+        let snapshot = engine13::llm::build_snapshot(&world, &scenario, &log);
+        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, &scenario, &db);
+
+        let start = prompt
+            .find("Положение дел:")
+            .unwrap_or_else(|| panic!("{id}: блока «Положение дел» нет в промпте"));
+        let block = &prompt[start..];
+        let end = block.find("\n\n").unwrap_or(block.len());
+        let block = &block[..end];
+
+        let lines: Vec<&str> = block.lines().skip(1).collect();
+        // Равенство, а не «не больше»: на тике 0 все державы живы, и пропусков быть
+        // не должно. Пропуск появляется только у погибшей державы — это проверяет
+        // `the_world_state_block_omits_a_fallen_power`.
+        assert_eq!(
+            lines.len(),
+            scenario.narrative_config.key_metrics.len(),
+            "{id}: строк в блоке {} против {} ключевых метрик",
+            lines.len(),
+            scenario.narrative_config.key_metrics.len()
+        );
+        for line in &lines {
+            assert!(
+                !line.chars().any(|c| c.is_ascii_digit()),
+                "{id}: цифра в строке блока: {line:?}"
+            );
+            for prefix in ["actor:", "global:", "family:"] {
+                assert!(
+                    !line.contains(prefix),
+                    "{id}: движковый ключ в строке блока: {line:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Метрика погибшей державы не должна стоять в блоке как положение дел.
+///
+/// `MetricRef::Actor::get` на отсутствующем акторе даёт `0.0`, и у перевёрнутой
+/// метрики ноль попадает в **благополучную** полосу: на сиде 42, тик 40, Византия
+/// мертва, а блок сообщал «Константинополь: держится». Само число было равно
+/// бессмысленно и до полос, но словарь превратил его в ложное утверждение.
+#[test]
+fn the_world_state_block_omits_a_fallen_power() {
+    use rand::SeedableRng;
+
+    let db = engine13::db::Db::open_in_memory().expect("in-memory db");
+    let scenario = registry::load_by_id("constantinople_1430").expect("scenario");
+    let mut world =
+        engine13::core::WorldState::with_seed(scenario.id.clone(), scenario.start_year, 42);
+    for a in &scenario.actors {
+        if !a.is_successor_template {
+            world.actors.insert(a.id.clone(), a.clone());
+        }
+    }
+    let mut state = engine13::commands::AppState {
+        world_state: Some(world),
+        event_log: engine13::engine::EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
+    };
+    for _ in 0..40 {
+        engine13::commands::advance_tick_silent(&mut state).expect("tick");
+    }
+
+    let ws = state.world_state.as_ref().unwrap();
+    assert!(
+        !ws.actors.contains_key("byzantium"),
+        "предпосылка не выполнена: на сиде 42 к тику 40 Византия жива, проверять нечего"
+    );
+
+    let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
+    let prompt = engine13::llm::generate_narrative_prompt(&snapshot, &scenario, &db);
+    let start = prompt.find("Положение дел:").expect("блок «Положение дел»");
+    let block = &prompt[start..];
+    let block = &block[..block.find("\n\n").unwrap_or(block.len())];
+
+    for label in ["Константинополь", "Власть базилевса", "Единство греков"] {
+        assert!(
+            !block.contains(label),
+            "метрика павшей державы стоит в блоке: {label} — {block:?}"
+        );
+    }
+    // Живые державы из списка при этом остаются.
+    assert!(
+        block.contains("Османская угроза"),
+        "живая держава пропала из блока: {block:?}"
     );
 }

@@ -92,8 +92,30 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
     // Check narrative key_metrics. These feed the chronicler's prompt and were never
     // validated, which is why 13 of the 16 keys across the three scenarios had been
     // resolving to 0.0 unnoticed.
-    for metric in &scenario.narrative_config.key_metrics {
-        check_actor_exists(metric, &actor_ids, "narrative_config.key_metrics", &mut errors);
+    for key_metric in &scenario.narrative_config.key_metrics {
+        check_actor_exists(
+            &key_metric.metric,
+            &actor_ids,
+            &format!("narrative_config.key_metrics '{}'", key_metric.label),
+            &mut errors,
+        );
+        // Полосы: словарь обязан быть непустым и идти снизу вверх, иначе
+        // `KeyMetric::band_for` вернёт слово не той полосы — молча, как всё в этом
+        // блоке до задачи B19.
+        if key_metric.bands.is_empty() {
+            errors.push(format!(
+                "narrative_config.key_metrics '{}': пустой словарь полос — \
+                 летописцу нечего сказать об этой метрике",
+                key_metric.label
+            ));
+        }
+        if key_metric.bands.windows(2).any(|w| w[1].0 <= w[0].0) {
+            errors.push(format!(
+                "narrative_config.key_metrics '{}': границы полос не возрастают строго: {:?}",
+                key_metric.label,
+                key_metric.bands.iter().map(|(v, _)| *v).collect::<Vec<_>>()
+            ));
+        }
     }
 
     // Check on_collapse heirs. Every declared heir must be an actor of THIS

@@ -952,7 +952,11 @@ fn test_validate_scenario_rejects_actor_relative_key_without_actor_prefix() {
     scenario
         .narrative_config
         .key_metrics
-        .push(MetricRef::literal("ottomans"));
+        .push(crate::core::KeyMetric {
+            label: "проба".to_string(),
+            metric: MetricRef::literal("ottomans"),
+            bands: vec![(0.0, "никак".to_string())],
+        });
     let errors = registry::validate_scenario(&scenario)
         .expect_err("a Global key that is an actor id must be rejected at load");
     assert!(
@@ -966,7 +970,11 @@ fn test_validate_scenario_rejects_actor_relative_key_without_actor_prefix() {
     scenario
         .narrative_config
         .key_metrics
-        .push(MetricRef::literal("actor:atlantis.cohesion"));
+        .push(crate::core::KeyMetric {
+            label: "проба".to_string(),
+            metric: MetricRef::literal("actor:atlantis.cohesion"),
+            bands: vec![(0.0, "никак".to_string())],
+        });
     let errors = registry::validate_scenario(&scenario)
         .expect_err("an unknown actor id must be rejected at load");
     assert!(
@@ -996,16 +1004,26 @@ fn test_narrative_key_metrics_actually_resolve() {
         let snapshot = crate::llm::build_snapshot(&world, &scenario, &event_log);
 
         let mut checked = 0;
-        for key in &scenario.narrative_config.key_metrics {
-            let value = snapshot.key_metrics.get(&key.to_string()).copied().unwrap_or(0.0);
+        for (i, key) in scenario.narrative_config.key_metrics.iter().enumerate() {
+            // Порядок снимка = порядок контента, поэтому показание берётся по месту,
+            // а не по ключу: строкового ключа в снимке больше нет.
+            let reading = &snapshot.key_metrics[i];
+            assert_eq!(reading.label, key.label, "{scenario_id}: порядок снимка разошёлся с контентом");
+            let value = reading.value;
             // Every actor-scoped key in these two scenarios starts non-zero
             // (legitimacy, cohesion, external_pressure, military_size).
-            if matches!(key, MetricRef::Actor { .. }) {
+            if matches!(key.metric, MetricRef::Actor { .. }) {
                 checked += 1;
                 assert!(
                     value > 0.0,
-                    "{scenario_id}: key_metric '{key}' resolved to {value} — \
-                     the chronicler is being handed a dead metric"
+                    "{scenario_id}: key_metric '{}' resolved to {value} — \
+                     the chronicler is being handed a dead metric",
+                    key.label
+                );
+                assert!(
+                    !reading.band.is_empty(),
+                    "{scenario_id}: '{}' даёт пустое слово полосы",
+                    key.label
                 );
             }
         }
