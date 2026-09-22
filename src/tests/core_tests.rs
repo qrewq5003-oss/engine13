@@ -1251,52 +1251,6 @@ fn test_collapse_warnings_hold_only_living_actors() {
     );
 }
 
-/// `generate_tick_explanation` должно описывать тик, который только что отработал.
-///
-/// До правки оно фильтровало журнал по `world.tick`, а тот уже увеличен фазой
-/// `phase_advance`: журнал держит тики 0…59, когда `world.tick` равен 60. Замер на
-/// milan_1477: **непустых объяснений 0 из 60**, все четыре списка пусты всегда.
-/// Второй дефект в той же функции: список `collapses` заполнялся из
-/// `EventType::Collapse`, а этот вариант пишется только для вехи сценария с
-/// `triggers_collapse` и несёт `actor_id = "scenario"` — то есть поле никогда не
-/// называло актора. Гибель — это `EventType::Death`.
-///
-/// Тест сначала требует, чтобы объяснение вообще было непустым: иначе вторая
-/// проверка проходит на пустом списке и ничего не охраняет.
-#[test]
-fn test_tick_explanation_describes_the_tick_that_just_ran() {
-    let mut state = crate::AppState::default();
-    let db = crate::db::Db::open_in_memory().unwrap();
-    crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
-
-    let mut nonempty = 0u32;
-    let mut named_collapses: Vec<String> = Vec::new();
-    for _ in 0..120 {
-        crate::commands::advance_tick_silent(&mut state).unwrap();
-        let ws = state.world_state.as_ref().unwrap();
-        let ex = crate::engine::generate_tick_explanation(ws, &state.event_log);
-        assert_eq!(ex.tick, ws.tick - 1, "объяснение должно быть о прошедшем тике");
-        if !ex.milestones_fired.is_empty()
-            || !ex.random_events_fired.is_empty()
-            || !ex.interactions_fired.is_empty()
-            || !ex.collapses.is_empty()
-        {
-            nonempty += 1;
-        }
-        named_collapses.extend(ex.collapses.iter().cloned());
-    }
-
-    assert!(nonempty > 0, "объяснение пусто на всех 120 тиках — фильтр снова мимо");
-    assert!(
-        !named_collapses.is_empty(),
-        "предпосылка не выполнена: за 120 тиков milan никто не погиб, \
-         проверка имени в collapses ничего не проверяет"
-    );
-    assert!(
-        !named_collapses.iter().any(|id| id == "scenario"),
-        "collapses должен называть актора, а не литерал \"scenario\": {named_collapses:?}"
-    );
-}
 
 /// Появление державы должно доходить до блока «события периода».
 ///
@@ -1479,4 +1433,68 @@ fn test_split_seat_does_not_resurrect_itself_as_its_own_heir() {
         "место воскресло собственным наследником: {:?}",
         &clashes[..clashes.len().min(2)]
     );
+}
+
+/// Если земли павшей державы забирает уже живая держава, текст гибели называет её.
+///
+/// Поглощение наследником-живой-державой встречается часто — 10 гибелей из 20 в
+/// constantinople и 5 из 10 в milan за 5 сидов × 300 тиков, — а движок не записывал
+/// его ни на чьей линии: текст никого не называл, поглотитель получал только молчаливую
+/// прибавку `expansion_count`. Отдельное событие для этого заводить отказались (A24):
+/// оно сдвинуло бы окна релевантности. Имя в уже существующем тексте не стоит ничего.
+#[test]
+fn test_death_text_names_a_living_heir() {
+    use crate::core::{EventType, WorldState};
+    use rand::SeedableRng;
+
+    const SEED: u64 = 0;
+    let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").unwrap();
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, SEED);
+    for a in &scenario.actors {
+        if !a.is_successor_template {
+            world.actors.insert(a.id.clone(), a.clone());
+        }
+    }
+    world.generation_mechanics = scenario.generation_mechanics.clone();
+    world.generation_length = scenario.generation_length;
+    let mut state = crate::AppState {
+        world_state: Some(world),
+        event_log: crate::engine::EventLog::new(),
+        current_scenario: Some(scenario.clone()),
+        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED)),
+    };
+    for _ in 0..300 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+    }
+
+    let ws = state.world_state.as_ref().unwrap();
+    // Поглощение: погибший объявлял наследника, который на момент конца партии жив.
+    let absorbed: Vec<&crate::core::DeadActor> = ws
+        .dead_actors
+        .iter()
+        .filter(|d| {
+            d.successor_ids
+                .iter()
+                .any(|s| s.id != d.id && ws.actors.contains_key(&s.id))
+        })
+        .collect();
+    assert!(
+        !absorbed.is_empty(),
+        "предпосылка не выполнена: на сиде {SEED} никого не поглотили, проверять нечего"
+    );
+
+    for d in &absorbed {
+        let ev = state
+            .event_log
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::Death && e.actor_id == d.id)
+            .unwrap_or_else(|| panic!("нет события гибели для {}", d.id));
+        assert!(
+            ev.description.contains("отошли держав"),
+            "текст гибели {} не называет поглотителя: {:?}",
+            d.id,
+            ev.description
+        );
+    }
 }

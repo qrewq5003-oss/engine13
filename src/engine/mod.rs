@@ -6,7 +6,6 @@ use crate::core::{
     ActorDelta, ComparisonOperator, DependencyMode, DependencyRule, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
-use serde::Serialize;
 
 pub mod interactions;
 pub mod trace;
@@ -163,56 +162,6 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
             apply_dependency_rule(actor, rule, tick);
         }
     }
-}
-
-/// Tick explanation for debug mode
-#[derive(Debug, Default, Serialize)]
-pub struct TickExplanation {
-    pub tick: u32,
-    pub year: i32,
-    pub auto_deltas_applied: Vec<DeltaEntry>,
-    pub interactions_fired: Vec<InteractionEntry>,
-    pub milestones_fired: Vec<MilestoneEntry>,
-    pub random_events_fired: Vec<RandomEventEntry>,
-    pub foreground_changes: Vec<ForegroundChange>,
-    pub collapses: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeltaEntry {
-    pub metric: String,
-    pub base_delta: f64,
-    pub ratio_delta: f64,
-    pub final_delta: f64,
-    pub reason: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct InteractionEntry {
-    pub interaction_type: String,
-    pub actor_a: String,
-    pub actor_b: String,
-    pub details: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct MilestoneEntry {
-    pub id: String,
-    pub conditions_met: Vec<String>,
-    pub effects_applied: HashMap<String, f64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RandomEventEntry {
-    pub id: String,
-    pub target: String,
-    pub effects_applied: HashMap<String, f64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ForegroundChange {
-    pub actor_id: String,
-    pub reason: String,
 }
 
 /// Event log for recording simulation events
@@ -1853,7 +1802,34 @@ fn check_collapses(
                 // ("Византия", "Остготы", "Савойя"), and the old wording produced
                 // "Византия прекратил существование" in a prompt that demands
                 // Russian prose. The prefix agrees with itself and is name-agnostic.
-                format!("Держава {} прекратила существование", actor.name),
+                //
+                // An heir that is *already a living power* is an absorption, not a
+                // split, and the engine used to record it nowhere on either party's
+                // line: the text named no one, and the absorber got only a silent
+                // `expansion_count` increment. It is frequent — 10 of 20 deaths in
+                // constantinople and 5 of 10 in milan over 5 seeds × 300 ticks.
+                // Naming it here costs no new event and therefore does not shift the
+                // relevance windows, which is why задача A24 refused adding one.
+                // "державе"/"державам" agrees with itself, like the prefix above.
+                {
+                    let absorbers: Vec<String> = successors
+                        .iter()
+                        .filter(|s| s.id != actor_id)
+                        .filter_map(|s| world.actors.get(&s.id).map(|a| a.name.clone()))
+                        .collect();
+                    match absorbers.len() {
+                        0 => format!("Держава {} прекратила существование", actor.name),
+                        1 => format!(
+                            "Держава {} прекратила существование, её земли отошли державе {}",
+                            actor.name, absorbers[0]
+                        ),
+                        _ => format!(
+                            "Держава {} прекратила существование, её земли отошли державам {}",
+                            actor.name,
+                            absorbers.join(" и ")
+                        ),
+                    }
+                },
             )
             .with_metrics_snapshot(metrics_to_snapshot(&actor.metrics))
             .with_tags(vec!["collapse".to_string(), actor_id.clone()]);
@@ -2824,70 +2800,3 @@ mod tests {
     }
 }
 
-// ============================================================================
-// Debug/Explain mode
-// ============================================================================
-
-/// Generate explanation for the last tick from event log
-pub fn generate_tick_explanation(
-    world: &WorldState,
-    event_log: &EventLog,
-) -> TickExplanation {
-    // Объяснение описывает тик, который ТОЛЬКО ЧТО отработал, а `world.tick` к этому
-    // моменту уже увеличен фазой `phase_advance`. Фильтр по `world.tick` не совпадал
-    // ни с одним событием: журнал держит тики 0…59, когда `world.tick` уже 60.
-    // Замер до правки (milan_1477, 60 тиков): непустых объяснений **0 из 60** — все
-    // четыре списка структуры были пусты всегда. См. docs/TRIAGE.md, B15.
-    let explained_tick = world.tick.saturating_sub(1);
-    let explained_year = world.year;
-
-    let mut explanation = TickExplanation {
-        tick: explained_tick,
-        year: explained_year,
-        ..Default::default()
-    };
-
-    // Get events from the tick that just finished
-    let tick_events: Vec<&Event> = event_log.events.iter()
-        .filter(|e| e.tick == explained_tick)
-        .collect();
-
-    for event in tick_events {
-        match event.event_type {
-            EventType::Milestone => {
-                explanation.milestones_fired.push(MilestoneEntry {
-                    id: event.id.clone(),
-                    conditions_met: vec![event.description.clone()],
-                    effects_applied: HashMap::new(),
-                });
-            }
-            EventType::Threshold => {
-                explanation.random_events_fired.push(RandomEventEntry {
-                    id: event.id.clone(),
-                    target: event.actor_id.clone(),
-                    effects_applied: HashMap::new(),
-                });
-            }
-            EventType::War => {
-                explanation.interactions_fired.push(InteractionEntry {
-                    interaction_type: "military".to_string(),
-                    actor_a: event.actor_id.clone(),
-                    actor_b: String::new(),
-                    details: event.description.clone(),
-                });
-            }
-            // `EventType::Collapse` сюда НЕ годится: в этом движке этот вариант
-            // пишется ровно в одном месте — для вехи сценария с `triggers_collapse`,
-            // и `actor_id` там всегда литерал `"scenario"`. Поле `collapses`
-            // перечисляло строку `"scenario"` и никогда — актора. Гибель актора
-            // пишется как `EventType::Death` (строка ~1812).
-            EventType::Death => {
-                explanation.collapses.push(event.actor_id.clone());
-            }
-            _ => {}
-        }
-    }
-
-    explanation
-
-}

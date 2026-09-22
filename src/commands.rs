@@ -420,9 +420,3 @@ pub fn load_scenario(state: &mut AppState, db: &Db, scenario_id: String) -> Resu
 pub fn get_scenario_list() -> Vec<ScenarioMeta> {
     crate::scenarios::registry::get_scenario_meta()
 }
-
-/// Get tick explanation for debug mode
-pub fn get_tick_explanation(state: &AppState) -> Result<crate::engine::TickExplanation, String> {
-    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
-    Ok(crate::engine::generate_tick_explanation(world_state, &state.event_log))
-}
