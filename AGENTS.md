@@ -110,6 +110,10 @@ Preserve canonical contracts. Do not "improve" adjacent systems while fixing a l
   implementation: the live command implements itself. Guarded by
   `library_defines_no_twin_of_a_live_tauri_command`.
 - The crate is compile-checked by the `tauri` CI job only. Nothing runs its code in tests.
+- **`git add src` does not stage it.** `src-tauri/` is a sibling of `src/`, not a child.
+  A change there has to be staged by name, and nothing local will notice it missing:
+  `cargo test --workspace` and `cargo clippy --workspace` do not enter the crate, so the
+  commit builds clean and the `tauri` job fails on CI. It happened on PR #124.
 
 ---
 

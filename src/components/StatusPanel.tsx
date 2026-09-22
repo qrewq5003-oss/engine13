@@ -36,12 +36,21 @@ export const StatusPanel: React.FC<StatusPanelProps> = ({ indicators }) => {
   );
 };
 
+// Цвет полосы — это «насколько плохо», а не «насколько велико».
+//
+// Здесь стояло `invert ? 1 - progress : progress`, и это переворачивало цвет в ОБЕ
+// стороны. При `invert: true` (высокое значение — беда: давление на Константинополь,
+// османское войско) чем хуже, тем зеленее: `ep = 85`, текст «критическое положение»,
+// полоса зелёная во всю ширину. При `invert: false` (высокое — благо: Федерация,
+// регентство в Милане) наоборот: `federation_progress = 85`, текст «готова», полоса
+// красная. Ширина при этом не инвертируется (`progress * 100%`), так что два куска
+// одного виджета противоречили друг другу.
 function getStatusColor(progress: number, invert: boolean = false): string {
-  const effectiveProgress = invert ? 1.0 - progress : progress;
+  const badness = invert ? progress : 1.0 - progress;
 
-  if (effectiveProgress < 0.33) {
+  if (badness < 0.33) {
     return 'status-green';
-  } else if (effectiveProgress < 0.66) {
+  } else if (badness < 0.66) {
     return 'status-yellow';
   } else {
     return 'status-red';
