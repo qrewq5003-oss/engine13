@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod scripted;
 pub mod modes;
 pub mod save_load;
 
