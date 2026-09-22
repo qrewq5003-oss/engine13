@@ -1167,17 +1167,45 @@ fn apply_seat_split(
         m
     };
 
-    // The seat: same id, same neighbours, new name, reduced share.
-    let seat_name = scenario
+    // The seat: same id, same neighbours, new name and new heir list, reduced share.
+    //
+    // The heir list has to be adopted along with the name, and for the same reason.
+    // The seat keeps the *parent's* id — `rome` goes on being `rome` while calling
+    // itself "Западная Римская Империя" — and `rome_west` is never inserted into
+    // `world.actors` at all. Leaving the parent's `on_collapse` in place therefore
+    // leaves the seat declaring an heir that it has already become. When the seat
+    // later dies, `check_collapses` finds `rome_west` neither among the living nor
+    // in `dead_actor_ids` (the id that died is `rome`) and builds it from the
+    // template verbatim: a full-strength copy of the power that has just fallen,
+    // under the same name, with `external_pressure` back from 100 to the template's
+    // 50. Measured at floor 12, before this line: **8 of 30 runs** ended with one
+    // name standing in `alive_actors` and `dead_actors` at once —
+    //
+    //   сид 5, тик 298: мёртв id=rome name="Западная Римская Империя" ep=100.0
+    //                 | жив  id=rome_west name="Западная Римская Империя" ep=50.0
+    //
+    // — which leaves the chronicler unable to say anything true about that name.
+    // This is the resurrection class closed for `milan`/`savoy` in PR #47; the guard
+    // there tests `dead_actor_ids.contains(&successor.id)` and cannot see this case,
+    // because the id that dies is the parent's.
+    //
+    // The template's own `on_collapse` is the right source: `rome_west` declares
+    // `vec![]`, i.e. the Western Empire has no further declared heirs — which is
+    // exactly the statement the content makes. NOT adopted here: the template's
+    // `region_rank`. The seat keeps rank `S` and the legitimacy floor written for
+    // the undivided empire, and that is a separate question with its own numbers
+    // (see docs/investigation_rome_immortality.md §10).
+    let seat_template = scenario
         .actors
         .iter()
         .find(|a| a.id == seat.id)
-        .map(|t| (t.name.clone(), t.name_short.clone()));
+        .map(|t| (t.name.clone(), t.name_short.clone(), t.on_collapse.clone()));
     if let Some(p) = world.actors.get_mut(&actor_id) {
         p.metrics = cut(&parent_metrics, seat.weight / total, false);
-        if let Some((name, short)) = seat_name {
+        if let Some((name, short, on_collapse)) = seat_template {
             p.name = name;
             p.name_short = short;
+            p.on_collapse = on_collapse;
         }
     }
 
