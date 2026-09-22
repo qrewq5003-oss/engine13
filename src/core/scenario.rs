@@ -197,11 +197,52 @@ pub struct EraDefinition {
     pub unlocks_tags: Vec<String>,
 }
 
+/// Одна ключевая метрика в фактическом блоке промпта.
+///
+/// Летописцу выдаётся **слово, а не число**. Системная часть промпта запрещает ему
+/// «называть числа и проценты» и писать «актор X имеет Y единиц», а блок под этим
+/// запретом печатал ровно то и ровно так: `actor:rome.legitimacy: 42.7`.
+///
+/// Словарь полос живёт здесь, а не выводится из имени метрики, потому что он
+/// принадлежит не метрике, а тому, о ком идёт речь. В `milan_1477` индикатор
+/// «Баронская фронда» читает `naples.cohesion` и называет **высокое** значение
+/// «мятеж»: то же число для самого Неаполя означало бы «единство держится».
+/// Механического отображения «метрика → слово» не существует.
+///
+/// Где на ту же метрику есть `StatusIndicator`, полосы обязаны совпадать с его
+/// порогами — иначе панель игрока и хроника скажут о одном числе разное. Это
+/// закреплено гардом `key_metric_bands_agree_with_status_indicators`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyMetric {
+    /// Как метрика называется в хронике («Власть базилевса», а не `byzantium.legitimacy`).
+    pub label: String,
+    pub metric: MetricRef,
+    /// Полосы снизу вверх: `(нижняя граница, слово)`. Слово выбирается как
+    /// последняя полоса, чья граница не превышает значения — та же процедура, что
+    /// у `compute_status_indicators`. Направление задаётся словами, а не флагом:
+    /// `invert` нужен полоске в интерфейсе, а не строке в промпте.
+    pub bands: Vec<(f64, String)>,
+}
+
+impl KeyMetric {
+    /// Слово для значения. Пустой словарь невозможен: это проверяет валидатор
+    /// сценария при загрузке (`validate_narrative_key_metrics`).
+    pub fn band_for(&self, value: f64) -> &str {
+        let mut chosen = self.bands.first().map(|(_, w)| w.as_str()).unwrap_or("");
+        for (bound, word) in &self.bands {
+            if value >= *bound {
+                chosen = word.as_str();
+            }
+        }
+        chosen
+    }
+}
+
 /// Narrative configuration for data-driven chronicle generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeConfig {
     /// Key metrics to include in factual block
-    pub key_metrics: Vec<MetricRef>,
+    pub key_metrics: Vec<KeyMetric>,
     /// Narrative axes for framing (e.g., "stability vs ambition", "tradition vs innovation")
     pub narrative_axes: Vec<String>,
     /// Tone tags for chronicler style (e.g., "formal", "epic", "intimate")

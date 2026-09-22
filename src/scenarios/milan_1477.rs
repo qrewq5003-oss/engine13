@@ -222,12 +222,59 @@ pub fn load_milan_1477() -> Scenario {
         initial_family_metrics: None,
         max_random_events_per_tick: 3,
         narrative_config: crate::core::NarrativeConfig {
+            // Летописцу выдаётся слово, а не число: системная часть промпта запрещает
+            // называть числа, а этот блок печатал `actor:rome.legitimacy: 42.7`.
+            // Словарь полос принадлежит не метрике, а тому, о ком речь, — см.
+            // `core::KeyMetric`. Где на ту же метрику есть индикатор, слова совпадают
+            // с ним дословно, и это проверяет гард.
             key_metrics: vec![
-                crate::core::MetricRef::literal("actor:milan.legitimacy"),
-                crate::core::MetricRef::literal("actor:milan.cohesion"),
-                crate::core::MetricRef::literal("actor:milan.external_pressure"),
-                crate::core::MetricRef::literal("actor:naples.external_pressure"),
-                crate::core::MetricRef::literal("actor:naples.cohesion"),
+                crate::core::KeyMetric {
+                    label: "Регентство в Милане".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:milan.legitimacy"),
+                    bands: vec![
+                        (0.0, "на грани распада".to_string()),
+                        (30.0, "оспаривается".to_string()),
+                        (55.0, "удерживается".to_string()),
+                        (75.0, "укрепилось".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Единство Милана".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:milan.cohesion"),
+                    bands: vec![
+                        (0.0, "распадается".to_string()),
+                        (25.0, "трещит".to_string()),
+                        (50.0, "держится".to_string()),
+                        (75.0, "прочно".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Давление на Милан".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:milan.external_pressure"),
+                    bands: vec![
+                        (0.0, "спокойно".to_string()),
+                        (50.0, "ощутимо".to_string()),
+                        (70.0, "угрожающе".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Неаполь".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:naples.external_pressure"),
+                    bands: vec![
+                        (0.0, "спокоен".to_string()),
+                        (50.0, "под угрозой".to_string()),
+                        (70.0, "Отранто в опасности".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Баронская фронда".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:naples.cohesion"),
+                    bands: vec![
+                        (0.0, "под контролем".to_string()),
+                        (40.0, "нарастает".to_string()),
+                        (60.0, "мятеж".to_string()),
+                    ],
+                },
             ],
             narrative_axes: vec![
                 "legitimacy vs force".to_string(),

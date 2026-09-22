@@ -247,7 +247,7 @@ fn walk_scenario(sc: &Scenario, out: &mut Vec<Hit>) {
         push(out, id, "global_metric_weights", "-".into(), k.to_string(), "READ", format!("{} sources", srcs.len()));
     }
     for km in &sc.narrative_config.key_metrics {
-        push(out, id, "narrative_config.key_metrics", "-".into(), km.to_string(), "READ(prompt)", String::new());
+        push(out, id, "narrative_config.key_metrics", "-".into(), km.metric.to_string(), "READ(prompt)", String::new());
     }
 
     // --- random events (scenario pool) -------------------------------------

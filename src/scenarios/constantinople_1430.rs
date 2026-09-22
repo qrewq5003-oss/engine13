@@ -269,12 +269,60 @@ pub fn load_constantinople_1430() -> Scenario {
         initial_family_metrics: None,
         max_random_events_per_tick: 3,
         narrative_config: crate::core::NarrativeConfig {
+            // Летописцу выдаётся слово, а не число: системная часть промпта запрещает
+            // называть числа, а этот блок печатал `actor:rome.legitimacy: 42.7`.
+            // Словарь полос принадлежит не метрике, а тому, о ком речь, — см.
+            // `core::KeyMetric`. Где на ту же метрику есть индикатор, слова совпадают
+            // с ним дословно, и это проверяет гард.
             key_metrics: vec![
-                crate::core::MetricRef::literal("global:federation_progress"),
-                crate::core::MetricRef::literal("actor:byzantium.external_pressure"),
-                crate::core::MetricRef::literal("actor:byzantium.legitimacy"),
-                crate::core::MetricRef::literal("actor:byzantium.cohesion"),
-                crate::core::MetricRef::literal("actor:ottomans.military_size"),
+                crate::core::KeyMetric {
+                    label: "Федерация".to_string(),
+                    metric: crate::core::MetricRef::literal("global:federation_progress"),
+                    bands: vec![
+                        (0.0, "не сформирована".to_string()),
+                        (30.0, "формируется".to_string()),
+                        (60.0, "укрепляется".to_string()),
+                        (80.0, "готова".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Константинополь".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:byzantium.external_pressure"),
+                    bands: vec![
+                        (0.0, "держится".to_string()),
+                        (60.0, "под давлением".to_string()),
+                        (80.0, "критическое положение".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Власть базилевса".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:byzantium.legitimacy"),
+                    bands: vec![
+                        (0.0, "не признаётся".to_string()),
+                        (25.0, "оспаривается".to_string()),
+                        (50.0, "признаётся".to_string()),
+                        (75.0, "тверда".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Единство греков".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:byzantium.cohesion"),
+                    bands: vec![
+                        (0.0, "распадается".to_string()),
+                        (25.0, "трещит".to_string()),
+                        (50.0, "держится".to_string()),
+                        (75.0, "прочно".to_string()),
+                    ],
+                },
+                crate::core::KeyMetric {
+                    label: "Османская угроза".to_string(),
+                    metric: crate::core::MetricRef::literal("actor:ottomans.military_size"),
+                    bands: vec![
+                        (0.0, "сдержана".to_string()),
+                        (150.0, "нарастает".to_string()),
+                        (200.0, "готова к штурму".to_string()),
+                    ],
+                },
             ],
             narrative_axes: vec![
                 "survival vs surrender".to_string(),
