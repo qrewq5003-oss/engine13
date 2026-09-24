@@ -1769,9 +1769,12 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
             metric: crate::core::MetricRef::literal("actor:visigoths.military_size"),
             invert: true,
             thresholds: vec![
+                // A27: `visigoths.military_size` живёт в p50 ≈ 35, p90 56…64 во всех
+                // четырёх мирах, максимум 132; при 80 / 150 верхняя полоса не
+                // показывалась ни разу. 100 — верхняя четверть максимума (правило A3).
                 (0.0, "слабый".to_string()),
-                (80.0, "опасный".to_string()),
-                (150.0, "неудержимый".to_string()),
+                (50.0, "опасный".to_string()),
+                (100.0, "неудержимый".to_string()),
             ],
         },
         StatusIndicator {
