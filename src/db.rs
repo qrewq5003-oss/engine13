@@ -920,16 +920,37 @@ impl Db {
 /// rule 3 tests `narrative_actor_ids.contains(&event.actor_id)`, and engine
 /// milestones — `generation_transfer` among them — carry `actor_id = "scenario"`,
 /// which is never a narrative actor. They reach the output only through rules 1–2.
+/// B12 closed `(C)` on measurement: adding `"scenario"` to rule 3 changes the prompt's
+/// five slots on 0 of 2250 half-years (3 scenarios × 5 seeds × 150, `balanced`) once
+/// B11 is in — what rule 3 adds is old, and the prompt takes the five most recent.
 pub fn select_relevant_events(
     candidates: &[Event],
     current_tick: u32,
     query_tags: &[String],
     narrative_actor_ids: &[String],
 ) -> Vec<Event> {
+    // One entry per `id`, and it is the freshest occurrence (B11). `id` is unique only
+    // for `metrics_*`: interactions, random events and player actions recur under one
+    // id. The rules below deduplicate by id, so without this step the stable sort handed
+    // rule 1 the *oldest* occurrence within a relevance tie and the newer one was dropped
+    // as "already seen" — 13–30 % of the chronicler's five slots held an occurrence that
+    // had since recurred. Later in the input wins a same-tick tie: the log is append-only.
+    let mut freshest: HashMap<&str, usize> = HashMap::new();
+    for (i, event) in candidates.iter().enumerate() {
+        match freshest.get(event.id.as_str()) {
+            Some(&j) if candidates[j].tick > event.tick => {}
+            _ => {
+                freshest.insert(event.id.as_str(), i);
+            }
+        }
+    }
+
     // Calculate relevance score for each event
     let mut scored_events: Vec<(Event, f64)> = candidates
         .iter()
-        .map(|event| {
+        .enumerate()
+        .filter(|(i, event)| freshest[event.id.as_str()] == *i)
+        .map(|(_, event)| {
             let ticks_ago = current_tick.saturating_sub(event.tick);
             let temporal_coeff = Db::temporal_coefficient(ticks_ago, event.is_key);
             let thematic_sim = Db::thematic_similarity(&event.tags, query_tags);
