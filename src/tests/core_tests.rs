@@ -1516,3 +1516,28 @@ fn test_death_text_names_a_living_heir() {
         );
     }
 }
+
+/// B11: `id` is unique only for `metrics_*`; `military_conflict_{a}_{d}`, `diplomatic_…`,
+/// random events and player actions recur under one id. The selection keeps one entry per
+/// id, and the entry it keeps must be the freshest occurrence — before the fix the stable
+/// sort handed rule 1 the *oldest* one within a relevance tie, and the newer occurrence was
+/// dropped as "already seen". Measured on a continuous game: 13–30 % of the chronicler's
+/// five slots held an occurrence that had since recurred.
+#[test]
+fn relevance_selection_keeps_the_freshest_occurrence_of_a_recurring_id() {
+    use crate::core::{Event, EventType};
+    let ev = |id: &str, tick: u32| {
+        Event::new(id.to_string(), tick, 375, "a".to_string(), EventType::War, false, format!("{id}@{tick}"))
+    };
+    let mut candidates = vec![ev("war_a_b", 1)];
+    for t in 2..8 {
+        candidates.push(ev(&format!("other_{t}"), t));
+    }
+    candidates.push(ev("war_a_b", 9));
+
+    let out = crate::db::select_relevant_events(&candidates, 10, &[], &["a".to_string()]);
+
+    let wars: Vec<u32> = out.iter().filter(|e| e.id == "war_a_b").map(|e| e.tick).collect();
+    assert_eq!(wars, vec![9], "recurring id must be represented by its freshest occurrence");
+    assert_eq!(out[0].id, "war_a_b", "the freshest event leads the presented list");
+}
