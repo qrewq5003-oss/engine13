@@ -934,7 +934,9 @@ pub fn select_relevant_events(
     // id. The rules below deduplicate by id, so without this step the stable sort handed
     // rule 1 the *oldest* occurrence within a relevance tie and the newer one was dropped
     // as "already seen" — 13–30 % of the chronicler's five slots held an occurrence that
-    // had since recurred. Later in the input wins a same-tick tie: the log is append-only.
+    // had since recurred. A same-(id, tick) pair would go to the later input position —
+    // which rests on the callers' stable sort, not on the log — but none occurs: 0 pairs
+    // in 3 scenarios × 5 seeds × 300 half-years.
     let mut freshest: HashMap<&str, usize> = HashMap::new();
     for (i, event) in candidates.iter().enumerate() {
         match freshest.get(event.id.as_str()) {
