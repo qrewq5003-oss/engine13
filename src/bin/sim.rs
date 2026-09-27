@@ -915,7 +915,11 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
         md.push_str("---\n\n");
     }
 
-    let path = format!("docs/narrative_review_pack_{}.md", scenario_id);
+    // Written outside `docs/` by default: the committed packs there are live model runs,
+    // and a dry run for comparison used to overwrite them silently. To keep a pack in the
+    // repository, name the path: NARRATIVE_PACK_OUT=docs/narrative_review_pack_<id>.md.
+    let path = std::env::var("NARRATIVE_PACK_OUT")
+        .unwrap_or_else(|_| format!("target/narrative_review_pack_{}.md", scenario_id));
     std::fs::write(&path, &md).unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
 
     // Diagnostics: the measured series behind the verdicts, so "НЕ ДОСТИГНУТ" is

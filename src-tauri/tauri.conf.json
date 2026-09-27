@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "export PATH=/home/deck/.cargo/bin:$PATH && npm run dev",
-    "beforeBuildCommand": "export PATH=/home/deck/.cargo/bin:$PATH && npm run build"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
