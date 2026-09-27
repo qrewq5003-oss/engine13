@@ -2854,3 +2854,33 @@ fn metric_milestones_are_closed_in_the_starting_world() {
     }
     assert!(failures.is_empty(), "a metric milestone is open on tick 0 — write it as `Tick` if that is meant:\n{}", failures.join("\n"));
 }
+
+/// B28: a spawn's identity and edges are required in content. The engine pinned every
+/// spawn to rank `C`, `Orthodox`, `Slavic`, and `neighbors` defaulted to empty (the
+/// France-in-Milan bug). A default would hide the next omission as a wrong value; a
+/// missing field must fail to load. The full config must load — or the check is vacuous.
+#[test]
+fn spawn_config_requires_identity_and_neighbors() {
+    use engine13::core::SpawnActorConfig;
+    const FIELDS: &[&str] = &[
+        r#"neighbors = [{ id = "savoy", distance = 1, border_type = "land" }]"#,
+        r#"region_rank = "C""#,
+        r#"religion = "catholic""#,
+        r#"culture = "latin""#,
+    ];
+    let config = |skip: Option<usize>| {
+        let mut s = String::from("actor_id = \"france\"\nlabel = \"Франция\"\nlat = 48.8\nlng = 2.3\ncolor = \"#1e3a8a\"\ninitial_metrics = { population = 800.0 }\n");
+        for (i, f) in FIELDS.iter().enumerate() {
+            if Some(i) != skip {
+                s.push_str(f);
+                s.push('\n');
+            }
+        }
+        toml::from_str::<SpawnActorConfig>(&s)
+    };
+    assert!(config(None).is_ok(), "the full config must load: {:?}", config(None).err());
+    for (i, f) in FIELDS.iter().enumerate() {
+        let field = f.split(' ').next().unwrap();
+        assert!(config(Some(i)).is_err(), "a spawn config without `{field}` loaded — the field is not required");
+    }
+}

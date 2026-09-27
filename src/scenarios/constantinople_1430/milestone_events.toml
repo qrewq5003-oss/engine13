@@ -141,6 +141,11 @@ actor_id = "ottomans"
 operator = "greater"
 value = 70.0
 [milestone_events.spawn_actor]
+# Identity (B28): the values the engine used to pin for every spawn, written out
+# so they can be seen and chosen. Choosing them is an authored decision (column A).
+region_rank = "C"
+religion = "orthodox"
+culture = "slavic"
 actor_id = "wallachia"
 label = "Валахия"
 lat = 44.4
@@ -186,6 +191,11 @@ cooldown_ticks = 999
 type = "tick"
 tick = 5
 [milestone_events.spawn_actor]
+# Identity (B28): the values the engine used to pin for every spawn, written out
+# so they can be seen and chosen. Choosing them is an authored decision (column A).
+region_rank = "C"
+religion = "orthodox"
+culture = "slavic"
 actor_id = "poland_lithuania"
 label = "Польша-Литва"
 lat = 52.2
@@ -215,6 +225,11 @@ actor_id = "ottomans"
 operator = "less"
 value = 40.0
 [milestone_events.spawn_actor]
+# Identity (B28): the values the engine used to pin for every spawn, written out
+# so they can be seen and chosen. Choosing them is an authored decision (column A).
+region_rank = "C"
+religion = "orthodox"
+culture = "slavic"
 actor_id = "mamluks"
 label = "Мамлюки"
 lat = 30.0
