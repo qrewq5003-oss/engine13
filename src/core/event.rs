@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Event type classification
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -18,7 +17,15 @@ pub enum EventType {
     Milestone,
 }
 
-/// Key event record for indexed storage
+/// One entry of the game's event log.
+///
+/// Since B31 the log is saved with the game, so this struct **is a save format**: a
+/// field removed here fails to load in any build that still requires it. The optional
+/// fields carry `#[serde(default)]` so that the next removal is safe for this build.
+/// B36 removed `metrics_snapshot` (one writer, the death event, duplicating
+/// `DeadActor.final_metrics`; no reader) and `scenario_id` (always empty) — a save
+/// written after B36 does not load in a build before it (accepted, see docs/TRIAGE.md).
+/// A save written before B36 loads here: unknown fields are ignored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
@@ -29,10 +36,11 @@ pub struct Event {
     pub event_type: EventType,
     pub is_key: bool,
     pub description: String,
+    #[serde(default)]
     pub involved_actors: Vec<String>,
-    pub metrics_snapshot: HashMap<String, f64>,
+    #[serde(default)]
     pub tags: Vec<String>,
-    pub scenario_id: String,
+    #[serde(default)]
     pub metadata: String,
 }
 
@@ -56,28 +64,14 @@ impl Event {
             is_key,
             description,
             involved_actors: Vec::new(),
-            metrics_snapshot: HashMap::new(),
             tags: Vec::new(),
-            scenario_id: String::new(),
             metadata: String::new(),
         }
-    }
-
-    /// Set scenario_id
-    pub fn with_scenario_id(mut self, scenario_id: String) -> Self {
-        self.scenario_id = scenario_id;
-        self
     }
 
     /// Add involved actors
     pub fn with_involved_actors(mut self, actors: Vec<String>) -> Self {
         self.involved_actors = actors;
-        self
-    }
-
-    /// Add metrics snapshot
-    pub fn with_metrics_snapshot(mut self, snapshot: HashMap<String, f64>) -> Self {
-        self.metrics_snapshot = snapshot;
         self
     }
 
@@ -91,38 +85,6 @@ impl Event {
     pub fn with_metadata(mut self, metadata: String) -> Self {
         self.metadata = metadata;
         self
-    }
-}
-
-/// Event record for SQLite storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredEvent {
-    pub id: String,
-    pub tick: u32,
-    pub year: i32,
-    pub actor_id: String,
-    pub event_type: String,
-    pub is_key: bool,
-    pub description: String,
-    pub involved_actors: String, // JSON array
-    pub metrics_snapshot: String, // JSON object
-    pub tags: String,            // JSON array
-}
-
-impl From<Event> for StoredEvent {
-    fn from(event: Event) -> Self {
-        Self {
-            id: event.id,
-            tick: event.tick,
-            year: event.year,
-            actor_id: event.actor_id,
-            event_type: format!("{:?}", event.event_type),
-            is_key: event.is_key,
-            description: event.description,
-            involved_actors: serde_json::to_string(&event.involved_actors).unwrap_or_default(),
-            metrics_snapshot: serde_json::to_string(&event.metrics_snapshot).unwrap_or_default(),
-            tags: serde_json::to_string(&event.tags).unwrap_or_default(),
-        }
     }
 }
 

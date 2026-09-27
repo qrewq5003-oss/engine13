@@ -10370,11 +10370,16 @@ fn tagshadow(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
 /// Does the canonical relevance path ever hand a `tag_spread_*` event to the
 /// narrative layer?
 ///
-/// Invariant 2 of `AGENTS.md` names `db.rs::get_relevant_events_scored` as the
-/// canonical scoring path, so this mode uses **that call**, on a real in-memory
-/// `Db` seeded with the game's own event log, rather than re-deriving the selection
-/// rules. It is run at a set of sampling ticks with the world's own foreground
-/// actors as `narrative_actor_ids`.
+/// Uses the canonical selection itself, `db::select_relevant_events`, fed the game's
+/// own event log — the product's feed — rather than re-deriving the rules. It is run at
+/// a set of sampling ticks with the world's own foreground actors as
+/// `narrative_actor_ids`.
+///
+/// **B36:** this mode used to go through `Db::get_relevant_events_scored` on an
+/// in-memory `events` table. That feeder built a different candidate set from the
+/// product's: one row per `id` (the table's `UNIQUE` + `REPLACE`), only foreground
+/// actors' events plus key events, unsorted. Numbers measured before B36 describe that
+/// set, not the chronicler's; after the switch they change, and that is not a regression.
 ///
 /// `query_tags` has no runtime producer inside the simulator — it is a parameter of
 /// the Tauri command (`commands.rs:328`, `api.ts:144`) — so both ends of its range
@@ -10384,11 +10389,10 @@ fn tagshadow(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
 /// so those two ends bracket everything a caller could ask for.
 fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
     use engine13::commands::AppState;
-    use engine13::db::Db;
 
     let sample: Vec<u32> = (1..=ticks).filter(|t| t % 50 == 0).collect();
     println!(
-        "# tagrel {} {} ticks × {} seeds, mode {} — канонический путь db.rs::get_relevant_events_scored",
+        "# tagrel {} {} ticks × {} seeds, mode {} — канонический отбор db::select_relevant_events",
         scenario_id, ticks, seeds.len(), mode_label(strategy)
     );
     println!("REL\tseed\ttick\tquery\tlog_total\tlog_tag_spread\tcurated\tcurated_tag_spread\tcurated_key");
@@ -10446,18 +10450,7 @@ fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) 
                 .collect();
             fg.sort();
 
-            let mut db = Db::open_in_memory().expect("db");
-            let evs: Vec<engine13::core::Event> = state
-                .event_log
-                .events
-                .iter()
-                .cloned()
-                .map(|mut e| {
-                    e.scenario_id = scenario_id.to_string();
-                    e
-                })
-                .collect();
-            db.insert_events_batch(&evs).expect("batch");
+            let evs: &[engine13::core::Event] = &state.event_log.events;
             let log_total = evs.len() as u64;
             let log_spread = evs.iter().filter(|e| e.id.starts_with("tag_spread_")).count() as u64;
 
@@ -10465,9 +10458,7 @@ fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) 
                 ("empty", Vec::<String>::new()),
                 ("nonempty", vec!["war".to_string(), "crisis".to_string()]),
             ] {
-                let out = db
-                    .get_relevant_events_scored(t + 1, &q, &fg)
-                    .expect("scored");
+                let out = engine13::db::select_relevant_events(evs, t + 1, &q, &fg);
                 let cur = out.len() as u64;
                 let cur_spread =
                     out.iter().filter(|e| e.id.starts_with("tag_spread_")).count() as u64;
@@ -10611,7 +10602,6 @@ fn gt_replay(
 
 fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) {
     use engine13::commands::AppState;
-    use engine13::db::Db;
 
     let scenario0 = registry::load_by_id(scenario_id).expect("scenario");
     let Some(gm0) = scenario0.generation_mechanics.clone() else {
@@ -10845,18 +10835,8 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
                     .map(|a| a.id.clone())
                     .collect();
                 fg.sort();
-                let mut db = Db::open_in_memory().expect("db");
-                let evs: Vec<engine13::core::Event> = state
-                    .event_log
-                    .events
-                    .iter()
-                    .cloned()
-                    .map(|mut e| {
-                        e.scenario_id = scenario_id.to_string();
-                        e
-                    })
-                    .collect();
-                db.insert_events_batch(&evs).expect("batch");
+                // Canonical selection on the in-memory log (B36; see `tagrel`).
+                let evs: &[engine13::core::Event] = &state.event_log.events;
                 let log_total = evs.len() as u64;
                 let log_gen = evs.iter().filter(|e| e.id == "generation_transfer").count() as u64;
                 let mut cur = [0u64; 2];
@@ -10864,7 +10844,7 @@ fn gentransfer(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&s
                     .into_iter()
                     .enumerate()
                 {
-                    let out = db.get_relevant_events_scored(t + 1, &q, &fg).expect("scored");
+                    let out = engine13::db::select_relevant_events(evs, t + 1, &q, &fg);
                     cur[i] = out.iter().filter(|e| e.id == "generation_transfer").count() as u64;
                 }
                 rel_rows.push((t + 1, log_total, log_gen, cur[0], cur[1]));

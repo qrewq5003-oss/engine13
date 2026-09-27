@@ -18,7 +18,11 @@ Preserve canonical contracts. Do not "improve" adjacent systems while fixing a l
 ### 2. Relevance pipeline is canonical
 - Canonical flow:
   `WorldState -> narrative_actor_ids -> query_tags -> relevant_events -> NarrativeWorldSnapshot`
-- `db.rs::get_relevant_events_scored()` is the canonical scoring path
+  (the `query_tags` stage exists but the product passes it empty — `&[]` in
+  `llm::build_snapshot` — so relevance is recency alone. A non-empty query would score
+  almost every event `0.0`, since almost none carry tags: the inversion recorded in the
+  task-31 write-up §14.3. Not a working stage to "fix" by filling it in)
+- `db::select_relevant_events()` is the canonical selection; it normalizes its input order itself. Its only product caller is `llm::build_snapshot`, fed from the in-memory `EventLog`.
 - command-layer wrappers should stay thin
 - do not invent alternate relevance selection paths unless explicitly requested
 

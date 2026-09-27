@@ -1655,3 +1655,53 @@ fn scripted_milan_keeps_its_reserve_and_the_action_cap() {
     }
     assert!(applied_total > 0 && discretionary > 0, "precondition: the player must act, including discretionary spend ({applied_total}, {discretionary})");
 }
+
+/// B36: the canonical selection normalizes its input order itself. Fed the same
+/// candidates in two orders, it must return the same events — before B36 the sort lived
+/// in `build_snapshot`, and a caller that forgot it got a process-dependent prompt.
+#[test]
+fn relevance_selection_does_not_depend_on_input_order() {
+    use crate::core::{Event, EventType};
+    let ev = |id: &str, tick: u32| Event::new(id.to_string(), tick, 375, "a".to_string(), EventType::War, false, id.to_string());
+    let mut candidates: Vec<Event> = (0..30).map(|i| ev(&format!("e{:02}", i % 23), i / 2)).collect();
+    let sorted = crate::db::select_relevant_events(&candidates, 20, &[], &["a".to_string()]);
+    candidates.reverse();
+    let reversed = crate::db::select_relevant_events(&candidates, 20, &[], &["a".to_string()]);
+    let ids = |v: &[Event]| v.iter().map(|e| format!("{}@{}", e.id, e.tick)).collect::<Vec<_>>();
+    assert_eq!(ids(&sorted), ids(&reversed));
+}
+
+/// B36: `Event` is a save format since B31. A log written before B36 carries
+/// `metrics_snapshot` and `scenario_id` and must still load; a log without the optional
+/// fields must load through `#[serde(default)]`, so the next removal is safe.
+#[test]
+fn event_log_format_reads_old_saves_and_tolerates_missing_optional_fields() {
+    let old = r#"[{"id":"death_huns","tick":243,"year":496,"actor_id":"huns","type":"death","is_key":true,
+        "description":"x","involved_actors":[],"metrics_snapshot":{"cohesion":9.25},"tags":["collapse"],
+        "scenario_id":"","metadata":""}]"#;
+    let events: Vec<crate::core::Event> = serde_json::from_str(old).expect("a pre-B36 log must load");
+    assert_eq!(events[0].tags, vec!["collapse".to_string()]);
+
+    let minimal = r#"[{"id":"x","tick":1,"year":376,"actor_id":"rome","type":"war","is_key":false,"description":"d"}]"#;
+    let events: Vec<crate::core::Event> = serde_json::from_str(minimal).expect("optional fields must default");
+    assert!(events[0].involved_actors.is_empty() && events[0].tags.is_empty() && events[0].metadata.is_empty());
+}
+
+/// B36: a database written by an older build still has the `events` table; opening it
+/// drops the table and keeps the saves.
+#[test]
+fn opening_an_old_database_drops_the_events_table() {
+    let path = std::env::temp_dir().join(format!("engine13_b36_{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE events (id INTEGER PRIMARY KEY, event_id TEXT); INSERT INTO events (event_id) VALUES ('a');").unwrap();
+    }
+    let db = crate::db::Db::open(&path).unwrap();
+    drop(db);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let n: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='events'", [], |r| r.get(0)).unwrap();
+    let saves: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='saves'", [], |r| r.get(0)).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!((n, saves), (0, 1), "events must be dropped, saves must exist");
+}

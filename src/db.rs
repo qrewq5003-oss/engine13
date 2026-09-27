@@ -89,43 +89,13 @@ impl Db {
 
     /// Initialize database schema (CREATE TABLE IF NOT EXISTS)
     fn migrate_schema(&self) -> Result<(), String> {
-        // Create tables and indexes
+        // The `events` table is gone (B36). Since B31 the game's event log lives in memory
+        // and travels with the save; the table had no writer and no reader in the product.
+        // Dropping it is safe for older builds too: they recreate it empty with
+        // `CREATE TABLE IF NOT EXISTS` and never read it.
         self.conn
-            .execute_batch(
-                "
-                -- Events table
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL UNIQUE,
-                    tick INTEGER NOT NULL,
-                    year INTEGER NOT NULL,
-                    actor_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    metrics_snapshot TEXT,
-                    involved_actors TEXT,
-                    tags TEXT,
-                    is_key INTEGER NOT NULL DEFAULT 0,
-                    scenario_id TEXT,
-                    metadata TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-
-                -- Indexes for events
-                CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_id);
-                CREATE INDEX IF NOT EXISTS idx_events_tick ON events(tick);
-                CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
-                CREATE INDEX IF NOT EXISTS idx_events_key ON events(is_key);
-                CREATE INDEX IF NOT EXISTS idx_events_scenario ON events(scenario_id);
-            "
-            )
-            .map_err(|e| format!("Failed to create events table: {}", e))?;
-
-        // Migration: add metadata column if it doesn't exist (for existing databases)
-        // Ignore errors - column may already exist
-        self.conn
-            .execute("ALTER TABLE events ADD COLUMN metadata TEXT NOT NULL DEFAULT ''", [])
-            .ok();
+            .execute("DROP TABLE IF EXISTS events", [])
+            .map_err(|e| format!("Failed to drop events table: {}", e))?;
 
         // Create saves table
         self.conn
@@ -171,461 +141,7 @@ impl Db {
             .execute("ALTER TABLE saves ADD COLUMN event_log_json TEXT NOT NULL DEFAULT '[]'", [])
             .ok();
 
-        // Idempotent migration: add scenario_id column to events table if not exists
-        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check manually
-        let mut stmt = self.conn
-            .prepare("PRAGMA table_info(events)")
-            .map_err(|e| format!("Failed to prepare pragma: {}", e))?;
-        
-        let column_names = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|e| format!("Failed to query columns: {}", e))?;
-        
-        let mut has_scenario_id = false;
-        for col_name in column_names.flatten() {
-            if col_name == "scenario_id" {
-                has_scenario_id = true;
-                break;
-            }
-        }
-
-        if !has_scenario_id {
-            self.conn
-                .execute("ALTER TABLE events ADD COLUMN scenario_id TEXT", [])
-                .map_err(|e| format!("Failed to add scenario_id column: {}", e))?;
-        }
-
         Ok(())
-    }
-
-    // ========================================================================
-    // Event operations
-    // ========================================================================
-
-    /// Insert a single event
-    pub fn insert_event(&self, event: &Event) -> Result<(), String> {
-        let involved_actors = serde_json::to_string(&event.involved_actors)
-            .unwrap_or_else(|_| "[]".to_string());
-        let tags = serde_json::to_string(&event.tags)
-            .unwrap_or_else(|_| "[]".to_string());
-        let metrics_snapshot = serde_json::to_string(&event.metrics_snapshot)
-            .unwrap_or_else(|_| "{}".to_string());
-
-        self.conn
-            .execute(
-                "
-                INSERT OR REPLACE INTO events
-                (event_id, tick, year, actor_id, event_type, description, metrics_snapshot, involved_actors, tags, is_key, scenario_id, metadata)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                ",
-                params![
-                    event.id,
-                    event.tick,
-                    event.year,
-                    event.actor_id,
-                    Self::event_type_to_string(&event.event_type),
-                    event.description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    if event.is_key { 1 } else { 0 },
-                    event.scenario_id,
-                    event.metadata,
-                ],
-            )
-            .map_err(|e| format!("Failed to insert event: {}", e))?;
-
-        Ok(())
-    }
-
-    /// Delete all events for a scenario
-    pub fn delete_events_for_scenario(&self, scenario_id: &str) -> Result<(), String> {
-        self.conn
-            .execute(
-                "DELETE FROM events WHERE scenario_id = ?1",
-                params![scenario_id],
-            )
-            .map_err(|e| format!("Failed to delete events: {}", e))?;
-
-        Ok(())
-    }
-
-    /// Insert multiple events in a batch (more efficient)
-    pub fn insert_events_batch(&mut self, events: &[Event]) -> Result<(), String> {
-        let tx = self.conn
-            .transaction()
-            .map_err(|e| format!("Failed to start transaction: {}", e))?;
-
-        for event in events {
-            let involved_actors = serde_json::to_string(&event.involved_actors)
-                .unwrap_or_else(|_| "[]".to_string());
-            let tags = serde_json::to_string(&event.tags)
-                .unwrap_or_else(|_| "[]".to_string());
-            let metrics_snapshot = serde_json::to_string(&event.metrics_snapshot)
-                .unwrap_or_else(|_| "{}".to_string());
-
-            tx.execute(
-                "
-                INSERT OR REPLACE INTO events
-                (event_id, tick, year, actor_id, event_type, description, metrics_snapshot, involved_actors, tags, is_key, scenario_id, metadata)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                ",
-                params![
-                    event.id,
-                    event.tick,
-                    event.year,
-                    event.actor_id,
-                    Self::event_type_to_string(&event.event_type),
-                    event.description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    if event.is_key { 1 } else { 0 },
-                    event.scenario_id,
-                    event.metadata,
-                ],
-            )
-            .map_err(|e| format!("Failed to insert event: {}", e))?;
-        }
-
-        tx.commit()
-            .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-
-        Ok(())
-    }
-
-    /// Get all events for a specific actor
-    pub fn get_events_by_actor(&self, actor_id: &str) -> Result<Vec<Event>, String> {
-        let mut stmt = self.conn
-            .prepare("SELECT * FROM events WHERE actor_id = ? ORDER BY tick DESC")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-        let events = stmt
-            .query_map(params![actor_id], |row| {
-                let event_id: String = row.get(1)?;
-                let tick: u32 = row.get(2)?;
-                let year: i32 = row.get(3)?;
-                let actor_id: String = row.get(4)?;
-                let event_type_str: String = row.get(5)?;
-                let description: String = row.get(6)?;
-                let metrics_snapshot_str: String = row.get(7)?;
-                let involved_actors_str: String = row.get(8)?;
-                let tags_str: String = row.get(9)?;
-                let is_key: i32 = row.get(10)?;
-
-                let event_type = Self::string_to_event_type(&event_type_str);
-                let metrics_snapshot: HashMap<String, f64> =
-                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
-                let involved_actors: Vec<String> =
-                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
-                let tags: Vec<String> =
-                    serde_json::from_str(&tags_str).unwrap_or_default();
-                let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
-
-                Ok(Event {
-                    id: event_id,
-                    tick,
-                    year,
-                    actor_id,
-                    event_type,
-                    description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    is_key: is_key != 0,
-                    scenario_id,
-                    metadata,
-                })
-            })
-            .map_err(|e| format!("Failed to query events: {}", e))?;
-
-        let mut result = Vec::new();
-        for event in events {
-            match event {
-                Ok(e) => result.push(e),
-                Err(e) => eprintln!("Error parsing event: {}", e),
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Get events within a tick range
-    pub fn get_events_by_tick_range(
-        &self,
-        start_tick: u32,
-        end_tick: u32,
-    ) -> Result<Vec<Event>, String> {
-        let mut stmt = self.conn
-            .prepare("SELECT * FROM events WHERE tick >= ? AND tick <= ? ORDER BY tick DESC")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-        let events = stmt
-            .query_map(params![start_tick, end_tick], |row| {
-                let event_id: String = row.get(1)?;
-                let tick: u32 = row.get(2)?;
-                let year: i32 = row.get(3)?;
-                let actor_id: String = row.get(4)?;
-                let event_type_str: String = row.get(5)?;
-                let description: String = row.get(6)?;
-                let metrics_snapshot_str: String = row.get(7)?;
-                let involved_actors_str: String = row.get(8)?;
-                let tags_str: String = row.get(9)?;
-                let is_key: i32 = row.get(10)?;
-
-                let event_type = Self::string_to_event_type(&event_type_str);
-                let metrics_snapshot: HashMap<String, f64> =
-                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
-                let involved_actors: Vec<String> =
-                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
-                let tags: Vec<String> =
-                    serde_json::from_str(&tags_str).unwrap_or_default();
-                let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
-
-                Ok(Event {
-                    id: event_id,
-                    tick,
-                    year,
-                    actor_id,
-                    event_type,
-                    description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    is_key: is_key != 0,
-                    scenario_id,
-                    metadata,
-                })
-            })
-            .map_err(|e| format!("Failed to query events: {}", e))?;
-
-        let mut result = Vec::new();
-        for event in events {
-            match event {
-                Ok(e) => result.push(e),
-                Err(e) => eprintln!("Error parsing event: {}", e),
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Get key events for a specific actor
-    pub fn get_key_events_by_actor(&self, actor_id: &str) -> Result<Vec<Event>, String> {
-        let mut stmt = self.conn
-            .prepare("SELECT * FROM events WHERE actor_id = ? AND is_key = 1 ORDER BY tick DESC")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-        let events = stmt
-            .query_map(params![actor_id], |row| {
-                let event_id: String = row.get(1)?;
-                let tick: u32 = row.get(2)?;
-                let year: i32 = row.get(3)?;
-                let actor_id: String = row.get(4)?;
-                let event_type_str: String = row.get(5)?;
-                let description: String = row.get(6)?;
-                let metrics_snapshot_str: String = row.get(7)?;
-                let involved_actors_str: String = row.get(8)?;
-                let tags_str: String = row.get(9)?;
-                let is_key: i32 = row.get(10)?;
-
-                let event_type = Self::string_to_event_type(&event_type_str);
-                let metrics_snapshot: HashMap<String, f64> =
-                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
-                let involved_actors: Vec<String> =
-                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
-                let tags: Vec<String> =
-                    serde_json::from_str(&tags_str).unwrap_or_default();
-                let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
-
-                Ok(Event {
-                    id: event_id,
-                    tick,
-                    year,
-                    actor_id,
-                    event_type,
-                    description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    is_key: is_key != 0,
-                    scenario_id,
-                    metadata,
-                })
-            })
-            .map_err(|e| format!("Failed to query events: {}", e))?;
-
-        let mut result = Vec::new();
-        for event in events {
-            match event {
-                Ok(e) => result.push(e),
-                Err(e) => eprintln!("Error parsing event: {}", e),
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Get events by type with limit
-    pub fn get_events_by_type(&self, event_type: &str, limit: usize) -> Result<Vec<Event>, String> {
-        let mut stmt = self.conn
-            .prepare("SELECT * FROM events WHERE event_type = ? ORDER BY tick DESC LIMIT ?")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-        let events = stmt
-            .query_map(params![event_type, limit], |row| {
-                let event_id: String = row.get(1)?;
-                let tick: u32 = row.get(2)?;
-                let year: i32 = row.get(3)?;
-                let actor_id: String = row.get(4)?;
-                let event_type_str: String = row.get(5)?;
-                let description: String = row.get(6)?;
-                let metrics_snapshot_str: String = row.get(7)?;
-                let involved_actors_str: String = row.get(8)?;
-                let tags_str: String = row.get(9)?;
-                let is_key: i32 = row.get(10)?;
-
-                let event_type = Self::string_to_event_type(&event_type_str);
-                let metrics_snapshot: HashMap<String, f64> =
-                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
-                let involved_actors: Vec<String> =
-                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
-                let tags: Vec<String> =
-                    serde_json::from_str(&tags_str).unwrap_or_default();
-                let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
-
-                Ok(Event {
-                    id: event_id,
-                    tick,
-                    year,
-                    actor_id,
-                    event_type,
-                    description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    is_key: is_key != 0,
-                    scenario_id,
-                    metadata,
-                })
-            })
-            .map_err(|e| format!("Failed to query events by type: {}", e))?;
-
-        let mut result = Vec::new();
-        for event in events {
-            match event {
-                Ok(e) => result.push(e),
-                Err(e) => eprintln!("Error parsing event: {}", e),
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Get relevant events with temporal decay and thematic scoring
-    /// Returns events sorted by relevance (thematic_similarity × temporal_coefficient)
-    ///
-    /// Thin wrapper: it only *fetches* candidates from the events table and hands them
-    /// to [`select_relevant_events`], which owns the selection rules.
-    ///
-    /// **Поправка 2026-09-21.** Здесь стояло: «таблица `events` не пишется никем, кроме
-    /// `budget_probe`, поэтому в продукте этот метод читает пустое хранилище». Это
-    /// неверно. Утверждение получено поиском по `src/`, а писатели продукта живут в
-    /// `src-tauri/src/main.rs` — `cmd_advance_tick`, `cmd_advance_tick_silent` и
-    /// `cmd_submit_action` зовут `insert_events_batch` на каждом тике и на каждом
-    /// действии. Крейт `src-tauri` не входит в воркспейс, и поиск его не видел.
-    /// В живой партии хранилище непустое.
-    ///
-    /// Что остаётся в силе независимо от этого: нарративный слой держит те же события в
-    /// памяти и нуждается в тех же правилах, а второй набор правил для него запрещён
-    /// инвариантом 2 `AGENTS.md`. Отсюда форма: один отбор, два питателя.
-    pub fn get_relevant_events_scored(
-        &self,
-        current_tick: u32,
-        query_tags: &[String],
-        narrative_actor_ids: &[String],
-    ) -> Result<Vec<Event>, String> {
-        // Get all events for narrative actors plus key events
-        let mut all_events: Vec<Event> = Vec::new();
-
-        // Get events for each narrative actor
-        for actor_id in narrative_actor_ids {
-            let mut events = self.get_events_by_actor(actor_id)?;
-            all_events.append(&mut events);
-        }
-
-        // Get all key events
-        let key_events = self.get_all_key_events()?;
-        for event in key_events {
-            if !all_events.iter().any(|e| e.id == event.id) {
-                all_events.push(event);
-            }
-        }
-
-        Ok(select_relevant_events(
-            &all_events,
-            current_tick,
-            query_tags,
-            narrative_actor_ids,
-        ))
-    }
-
-    /// Get all key events from database
-    fn get_all_key_events(&self) -> Result<Vec<Event>, String> {
-        let mut stmt = self.conn
-            .prepare("SELECT * FROM events WHERE is_key = 1 ORDER BY tick DESC")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-        let events = stmt
-            .query_map([], |row: &rusqlite::Row| {
-                let event_id: String = row.get(1)?;
-                let tick: u32 = row.get(2)?;
-                let year: i32 = row.get(3)?;
-                let actor_id: String = row.get(4)?;
-                let event_type_str: String = row.get(5)?;
-                let description: String = row.get(6)?;
-                let metrics_snapshot_str: String = row.get(7)?;
-                let involved_actors_str: String = row.get(8)?;
-                let tags_str: String = row.get(9)?;
-                let is_key: i32 = row.get(10)?;
-
-                let event_type = Self::string_to_event_type(&event_type_str);
-                let metrics_snapshot: HashMap<String, f64> =
-                    serde_json::from_str(&metrics_snapshot_str).unwrap_or_default();
-                let involved_actors: Vec<String> =
-                    serde_json::from_str(&involved_actors_str).unwrap_or_default();
-                let tags: Vec<String> =
-                    serde_json::from_str(&tags_str).unwrap_or_default();
-                let scenario_id: String = row.get(11).unwrap_or_default();
-                let metadata: String = row.get(12).unwrap_or_default();
-
-                Ok(Event {
-                    id: event_id,
-                    tick,
-                    year,
-                    actor_id,
-                    event_type,
-                    description,
-                    metrics_snapshot,
-                    involved_actors,
-                    tags,
-                    is_key: is_key != 0,
-                    scenario_id,
-                    metadata,
-                })
-            })
-            .map_err(|e| format!("Failed to query key events: {}", e))?;
-
-        let mut result = Vec::new();
-        for e in events.flatten() {
-            result.push(e);
-        }
-
-        Ok(result)
     }
 
     /// Calculate temporal coefficient based on ticks ago
@@ -878,43 +394,6 @@ impl Db {
 
         Ok(dead_actor)
     }
-
-    // ========================================================================
-    // Helper functions
-    // ========================================================================
-
-    fn event_type_to_string(event_type: &crate::core::EventType) -> &'static str {
-        match event_type {
-            crate::core::EventType::Collapse => "collapse",
-            crate::core::EventType::War => "war",
-            crate::core::EventType::Migration => "migration",
-            crate::core::EventType::Threshold => "threshold",
-            crate::core::EventType::Birth => "birth",
-            crate::core::EventType::Death => "death",
-            crate::core::EventType::Trade => "trade",
-            crate::core::EventType::Cultural => "cultural",
-            crate::core::EventType::Diplomatic => "diplomatic",
-            crate::core::EventType::PlayerAction => "player_action",
-            crate::core::EventType::Milestone => "milestone",
-        }
-    }
-
-    fn string_to_event_type(s: &str) -> crate::core::EventType {
-        match s {
-            "collapse" => crate::core::EventType::Collapse,
-            "war" => crate::core::EventType::War,
-            "migration" => crate::core::EventType::Migration,
-            "threshold" => crate::core::EventType::Threshold,
-            "birth" => crate::core::EventType::Birth,
-            "death" => crate::core::EventType::Death,
-            "trade" => crate::core::EventType::Trade,
-            "cultural" => crate::core::EventType::Cultural,
-            "diplomatic" => crate::core::EventType::Diplomatic,
-            "player_action" => crate::core::EventType::PlayerAction,
-            "milestone" => crate::core::EventType::Milestone,
-            _ => crate::core::EventType::Threshold,
-        }
-    }
 }
 
 // ============================================================================
@@ -923,10 +402,15 @@ impl Db {
 
 /// The canonical relevance selection rules (`AGENTS.md`, invariant 2).
 ///
-/// Pure: takes the candidate events, returns the chosen ones, most recent first.
-/// `Db::get_relevant_events_scored` feeds it from the events table;
-/// `llm::build_snapshot` feeds it from the in-memory `EventLog`. There is one
-/// implementation of the rules, not two.
+/// Pure: takes the candidate events, returns the chosen ones, most recent first. Its only
+/// product caller is `llm::build_snapshot`, fed from the in-memory `EventLog` (the
+/// `events` table and its feeder `Db::get_relevant_events_scored` were removed in B36).
+///
+/// It normalizes its input order itself — a stable sort by `(tick, id)` — so the output
+/// cannot depend on how a caller happened to order the candidates. The rules below break
+/// relevance ties by input order; fed a log whose order followed `HashMap` iteration, the
+/// prompt differed between processes at a fixed seed (6 distinct files out of 6 runs).
+/// That sort used to live in `build_snapshot`, i.e. in the memory of each caller.
 ///
 /// Rules, unchanged from the original method:
 ///   1. top 15 by relevance (`thematic_similarity` × `temporal_coefficient`);
@@ -946,14 +430,21 @@ pub fn select_relevant_events(
     query_tags: &[String],
     narrative_actor_ids: &[String],
 ) -> Vec<Event> {
+    // Normalized input order (see the doc comment). Stable, so exact `(tick, id)` ties
+    // keep the caller's order — none occur (0 pairs, 3 scenarios × 5 seeds × 300).
+    let mut sorted: Vec<&Event> = candidates.iter().collect();
+    sorted.sort_by(|a, b| a.tick.cmp(&b.tick).then_with(|| a.id.cmp(&b.id)));
+    let candidates: Vec<Event> = sorted.into_iter().cloned().collect();
+    let candidates = candidates.as_slice();
+
     // One entry per `id`, and it is the freshest occurrence (B11). `id` is unique only
     // for `metrics_*`: interactions, random events and player actions recur under one
     // id. The rules below deduplicate by id, so without this step the stable sort handed
     // rule 1 the *oldest* occurrence within a relevance tie and the newer one was dropped
     // as "already seen" — 13–30 % of the chronicler's five slots held an occurrence that
     // had since recurred. A same-(id, tick) pair would go to the later input position —
-    // which rests on the callers' stable sort, not on the log — but none occurs: 0 pairs
-    // in 3 scenarios × 5 seeds × 300 half-years.
+    // which rests on the stable sort above — but none occurs: 0 pairs in 3 scenarios ×
+    // 5 seeds × 300 half-years.
     let mut freshest: HashMap<&str, usize> = HashMap::new();
     for (i, event) in candidates.iter().enumerate() {
         match freshest.get(event.id.as_str()) {

@@ -29,10 +29,9 @@ pub fn ensure_default_metrics(metrics: &mut HashMap<String, f64>) {
 /// discarded on the next line: the return type is a `HashMap`, which keeps no order, so
 /// the only effect was two extra allocations. Removed rather than kept as decoration.
 ///
-/// The intent behind it is real and NOT achieved here: `Event::metrics_snapshot` is a
-/// `HashMap`, so a serialized snapshot has no stable key order. Fixing that means
-/// changing the field's type through `Event` and the frontend, which is a separate job —
-/// recorded rather than silently half-done.
+/// Its one remaining use is `DeadActor.final_metrics` (`Event::metrics_snapshot`, the
+/// other, was removed in B36). The result is a `HashMap`, so a serialized snapshot has
+/// no stable key order — the class recorded as B37.
 pub fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
     metrics.clone()
 }

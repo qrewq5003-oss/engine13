@@ -184,7 +184,6 @@ export interface Event {
   is_key: boolean;
   description: string;
   involved_actors: string[];
-  metrics_snapshot: Record<string, number>;
   tags: string[];
 }
 
