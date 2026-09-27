@@ -111,7 +111,13 @@ pub fn apply_player_action(
         .unwrap_or_else(|| "scenario".to_string());
 
     // Serialize effects to metadata for action history
-    let effects_json = serde_json::to_string(&applied_effects).unwrap_or_default();
+    // Keys sorted (B9′): serialized straight from the `HashMap`, the string's key order
+    // followed the per-instance hash key — four different strings for one action over
+    // sixteen loads of rome's `support_city`. The log is saved with the game (B31).
+    let effects_json = serde_json::to_string(
+        &applied_effects.iter().collect::<std::collections::BTreeMap<_, _>>(),
+    )
+    .unwrap_or_default();
 
     let event = crate::core::Event::new(
         format!("player_action_{}", action_input.action_id),

@@ -1596,3 +1596,27 @@ fn event_log_survives_save_and_load_and_ticks_ship_only_their_events() {
     crate::commands::load_game(&mut st, &db, save_id).unwrap();
     assert_eq!(serde_json::to_value(&st.event_log.events).unwrap(), log, "load restores the save's own log");
 }
+
+/// B9′ + B35: a player action's `metadata` (the applied effects as JSON) and the history
+/// line built from it must not depend on `HashMap` iteration order. Each world loads the
+/// scenario afresh, so its action's `effects` map has a fresh per-instance hash key —
+/// the order another process would see.
+#[test]
+fn player_action_metadata_and_history_do_not_depend_on_hash_order() {
+    let mut metadata = std::collections::BTreeSet::new();
+    let mut summaries = std::collections::BTreeSet::new();
+    for _ in 0..16 {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+        // `support_city` needs family wealth > 15; the rome family starts at 0.
+        MetricRef::literal("family:family_wealth").apply(st.world_state.as_mut().unwrap(), 50.0);
+        let input = crate::application::PlayerActionInput { action_id: "support_city".to_string(), target_actor_id: None };
+        crate::application::apply_player_action(&mut st, &input).unwrap();
+        let ev = st.event_log.events.last().unwrap();
+        metadata.insert(ev.metadata.clone());
+        summaries.insert(crate::commands::get_action_history(&st, 1)[0].effects_summary.join("|"));
+    }
+    assert_eq!(metadata.len(), 1, "metadata varies with hash order: {metadata:?}");
+    assert_eq!(summaries.len(), 1, "history line varies with hash order: {summaries:?}");
+}

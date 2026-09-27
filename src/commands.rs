@@ -371,7 +371,8 @@ fn parse_effects_summary(metadata: &str) -> Vec<String> {
         return vec![];
     }
 
-    serde_json::from_str::<HashMap<String, f64>>(metadata)
+    // Parsed into a sorted map (B35): a `HashMap` here listed the effects in hash order.
+    serde_json::from_str::<std::collections::BTreeMap<String, f64>>(metadata)
         .unwrap_or_default()
         .into_iter()
         .map(|(metric, delta)| {
