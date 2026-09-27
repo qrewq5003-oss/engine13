@@ -141,8 +141,7 @@ actor_id = "ottomans"
 operator = "greater"
 value = 70.0
 [milestone_events.spawn_actor]
-# Identity (B28): the values the engine used to pin for every spawn, written out
-# so they can be seen and chosen. Choosing them is an authored decision (column A).
+# Identity (A32, решение владельца 2026-09-28): церковь и канцелярия церковнославянские; политически — православно-славянский мир; ранг C — провинция, которая сама себя кормит.
 region_rank = "C"
 religion = "orthodox"
 culture = "slavic"
@@ -191,10 +190,9 @@ cooldown_ticks = 999
 type = "tick"
 tick = 5
 [milestone_events.spawn_actor]
-# Identity (B28): the values the engine used to pin for every spawn, written out
-# so they can be seen and chosen. Choosing them is an authored decision (column A).
-region_rank = "C"
-religion = "orthodox"
+# Identity (A32, решение владельца 2026-09-28): держава первого ряда при Ягеллонах; католики, славянская культура.
+region_rank = "A"
+religion = "catholic"
 culture = "slavic"
 actor_id = "poland_lithuania"
 label = "Польша-Литва"
@@ -225,11 +223,10 @@ actor_id = "ottomans"
 operator = "less"
 value = 40.0
 [milestone_events.spawn_actor]
-# Identity (B28): the values the engine used to pin for every spawn, written out
-# so they can be seen and chosen. Choosing them is an authored decision (column A).
-region_rank = "C"
-religion = "orthodox"
-culture = "slavic"
+# Identity (A32, решение владельца 2026-09-28): Бурджиты (черкесы, Барсбай) в 1430; arabic — культура государства и администрации, не turkic бахритского периода.
+region_rank = "A"
+religion = "muslim"
+culture = "arabic"
 actor_id = "mamluks"
 label = "Мамлюки"
 lat = 30.0
