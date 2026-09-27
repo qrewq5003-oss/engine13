@@ -241,16 +241,10 @@ pub fn build_snapshot(
     // not one of the ~2000 authored random events (plague, famine, revolt, the Ottoman
     // embassy) was ever shown.
     //
-    // `select_relevant_events` is the selection `AGENTS.md` invariant 2 calls canonical.
-    // Оно живёт за `Db::get_relevant_events_scored`, который читает таблицу `events`, а
-    // правила питаются здесь из журнала в памяти через ту же чистую функцию. Один отбор,
-    // два питателя; второго пути нет.
-    //
-    // Поправка 2026-09-21: обоснование, стоявшее здесь раньше — «таблицу не пишет никто,
-    // кроме `budget_probe`, поэтому путь через базу недостижим в продукте», — неверно.
-    // Писатели есть, и они в `src-tauri/src/main.rs` (три вызова `insert_events_batch`),
-    // то есть в крейте вне воркспейса, которого не видел поиск по `src/`. Выбор питателя
-    // из памяти этим не отменяется, но он теперь выбор, а не единственная возможность.
+    // `select_relevant_events` is the selection `AGENTS.md` invariant 2 calls canonical,
+    // and this is its only product caller. The `events` table and its feeder
+    // `Db::get_relevant_events_scored` were removed in B36: since B31 the log in memory
+    // is the game's one history and travels with the save.
     //
     // `query_tags` is empty on purpose. Nothing in the narrative layer computes query
     // tags, and with an empty query `thematic_similarity` returns 1.0 for the untagged
@@ -261,21 +255,11 @@ pub fn build_snapshot(
     // measured and are numerically identical today; see §14.3 of the task-31 write-up for
     // the inversion this exposes in `thematic_similarity`, recorded and not fixed here.
     //
-    // The candidate slice is normalised before it is handed over, and that is load-bearing,
-    // not tidiness. `record_metric_changes` (since removed with the `metrics_*` events)
-    // appended one event per actor while iterating `world.actors` — a HashMap — so the
-    // *log's own order* was randomized per process; the sort keeps the feeder independent
-    // of any appender's order. The canonical selection sorts by relevance with a stable
-    // sort, so ties fall through to input order, and feeding it the raw log made the prompt
-    // differ between processes at a fixed seed: measured 6 distinct prompt files out of 6
-    // runs, which is exactly the regression plan item (C) exists to prevent. Sorting here
-    // fixes it at the feeder without touching either the engine's append order or the
-    // shared selection rules.
-    // Per-tick `metrics_<actor>_<tick>` ledger dumps used to be filtered out here — 91 % of
-    // the five evidence slots in rome before the filter. The engine no longer emits them
-    // (`engine::phase_record`), so the log holds content events only and needs no filter.
-    let mut event_candidates: Vec<crate::core::Event> = event_log.events.clone();
-    event_candidates.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.id.cmp(&b.id)));
+    // Candidate order is normalized inside `select_relevant_events` (B36) — it used to be
+    // sorted here, and that sort was load-bearing: fed the raw log, the prompt differed
+    // between processes at a fixed seed (6 distinct files out of 6 runs). Moved into the
+    // selection so no caller can forget it.
+    let event_candidates: &[crate::core::Event] = &event_log.events;
 
     // NB: `world.tick`, deliberately, NOT `period_tick`.
     //
@@ -287,7 +271,7 @@ pub fn build_snapshot(
     // as a counterfactual (§19.3): the shift changes which events are shown in a
     // minority of half-years and nothing else, and it is not made here.
     let recent_important_events: Vec<crate::core::Event> = crate::db::select_relevant_events(
-        &event_candidates,
+        event_candidates,
         world.tick,
         &[],
         &foreground_actors,

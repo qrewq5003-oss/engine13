@@ -81,9 +81,10 @@
 | B33 | ✅ **СДЕЛАНО**: задание `tauri` гоняет `cargo clippy … -D warnings` вместо `cargo check`; 18 предупреждений крейта (все `explicit_auto_deref`, `&mut *s` → `&mut s`) исправлены `clippy --fix` | M |
 | B34 | ✅ **СДЕЛАНО**: экспорт `PATH=/home/deck/.cargo/bin` снят из `before*Command` — он действовал только в подоболочке `npm run dev/build` (vite), cargo Tauri CLI запускает не оттуда; гард `cargo_configs_contain_no_machine_specific_paths` теперь читает и `tauri.conf.json` (на старом конфиге падает) | S |
 | B35 | ✅ **СДЕЛАНО**: эффекты в «Истории действий» разбираются в отсортированную карту | S |
-| B36 | Таблица `events` инертна после B31: никто не пишет и не читает в продукте; её методы в `Db` и `delete_events_for_scenario` без вызовов. Удаление — миграция. **Вместе с ней удалить `Event.metrics_snapshot`**: писатель один (событие гибели, дубль `DeadActor.final_metrics`), читателей в продукте нет, а весь прочий код поля — в методах этой таблицы | M |
+| B36 | ✅ **СДЕЛАНО**: таблица `events` удалена (`DROP TABLE IF EXISTS`), с ней методы `Db`, `StoredEvent`, поля `Event.metrics_snapshot` и `Event.scenario_id`; сортировка входа перенесена внутрь `select_relevant_events`; правило 2 `AGENTS.md` переписано. **Формат сохранения меняется в одну сторону** — см. «B36» | M |
 | B37 | Широкая замена `HashMap` → `BTreeMap` в 33 сериализуемых полях — ради сырого JSON, сравнимого между процессами. **Класс (б) не пуст**, приёмка по каждому: `interactions.rs:1168` — при культурном вытеснении передаются `.take(3)` тегов в порядке `actor_tags` (дискретный исход); `mod.rs:1271` — `avg_power_projection` суммирует `f64` в порядке `world.actors`. См. «Перепись сериализуемых карт» | L **Уточнение владельца:** путь `.take(3)` недостижим — прогресс вытеснения не выше 28.4 из 100 ни в одном мире (30 сидов × 300, с игроком и без); сортировку ставить в том же PR, что оживит механику (→ A30) |
 | B38 | ✅ **СДЕЛАНО**: `narrative_eval` и `narrative_pack` берут ход из библиотеки. rome и constantinople побайтово те же; **milan меняется** — первая гибель (Сиена) на тике 69 вместо 123. Закоммиченный `docs/narrative_review_pack_milan_1477.md` снят живым прогоном со старым миром и не перегенерирован (нужен LLM) | S |
+| B39 | `budget_probe` держит собственную копию цикла игрока — `scripted_step` (20 вызовов); перевод на `application::scripted` меняет его сыгранный мир (резерв milan) | S |
 
 ---
 
@@ -1293,4 +1294,47 @@ milan aggressive; 6 процессов × 300 тиков). Контроль: в�
 **Закрыта (PR B34):** по умолчанию пачка пишется в `target/`, в `docs/` — только явно
 через `NARRATIVE_PACK_OUT`. Шапка `docs/narrative_review_pack_milan_1477.md` помечена:
 снят на мире до #141.
+
+
+---
+
+# B36: таблица `events` удалена — сделано
+
+| что | правка |
+|---|---|
+| база | `DROP TABLE IF EXISTS events` при открытии; миграции её колонок сняты. Откат безопасен: старые сборки создают таблицу пустой через `CREATE TABLE IF NOT EXISTS` и не читают её |
+| `Db` | удалены `insert_event`, `insert_events_batch`, `delete_events_for_scenario`, `get_events_by_*`, `get_key_events_by_actor`, `get_relevant_events_scored`, `get_all_key_events`, конвертеры типа события |
+| `Event` | удалены `metrics_snapshot` (один писатель — событие гибели, дубль `DeadActor.final_metrics`; читателей нет) и `scenario_id` (всегда пуст); `#[serde(default)]` на `involved_actors`, `tags`, `metadata`; `StoredEvent` удалён; TS-зеркало без `metrics_snapshot` |
+| отбор | `select_relevant_events` сама сортирует вход по `(tick, id)`; сортировка из `build_snapshot` снята |
+| `AGENTS.md`, правило 2 | «`db::select_relevant_events()` is the canonical selection; it normalizes its input order itself. Its only product caller is `llm::build_snapshot`, fed from the in-memory `EventLog`» + оговорка: стадия `query_tags` существует, но в продукте пуста |
+| `budget_probe` | режимы `tagrel` и `gentransfer` — на `select_relevant_events` из журнала в памяти |
+
+**Односторонний формат — решение, не побочный эффект.** Со времён B31 журнал лежит в
+сохранении, а `Event` — схема сохранения. Новая сборка читает старые сохранения (лишние
+поля игнорируются — гард). Сборка **до** B36 не загрузит сохранение, записанное **после**:
+`missing field metrics_snapshot` → «Failed to deserialize event log». Для настольной игры
+откат на старую сборку со свежими сохранениями принят как редкость. `#[serde(default)]`
+на необязательных полях делает следующее удаление поля безопасным для этой сборки.
+
+**Приёмка:** `narrative_pack` и `narrative_eval` dry по трём сценариям — побайтово те же;
+`sim` 13 прогонов — тот же; `history_probe` — все проверки; гард B11 зелёный. Три новых
+гарда, каждый падает на своём откате: `relevance_selection_does_not_depend_on_input_order`
+(без сортировки), `event_log_format_reads_old_saves_and_tolerates_missing_optional_fields`
+(без `serde(default)`), `opening_an_old_database_drops_the_events_table` (без `DROP`).
+
+**Числа `tagrel` изменились — это не регрессия.** Прежний питатель брал из таблицы одну
+строку на `id` (после `REPLACE`), только события акторов переднего плана плюс ключевые,
+без сортировки — не тот набор, что у летописца. Балансированная стратегия, 5 сидов × 300:
+
+| сценарий | запрос | доля `tag_spread` в отборе, до → после |
+|---|---|---|
+| rome | пустой (продукт) | 0.91 % → 1.42 % |
+| rome | непустой | 17.24 % → 6.46 % |
+| constantinople | пустой | 1.42 % → 1.91 % |
+| constantinople | непустой | 17.72 % → 17.19 % |
+| milan | пустой | 0.11 % → 0.05 % |
+| milan | непустой | 7.58 % → 9.49 % |
+
+Вывод задачи 28 держится: при пустом запросе — том, что передаёт продукт, — тег-канал до
+летописца почти не доходит.
 

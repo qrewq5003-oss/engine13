@@ -1835,7 +1835,6 @@ fn check_collapses(
                     }
                 },
             )
-            .with_metrics_snapshot(metrics_to_snapshot(&actor.metrics))
             .with_tags(vec!["collapse".to_string(), actor_id.clone()]);
 
             event_log.add(event);
