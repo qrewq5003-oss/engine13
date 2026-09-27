@@ -832,7 +832,7 @@ fn create_savoy() -> Actor {
         ],
         // Milan as heir: confirmed by playtest (ENGINE13_SCENARIO3_DESIGN.md,
         // "Найдено при плейтесте C/D") to be the actor that reliably grinds
-        // Savoy's military_size to zero (affinity()==0.0 disables force
+        // Savoy's military_size to zero (friction()==0.0 disables force
         // projection for this culturally-homogeneous cast, so raw
         // military_size alone decides the Milan-vs-Savoy conflict). Milan is
         // already alive, so this feeds the heir-absorption branch of

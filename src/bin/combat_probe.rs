@@ -13,7 +13,7 @@
 
 use engine13::{
     core::WorldState,
-    engine::{interactions::{affinity, effective_military}, tick, EventLog},
+    engine::{interactions::{effective_military, friction}, tick, EventLog},
     scenarios::registry,
 };
 use rand::SeedableRng;
@@ -182,7 +182,7 @@ fn eff_breakdown(world: &WorldState, id: &str) -> (f64, f64, usize, f64) {
         .filter_map(|n| world.actors.get(&n.id))
         .collect();
     let n = neighbors.len().max(1);
-    let avg_aff: f64 = neighbors.iter().map(|x| affinity(actor, x)).sum::<f64>() / n as f64;
+    let avg_aff: f64 = neighbors.iter().map(|x| friction(actor, x)).sum::<f64>() / n as f64;
     let divisor = (n as f64 * avg_aff).max(1.0);
     (effective_military(actor, neighbors), divisor, n, avg_aff)
 }

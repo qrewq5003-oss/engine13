@@ -7,7 +7,7 @@
 //! What reads these fields:
 //! * rank — only `phase_region_ranks`; rank `C` has a zero bonus in all three scenarios
 //!   (A21), so the pinned rank changes nothing today;
-//! * religion / culture — `interactions::affinity`, read by `effective_military` (army
+//! * religion / culture — `interactions::friction` (named `affinity` before B41), read by `effective_military` (army
 //!   stretched by foreign neighbours) and by the combat roll (a strong attacker is less
 //!   likely to strike an affine defender); culture also by cultural displacement, which
 //!   never fires (A30).
