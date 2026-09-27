@@ -1834,7 +1834,6 @@ impl BatchStats {
             .filter(|e| matches!(e.event_type, EventType::Threshold))
             .filter(|e| {
                 !e.id.starts_with("foreground_")
-                    && !e.id.starts_with("metrics_")
                     && !e.id.starts_with("rank_")
                     && !e.id.starts_with("milestone_")
                     && !e.id.starts_with("game_mode_")

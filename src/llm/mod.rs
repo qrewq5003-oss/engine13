@@ -262,34 +262,19 @@ pub fn build_snapshot(
     // the inversion this exposes in `thematic_similarity`, recorded and not fixed here.
     //
     // The candidate slice is normalised before it is handed over, and that is load-bearing,
-    // not tidiness. `record_metric_changes` (`engine/mod.rs:1662`) appends one `metrics_*`
-    // event per actor while iterating `world.actors` — a HashMap — so the *log's own order*
-    // is randomized per process. The canonical selection sorts by relevance with a stable
+    // not tidiness. `record_metric_changes` (since removed with the `metrics_*` events)
+    // appended one event per actor while iterating `world.actors` — a HashMap — so the
+    // *log's own order* was randomized per process; the sort keeps the feeder independent
+    // of any appender's order. The canonical selection sorts by relevance with a stable
     // sort, so ties fall through to input order, and feeding it the raw log made the prompt
     // differ between processes at a fixed seed: measured 6 distinct prompt files out of 6
     // runs, which is exactly the regression plan item (C) exists to prevent. Sorting here
     // fixes it at the feeder without touching either the engine's append order or the
     // shared selection rules.
-    // Per-tick metric dumps are dropped from the candidates before the selection sees
-    // them. `record_metric_changes` (`engine/mod.rs:1662`) emits one `metrics_<actor>_<tick>`
-    // event per actor per tick whose description is a list of raw deltas — "Аламанны:
-    // military_quality: -4.2, treasury: +10.7". They are bookkeeping for the debug/tick
-    // explanation, not chronicle material, and there is no filter anywhere between the
-    // snapshot and the prompt text (`generate_narrative_prompt` prints `id: description`
-    // verbatim), so without this they went to the model as-is — 91% of the five evidence
-    // slots in rome, 82% in constantinople, 56% in milan — inside the same prompt that
-    // orders the chronicler to never name a number. §5.2 already measured what the model
-    // does with numbers it is shown and forbidden to use: it spells them out in words.
-    //
-    // Filtering here rather than in `select_relevant_events` is deliberate: the canonical
-    // rules stay untouched and the DB feeder keeps its own candidate set. Measured cost of
-    // the filter — distinct event sets per 150-half-year game fall 150 → 115 / 111 / 94,
-    // still far above the acceptance threshold of 30, while the five slots stay full and
-    // what fills them becomes authored content instead of ledger lines.
-    let mut event_candidates: Vec<crate::core::Event> = event_log.events.iter()
-        .filter(|e| !e.id.starts_with("metrics_"))
-        .cloned()
-        .collect();
+    // Per-tick `metrics_<actor>_<tick>` ledger dumps used to be filtered out here — 91 % of
+    // the five evidence slots in rome before the filter. The engine no longer emits them
+    // (`engine::phase_record`), so the log holds content events only and needs no filter.
+    let mut event_candidates: Vec<crate::core::Event> = event_log.events.clone();
     event_candidates.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.id.cmp(&b.id)));
 
     // NB: `world.tick`, deliberately, NOT `period_tick`.

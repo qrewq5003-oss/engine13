@@ -643,7 +643,7 @@ fn main() {
         let mut tick0_ids: HS<String> = HS::new();
         let (mut seen_base, mut seen_v1, mut seen_v2): (HS<String>, HS<String>, HS<String>) =
             (HS::new(), HS::new(), HS::new());
-        let (mut slots_v1, mut slots_v3, mut metric_slots_v1) = (0usize, 0usize, 0usize);
+        let (mut slots_v1, mut slots_v3) = (0usize, 0usize);
 
         for tick_num in 0..ticks {
             let mut applied = 0u32;
@@ -676,16 +676,13 @@ fn main() {
 
             let v1 = engine13::db::select_relevant_events(&cand, ws.tick, &[], &fg);
             let v1_ids: Vec<String> = v1.iter().take(5).map(|e| e.id.clone()).collect();
-            // V3 — контрфакт: тот же канонический отбор, но потиковые дампы metrics_*
-            // исключены из КАНДИДАТОВ. Оценка объёма правки кормильца, продукт не меняется.
-            let cand3: Vec<engine13::core::Event> = cand.iter()
-                .filter(|e| !e.id.starts_with("metrics_"))
-                .cloned().collect();
+            // V3 — был контрфакт «metrics_* исключены из кандидатов». Движок их больше не
+            // пишет (`engine::phase_record`), так что V3 совпадает с V1 по построению.
+            let cand3: Vec<engine13::core::Event> = cand.clone();
             let v2 = engine13::db::select_relevant_events(&cand3, ws.tick, &[], &fg);
             let v2_ids: Vec<String> = v2.iter().take(5).map(|e| e.id.clone()).collect();
             slots_v1 += v1_ids.len();
             slots_v3 += v2_ids.len();
-            metric_slots_v1 += v1_ids.iter().filter(|i| i.starts_with("metrics_")).count();
 
             if tick_num == 0 {
                 tick0_ids = base_ids.iter().cloned().collect();
@@ -709,18 +706,18 @@ fn main() {
         println!("=== РАВНОВЕСНЫЙ РАСЧЁТ (A): {} / {} / seed {} / {} тиков ===", scenario_id, strategy, seed, ticks);
         // Плотность и перепись id — измерения, отвечающие на вопрос «почему у сценария
         // столько различных наборов», без обращения к LLM.
-        let nonmetric = st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")).count();
+        let nonmetric = st2.event_log.events.len();
         {
             use std::collections::HashMap as HM;
             let mut per: HM<u32, usize> = HM::new();
-            for e in st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")) {
+            for e in st2.event_log.events.iter() {
                 *per.entry(e.tick).or_insert(0) += 1;
             }
             let empty = (0..ticks).filter(|t| !per.contains_key(t)).count();
             {
                 use std::collections::HashMap as HM2;
                 let mut freq: HM2<String, usize> = HM2::new();
-                for e in st2.event_log.events.iter().filter(|e| !e.id.starts_with("metrics_")) {
+                for e in st2.event_log.events.iter() {
                     *freq.entry(e.id.clone()).or_insert(0) += 1;
                 }
                 let mut v: Vec<(String, usize)> = freq.into_iter().collect();
@@ -735,7 +732,7 @@ fn main() {
             if std::env::var("DUMP_TICKS").is_ok() {
                 for t in 28..36u32 {
                     let ids: Vec<String> = st2.event_log.events.iter()
-                        .filter(|e| e.tick == t && !e.id.starts_with("metrics_"))
+                        .filter(|e| e.tick == t)
                         .map(|e| format!("{}(key={})", e.id, e.is_key)).collect();
                     println!("   tick {}: {:?}", t, ids);
                 }
@@ -756,8 +753,7 @@ fn main() {
         println!("{:<6} {:>12} {:>25.0}%", "V1", v1_sets.len(), v1_t0 as f64 / n * 100.0);
         println!("{:<6} {:>12} {:>25.0}%", "V3", v2_sets.len(), v2_t0 as f64 / n * 100.0);
         println!();
-        println!("слотов в промпте: V1 {} (из них metrics_* {} = {:.0}%), V3 {} (metrics_* исключены)",
-            slots_v1, metric_slots_v1, metric_slots_v1 as f64 / slots_v1.max(1) as f64 * 100.0, slots_v3);
+        println!("слотов в промпте: V1 {}, V3 {}", slots_v1, slots_v3);
         println!();
         let kinds = |set: &HS<String>| -> String {
             let d = set.iter().filter(|i| i.starts_with("death_")).count();

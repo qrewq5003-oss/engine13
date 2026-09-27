@@ -202,16 +202,6 @@ pub fn tick(
     event_log: &mut EventLog,
     rng: &mut rand_chacha::ChaCha8Rng,
 ) {
-    let current_tick = world.tick;
-    let current_year = world.year;
-
-    // Store initial state for event comparison
-    let initial_states: HashMap<String, HashMap<String, f64>> = world
-        .actors
-        .iter()
-        .map(|(id, actor)| (id.clone(), actor.metrics.clone()))
-        .collect();
-
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
@@ -250,7 +240,7 @@ pub fn tick(
     phase_vassalage(world, event_log);
 
     // Phase 8: Record changes and generation mechanics
-    phase_record(world, scenario, &initial_states, current_tick, current_year, event_log);
+    phase_record(world, scenario, event_log);
 
     // Phase 9: Advance tick state
     phase_advance(world, scenario);
@@ -645,8 +635,12 @@ fn phase_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
 // Phase 7: Record changes and generation mechanics
 // ============================================================================
 
-fn phase_record(world: &mut WorldState, scenario: &Scenario, initial_states: &HashMap<String, HashMap<String, f64>>, current_tick: u32, current_year: i32, event_log: &mut EventLog) {
-    record_metric_changes(world, initial_states, current_tick, current_year, event_log);
+// No per-actor `metrics_*` ledger events. They were written here every tick and had no
+// positive reader: the chronicler and five tools excluded them by id prefix, and the one
+// reader that forgot — the "Recent Events" window — showed them in 99.4–100 % of its
+// slots, because this phase runs last. Excluded by construction now, not by six filters.
+// Per-tick metric debugging is `engine::trace`. See docs/TRIAGE.md, «B31: стадия 1».
+fn phase_record(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     check_generation_transfer(world, scenario, event_log);
     update_metric_history(world);
     update_prev_metrics(world);
@@ -1986,101 +1980,6 @@ fn check_collapses(
 
 fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
     crate::core::actor::metrics_to_snapshot(metrics)
-}
-
-// ============================================================================
-// Step 8: Record Metric Changes
-// ============================================================================
-
-fn record_metric_changes(
-    world: &WorldState,
-    initial_states: &HashMap<String, HashMap<String, f64>>,
-    tick: u32,
-    year: i32,
-    event_log: &mut EventLog,
-) {
-    // Sorted: the event log must not inherit `world.actors`' per-instance hash order —
-    // a shuffled log changes which events tie at the cut-off of the chronicler's "last
-    // five". None of the appending phases draws RNG, so this changes the log and nothing
-    // else. See docs/investigation_event_log_order.md.
-    let mut record_ids: Vec<String> = world.actors.keys().cloned().collect();
-    record_ids.sort();
-    for actor_id in &record_ids {
-        let Some(actor) = world.actors.get(actor_id) else { continue };
-        if let Some(initial) = initial_states.get(actor_id) {
-            let changes = calculate_metric_changes(&actor.metrics, initial);
-
-            if !changes.is_empty() {
-                let change_desc = changes
-                    .iter()
-                    .map(|(k, v)| format!("{}: {:+.1}", k, v))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let event = Event::new(
-                    format!("metrics_{}_{}", actor_id, tick),
-                    tick,
-                    year,
-                    actor_id.clone(),
-                    EventType::Threshold,
-                    false,
-                    format!("{}: {}", actor.name_short, change_desc),
-                )
-                .with_metrics_snapshot(metrics_to_snapshot(&actor.metrics));
-
-                event_log.add(event);
-            }
-        }
-    }
-}
-
-fn calculate_metric_changes(
-    current: &HashMap<String, f64>,
-    initial: &HashMap<String, f64>,
-) -> Vec<(String, f64)> {
-    let mut changes = Vec::new();
-
-    let pop_change = current.get("population").copied().unwrap_or(0.0) - initial.get("population").copied().unwrap_or(0.0);
-    if pop_change.abs() > 10.0 {
-        changes.push(("population".to_string(), pop_change));
-    }
-
-    let mil_change = current.get("military_size").copied().unwrap_or(0.0) - initial.get("military_size").copied().unwrap_or(0.0);
-    if mil_change.abs() > 1.0 {
-        changes.push(("military_size".to_string(), mil_change));
-    }
-
-    let qual_change = current.get("military_quality").copied().unwrap_or(0.0) - initial.get("military_quality").copied().unwrap_or(0.0);
-    if qual_change.abs() > 1.0 {
-        changes.push(("military_quality".to_string(), qual_change));
-    }
-
-    let econ_change = current.get("economic_output").copied().unwrap_or(0.0) - initial.get("economic_output").copied().unwrap_or(0.0);
-    if econ_change.abs() > 1.0 {
-        changes.push(("economic_output".to_string(), econ_change));
-    }
-
-    let coh_change = current.get("cohesion").copied().unwrap_or(0.0) - initial.get("cohesion").copied().unwrap_or(0.0);
-    if coh_change.abs() > 2.0 {
-        changes.push(("cohesion".to_string(), coh_change));
-    }
-
-    let leg_change = current.get("legitimacy").copied().unwrap_or(0.0) - initial.get("legitimacy").copied().unwrap_or(0.0);
-    if leg_change.abs() > 2.0 {
-        changes.push(("legitimacy".to_string(), leg_change));
-    }
-
-    let press_change = current.get("external_pressure").copied().unwrap_or(0.0) - initial.get("external_pressure").copied().unwrap_or(0.0);
-    if press_change.abs() > 3.0 {
-        changes.push(("external_pressure".to_string(), press_change));
-    }
-
-    let treas_change = current.get("treasury").copied().unwrap_or(0.0) - initial.get("treasury").copied().unwrap_or(0.0);
-    if treas_change.abs() > 10.0 {
-        changes.push(("treasury".to_string(), treas_change));
-    }
-
-    changes
 }
 
 // ============================================================================
