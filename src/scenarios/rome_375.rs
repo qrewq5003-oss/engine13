@@ -1555,13 +1555,12 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
+            // A3: a date, not a metric. `huns.military_size` starts at 120 and never rises,
+            // so `> 200` never fired and the decided `>= 90` would fire on tick 0 — the
+            // threshold rule "upper quarter of the observed maximum" cannot tell a peak
+            // from a starting value. The Huns appear at the Danube in 376: tick 2.
             condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: crate::core::MetricRef::actor("huns", "military_size").expect("scenario metric key"),
-                    actor_id: Some("huns".to_string()),
-                    operator: ComparisonOperator::Greater,
-                    value: 200.0,
-                },
+                condition_type: EventConditionType::Tick { tick: 2 },
                 duration: None,
             },
             is_key: true,
@@ -1934,7 +1933,10 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             probability: 0.07,
             target: EventTarget::Actor("rome".to_string()),
             conditions: vec![
-                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("family:wealth"), operator: ComparisonOperator::Greater, value: 200.0 },
+                // A1 (решение 2026-09-21): `>= 60`, not `> 200` — the family scale is clamped
+                // to 0..100, so 200 was unreachable by construction. Opens at tick 11
+                // (median) in 30/30 games of every world (`cola_probe`).
+                crate::core::RelativeCondition { metric: crate::core::RelativeMetricRef::literal("family:wealth"), operator: ComparisonOperator::GreaterOrEqual, value: 60.0 },
             ],
             effects: HashMap::from([
                 (crate::core::RelativeMetricRef::literal("family:influence"), 8.0),

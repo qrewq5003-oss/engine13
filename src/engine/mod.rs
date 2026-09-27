@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
-    ActorDelta, ComparisonOperator, DependencyMode, DependencyRule, Event, EventConditionType, EventCondition,
+    ComparisonOperator, DependencyMode, DependencyRule, Event, EventConditionType, EventCondition,
     EventType, MetricRef, Scenario, WorldState,
 };
 
@@ -1488,70 +1488,6 @@ fn update_prev_metrics(world: &mut WorldState) {
     for (actor_id, actor) in &world.actors {
         world.prev_metrics.insert(actor_id.clone(), actor.metrics.clone());
     }
-}
-
-/// Calculate actor deltas by comparing current metrics with prev_metrics
-pub fn calculate_actor_deltas(world: &WorldState) -> Vec<ActorDelta> {
-    use std::collections::HashMap;
-
-    let mut deltas = Vec::new();
-
-    for (actor_id, actor) in &world.actors {
-        if let Some(prev) = world.prev_metrics.get(actor_id) {
-            let mut metric_changes = HashMap::new();
-
-            // Calculate delta for each metric
-            let pop_delta = actor.get_metric("population") - prev.get("population").copied().unwrap_or(0.0);
-            if pop_delta.abs() > 0.01 {
-                metric_changes.insert("population".to_string(), pop_delta);
-            }
-
-            let mil_delta = actor.get_metric("military_size") - prev.get("military_size").copied().unwrap_or(0.0);
-            if mil_delta.abs() > 0.01 {
-                metric_changes.insert("military_size".to_string(), mil_delta);
-            }
-
-            let qual_delta = actor.get_metric("military_quality") - prev.get("military_quality").copied().unwrap_or(0.0);
-            if qual_delta.abs() > 0.01 {
-                metric_changes.insert("military_quality".to_string(), qual_delta);
-            }
-
-            let econ_delta = actor.get_metric("economic_output") - prev.get("economic_output").copied().unwrap_or(0.0);
-            if econ_delta.abs() > 0.01 {
-                metric_changes.insert("economic_output".to_string(), econ_delta);
-            }
-
-            let coh_delta = actor.get_metric("cohesion") - prev.get("cohesion").copied().unwrap_or(0.0);
-            if coh_delta.abs() > 0.01 {
-                metric_changes.insert("cohesion".to_string(), coh_delta);
-            }
-
-            let leg_delta = actor.get_metric("legitimacy") - prev.get("legitimacy").copied().unwrap_or(0.0);
-            if leg_delta.abs() > 0.01 {
-                metric_changes.insert("legitimacy".to_string(), leg_delta);
-            }
-
-            let pres_delta = actor.get_metric("external_pressure") - prev.get("external_pressure").copied().unwrap_or(0.0);
-            if pres_delta.abs() > 0.01 {
-                metric_changes.insert("external_pressure".to_string(), pres_delta);
-            }
-
-            let treas_delta = actor.get_metric("treasury") - prev.get("treasury").copied().unwrap_or(0.0);
-            if treas_delta.abs() > 0.01 {
-                metric_changes.insert("treasury".to_string(), treas_delta);
-            }
-
-            if !metric_changes.is_empty() {
-                deltas.push(ActorDelta {
-                    actor_id: actor_id.clone(),
-                    actor_name: actor.name.clone(),
-                    metric_changes,
-                });
-            }
-        }
-    }
-
-    deltas
 }
 
 fn check_event_condition(world: &WorldState, condition: &EventCondition) -> bool {
