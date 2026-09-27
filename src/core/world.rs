@@ -65,14 +65,6 @@ pub struct Vassalage {
     pub formed_tick: u32,
 }
 
-/// Actor delta for tracking metric changes between ticks
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActorDelta {
-    pub actor_id: String,
-    pub actor_name: String,
-    pub metric_changes: HashMap<String, f64>,
-}
-
 /// Game mode
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

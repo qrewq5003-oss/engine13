@@ -110,19 +110,6 @@ fn cmd_force_spawn(
 }
 
 #[tauri::command]
-fn cmd_get_narrative_actors(state: State<Mutex<AppState>>) -> Result<Vec<engine13::Actor>, String> {
-    eprintln!("[RUST] cmd_get_narrative_actors - acquiring lock");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let world_state = s.world_state.as_ref().ok_or("No active world state")?;
-    let actors: Vec<_> = world_state.actors.values()
-        .filter(|a| a.narrative_status == engine13::NarrativeStatus::Foreground)
-        .cloned()
-        .collect();
-    eprintln!("[RUST] cmd_get_narrative_actors - found {} foreground actors", actors.len());
-    Ok(actors)
-}
-
-#[tauri::command]
 fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine13::PatronAction>, String> {
     eprintln!("[RUST] cmd_get_available_actions - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -361,7 +348,6 @@ fn main() {
             cmd_advance_tick_silent,
             cmd_set_metric,
             cmd_force_spawn,
-            cmd_get_narrative_actors,
             cmd_get_available_actions,
             cmd_get_actions_with_availability,
             cmd_submit_action,

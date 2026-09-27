@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   WorldState,
-  Actor,
   PatronAction,
   SaveData,
   SaveSlotList,
@@ -30,10 +29,6 @@ export async function getWorldState(): Promise<WorldState | null> {
 export async function advanceTick(actionId?: string): Promise<AdvanceTickResponse> {
   const action = actionId ? { actionId, targetActorId: null } : null;
   return invoke<AdvanceTickResponse>('cmd_advance_tick', { action });
-}
-
-export async function getNarrativeActors(): Promise<Actor[]> {
-  return invoke<Actor[]>('cmd_get_narrative_actors');
 }
 
 // Streaming narrative - returns unsubscribe function

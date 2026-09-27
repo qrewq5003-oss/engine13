@@ -1582,8 +1582,10 @@ fn inheritance_coefficients_over_one(
 /// `0.85, 1.0, 1.0, 0.8` and the engine's default for an unlisted metric is `0.7`.
 ///
 /// This is load-bearing, not cosmetic. `docs/investigation_silent_authored_content.md`
-/// §7 concludes that `recruit_soldiers` (`family_wealth > 100`) and `senator_bribe`
-/// (`> 200`) are dead **structurally** — gated above a ceiling no state can reach. A
+/// §7 concluded that `recruit_soldiers` (`family_wealth > 100`) and `senator_bribe`
+/// (`> 200`) were dead **structurally** — gated above a ceiling no state can reach (both
+/// since fixed: `>= 100` and, by A1, `>= 60`). The ceiling still decides every such
+/// gate. A
 /// coefficient of `1.2` written tomorrow lifts family metrics past `100` on a path with
 /// no clamp, and that conclusion silently becomes false with no test failing.
 #[test]
@@ -1603,10 +1605,9 @@ fn inheritance_coefficients_never_exceed_one() {
         failures.is_empty(),
         "an inheritance coefficient above 1.0 lifts a family metric on the ONE write path \
          that does not clamp (`check_generation_transfer` inserts `value * coefficient` \
-         directly). The `0..100` ceiling is what makes `recruit_soldiers` and \
-         `senator_bribe` structurally dead — see \
-         docs/investigation_silent_authored_content.md §7. If a coefficient above 1.0 is \
-         intended, that conclusion has to be re-measured first.\n{}",
+         directly). The `0..100` ceiling is what every gate on a family metric is measured \
+         against — see docs/investigation_silent_authored_content.md §7. If a coefficient \
+         above 1.0 is intended, those gates have to be re-measured first.\n{}",
         failures.join("\n")
     );
 }
@@ -1873,7 +1874,7 @@ fn scenario_specifications_quote_numbers_that_still_match() {
     // It is not silently reconciled here because which side is right is a content
     // question with measured consequences: starting at zero is consistent with
     // `family_rises` (`influence >= 60`) never firing without a player, with
-    // `senator_bribe` (`wealth > 200`) never firing, with `recruit_soldiers`
+    // `senator_bribe` (then `wealth > 200`, `>= 60` since A1) never firing, with `recruit_soldiers`
     // (`wealth > 100`) never being available, and with the four family-conditioned
     // auto-delta modifiers that never apply — see
     // docs/investigation_silent_authored_content.md §12.
@@ -2169,14 +2170,11 @@ fn engine_arithmetic_is_re_implemented_only_where_listed() {
 fn authored_gates_on_clamped_metrics_are_satisfiable() {
     use engine13::core::{ComparisonOperator, MetricRef};
 
-    // metric -> why an out-of-range threshold on it is tolerated
-    const ALLOWED: &[(&str, &str)] = &[(
-        "senator_bribe",
-        "threshold `family:wealth > 200` is twice the 0..100 ceiling and twice the event's own \
-         cost (-100). Unlike `recruit_soldiers`, where the threshold equalled the cost and `>=` \
-         was the one satisfiable reading, any fix here invents a number the author did not \
-         write — it is an authored decision. See docs/investigation_dead_authored_content.md §13",
-    )];
+    // id -> why an out-of-range threshold on it is tolerated. An entry must still be
+    // unsatisfiable, or the guard fails: `senator_bribe` sat here after the owner's A1
+    // decision (`>= 60`) was made and until it was executed, and nothing noticed.
+    const ALLOWED: &[(&str, &str)] = &[];
+    let mut allowed_hit: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
     const CLAMPED: &[&str] = &[
         "legitimacy",
@@ -2216,27 +2214,29 @@ fn authored_gates_on_clamped_metrics_are_satisfiable() {
         let scenario = registry::load_by_id(id).unwrap_or_else(|| panic!("{id}: failed to load"));
 
         for action in scenario.universal_actions.iter().chain(scenario.patron_actions.iter()) {
-            if ALLOWED.iter().any(|(a, _)| *a == action.id) {
-                continue;
-            }
             if let engine13::core::ActionCondition::Metric { metric, operator, value } =
                 &action.available_if
             {
                 if let Some(why) = unsatisfiable(&metric.to_string(), operator, *value) {
-                    failures.push(format!("  {id} action `{}`: {why}", action.id));
+                    if let Some((a, _)) = ALLOWED.iter().find(|(a, _)| *a == action.id) {
+                        allowed_hit.insert(a);
+                    } else {
+                        failures.push(format!("  {id} action `{}`: {why}", action.id));
+                    }
                 }
             }
         }
 
         for event in &scenario.random_events {
-            if ALLOWED.iter().any(|(a, _)| *a == event.id) {
-                continue;
-            }
             for cond in &event.conditions {
                 if let Some(why) =
                     unsatisfiable(&cond.metric.to_string(), &cond.operator, cond.value)
                 {
-                    failures.push(format!("  {id} event `{}`: {why}", event.id));
+                    if let Some((a, _)) = ALLOWED.iter().find(|(a, _)| *a == event.id) {
+                        allowed_hit.insert(a);
+                    } else {
+                        failures.push(format!("  {id} event `{}`: {why}", event.id));
+                    }
                 }
             }
         }
@@ -2254,6 +2254,12 @@ fn authored_gates_on_clamped_metrics_are_satisfiable() {
                     failures.push(format!("  {id} milestone `{}`: {why}", m.id));
                 }
             }
+        }
+    }
+
+    for (a, _) in ALLOWED {
+        if !allowed_hit.contains(a) {
+            failures.push(format!("  `{a}` is allowed as unsatisfiable but no longer is — drop it from ALLOWED"));
         }
     }
 
@@ -2801,4 +2807,50 @@ fn scenario_indicator_count(pred: impl Fn(&engine13::core::StatusIndicator) -> b
         .flat_map(|s| s.status_indicators.into_iter())
         .filter(|i| pred(i))
         .count()
+}
+
+/// Bug class (A3): a milestone gate that is already open in the world the scenario
+/// starts from. The owner's rule "threshold = upper quarter of the observed maximum"
+/// cannot tell a peak the game reaches from a value the world *starts* at: the Huns
+/// start at `military_size 120` and never rise, so the decided `>= 90` would have fired
+/// on tick 0 in every game. A milestone meant to fire at the start is written as
+/// `Tick { tick }`; a metric gate must be closed on tick 0.
+#[test]
+fn metric_milestones_are_closed_in_the_starting_world() {
+    // id -> why it is open on tick 0 today. Each is an authored question, recorded rather
+    // than silently fixed; an entry that is no longer open at start fails the guard.
+    const ALLOWED: &[(&str, &str)] = &[
+        ("family_falls", "A2: rome's family starts at 0/0/0/0 (the specification says \
+          8/12/22/15), so «the family lost everything» fires on tick 0 in 30/30 games"),
+        ("wallachia_emerges", "A31: the Ottomans start at military_size 180 against a gate of \
+          > 70, so Wallachia spawns on tick 0 in 30/30 games of every world"),
+    ];
+    let mut allowed_hit: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut failures = Vec::new();
+    for &id in SCENARIO_IDS {
+        let db = engine13::db::Db::open_in_memory().unwrap();
+        let mut st = engine13::AppState::default();
+        engine13::load_scenario(&mut st, &db, id.to_string()).unwrap();
+        let world = st.world_state.as_ref().unwrap();
+        for m in &st.current_scenario.as_ref().unwrap().milestone_events {
+            if let engine13::core::EventConditionType::Metric { metric, operator, value, .. } =
+                &m.condition.condition_type
+            {
+                let now = metric.get(world);
+                if operator.evaluate(now, *value) {
+                    if let Some((a, _)) = ALLOWED.iter().find(|(a, _)| *a == m.id) {
+                        allowed_hit.insert(a);
+                    } else {
+                        failures.push(format!("  {id} milestone `{}`: {metric} {operator:?} {value} already holds at start ({now})", m.id));
+                    }
+                }
+            }
+        }
+    }
+    for (a, _) in ALLOWED {
+        if !allowed_hit.contains(a) {
+            failures.push(format!("  `{a}` is allowed as open at start but no longer is — drop it from ALLOWED"));
+        }
+    }
+    assert!(failures.is_empty(), "a metric milestone is open on tick 0 — write it as `Tick` if that is meant:\n{}", failures.join("\n"));
 }
