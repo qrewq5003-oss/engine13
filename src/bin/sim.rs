@@ -173,7 +173,6 @@ fn action_name_stems(name: &str) -> Vec<String> {
 }
 
 fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
-    use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
     let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
@@ -218,7 +217,6 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
     };
 
     let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
-    let priority = strategy.priority_actions();
     let db = engine13::db::Db::open_in_memory().expect("in-memory db");
     let cfg = engine13::llm::get_llm_config();
     if live {
@@ -230,21 +228,11 @@ fn run_narrative_eval(scenario_id: &str, ticks: u32, seed: u64, live: bool) {
     let mut llm_failures = 0u32;
 
     for tick_num in 0..ticks {
-        let mut applied = 0u32;
-        let mut actions_applied: Vec<String> = Vec::new();
-        for action_id in &priority {
-            if applied >= scenario.actions_per_tick {
-                break;
-            }
-            let input = PlayerActionInput {
-                action_id: action_id.to_string(),
-                target_actor_id: None,
-            };
-            if apply_player_action(&mut state, &input).is_ok() {
-                applied += 1;
-                actions_applied.push(action_id.to_string());
-            }
-        }
+        // The scripted turn from the library (B38): the same policy as `run_scripted`,
+        // milan's reserve included. This loop used to be a naive copy of the list.
+        let actions_applied: Vec<String> =
+            engine13::application::scripted::apply_scripted_actions(&mut state, &strategy)
+                .applied.iter().map(|a| a.to_string()).collect();
 
         {
             let ws = state.world_state.as_mut().unwrap();
@@ -501,7 +489,6 @@ enum CaseOutcome {
 }
 
 fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bool) {
-    use engine13::application::actions::{apply_player_action, PlayerActionInput};
     use engine13::commands::AppState;
 
     let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
@@ -587,28 +574,17 @@ fn run_narrative_pack(scenario_id: &str, max_ticks_arg: u32, seed: u64, live: bo
     };
 
     let strategy = ScriptedStrategy::from_str("balanced", scenario_id);
-    let priority = strategy.priority_actions();
     let db = engine13::db::Db::open_in_memory().expect("in-memory db");
 
     let mut turns: Vec<PackTurn> = Vec::new();
     let mut seen_transfer_ticks: HashSet<u32> = HashSet::new();
 
     for tick_num in 0..max_ticks {
-        let mut applied = 0u32;
-        let mut actions_applied: Vec<String> = Vec::new();
-        for action_id in &priority {
-            if applied >= scenario.actions_per_tick {
-                break;
-            }
-            let input = PlayerActionInput {
-                action_id: action_id.to_string(),
-                target_actor_id: None,
-            };
-            if apply_player_action(&mut state, &input).is_ok() {
-                applied += 1;
-                actions_applied.push(action_id.to_string());
-            }
-        }
+        // The scripted turn from the library (B38): the same policy as `run_scripted`,
+        // milan's reserve included. This loop used to be a naive copy of the list.
+        let actions_applied: Vec<String> =
+            engine13::application::scripted::apply_scripted_actions(&mut state, &strategy)
+                .applied.iter().map(|a| a.to_string()).collect();
 
         {
             let ws = state.world_state.as_mut().unwrap();
