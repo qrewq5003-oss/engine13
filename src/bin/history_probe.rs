@@ -20,13 +20,13 @@
 //! not as bytes: a `HashMap` rebuilt by deserialization iterates in a new order even in
 //! the same process (class B9′), so equal logs serialize to different bytes.
 //!
-//! The player loop is copied from `sim.rs` without milan's reserve discipline (A29): the
-//! probe needs player actions in the log, not a faithful strategy.
+//! The player plays through `application::scripted::apply_scripted_actions` (A29) — the
+//! same policy as `sim`, milan's reserve included — followed by `commands::advance_tick`,
+//! whose response is what this probe measures.
 //!
 //! Usage: cargo run --release --bin history_probe -- [ticks] [seed]
 
-use engine13::application::scripted::ScriptedStrategy;
-use engine13::application::{apply_player_action, PlayerActionInput};
+use engine13::application::scripted::{apply_scripted_actions, ScriptedStrategy};
 use engine13::commands::{self, AppState};
 use engine13::core::{Event, EventType};
 use engine13::db::Db;
@@ -44,19 +44,9 @@ fn fresh(db: &Db, scenario: &str, seed: u64) -> AppState {
 fn play(st: &mut AppState, ticks: u32) -> (Vec<Event>, usize) {
     let sc = st.current_scenario.as_ref().unwrap().id.clone();
     let strat = ScriptedStrategy::from_str("balanced", &sc);
-    let apt = st.current_scenario.as_ref().unwrap().actions_per_tick;
     let (mut shipped, mut bytes) = (Vec::new(), 0usize);
     for _ in 0..ticks {
-        let mut applied = 0;
-        for id in strat.priority_actions() {
-            if applied >= apt {
-                break;
-            }
-            let input = PlayerActionInput { action_id: id.to_string(), target_actor_id: None };
-            if apply_player_action(st, &input).is_ok() {
-                applied += 1;
-            }
-        }
+        apply_scripted_actions(st, &strat);
         let resp = commands::advance_tick(st, None).expect("tick");
         bytes += serde_json::to_vec(&resp.events).unwrap().len();
         shipped.extend(resp.events);

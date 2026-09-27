@@ -1620,3 +1620,34 @@ fn player_action_metadata_and_history_do_not_depend_on_hash_order() {
     assert_eq!(metadata.len(), 1, "metadata varies with hash order: {metadata:?}");
     assert_eq!(summaries.len(), 1, "history line varies with hash order: {summaries:?}");
 }
+
+/// A29: the scripted player lives in the library, so a test can assert about the played
+/// world. Milan's policy: `milan_raise_troops` first, discretionary spending only from
+/// the surplus above its gate — a turn never leaves the treasury below 70 by spending
+/// on anything else, and never exceeds `actions_per_tick`.
+#[test]
+fn scripted_milan_keeps_its_reserve_and_the_action_cap() {
+    use crate::application::scripted::{apply_scripted_actions, ScriptedStrategy};
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(5));
+    let strategy = ScriptedStrategy::from_str("aggressive", "milan_1477");
+    let cap = st.current_scenario.as_ref().unwrap().actions_per_tick as usize;
+    let treasury = |st: &crate::commands::AppState| st.world_state.as_ref().unwrap().actors["milan"].get_metric("treasury");
+
+    let (mut discretionary, mut applied_total) = (0usize, 0usize);
+    for _ in 0..100 {
+        let turn = apply_scripted_actions(&mut st, &strategy);
+        assert!(turn.applied.len() <= cap, "cap exceeded: {:?}", turn.applied);
+        if turn.applied.iter().any(|a| *a != "milan_raise_troops") {
+            discretionary += 1;
+            assert!(treasury(&st) >= 70.0, "discretionary spend dipped into the reserve: {:?}", turn.applied);
+        }
+        applied_total += turn.applied.len();
+        let ws = st.world_state.as_mut().unwrap();
+        let sc = st.current_scenario.as_ref().unwrap();
+        crate::engine::tick(ws, sc, &mut st.event_log, st.rng.as_mut().unwrap());
+    }
+    assert!(applied_total > 0 && discretionary > 0, "precondition: the player must act, including discretionary spend ({applied_total}, {discretionary})");
+}
