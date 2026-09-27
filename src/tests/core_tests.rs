@@ -1385,7 +1385,6 @@ fn test_split_seat_does_not_resurrect_itself_as_its_own_heir() {
     use crate::core::{RegionRank, WorldState};
     use rand::SeedableRng;
 
-    const SEED: u64 = 5;
     let mut scenario = crate::scenarios::registry::load_by_id("rome_375").unwrap();
     for rule in scenario.rank_bonuses.iter_mut() {
         if rule.rank == RegionRank::S {
@@ -1397,64 +1396,69 @@ fn test_split_seat_does_not_resurrect_itself_as_its_own_heir() {
         }
     }
 
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, SEED);
-    for a in &scenario.actors {
-        if !a.is_successor_template {
-            world.actors.insert(a.id.clone(), a.clone());
+    // Every seed where the path is walked (split fired, seat died) is checked. The test
+    // used to pin seed 5; B41 moved the RNG path and the seat stopped dying there —
+    // a precondition, not the property, so the test now finds its own seeds.
+    let mut walked = Vec::new();
+    #[allow(non_snake_case)]
+    for SEED in 0..20u64 {
+        if walked.len() >= 2 {
+            break; // two walked seeds are enough; the rest only cost time
         }
-    }
-    if let Some(ref im) = scenario.initial_family_metrics {
-        let age = scenario
-            .generation_mechanics
-            .as_ref()
-            .map(|g| g.patriarch_start_age)
-            .unwrap_or(40) as u32;
-        world.family_state = Some(crate::core::FamilyState {
-            metrics: crate::core::normalize_family_metrics(im),
-            patriarch_age: age,
-            generation_count: 0,
-        });
-    }
-    world.generation_mechanics = scenario.generation_mechanics.clone();
-    world.generation_length = scenario.generation_length;
-    let mut state = crate::AppState {
-        world_state: Some(world),
-        event_log: crate::engine::EventLog::new(),
-        current_scenario: Some(scenario.clone()),
-        rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED)),
-    };
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, SEED);
+        for a in &scenario.actors {
+            if !a.is_successor_template {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+        }
+        if let Some(ref im) = scenario.initial_family_metrics {
+            let age = scenario
+                .generation_mechanics
+                .as_ref()
+                .map(|g| g.patriarch_start_age)
+                .unwrap_or(40) as u32;
+            world.family_state = Some(crate::core::FamilyState {
+                metrics: crate::core::normalize_family_metrics(im),
+                patriarch_age: age,
+                generation_count: 0,
+            });
+        }
+        world.generation_mechanics = scenario.generation_mechanics.clone();
+        world.generation_length = scenario.generation_length;
+        let mut state = crate::AppState {
+            world_state: Some(world),
+            event_log: crate::engine::EventLog::new(),
+            current_scenario: Some(scenario.clone()),
+            rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED)),
+        };
 
-    let mut clashes: Vec<String> = Vec::new();
-    for _ in 0..300 {
-        crate::commands::advance_tick_silent(&mut state).unwrap();
-        let ws = state.world_state.as_ref().unwrap();
-        for actor in ws.actors.values() {
-            for dead in ws.dead_actors.iter() {
-                if !dead.name.is_empty() && dead.name == actor.name {
-                    clashes.push(format!(
-                        "тик {}: мёртв {} / жив {} — оба {:?}",
-                        ws.tick, dead.id, actor.id, actor.name
-                    ));
+        let mut clashes: Vec<String> = Vec::new();
+        for _ in 0..300 {
+            crate::commands::advance_tick_silent(&mut state).unwrap();
+            let ws = state.world_state.as_ref().unwrap();
+            for actor in ws.actors.values() {
+                for dead in ws.dead_actors.iter() {
+                    if !dead.name.is_empty() && dead.name == actor.name {
+                        clashes.push(format!(
+                            "тик {}: мёртв {} / жив {} — оба {:?}",
+                            ws.tick, dead.id, actor.id, actor.name
+                        ));
+                    }
                 }
             }
         }
+        let ws = state.world_state.as_ref().unwrap();
+        if ws.milestone_events_fired.iter().any(|m| m == "rome_splits") && ws.dead_actor_ids.contains("rome") {
+            walked.push(SEED);
+            clashes.dedup();
+            assert!(
+                clashes.is_empty(),
+                "сид {SEED}: место воскресло собственным наследником: {:?}",
+                &clashes[..clashes.len().min(2)]
+            );
+        }
     }
-
-    let ws = state.world_state.as_ref().unwrap();
-    assert!(
-        ws.milestone_events_fired.iter().any(|m| m == "rome_splits"),
-        "предпосылка не выполнена: раскол на сиде {SEED} не сработал"
-    );
-    assert!(
-        ws.dead_actor_ids.contains("rome"),
-        "предпосылка не выполнена: место не погибло на сиде {SEED}, путь не пройден"
-    );
-    clashes.dedup();
-    assert!(
-        clashes.is_empty(),
-        "место воскресло собственным наследником: {:?}",
-        &clashes[..clashes.len().min(2)]
-    );
+    assert!(!walked.is_empty(), "предпосылка не выполнена: ни на одном из 20 сидов раскол не сработал с гибелью места");
 }
 
 /// Если земли павшей державы забирает уже живая держава, текст гибели называет её.
@@ -1704,4 +1708,25 @@ fn opening_an_old_database_drops_the_events_table() {
     let saves: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='saves'", [], |r| r.get(0)).unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!((n, saves), (0, 1), "events must be dropped, saves must exist");
+}
+
+/// B41: `friction` is one scale read one way. Two Catholic Latins are less foreign than a
+/// Catholic Latin and a Muslim Turk, and the war roll's strong-attacker bonus grows with
+/// friction — before B41 the roll read the same number as closeness, so the most alike
+/// fought the most.
+#[test]
+fn friction_is_read_one_way_by_the_war_roll() {
+    use crate::core::{Culture, Religion};
+    use crate::engine::interactions::{friction, strong_attacker_bonus};
+    let scenario = registry::load_by_id("milan_1477").unwrap();
+    let base = scenario.actors.iter().find(|a| !a.is_successor_template).unwrap().clone();
+    let with = |r: Religion, c: Culture| { let mut a = base.clone(); a.religion = r; a.culture = c; a };
+    let latin = with(Religion::Catholic, Culture::Latin);
+    let turk = with(Religion::Muslim, Culture::Turkic);
+    let (alike, foreign) = (friction(&latin, &latin), friction(&latin, &turk));
+    assert!(alike < foreign, "alike {alike} must be less foreign than {foreign}");
+    assert!(
+        strong_attacker_bonus(0.15, alike) < strong_attacker_bonus(0.15, foreign),
+        "a strong attacker must be likelier to strike the more foreign defender"
+    );
 }

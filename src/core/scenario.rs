@@ -612,7 +612,7 @@ pub struct SpawnActorConfig {
     /// the engine used to pin every spawn to rank `C`, `Orthodox`, `Slavic`, so France
     /// entered milan as an Orthodox Slav. A default here would only move that invention
     /// into `Default`; a missing field is a load error instead. Religion and culture
-    /// feed `interactions::affinity` — see docs/TRIAGE.md, «B28: стадия 1».
+    /// feed `interactions::friction` — see docs/TRIAGE.md, «B28: стадия 1».
     pub region_rank: RegionRank,
     pub religion: Religion,
     pub culture: Culture,

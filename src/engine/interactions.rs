@@ -4,8 +4,10 @@ use rand_chacha::ChaCha8Rng;
 use crate::core::{ActorTag, BorderType, ConditionActor, Event, EventType, InteractionRule, TagSpreadType, Vassalage, WorldState, Scenario, Religion, Culture};
 use crate::engine::EventLog;
 
-/// Cultural affinity between two cultures (0.0 = hostile, 1.0 = identical)
-pub fn cultural_affinity(a_culture: &Culture, b_culture: &Culture) -> f64 {
+/// Cultural friction between two cultures: `0.2` for the same culture ("low friction"),
+/// up to `1.0` for the most distant. A friction scale, not closeness (B41): the doc line
+/// here used to say "0.0 = hostile, 1.0 = identical", the opposite of the table below.
+pub fn cultural_friction(a_culture: &Culture, b_culture: &Culture) -> f64 {
     use Culture::*;
     match (a_culture, b_culture) {
         (x, y) if x == y => 0.2,  // Same culture has low friction
@@ -66,7 +68,7 @@ pub fn cultural_affinity(a_culture: &Culture, b_culture: &Culture) -> f64 {
     }
 }
 
-/// Religious modifier for interactions (-0.2 = harmonious, +0.3 = hostile)
+/// Religious friction modifier (-0.2 = same faith, +0.3 = hostile faiths)
 pub fn religious_modifier(a_religion: &Religion, b_religion: &Religion) -> f64 {
     use Religion::*;
     match (a_religion, b_religion) {
@@ -80,9 +82,12 @@ pub fn religious_modifier(a_religion: &Religion, b_religion: &Religion) -> f64 {
     }
 }
 
-/// Overall affinity between two actors (0.0 = hostile, 1.0 = allied)
-pub fn affinity(a: &crate::core::Actor, b: &crate::core::Actor) -> f64 {
-    let base = cultural_affinity(&a.culture, &b.culture);
+/// Friction between two actors, `0.0` (alike: same culture and faith) to `1.0` (most
+/// distant). Named `affinity` until B41, with a doc line reading it as closeness
+/// ("0.0 = hostile, 1.0 = allied") — the opposite of its own tables. The army-stretch
+/// reader and milan's content read it as friction; the war roll read it as closeness.
+pub fn friction(a: &crate::core::Actor, b: &crate::core::Actor) -> f64 {
+    let base = cultural_friction(&a.culture, &b.culture);
     let modifier = religious_modifier(&a.religion, &b.religion);
     (base + modifier).clamp(0.0, 1.0)
 }
@@ -156,17 +161,26 @@ pub fn apply_military_recovery(world: &mut WorldState) {
     }
 }
 
+/// The strong-attacker bonus of the war roll, scaled by friction: full against the most
+/// foreign defender, half against one of the same culture and faith (B41). It used to be
+/// `military_mod * (1.0 - friction * 0.5)` — the reverse — because the function it reads
+/// was documented as closeness. Measured effect of the reversal (100 seeds × 300, eight
+/// worlds): wars within ±6 %, rome deaths −5 … −17 %, victories within noise.
+pub fn strong_attacker_bonus(military_mod: f64, friction: f64) -> f64 {
+    military_mod * (0.5 + friction * 0.5)
+}
+
 /// Effective military strength accounting for force projection through neighbors
 pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
     let active_neighbors = neighbors.len().max(1);
     
-    // Average affinity with all neighbors
-    let avg_affinity: f64 = neighbors.iter()
-        .map(|n| affinity(actor, n))
+    // Average friction with all neighbors
+    let avg_friction: f64 = neighbors.iter()
+        .map(|n| friction(actor, n))
         .sum::<f64>() / active_neighbors as f64;
 
     // More foreign neighbors = more military stretched
-    let divisor = (active_neighbors as f64 * avg_affinity).max(1.0);
+    let divisor = (active_neighbors as f64 * avg_friction).max(1.0);
     actor.get_metric("military_size") / divisor
 }
 
@@ -500,11 +514,9 @@ fn calculate_military_interaction(
         0.0
     };
 
-    // Get affinity between actors
-    let affinity_mod = affinity(attacker, defender);
-    
     // Calculate final probability (capped at 0.8)
-    let final_prob = (base_prob + pressure_mod + military_mod * (1.0 - affinity_mod * 0.5)).min(0.8);
+    let final_prob = (base_prob + pressure_mod
+        + strong_attacker_bonus(military_mod, friction(attacker, defender))).min(0.8);
 
     // Roll for interaction
     let roll: f64 = rng.gen();

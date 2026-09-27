@@ -2651,14 +2651,20 @@ fn the_world_state_block_omits_a_fallen_power() {
         current_scenario: Some(scenario.clone()),
         rng: Some(rand_chacha::ChaCha8Rng::seed_from_u64(42)),
     };
-    for _ in 0..40 {
+    // Played until Byzantium falls, not to a pinned tick: the test used to stop at tick
+    // 40, and B41 moved the RNG path so that she was still alive there — a precondition,
+    // not the property under test.
+    for _ in 0..300 {
         engine13::commands::advance_tick_silent(&mut state).expect("tick");
+        if !state.world_state.as_ref().unwrap().actors.contains_key("byzantium") {
+            break;
+        }
     }
 
     let ws = state.world_state.as_ref().unwrap();
     assert!(
         !ws.actors.contains_key("byzantium"),
-        "предпосылка не выполнена: на сиде 42 к тику 40 Византия жива, проверять нечего"
+        "предпосылка не выполнена: на сиде 42 за 300 тиков Византия не пала, проверять нечего"
     );
 
     let snapshot = engine13::llm::build_snapshot(ws, &scenario, &state.event_log);
