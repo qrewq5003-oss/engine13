@@ -26,7 +26,7 @@
 //! ```
 //! Emits a `SUMMARY<TAB>...` line per run for aggregation across seeds.
 
-use engine13::{core::WorldState, engine::{tick, EventLog}, scenarios::registry};
+use engine13::{engine::{tick, EventLog}, scenarios::registry};
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
@@ -51,14 +51,16 @@ fn main() {
     let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(42);
 
     let scenario = registry::load_by_id(scenario_id).expect("Unknown scenario");
-    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, seed);
-    for actor in &scenario.actors {
-        if !actor.is_successor_template {
-            world.actors.insert(actor.id.clone(), actor.clone());
-        }
-    }
-    world.generation_mechanics = scenario.generation_mechanics.clone();
-    world.generation_length = scenario.generation_length;
+    // The world comes from the product's own fresh-start path (B17). The copied init
+    // this replaced never created `family_state`, so in rome `check_generation_transfer`
+    // returned on its first line and generation change was silently off.
+    let mut world = {
+        let db = engine13::db::Db::open_in_memory().expect("in-memory db");
+        let mut st = engine13::AppState::default();
+        engine13::load_scenario(&mut st, &db, scenario_id.to_string()).expect("scenario");
+        st.world_state.take().expect("world")
+    };
+    world.rng_seed = seed;
 
     let mut event_log = EventLog::new();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);

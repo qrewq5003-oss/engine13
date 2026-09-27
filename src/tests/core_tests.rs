@@ -603,44 +603,48 @@ fn test_constantinople_sim_balance() {
     );
 }
 
+/// B18. The world is started by the product's own path (`load_scenario`), not by a copy:
+/// the copy seeded `family_state` with raw `family:`-prefixed keys (class §5.H), which the
+/// neighbouring container tests forbid. And the claim is about the played world (A29):
+/// the old assertion, «victory in 25–100 **or none**», held vacuously without a player —
+/// rome's family influence has no source then, so there was never a victory to check.
 #[test]
 fn test_rome_375_sim_balance() {
-    use rand::SeedableRng;
-    let scenario = registry::load_by_id("rome_375").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
-    for actor in &scenario.actors {
-        if !actor.is_successor_template {
-            world.actors.insert(actor.id.clone(), actor.clone());
+    use crate::application::scripted::{play_scripted_tick, ScriptedStrategy};
+
+    let victory_tick = |strategy: Option<&str>| {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
+        let keys: Vec<String> = st.world_state.as_ref().unwrap().family_state.as_ref().unwrap()
+            .metrics.keys().cloned().collect();
+        assert!(keys.iter().all(|k| !k.starts_with("family:")), "raw family keys seeded: {keys:?}");
+
+        let strategy = strategy.map(|s| ScriptedStrategy::from_str(s, "rome_375"));
+        for _ in 0..100 {
+            match &strategy {
+                Some(s) => { play_scripted_tick(&mut st, s); }
+                None => {
+                    let ws = st.world_state.as_mut().unwrap();
+                    let sc = st.current_scenario.as_ref().unwrap();
+                    crate::engine::tick(ws, sc, &mut st.event_log, st.rng.as_mut().unwrap());
+                }
+            }
+            let ws = st.world_state.as_ref().unwrap();
+            if ws.victory_achieved {
+                return Some(ws.tick);
+            }
         }
-    }
+        None
+    };
 
-    if let Some(ref initial) = scenario.initial_family_metrics {
-        world.family_state = Some(crate::core::FamilyState {
-            metrics: initial.clone(),
-            patriarch_age: scenario.generation_mechanics.as_ref().unwrap().patriarch_start_age,
-            generation_count: 0,
-        });
-    }
-
-    let mut event_log = crate::engine::EventLog::new();
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
-
-    let mut victory_tick = None;
-    for _ in 0..100 {
-        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-        if world.victory_achieved && victory_tick.is_none() {
-            victory_tick = Some(world.tick);
-        }
-    }
-
-    // Note: Victory requires family:influence >= 90
-    // In autonomous simulation, influence fluctuates and rarely reaches 90
-    // Test verifies simulation runs correctly; victory may or may not occur
+    let played = victory_tick(Some("balanced"));
     assert!(
-        victory_tick.map(|t| t >= 25 && t <= 100).unwrap_or(true),
-        "Rome 375 victory tick {:?} outside expected range 25-100 (or no victory)",
-        victory_tick
+        played.is_some_and(|t| (25..=100).contains(&t)),
+        "played rome (balanced) must win within ticks 25–100, got {played:?}"
     );
+    assert_eq!(victory_tick(None), None, "without a player the family influence has no source");
 }
 
 #[test]

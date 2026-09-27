@@ -5410,7 +5410,7 @@ struct Mig26 {
     c_events: f64,   // random events, nominal
     c_mig_loss: f64, // migration, as source
     c_mig_gain: f64, // migration, as sink
-    c_split: f64,    // successor split (born with parent's pop × weight)
+    c_split: f64,    // successor birth: the heir's own starting population, read from the world
     c_floor: f64,    // truncation at the 0 floor
     c_resid: f64,    // what none of the above explains
     // --- replica validation ------------------------------------------------
@@ -5824,7 +5824,10 @@ fn decisive26(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&st
                 .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
                 .collect();
 
-            // successors born this tick carry `parent_pop × weight` (`mod.rs:1640`)
+            // Successors born this tick: their starting population, read from the world.
+            // The engine births an heir from its own template (`check_collapses`), not as
+            // `parent_pop × weight` — this line used to say so, and the count never
+            // depended on it (B16).
             for (aid, a) in world.actors.iter() {
                 if !live_before.contains(aid) && !world.dead_actor_ids.contains(aid) {
                     let e = acc.entry(aid.clone()).or_default();
@@ -6672,7 +6675,8 @@ fn epratchet(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str
                 .map(|(k, a)| (k.clone(), a.get_metric("military_size")))
                 .collect();
 
-            // a successor born this tick carries `parent_ep × 1.3` (`mod.rs:1644`)
+            // Successors born this tick: their starting `external_pressure`, read from the
+            // world — the template's value, not `parent_ep × 1.3` as this line used to say (B16).
             for (aid, a) in world.actors.iter() {
                 if !live_before.contains(aid) && !world.dead_actor_ids.contains(aid) {
                     let e = acc.entry(aid.clone()).or_default();
@@ -7908,8 +7912,9 @@ fn _display_contract(m: &MetricRef) -> String {
 //                   `military_conflict_<att>_<def>` record. Its mass is therefore
 //                   bracketed, `[15n, 25n]`, and the bracket is carried through
 //                   everything downstream;
-//   inheritance   — a successor is born with `parent_ep × 1.3`; it seeds the shadow
-//                   at its own starting value rather than entering as inflow.
+//   inheritance   — a successor is born with its template's `external_pressure` (not
+//                   `parent_ep × 1.3`, as this line said until B16); it seeds the
+//                   shadow at its own starting value rather than entering as inflow.
 //
 // Everything downstream is a **bracket**, low and high, and that is what makes the
 // census checkable rather than assumed:
