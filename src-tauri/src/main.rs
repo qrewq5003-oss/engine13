@@ -51,18 +51,10 @@ fn cmd_advance_tick(
     let result = commands::advance_tick(&mut *s, action);
     eprintln!("[RUST] cmd_advance_tick - result: {:?}", result.is_ok());
 
-    // If successful, write events and dead actors to database
-    if let Ok(ref response) = result {
-        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
-
-        // Write events to database
-        if !response.events.is_empty() {
-            if let Err(e) = (&mut *db_guard).insert_events_batch(&response.events) {
-                eprintln!("[RUST] cmd_advance_tick - failed to write events to DB: {}", e);
-            } else {
-                eprintln!("[RUST] cmd_advance_tick - wrote {} events to DB", response.events.len());
-            }
-        }
+    // If successful, write dead actors to database. Events are not written: the game's
+    // event log lives in `AppState` and travels with the save (B31).
+    if result.is_ok() {
+        let db_guard = db.lock().map_err(|e| e.to_string())?;
 
         // Write dead actors to database
         if let Some(ref world_state) = s.world_state {
@@ -84,25 +76,11 @@ fn cmd_advance_tick(
 #[tauri::command]
 fn cmd_advance_tick_silent(
     state: State<Mutex<AppState>>,
-    db: State<Mutex<Db>>,
 ) -> Result<commands::AdvanceTickSilentResponse, String> {
-    eprintln!("[RUST] cmd_advance_tick_silent - acquiring locks");
+    eprintln!("[RUST] cmd_advance_tick_silent - acquiring lock");
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::advance_tick_silent(&mut *s);
-
-    // Write events to database if successful
-    if let Ok(ref response) = result {
-        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
-
-        if !response.events.is_empty() {
-            if let Err(e) = (&mut *db_guard).insert_events_batch(&response.events) {
-                eprintln!("[RUST] cmd_advance_tick_silent - failed to write events to DB: {}", e);
-            }
-        }
-    }
-
-    result
+    commands::advance_tick_silent(&mut *s)
 }
 
 #[tauri::command]
@@ -165,30 +143,16 @@ fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Ve
 #[tauri::command]
 fn cmd_submit_action(
     state: State<Mutex<AppState>>,
-    db: State<Mutex<Db>>,
     action_id: String,
 ) -> Result<commands::SubmitActionResponse, String> {
-    eprintln!("[RUST] cmd_submit_action - acquiring locks, action_id: {}", action_id);
-    
-    // First, submit the action and get response
+    eprintln!("[RUST] cmd_submit_action - acquiring lock, action_id: {}", action_id);
+
+    // The action's event goes into the game's log in memory; that log is what the
+    // chronicler, the action history and the save read (B31). It used to be followed by
+    // re-inserting the whole log into the `events` table on every action.
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let result = commands::submit_action(&mut *s, action_id);
     eprintln!("[RUST] cmd_submit_action - result: {:?}", result.is_ok());
-    
-    // If successful, write events to database
-    if let Ok(ref _response) = result {
-        let mut db_guard = db.lock().map_err(|e| e.to_string())?;
-        // Get events from the event_log (submit_action doesn't return events directly)
-        let events = s.event_log.events.clone();
-        if !events.is_empty() {
-            if let Err(e) = db_guard.insert_events_batch(&events) {
-                eprintln!("[RUST] cmd_submit_action - failed to write events to DB: {}", e);
-            } else {
-                eprintln!("[RUST] cmd_submit_action - wrote {} events to DB", events.len());
-            }
-        }
-    }
-    
     result
 }
 
@@ -244,14 +208,14 @@ fn cmd_list_saves_with_slots(
 
 #[tauri::command]
 fn cmd_get_action_history(
-    db: State<Mutex<Db>>,
+    state: State<Mutex<AppState>>,
     limit: usize,
 ) -> Result<Vec<commands::ActionHistoryEntry>, String> {
     eprintln!("[RUST] cmd_get_action_history - acquiring lock");
-    let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_action_history(&*db_guard, limit);
-    eprintln!("[RUST] cmd_get_action_history - result: {:?}", result.as_ref().map(|h| h.len()));
-    result
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let history = commands::get_action_history(&*s, limit);
+    eprintln!("[RUST] cmd_get_action_history - result: {}", history.len());
+    Ok(history)
 }
 
 

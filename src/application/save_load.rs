@@ -43,6 +43,11 @@ pub fn save_game(
     let player_state_json = serde_json::to_string(&world_state.family_state)
         .map_err(|e| format!("Failed to serialize family state: {}", e))?;
 
+    // The event log is game state (B31): the chronicler and the action history read it,
+    // so a load that drops it hands both an empty past.
+    let event_log_json = serde_json::to_string(&state.event_log.events)
+        .map_err(|e| format!("Failed to serialize event log: {}", e))?;
+
     let db_save = DbSave {
         id: save_id.clone(),
         name: save_name,
@@ -55,6 +60,7 @@ pub fn save_game(
             .as_secs(),
         world_state_json,
         player_state_json,
+        event_log_json,
     };
 
     db.insert_save(&db_save)
@@ -111,8 +117,13 @@ pub fn load_game(
     use rand::SeedableRng;
     state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(world_state.rng_seed));
 
+    // Restore the save's own log — not the current session's, not an empty one. A save
+    // from before the column existed carries `[]` and loads as every load did until now.
+    let events: Vec<crate::core::Event> = serde_json::from_str(&db_save.event_log_json)
+        .map_err(|e| format!("Failed to deserialize event log: {}", e))?;
+
     state.world_state = Some(world_state.clone());
-    state.event_log = crate::engine::EventLog::new();
+    state.event_log = crate::engine::EventLog { events };
 
     if state.current_scenario.as_ref().map(|s| s.id.clone()) != Some(db_save.scenario_id.clone()) {
         let scenario = crate::scenarios::registry::load_by_id(&db_save.scenario_id)
@@ -126,12 +137,12 @@ pub fn load_game(
 /// Load a scenario
 pub fn load_scenario(
     state: &mut AppState,
-    db: &Db,
+    // Unused since B31: the fresh run's history is the fresh `EventLog` below; the
+    // `events` table is no longer written, so there is nothing to clear. Kept so the
+    // command and every probe keep one signature.
+    _db: &Db,
     scenario_id: String,
 ) -> Result<crate::commands::SaveResponse, String> {
-    // Delete events from previous playthrough of this scenario
-    db.delete_events_for_scenario(&scenario_id)?;
-
     let scenario = crate::scenarios::registry::load_by_id(&scenario_id)
         .ok_or_else(|| format!("Unknown scenario: {}", scenario_id))?;
 

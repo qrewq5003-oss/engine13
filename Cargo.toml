@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0.193", features = ["derive"] }
-serde_json = "1.0.108"
+serde_json = { version = "1.0.108", features = ["float_roundtrip"] }  # load must restore f64 bit-exact (B31)
 toml = "0.8"
 thiserror = "1.0.50"
 reqwest = { version = "0.11", features = ["json", "stream", "blocking"] }

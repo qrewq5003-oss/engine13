@@ -20,6 +20,10 @@ pub struct DbSave {
     pub created_at: u64,
     pub world_state_json: String,
     pub player_state_json: String,
+    /// The game's event log (B31): the log is part of the game's state, so it travels with
+    /// the save and comes back on load. Filled only by `get_save_by_id`; listings leave it
+    /// empty rather than read a megabyte per slot to draw a menu.
+    pub event_log_json: String,
 }
 
 /// Dead actor data for database storage
@@ -159,6 +163,12 @@ impl Db {
         // Migration: add save_version column if it doesn't exist
         self.conn
             .execute("ALTER TABLE saves ADD COLUMN save_version INTEGER NOT NULL DEFAULT 1", [])
+            .ok();
+
+        // Migration: the event log is saved with the game (B31). A save written before
+        // this column loads with an empty log, which is what every load did until now.
+        self.conn
+            .execute("ALTER TABLE saves ADD COLUMN event_log_json TEXT NOT NULL DEFAULT '[]'", [])
             .ok();
 
         // Idempotent migration: add scenario_id column to events table if not exists
@@ -676,8 +686,8 @@ impl Db {
             .execute(
                 "
                 INSERT OR REPLACE INTO saves 
-                (id, name, scenario_id, tick, year, created_at, world_state_json, player_state_json)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                (id, name, scenario_id, tick, year, created_at, world_state_json, player_state_json, event_log_json)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 ",
                 params![
                     save.id,
@@ -687,7 +697,8 @@ impl Db {
                     save.year,
                     save.created_at,
                     save.world_state_json,
-                    save.player_state_json
+                    save.player_state_json,
+                    save.event_log_json
                 ],
             )
             .map_err(|e| format!("Failed to insert save: {}", e))?;
@@ -698,7 +709,10 @@ impl Db {
     /// Get a save by ID
     pub fn get_save_by_id(&self, save_id: &str) -> Result<Option<DbSave>, String> {
         let mut stmt = self.conn
-            .prepare("SELECT * FROM saves WHERE id = ?")
+            .prepare(
+                "SELECT id, name, scenario_id, tick, year, created_at, world_state_json, \
+                 player_state_json, event_log_json FROM saves WHERE id = ?",
+            )
             .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
         let save = stmt
@@ -712,6 +726,7 @@ impl Db {
                     created_at: row.get(5)?,
                     world_state_json: row.get(6)?,
                     player_state_json: row.get(7)?,
+                    event_log_json: row.get(8)?,
                 })
             })
             .optional()
@@ -737,6 +752,7 @@ impl Db {
                     created_at: row.get(5)?,
                     world_state_json: row.get(6)?,
                     player_state_json: row.get(7)?,
+                    event_log_json: String::new(),
                 })
             })
             .map_err(|e| format!("Failed to query saves: {}", e))?;
@@ -769,6 +785,7 @@ impl Db {
                     created_at: row.get(5)?,
                     world_state_json: row.get(6)?,
                     player_state_json: row.get(7)?,
+                    event_log_json: String::new(),
                 })
             })
             .map_err(|e| format!("Failed to query saves: {}", e))?;

@@ -107,6 +107,18 @@ pub struct PlayerActionInput {
 // Core Command Functions (delegate to application modules)
 // ============================================================================
 
+/// The part of the log that belongs to the tick just played: the player's actions of
+/// that tick (submitted before it, stamped with its number) and everything the engine
+/// appended while playing it. The response used to carry the whole accumulated log on
+/// every tick — 191–392 MB over a 300-half-year game (docs/TRIAGE.md, «B31: стадия 1»).
+fn events_of_tick(log: &EventLog, len_before: usize, played_tick: u32) -> Vec<Event> {
+    let start = log.events[..len_before]
+        .iter()
+        .rposition(|e| e.tick != played_tick)
+        .map_or(0, |i| i + 1);
+    log.events[start..].to_vec()
+}
+
 /// Advance simulation by one tick
 pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> Result<AdvanceTickResponse, String> {
     use crate::application::apply_player_action;
@@ -127,6 +139,7 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let rng = state.rng.as_mut().ok_or("No RNG initialized")?;
 
+    let (len_before, played_tick) = (state.event_log.events.len(), world_state.tick);
     tick(world_state, scenario, &mut state.event_log, rng);
 
     // `llm_trigger` removed. `check_llm_trigger_with_data` used to run here on every
@@ -137,7 +150,7 @@ pub fn advance_tick(state: &mut AppState, action: Option<PlayerActionInput>) -> 
     // declarations in `types/index.ts`: `App.tsx` reads `world_state`, `events` and
     // `new_state`, and nothing anywhere reads `llm_trigger`. Two prompt builders, one
     // of them unreachable, is the shape invariant 2 of `AGENTS.md` forbids.
-    let events = state.event_log.events.clone();
+    let events = events_of_tick(&state.event_log, len_before, played_tick);
 
     Ok(AdvanceTickResponse {
         world_state: world_state.clone(),
@@ -151,9 +164,10 @@ pub fn advance_tick_silent(state: &mut AppState) -> Result<AdvanceTickSilentResp
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let rng = state.rng.as_mut().ok_or("No RNG initialized")?;
 
+    let (len_before, played_tick) = (state.event_log.events.len(), world_state.tick);
     tick(world_state, scenario, &mut state.event_log, rng);
 
-    let events = state.event_log.events.clone();
+    let events = events_of_tick(&state.event_log, len_before, played_tick);
 
     Ok(AdvanceTickSilentResponse {
         world_state: world_state.clone(),
@@ -330,26 +344,26 @@ pub struct ActionHistoryEntry {
     pub effects_summary: Vec<String>,
 }
 
-/// Get action history from database
-pub fn get_action_history(db: &Db, limit: usize) -> Result<Vec<ActionHistoryEntry>, String> {
-    let events = db.get_events_by_type("PlayerAction", limit)
-        .map_err(|e| format!("Failed to get action history: {}", e))?;
-
-    let history = events
-        .into_iter()
-        .map(|event| {
-            let effects_summary = parse_effects_summary(&event.metadata);
-            ActionHistoryEntry {
-                tick: event.tick,
-                year: event.year,
-                action_id: event.id.clone(),
-                action_name: event.description.clone(),
-                effects_summary,
-            }
+/// Action history for the UI, read from the game's own event log (B31). It used to read
+/// the `events` table, where it asked for type `"PlayerAction"` while rows were written as
+/// `"player_action"` (always empty), and where `UNIQUE(event_id)` kept one row per action
+/// kind for the whole installation. The log keeps every occurrence and belongs to one game.
+pub fn get_action_history(state: &AppState, limit: usize) -> Vec<ActionHistoryEntry> {
+    state
+        .event_log
+        .events
+        .iter()
+        .rev()
+        .filter(|e| matches!(e.event_type, crate::core::EventType::PlayerAction))
+        .take(limit)
+        .map(|event| ActionHistoryEntry {
+            tick: event.tick,
+            year: event.year,
+            action_id: event.id.clone(),
+            action_name: event.description.clone(),
+            effects_summary: parse_effects_summary(&event.metadata),
         })
-        .collect();
-
-    Ok(history)
+        .collect()
 }
 
 fn parse_effects_summary(metadata: &str) -> Vec<String> {
