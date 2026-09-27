@@ -656,13 +656,6 @@ fn run(
 
     let mut events: HashMap<(String, String), u32> = HashMap::new();
     for ev in &state.event_log.events {
-        // `metrics_<actor>_<tick>` is bookkeeping emitted by `record_metric_changes`
-        // once per actor per tick (`engine/mod.rs:1649`), not a content event. It is
-        // the only id family excluded, and it is excluded by construction, not by
-        // judgement about which events matter.
-        if ev.id.starts_with("metrics_") {
-            continue;
-        }
         *events.entry((ev.actor_id.clone(), ev.id.clone())).or_insert(0) += 1;
     }
 

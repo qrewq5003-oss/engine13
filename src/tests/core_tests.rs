@@ -1541,3 +1541,26 @@ fn relevance_selection_keeps_the_freshest_occurrence_of_a_recurring_id() {
     assert_eq!(wars, vec![9], "recurring id must be represented by its freshest occurrence");
     assert_eq!(out[0].id, "war_a_b", "the freshest event leads the presented list");
 }
+
+/// The engine emits no per-actor `metrics_*` ledger events. They had no positive reader:
+/// six readers excluded them by id prefix, and the one that forgot — the "Recent Events"
+/// window — showed them in 99.4–100 % of its slots. Excluded by construction now; this
+/// keeps it that way. See docs/TRIAGE.md, «B31: стадия 1».
+#[test]
+fn engine_emits_no_metrics_ledger_events() {
+    use rand::SeedableRng;
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, sc.to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(7));
+        for _ in 0..20 {
+            let ws = st.world_state.as_mut().unwrap();
+            let scn = st.current_scenario.as_ref().unwrap();
+            crate::engine::tick(ws, scn, &mut st.event_log, st.rng.as_mut().unwrap());
+        }
+        assert!(!st.event_log.events.is_empty(), "{sc}: the log must not be empty, or the check is vacuous");
+        let leaked: Vec<&str> = st.event_log.events.iter().map(|e| e.id.as_str()).filter(|id| id.starts_with("metrics_")).collect();
+        assert!(leaked.is_empty(), "{sc}: {} metrics_* events, e.g. {:?}", leaked.len(), leaked.first());
+    }
+}
