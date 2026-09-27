@@ -1267,9 +1267,13 @@ fn check_relevance_thresholds(
         .map(|a| a.get_metric("military_size"))
         .fold(1.0_f64, f64::max);
 
-    // Calculate average power projection for all active actors
-    let avg_power_projection: f64 = world.actors.values()
-        .map(|a| a.power_projection(1.0, max_military_size))
+    // Calculate average power projection for all active actors. Summed in id order
+    // (B21): an `f64` sum in `HashMap` order differs in the last bit between processes,
+    // and this average is compared against a promotion threshold below.
+    let mut projection_ids: Vec<&String> = world.actors.keys().collect();
+    projection_ids.sort();
+    let avg_power_projection: f64 = projection_ids.iter()
+        .map(|id| world.actors[*id].power_projection(1.0, max_military_size))
         .sum::<f64>() / world.actors.len().max(1) as f64;
 
     // Get list of narrative actor IDs for contact check (collect as owned Strings to avoid borrow issues)

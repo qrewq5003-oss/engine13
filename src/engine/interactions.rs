@@ -362,7 +362,14 @@ fn get_neighbor_pairs(world: &WorldState) -> Vec<(String, String, u32, crate::co
     let mut pairs = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for (actor_id, actor) in &world.actors {
+    // Actors visited in id order (B21): a pair listed from both sides keeps the
+    // `distance` / `border_type` of the side seen first, so with an asymmetric edge the
+    // hash order would decide which. None is asymmetric today (0 in 3 scenarios × 2
+    // worlds × 10 seeds × 300 ticks); sorted, it cannot matter.
+    let mut actor_ids: Vec<&String> = world.actors.keys().collect();
+    actor_ids.sort();
+    for actor_id in actor_ids {
+        let actor = &world.actors[actor_id];
         for neighbor in &actor.neighbors {
             if world.actors.contains_key(&neighbor.id) {
                 // Create sorted pair key to avoid duplicates
