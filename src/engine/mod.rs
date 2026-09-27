@@ -680,11 +680,21 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            for actor_tag in actor.actor_tags.values() {
-                for (metric, modifier) in &actor_tag.metrics_modifier {
-                    let current = actor.metrics.get(metric.as_str()).copied().unwrap_or(0.0);
-                    actor.metrics.insert(metric.as_str().to_string(), current + *modifier as f64);
-                }
+            // Sorted by tag, then by metric (B21). Integer modifiers are added to a
+            // fractional `f64` one at a time, and with mixed signs on one metric — rome's
+            // `raid_economy −1` against `roman_contact +1` — the order changes the last
+            // bit. Iterating the two HashMaps made that order depend on the process's hash
+            // seed: rome drifted between processes in 20 of 30 seeds, 0 after sorting.
+            // See docs/TRIAGE.md, «B21: стадия 1».
+            let mut modifiers: Vec<(&str, &str, i32)> = actor
+                .actor_tags
+                .iter()
+                .flat_map(|(tag, t)| t.metrics_modifier.iter().map(move |(m, v)| (tag.as_str(), m.as_str(), *v)))
+                .collect();
+            modifiers.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+            for (_, metric, modifier) in modifiers {
+                let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
+                actor.metrics.insert(metric.to_string(), current + modifier as f64);
             }
             // Note: No clamping here - clamp_metrics is called on step 5
         }
@@ -2074,6 +2084,38 @@ mod tests {
                 first_diff.map(|i| &b[i])
             );
         }
+    }
+
+    /// B21: tag modifiers are integers added one at a time to a fractional `f64`, so with
+    /// mixed signs on one metric the order sets the last bit. Every world below builds
+    /// its `actor_tags` into a fresh `HashMap` — a fresh per-instance hash key, i.e. the
+    /// iteration order another process would see — and all must land on the same bits.
+    /// The value is the one rome actually drifted on (`burgundians.economic_output`).
+    #[test]
+    fn tag_modifiers_apply_in_an_order_independent_of_hash_order() {
+        use crate::core::{ActorTag, MetricName};
+        let tag = |delta: i32| ActorTag {
+            metrics_modifier: HashMap::from([(MetricName::new("economic_output").unwrap(), delta)]),
+            spreads_via: vec![],
+        };
+        let scenario = crate::scenarios::registry::load_by_id("rome_375").expect("scenario");
+        let template = scenario.actors.iter().find(|a| !a.is_successor_template).unwrap().clone();
+
+        let mut results = std::collections::BTreeSet::new();
+        for i in 0..32 {
+            let mut actor = template.clone();
+            actor.metrics.insert("economic_output".to_string(), 63.589101917601305);
+            actor.actor_tags = HashMap::new();
+            let pair = [("raid_economy", -1), ("roman_contact", 1)];
+            for (name, delta) in if i % 2 == 0 { pair } else { [pair[1], pair[0]] } {
+                actor.actor_tags.insert(name.to_string(), tag(delta));
+            }
+            let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 1);
+            world.actors.insert(actor.id.clone(), actor.clone());
+            apply_actor_tags(&mut world, &scenario);
+            results.insert(world.actors[&actor.id].metrics["economic_output"].to_bits());
+        }
+        assert_eq!(results.len(), 1, "tag application order leaked into the result: {results:x?}");
     }
 
     #[test]
