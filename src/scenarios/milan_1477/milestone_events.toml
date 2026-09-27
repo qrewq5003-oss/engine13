@@ -82,11 +82,10 @@ operator = "greater"
 value = 55.0
 duration = 3
 [milestone_events.spawn_actor]
-# Identity (B28): the values the engine used to pin for every spawn, written out
-# so they can be seen and chosen. Choosing them is an authored decision (column A).
-region_rank = "C"
-religion = "orthodox"
-culture = "slavic"
+# Identity (A32, решение владельца 2026-09-28): католики, латинская культура.
+region_rank = "A"
+religion = "catholic"
+culture = "latin"
 actor_id = "france"
 label = "Франция"
 lat = 48.85
