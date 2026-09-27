@@ -2423,7 +2423,8 @@ fn twin_check_catches_a_reintroduced_wrapper() {
 #[test]
 fn cargo_configs_contain_no_machine_specific_paths() {
     let mut offenders = Vec::new();
-    for path in [".cargo/config.toml", "src-tauri/.cargo/config.toml"] {
+    // tauri.conf.json too (B34): its before*Command exported PATH=/home/deck/.cargo/bin.
+    for path in [".cargo/config.toml", "src-tauri/.cargo/config.toml", "src-tauri/tauri.conf.json"] {
         let Ok(src) = std::fs::read_to_string(path) else { continue };
         for (i, line) in src.lines().enumerate() {
             let code = line.split('#').next().unwrap_or("");
