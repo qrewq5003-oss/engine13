@@ -149,3 +149,106 @@ impl ScriptedStrategy {
         }
     }
 }
+
+/// What one scripted turn did: the actions applied, in order, and how many were refused.
+#[derive(Debug, Clone, Default)]
+pub struct ScriptedTurn {
+    pub applied: Vec<&'static str>,
+    pub rejected: u32,
+}
+
+/// The treasury milan keeps back for `milan_raise_troops` — that action's own gate.
+const MILAN_RAISE_TROOPS_GATE: f64 = 70.0;
+
+/// Spends one turn the way the scripted player does, through the same path as the UI
+/// (`apply_player_action`). The whole policy lives here (A29) — priority order, the
+/// `actions_per_tick` cap, milan's reserve discipline — so a test or a probe that needs
+/// the played world calls this instead of copying `sim.rs`. Moved from `sim.rs`
+/// verbatim; `sim` output is byte-identical.
+///
+/// Milan: `milan_raise_troops` (the only `military_size` growth lever) always has first
+/// claim on the treasury; everything else is funded only from the surplus above that
+/// action's own gate, never at its expense. See ENGINE13_SCENARIO3_DESIGN.md, «Найдено
+/// при плейтесте C/D» — the naive list (spend on everything every tick) couldn't sustain
+/// growth.
+pub fn apply_scripted_actions(
+    state: &mut crate::commands::AppState,
+    strategy: &ScriptedStrategy,
+) -> ScriptedTurn {
+    use crate::application::actions::{apply_player_action, PlayerActionInput};
+
+    let scenario = state.current_scenario.as_ref().expect("scenario").clone();
+    let priority_actions = strategy.priority_actions();
+    let mut turn = ScriptedTurn::default();
+    let milan_treasury = |state: &crate::commands::AppState| {
+        state.world_state.as_ref().unwrap()
+            .actors.get("milan").map(|a| a.get_metric("treasury")).unwrap_or(0.0)
+    };
+
+    if scenario.id == "milan_1477" {
+        let raise_input = PlayerActionInput {
+            action_id: "milan_raise_troops".to_string(),
+            target_actor_id: None,
+        };
+        if milan_treasury(state) > MILAN_RAISE_TROOPS_GATE {
+            match apply_player_action(state, &raise_input) {
+                Ok(_) => turn.applied.push("milan_raise_troops"),
+                Err(_) => turn.rejected += 1,
+            }
+        }
+
+        for action_id in priority_actions.iter().filter(|id| **id != "milan_raise_troops") {
+            if turn.applied.len() as u32 >= scenario.actions_per_tick {
+                break;
+            }
+            let surplus = milan_treasury(state) - MILAN_RAISE_TROOPS_GATE;
+            if surplus <= 0.0 {
+                break; // preserve the reserve - no discretionary spend below it
+            }
+            let cost = scenario.patron_actions.iter()
+                .find(|a| a.id == *action_id)
+                .and_then(|a| a.cost.get(&crate::core::MetricRef::literal("actor:milan.treasury")))
+                .map(|c| -c) // cost values are negative deltas
+                .unwrap_or(f64::MAX);
+            if cost > surplus {
+                continue; // can't afford this one without dipping into the reserve
+            }
+            let action_input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            match apply_player_action(state, &action_input) {
+                Ok(_) => turn.applied.push(action_id),
+                Err(_) => turn.rejected += 1,
+            }
+        }
+    } else {
+        for action_id in &priority_actions {
+            if turn.applied.len() as u32 >= scenario.actions_per_tick {
+                break;
+            }
+            let action_input = PlayerActionInput {
+                action_id: action_id.to_string(),
+                target_actor_id: None,
+            };
+            match apply_player_action(state, &action_input) {
+                Ok(_) => turn.applied.push(action_id),
+                Err(_) => turn.rejected += 1,
+            }
+        }
+    }
+    turn
+}
+
+/// One played half-year: the scripted turn, then the engine tick — the order `sim` and
+/// the UI both use (actions are stamped with the tick they precede).
+pub fn play_scripted_tick(
+    state: &mut crate::commands::AppState,
+    strategy: &ScriptedStrategy,
+) -> ScriptedTurn {
+    let turn = apply_scripted_actions(state, strategy);
+    let ws = state.world_state.as_mut().expect("world");
+    let sc = state.current_scenario.as_ref().expect("scenario");
+    crate::engine::tick(ws, sc, &mut state.event_log, state.rng.as_mut().expect("rng"));
+    turn
+}

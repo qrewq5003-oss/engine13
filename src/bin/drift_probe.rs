@@ -14,9 +14,11 @@
 //! Trace rows inside one tick are sorted, because their emission order itself follows
 //! `HashMap` iteration and would differ without any numeric drift.
 //!
-//! Read-only: no player, RNG drawn only by the engine, sinks off in shipped code.
+//! Read-only: RNG drawn only by the engine, sinks off in shipped code. With a strategy
+//! the player plays through `application::scripted::play_scripted_tick` (A29) — the
+//! same policy as `sim`, not a copy.
 //!
-//! Usage: cargo run --release --bin drift_probe -- <scenario> <seed> <ticks>
+//! Usage: cargo run --release --bin drift_probe -- <scenario> <seed> <ticks> [strategy|none]
 
 use engine13::db::Db;
 use engine13::engine::trace;
@@ -31,6 +33,8 @@ fn main() {
     let scenario = args.get(1).cloned().unwrap_or_else(|| "rome_375".to_string());
     let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
     let ticks: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100);
+    let strategy = args.get(4).filter(|s| s.as_str() != "none")
+        .map(|s| engine13::application::scripted::ScriptedStrategy::from_str(s, &scenario));
 
     let db = Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
@@ -39,7 +43,9 @@ fn main() {
     trace::enable();
 
     for t in 0..ticks {
-        {
+        if let Some(strategy) = &strategy {
+            engine13::application::scripted::play_scripted_tick(&mut st, strategy);
+        } else {
             let ws = st.world_state.as_mut().unwrap();
             let sc = st.current_scenario.as_ref().unwrap();
             engine13::engine::tick(ws, sc, &mut st.event_log, st.rng.as_mut().unwrap());
