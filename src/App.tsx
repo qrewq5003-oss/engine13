@@ -35,6 +35,10 @@ import {
 import type { WorldState, Event, ScenarioMeta, SaveSlotData, SaveSlotList, StatusIndicatorState, ActionInfo } from './types';
 import './App.css';
 
+// How many recent events the frontend keeps for the "Recent Events" window, which shows
+// the last three. The full log stays in the backend (B31).
+const RECENT_EVENTS_TAIL = 20;
+
 const App: React.FC = () => {
   // Game state: 'menu' or 'playing'
   const [gameState, setGameState] = useState<'menu' | 'playing'>('menu');
@@ -125,6 +129,7 @@ const App: React.FC = () => {
     try {
       setIsLoading(true);
       setLoadingStep('Loading save...');
+      setRecentEvents([]);
       setVictoryOverlay(resetVictoryOverlay());
 
       // Sort by tick descending to get latest save
@@ -251,8 +256,9 @@ const App: React.FC = () => {
         prevWorldStateRef.current = worldState;
       }
       setWorldState(response.world_state);
+      // The backend sends only this tick's events (B31); the window keeps a short tail.
       if (response.events.length > 0) {
-        setRecentEvents(response.events);
+        setRecentEvents(prev => [...prev, ...response.events].slice(-RECENT_EVENTS_TAIL));
       }
 
       // Step 2: Refresh available actions and events to reflect new state

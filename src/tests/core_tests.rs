@@ -1548,7 +1548,6 @@ fn relevance_selection_keeps_the_freshest_occurrence_of_a_recurring_id() {
 /// keeps it that way. See docs/TRIAGE.md, «B31: стадия 1».
 #[test]
 fn engine_emits_no_metrics_ledger_events() {
-    use rand::SeedableRng;
     for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
         let db = crate::db::Db::open_in_memory().unwrap();
         let mut st = crate::commands::AppState::default();
@@ -1563,4 +1562,37 @@ fn engine_emits_no_metrics_ledger_events() {
         let leaked: Vec<&str> = st.event_log.events.iter().map(|e| e.id.as_str()).filter(|id| id.starts_with("metrics_")).collect();
         assert!(leaked.is_empty(), "{sc}: {} metrics_* events, e.g. {:?}", leaked.len(), leaked.first());
     }
+}
+
+/// B31: one history, one source. The game's event log travels with the save and comes
+/// back on load bit-exact (serde_json `float_roundtrip`); `advance_tick` answers with this
+/// tick's events only; the action history reads the log and keeps every occurrence.
+/// The full acceptance run is `src/bin/history_probe.rs`.
+#[test]
+fn event_log_survives_save_and_load_and_ticks_ship_only_their_events() {
+    use crate::core::EventType;
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(3));
+
+    let mut shipped = Vec::new();
+    for _ in 0..30 {
+        let input = crate::application::PlayerActionInput { action_id: "support_city".to_string(), target_actor_id: None };
+        let _ = crate::application::apply_player_action(&mut st, &input);
+        shipped.extend(crate::commands::advance_tick(&mut st, None).unwrap().events);
+    }
+    let log = serde_json::to_value(&st.event_log.events).unwrap();
+    assert_eq!(serde_json::to_value(&shipped).unwrap(), log, "responses must concatenate to the log");
+
+    let actions = st.event_log.events.iter().filter(|e| e.event_type == EventType::PlayerAction).count();
+    assert!(actions > 1, "precondition: the action must have repeated");
+    assert_eq!(crate::commands::get_action_history(&st, usize::MAX).len(), actions, "every occurrence kept");
+
+    let save_id = crate::commands::save_game(&mut st, &db, Some("guard".to_string())).unwrap().save_id.unwrap();
+    crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    assert!(st.event_log.events.is_empty(), "a fresh scenario starts with an empty log");
+
+    crate::commands::load_game(&mut st, &db, save_id).unwrap();
+    assert_eq!(serde_json::to_value(&st.event_log.events).unwrap(), log, "load restores the save's own log");
 }
