@@ -48,7 +48,7 @@ fn cmd_advance_tick(
     // First, advance the tick and get events
     let mut s = state.lock().map_err(|e| e.to_string())?;
     eprintln!("[RUST] cmd_advance_tick - calling advance_tick");
-    let result = commands::advance_tick(&mut *s, action);
+    let result = commands::advance_tick(&mut s, action);
     eprintln!("[RUST] cmd_advance_tick - result: {:?}", result.is_ok());
 
     // If successful, write dead actors to database. Events are not written: the game's
@@ -80,7 +80,7 @@ fn cmd_advance_tick_silent(
     eprintln!("[RUST] cmd_advance_tick_silent - acquiring lock");
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    commands::advance_tick_silent(&mut *s)
+    commands::advance_tick_silent(&mut s)
 }
 
 #[tauri::command]
@@ -92,7 +92,7 @@ fn cmd_set_metric(
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_set_metric - actor={}, metric={}, value={}", actor_id, metric, value);
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    commands::set_metric(&mut *s, actor_id, metric, value)
+    commands::set_metric(&mut s, actor_id, metric, value)
 }
 
 #[tauri::command]
@@ -106,7 +106,7 @@ fn cmd_force_spawn(
 ) -> Result<(), String> {
     eprintln!("[RUST] cmd_force_spawn - actor={}, label={}, lat={}, lng={}", actor_id, label, lat, lng);
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    commands::force_spawn(&mut *s, actor_id, label, lat, lng, initial_metrics)
+    commands::force_spawn(&mut s, actor_id, label, lat, lng, initial_metrics)
 }
 
 #[tauri::command]
@@ -126,7 +126,7 @@ fn cmd_get_narrative_actors(state: State<Mutex<AppState>>) -> Result<Vec<engine1
 fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine13::PatronAction>, String> {
     eprintln!("[RUST] cmd_get_available_actions - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_available_actions(&*s);
+    let result = commands::get_available_actions(&s);
     eprintln!("[RUST] cmd_get_available_actions - result: {:?}", result.as_ref().map(|a| a.len()));
     result
 }
@@ -135,7 +135,7 @@ fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine
 fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Vec<ActionInfo>, String> {
     eprintln!("[RUST] cmd_get_actions_with_availability - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_actions_with_availability(&*s);
+    let result = commands::get_actions_with_availability(&s);
     eprintln!("[RUST] cmd_get_actions_with_availability - result: {:?}", result.as_ref().map(|a| a.len()));
     result
 }
@@ -151,7 +151,7 @@ fn cmd_submit_action(
     // chronicler, the action history and the save read (B31). It used to be followed by
     // re-inserting the whole log into the `events` table on every action.
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::submit_action(&mut *s, action_id);
+    let result = commands::submit_action(&mut s, action_id);
     eprintln!("[RUST] cmd_submit_action - result: {:?}", result.is_ok());
     result
 }
@@ -165,7 +165,7 @@ fn cmd_save_game(
     eprintln!("[RUST] cmd_save_game - acquiring locks");
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::save_game(&mut *s, &*db_guard, slot);
+    let result = commands::save_game(&mut s, &db_guard, slot);
     eprintln!("[RUST] cmd_save_game - result: {:?}", result);
     result
 }
@@ -179,7 +179,7 @@ fn cmd_load_game(
     eprintln!("[RUST] cmd_load_game - acquiring locks, save_id: {}", save_id);
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::load_game(&mut *s, &*db_guard, save_id);
+    let result = commands::load_game(&mut s, &db_guard, save_id);
     eprintln!("[RUST] cmd_load_game - result: {:?}", result.is_ok());
     result
 }
@@ -188,7 +188,7 @@ fn cmd_load_game(
 fn cmd_list_saves(db: State<Mutex<Db>>) -> Result<Vec<commands::SaveData>, String> {
     eprintln!("[RUST] cmd_list_saves - acquiring lock");
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let saves = commands::list_saves(&*db_guard);
+    let saves = commands::list_saves(&db_guard);
     eprintln!("[RUST] cmd_list_saves - found {} saves", saves.len());
     Ok(saves)
 }
@@ -200,7 +200,7 @@ fn cmd_list_saves_with_slots(
 ) -> Result<engine13::application::SaveSlotList, String> {
     eprintln!("[RUST] cmd_list_saves_with_slots - acquiring lock, scenario: {}", scenario_id);
     let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let result = commands::list_saves_with_slots(&*db_guard, &scenario_id);
+    let result = commands::list_saves_with_slots(&db_guard, &scenario_id);
     eprintln!("[RUST] cmd_list_saves_with_slots - result: {:?}", result.is_ok());
     result
 }
@@ -213,7 +213,7 @@ fn cmd_get_action_history(
 ) -> Result<Vec<commands::ActionHistoryEntry>, String> {
     eprintln!("[RUST] cmd_get_action_history - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
-    let history = commands::get_action_history(&*s, limit);
+    let history = commands::get_action_history(&s, limit);
     eprintln!("[RUST] cmd_get_action_history - result: {}", history.len());
     Ok(history)
 }
@@ -232,7 +232,7 @@ fn cmd_load_scenario(
     })?;
     let db_guard = db.lock().map_err(|e| e.to_string())?;
     eprintln!("[RUST] cmd_load_scenario - calling commands::load_scenario");
-    let result = commands::load_scenario(&mut *s, &*db_guard, scenario_id);
+    let result = commands::load_scenario(&mut s, &db_guard, scenario_id);
     eprintln!("[RUST] cmd_load_scenario - result: {:?}", result);
     result
 }
@@ -262,7 +262,7 @@ async fn cmd_get_narrative(
         let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
         
         // Generate prompt using snapshot and narrative memory
-        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &*db_guard);
+        let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &db_guard);
         let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
         let config = engine13::llm::get_llm_config();
         let year = snapshot.year;
@@ -298,7 +298,7 @@ fn cmd_set_game_mode(
         _ => return Err(format!("Unknown game mode: {}", mode)),
     };
 
-    let result = commands::set_game_mode(&mut *s, new_mode);
+    let result = commands::set_game_mode(&mut s, new_mode);
     eprintln!("[RUST] cmd_set_game_mode - result: {:?}", result);
     result
 }
