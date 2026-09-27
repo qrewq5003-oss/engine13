@@ -1049,34 +1049,6 @@ fn decisive(scenario_id: &str, ticks: u32, seeds: &[u64], popfix: f64) {
 //
 // Read-only with respect to the engine: no engine symbol is modified, actions go through
 // the same application-layer path the UI uses.
-const CONST_BALANCED: &[&str] = &[
-    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_naval_support",
-    "genoa_mercenaries", "milan_condottieri", "venice_trade_deal", "genoa_galata_garrison",
-];
-const CONST_DIPLOMACY: &[&str] = &[
-    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_trade_deal",
-    "genoa_galata_garrison", "venice_naval_support", "genoa_mercenaries", "milan_condottieri",
-];
-const CONST_MILITARY: &[&str] = &[
-    "venice_naval_support", "genoa_mercenaries", "milan_condottieri", "genoa_galata_garrison",
-    "venice_diplomacy", "genoa_financial_aid", "milan_bankers", "venice_trade_deal",
-];
-const ROME_BALANCED: &[&str] = &[
-    "expand_network", "build_reputation", "support_city", "back_administration",
-    "fund_defense", "lay_low", "invest_wealth", "gather_information", "educate_family",
-];
-const ROME_WEALTH: &[&str] = &[
-    "lay_low", "invest_wealth", "gather_information", "expand_network", "educate_family",
-    "support_city", "back_administration", "build_reputation", "fund_defense",
-];
-const MILAN_AGGRESSIVE: &[&str] = &[
-    "milan_raise_troops", "milan_pressure_genoa", "incite_baronial_revolt",
-    "milan_hire_condottieri", "milan_hire_urbino_condottieri", "milan_lease_genoese_fleet",
-    "milan_banking_deal_florence", "milan_bribe_curia", "milan_court_patronage",
-    "milan_diplomacy_ferrara", "milan_marriage_venice", "milan_marriage_naples",
-    "call_papal_arbitration", "milan_savoy_alliance",
-];
-
 /// Price the population-writing dependency rules of a scenario on one actor's state,
 /// using whatever mode and coefficients that scenario actually carries.
 ///
@@ -1106,110 +1078,27 @@ fn price_population_rules(rules: &[DependencyRule], pop: f64, eo: f64) -> f64 {
     pop - stock
 }
 
-fn priority_list(scenario_id: &str, strategy: &str) -> &'static [&'static str] {
-    match (scenario_id, strategy) {
-        ("rome_375", "influence") => ROME_INFLUENCE,
-        ("rome_375", "wealth") => ROME_WEALTH,
-        ("rome_375", _) => ROME_BALANCED,
-        ("milan_1477", _) => MILAN_AGGRESSIVE,
-        (_, "diplomacy") => CONST_DIPLOMACY,
-        (_, "military") => CONST_MILITARY,
-        (_, _) => CONST_BALANCED,
-    }
+/// The strategy's priority list, from the library (B39) — it used to be seven local
+/// copies of `application::scripted`'s lists.
+fn priority_list(scenario_id: &str, strategy: &str) -> Vec<&'static str> {
+    engine13::application::scripted::ScriptedStrategy::from_str(strategy, scenario_id).priority_actions()
 }
 
-/// The scripted-player step of `sim::run_scripted`, lifted verbatim out of
-/// [`attractor`] so that it and [`popevents`] cannot drift apart in the one place a
-/// probe is easiest to get subtly wrong. Returns the actions applied this tick and
-/// how many of them were `milan_raise_troops` — the two counters both modes
-/// cross-check against `sim`.
+/// The scripted-player step, from the library (B39): `apply_scripted_actions` holds the
+/// whole policy — priority order, `actions_per_tick`, milan's reserve — which this probe
+/// used to copy verbatim out of `sim::run_scripted`. Returns the actions applied this
+/// tick and how many were `milan_raise_troops` — the two counters the modes cross-check
+/// against `sim`.
 fn scripted_step(
     state: &mut engine13::commands::AppState,
     scenario_id: &str,
     strategy: Option<&str>,
 ) -> (u32, u32) {
-    use engine13::application::actions::{apply_player_action, PlayerActionInput};
-
-    let strat = match strategy {
-        Some(s) => s,
-        None => return (0, 0),
-    };
-    let mut raise_troops = 0u32;
-    let list = priority_list(scenario_id, strat);
-    let per_tick = state.current_scenario.as_ref().unwrap().actions_per_tick;
-    let mut applied = 0u32;
-    if scenario_id == "milan_1477" {
-        const RAISE_TROOPS_GATE: f64 = 70.0;
-        let treasury_before = state
-            .world_state
-            .as_ref()
-            .unwrap()
-            .actors
-            .get("milan")
-            .map(|a| a.get_metric("treasury"))
-            .unwrap_or(0.0);
-        if treasury_before > RAISE_TROOPS_GATE {
-            let input = PlayerActionInput {
-                action_id: "milan_raise_troops".to_string(),
-                target_actor_id: None,
-            };
-            if apply_player_action(state, &input).is_ok() {
-                applied += 1;
-                raise_troops += 1;
-            }
-        }
-        for action_id in list.iter().filter(|id| **id != "milan_raise_troops") {
-            if applied >= per_tick {
-                break;
-            }
-            let treasury_now = state
-                .world_state
-                .as_ref()
-                .unwrap()
-                .actors
-                .get("milan")
-                .map(|a| a.get_metric("treasury"))
-                .unwrap_or(0.0);
-            let surplus = treasury_now - RAISE_TROOPS_GATE;
-            if surplus <= 0.0 {
-                break;
-            }
-            let cost = state
-                .current_scenario
-                .as_ref()
-                .unwrap()
-                .patron_actions
-                .iter()
-                .find(|a| a.id == *action_id)
-                .and_then(|a| a.cost.get(&MetricRef::literal("actor:milan.treasury")))
-                .map(|c| -c)
-                .unwrap_or(f64::MAX);
-            if cost > surplus {
-                continue;
-            }
-            let input = PlayerActionInput {
-                action_id: action_id.to_string(),
-                target_actor_id: None,
-            };
-            if apply_player_action(state, &input).is_ok() {
-                applied += 1;
-            }
-        }
-    } else {
-        for action_id in list.iter() {
-            if applied >= per_tick {
-                break;
-            }
-            let input = PlayerActionInput {
-                action_id: action_id.to_string(),
-                target_actor_id: None,
-            };
-            if apply_player_action(state, &input).is_ok() {
-                applied += 1;
-            }
-        }
-    }
-    (applied, raise_troops)
+    let Some(strat) = strategy else { return (0, 0) };
+    let strategy = engine13::application::scripted::ScriptedStrategy::from_str(strat, scenario_id);
+    let turn = engine13::application::scripted::apply_scripted_actions(state, &strategy);
+    let raise_troops = turn.applied.iter().filter(|a| **a == "milan_raise_troops").count() as u32;
+    (turn.applied.len() as u32, raise_troops)
 }
 
 #[derive(Default)]
@@ -10519,10 +10408,6 @@ fn tagrel(scenario_id: &str, ticks: u32, seeds: &[u64], strategy: Option<&str>) 
 // must reproduce the observed transfer ticks exactly, to the last one. `gt_viol > 0`
 // invalidates every number this mode prints.
 
-const ROME_INFLUENCE: &[&str] = &[
-    "build_reputation", "support_city", "fund_defense", "back_administration",
-    "expand_network", "educate_family", "invest_wealth", "gather_information", "lay_low",
-];
 
 /// One alternative rule for the transfer predicate.
 #[derive(Clone)]
