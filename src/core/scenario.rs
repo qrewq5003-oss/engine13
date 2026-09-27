@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::actor::{Actor, Era, Neighbor, RegionRank, TagSpreadType};
+use super::actor::{Actor, Culture, Era, Neighbor, RegionRank, Religion, TagSpreadType};
 use super::metric_ref::{resolve_at_load, MetricName, MetricRef, RelativeMetricRef};
 
 /// Dependency rule mode - determines how the dependency affects the target metric
@@ -605,9 +605,17 @@ pub struct SpawnActorConfig {
     /// for interaction rules and cannot be inferred from coordinates. Without
     /// at least one live neighbor here, the spawned actor never appears in any
     /// pair from `get_neighbor_pairs` and stays inert (the France-in-Milan bug).
-    /// Defaults to empty for back-compat with configs that predate this field.
-    #[serde(default)]
+    /// Required (B28): the `#[serde(default)]` it had protected no config any more —
+    /// all four spawns declare it — and could only let the next inert spawn in.
     pub neighbors: Vec<Neighbor>,
+    /// The spawned actor's identity, written in content (B28). All three are required:
+    /// the engine used to pin every spawn to rank `C`, `Orthodox`, `Slavic`, so France
+    /// entered milan as an Orthodox Slav. A default here would only move that invention
+    /// into `Default`; a missing field is a load error instead. Religion and culture
+    /// feed `interactions::affinity` — see docs/TRIAGE.md, «B28: стадия 1».
+    pub region_rank: RegionRank,
+    pub religion: Religion,
+    pub culture: Culture,
 }
 
 /// Condition for milestone event triggering

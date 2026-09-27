@@ -935,14 +935,15 @@ fn check_milestone_events(
                 if !world.actors.contains_key(&cfg.actor_id)
                     && !world.dead_actors.iter().any(|d| d.id == cfg.actor_id)
                 {
-                    use crate::core::{Actor, GeoCoordinate, NarrativeStatus, RegionRank, Religion, Culture};
+                    use crate::core::{Actor, GeoCoordinate, NarrativeStatus};
                     
                     let actor = Actor {
                         id: cfg.actor_id.clone(),
                         name: cfg.label.clone(),
                         name_short: cfg.label.clone(),
                         region: cfg.actor_id.clone(),
-                        region_rank: RegionRank::C,
+                        // Identity from content (B28), not invented here.
+                        region_rank: cfg.region_rank.clone(),
                         era: scenario.era.clone(),
                         narrative_status: NarrativeStatus::Background,
                         tags: vec![],
@@ -960,8 +961,8 @@ fn check_milestone_events(
                         actor_tags: HashMap::new(),
                         center: Some(GeoCoordinate { lat: cfg.lat, lng: cfg.lng }),
                         is_successor_template: false,
-                        religion: Religion::Orthodox,
-                        culture: Culture::Slavic,
+                        religion: cfg.religion.clone(),
+                        culture: cfg.culture.clone(),
                         minimum_survival_ticks: None,
                         leader: None,
                     };
@@ -2636,6 +2637,9 @@ mod tests {
                     Neighbor { id: "genoa".into(), distance: 2, border_type: BorderType::Sea },
                     Neighbor { id: "milan".into(), distance: 3, border_type: BorderType::Land },
                 ],
+                region_rank: crate::core::RegionRank::C,
+                religion: crate::core::Religion::Orthodox,
+                culture: crate::core::Culture::Slavic,
             }),
         }];
         // Milan already names France on its own terms — that entry must survive as is.
