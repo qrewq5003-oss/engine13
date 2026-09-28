@@ -885,9 +885,6 @@ fn authored_scenario_fields_have_readers() {
 
     // field -> why it may stay unread
     const ALLOWED: &[(&str, &str)] = &[
-        ("tempo", "serialized shape only: declared in types/index.ts, never read; pacing is fixed at two ticks per year"),
-        ("tick_span", "DEAD, recorded: the engine computes `year = start_year + tick / 2`, so the authored `tick_span: 5` is ignored — docs/investigation_dead_authored_fields.md §3"),
-        ("tick_label", "serialized shape only: the UI writes its own half-year label"),
         ("features", "read off `WorldState`, which now carries a copy taken from the scenario at load — docs/investigation_world_features.md"),
     ];
 

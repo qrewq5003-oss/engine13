@@ -272,10 +272,9 @@ pub struct Scenario {
     pub label: String,
     pub description: String,
     pub start_year: i32,
-    pub tempo: f64,
-    pub tick_span: u32,
+    // `tempo`, `tick_span`, `tick_label` were removed (B1): authored, read by nothing —
+    // the time contract is fixed at two ticks per year (`AGENTS.md` invariant 1).
     pub era: Era,
-    pub tick_label: String,
     pub actors: Vec<Actor>,
     pub auto_deltas: Vec<AutoDelta>,
     pub patron_actions: Vec<PatronAction>,
