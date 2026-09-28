@@ -886,6 +886,7 @@ fn authored_scenario_fields_have_readers() {
     // field -> why it may stay unread
     const ALLOWED: &[(&str, &str)] = &[
         ("features", "read off `WorldState`, which now carries a copy taken from the scenario at load — docs/investigation_world_features.md"),
+        ("universal_actions", "DEAD, recorded (B42): the UI's list never offered them — it lists scenario actions in every mode — and the only reader, the mode-aware `get_available_actions`, was a path no frontend called; removed. Owner's decision (b): the mode does not change actions"),
     ];
 
     fn collect(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {

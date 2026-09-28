@@ -110,15 +110,6 @@ fn cmd_force_spawn(
 }
 
 #[tauri::command]
-fn cmd_get_available_actions(state: State<Mutex<AppState>>) -> Result<Vec<engine13::PatronAction>, String> {
-    eprintln!("[RUST] cmd_get_available_actions - acquiring lock");
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let result = commands::get_available_actions(&s);
-    eprintln!("[RUST] cmd_get_available_actions - result: {:?}", result.as_ref().map(|a| a.len()));
-    result
-}
-
-#[tauri::command]
 fn cmd_get_actions_with_availability(state: State<Mutex<AppState>>) -> Result<Vec<ActionInfo>, String> {
     eprintln!("[RUST] cmd_get_actions_with_availability - acquiring lock");
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -348,7 +339,6 @@ fn main() {
             cmd_advance_tick_silent,
             cmd_set_metric,
             cmd_force_spawn,
-            cmd_get_available_actions,
             cmd_get_actions_with_availability,
             cmd_submit_action,
             cmd_save_game,

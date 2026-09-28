@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   WorldState,
-  PatronAction,
   SaveData,
   SaveSlotList,
   ScenarioMeta,
@@ -94,10 +93,6 @@ export async function saveLlmConfig(
 // ============================================================================
 // Player Action Commands
 // ============================================================================
-
-export async function getAvailableActions(): Promise<PatronAction[]> {
-  return invoke<PatronAction[]>('cmd_get_available_actions');
-}
 
 export async function getActionsWithAvailability(): Promise<ActionInfo[]> {
   return invoke<ActionInfo[]>('cmd_get_actions_with_availability');

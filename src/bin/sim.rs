@@ -1240,7 +1240,6 @@ fn run_batch(scenario_id: &str, ticks: u32) {
 
 
 fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
-    use engine13::application::actions::get_available_actions;
     use engine13::commands::AppState;
 
     let strategy = ScriptedStrategy::from_str(strategy_str, scenario_id);
@@ -1304,15 +1303,12 @@ fn run_scripted(scenario_id: &str, ticks: u32, strategy_str: &str, seed: u64) {
             return;
         }
         
-        // Check available actions on tick 0
-        let available_actions = get_available_actions(&state).unwrap_or_default();
-        let available_ids: Vec<&str> = available_actions.iter().map(|a| a.id.as_str()).collect();
+        // Actions the UI would offer on tick 0 (B42: the one availability rule, cost
+        // included). rome's family starts at 0/0/0/0 (A2), so none may be affordable yet —
+        // that is the game, not a broken init, and the run goes on.
+        let listed = engine13::commands::get_actions_with_availability(&state).unwrap_or_default();
+        let available_ids: Vec<&str> = listed.iter().filter(|a| a.available).map(|a| a.action.id.as_str()).collect();
         eprintln!("  tick0 available actions: {:?}", available_ids);
-        
-        if available_actions.is_empty() {
-            eprintln!("ERROR: Rome scripted init: no available actions on tick 0 - aborting");
-            return;
-        }
         
         // Task 2: Verify priority IDs match actual available actions
         let priority_actions = strategy.priority_actions();

@@ -1759,3 +1759,45 @@ fn absorption_passes_the_border_to_the_absorber() {
         assert!(ws.actors["milan"].neighbors.iter().any(|n| &n.id == id), "milan did not inherit savoy's border with {id}");
     }
 }
+
+/// B42: one availability rule. On states from played games — before the player's turn
+/// and after it, when the per-tick limit may be spent — the set of actions the UI's list
+/// marks available is exactly the set `apply_player_action` accepts, both ways. Before
+/// B42 the list checked cost and the apply path did not: the scripted player bought what
+/// a human could not click (60–96 % of its actions in rome and constantinople).
+#[test]
+fn ui_list_and_apply_path_agree_on_every_action() {
+    use crate::application::scripted::{apply_scripted_actions, ScriptedStrategy};
+    let fork = |st: &crate::commands::AppState| crate::commands::AppState {
+        world_state: st.world_state.clone(),
+        event_log: st.event_log.clone(),
+        current_scenario: st.current_scenario.clone(),
+        rng: st.rng.clone(),
+    };
+    let check = |st: &crate::commands::AppState, label: &str, seen_both: &mut (u32, u32)| {
+        for info in crate::commands::get_actions_with_availability(st).unwrap() {
+            let mut probe = fork(st);
+            let input = crate::application::PlayerActionInput { action_id: info.action.id.clone(), target_actor_id: None };
+            let applied = crate::application::apply_player_action(&mut probe, &input);
+            assert_eq!(info.available, applied.is_ok(), "{label}: `{}` listed available={} but apply gave {:?}", info.action.id, info.available, applied.err());
+            if info.available { seen_both.0 += 1 } else { seen_both.1 += 1 }
+        }
+    };
+    for (sc, strat) in [("rome_375", "balanced"), ("constantinople_1430", "balanced"), ("milan_1477", "aggressive")] {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, sc.to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(1));
+        let strategy = ScriptedStrategy::from_str(strat, sc);
+        let mut seen = (0u32, 0u32);
+        for t in 0..60 {
+            if t % 5 == 0 { check(&st, &format!("{sc} tick {t} before turn"), &mut seen); }
+            apply_scripted_actions(&mut st, &strategy);
+            if t % 5 == 0 { check(&st, &format!("{sc} tick {t} after turn"), &mut seen); }
+            let ws = st.world_state.as_mut().unwrap();
+            let scn = st.current_scenario.as_ref().unwrap();
+            crate::engine::tick(ws, scn, &mut st.event_log, st.rng.as_mut().unwrap());
+        }
+        assert!(seen.0 > 0 && seen.1 > 0, "{sc}: both available and unavailable actions must occur, got {seen:?}");
+    }
+}

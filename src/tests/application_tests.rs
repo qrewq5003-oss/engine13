@@ -1,4 +1,4 @@
-use crate::application::{get_available_actions, save_game, list_saves_with_slots};
+use crate::application::{save_game, list_saves_with_slots};
 use crate::application::actions::{apply_player_action, PlayerActionInput};
 use crate::commands::{advance_tick, AppState};
 use crate::db::Db;
@@ -67,27 +67,23 @@ fn test_tick_advances_constantinople() {
 }
 
 #[test]
-fn test_get_available_actions_rome() {
+fn test_actions_listed_rome() {
+    // B42: the mode-aware `get_available_actions` was removed; the UI's list is the one
+    // list. Every scenario action is listed, available or with the reason it is not.
     let state = setup_rome_state();
-    
-    let actions = get_available_actions(&state);
-    assert!(actions.is_ok(), "get_available_actions failed: {:?}", actions);
-    let actions = actions.unwrap();
-    
-    // Should have at least some actions available
-    assert!(!actions.is_empty(), "Should have at least one available action");
+    let listed = crate::commands::get_actions_with_availability(&state).expect("listed");
+    assert!(!listed.is_empty(), "the scenario must list its actions");
+    assert!(listed.iter().all(|a| a.available == a.unavailable_reason.is_none()));
 }
 
 #[test]
-fn test_get_available_actions_constantinople() {
+fn test_actions_listed_constantinople() {
+    // B42: the mode-aware `get_available_actions` was removed; the UI's list is the one
+    // list. Every scenario action is listed, available or with the reason it is not.
     let state = setup_constantinople_state();
-    
-    let actions = get_available_actions(&state);
-    assert!(actions.is_ok(), "get_available_actions failed: {:?}", actions);
-    let actions = actions.unwrap();
-    
-    // Constantinople should have federation actions
-    assert!(!actions.is_empty(), "Should have at least one available action");
+    let listed = crate::commands::get_actions_with_availability(&state).expect("listed");
+    assert!(!listed.is_empty(), "the scenario must list its actions");
+    assert!(listed.iter().all(|a| a.available == a.unavailable_reason.is_none()));
 }
 
 #[test]

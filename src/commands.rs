@@ -175,11 +175,6 @@ pub fn advance_tick_silent(state: &mut AppState) -> Result<AdvanceTickSilentResp
     })
 }
 
-/// Get available actions for the player - delegates to application::actions
-pub fn get_available_actions(state: &AppState) -> Result<Vec<crate::core::PatronAction>, String> {
-    crate::application::get_available_actions(state)
-}
-
 /// Get all actions with availability status - delegates to application::actions
 pub fn get_actions_with_availability(state: &AppState) -> Result<Vec<crate::application::actions::ActionInfo>, String> {
     let world_state = state.world_state.as_ref().ok_or("No active world state")?;
