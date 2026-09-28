@@ -2888,3 +2888,47 @@ fn spawn_config_requires_identity_and_neighbors() {
         assert!(config(Some(i)).is_err(), "a spawn config without `{field}` loaded — the field is not required");
     }
 }
+
+/// B32: every consumer of one metric names the same band bounds — status indicator,
+/// chronicle key metric and the global metrics panel. Before B32 this compared only the
+/// first two; the panel (`global_metrics_display`) said 20 / 50 / 80 for the federation
+/// while the others said 30 / 60 / 80, and after A10 the federation spends a real share
+/// of the game between 20–30 and 50–60. The metrics are walked, not listed: any metric
+/// read by two or more consumers is compared. Bounds: indicator and key metric bands are
+/// lower bounds (`value >= bound`, the first is the floor); panel thresholds are upper
+/// bounds (`value < below`, the last is the catch-all) — the same cut points.
+#[test]
+fn every_consumer_of_a_metric_uses_the_same_band_bounds() {
+    use std::collections::BTreeMap;
+    let mut compared = 0;
+    let mut mismatches = Vec::new();
+    for id in SCENARIO_IDS {
+        let s = registry::load_by_id(id).expect("scenario");
+        let mut bounds: BTreeMap<String, Vec<(&str, Vec<f64>)>> = BTreeMap::new();
+        for ind in &s.status_indicators {
+            let cuts: Vec<f64> = ind.thresholds.iter().skip(1).map(|(b, _)| *b).collect();
+            bounds.entry(ind.metric.to_string()).or_default().push(("indicator", cuts));
+        }
+        for km in &s.narrative_config.key_metrics {
+            let cuts: Vec<f64> = km.bands.iter().skip(1).map(|(b, _)| *b).collect();
+            bounds.entry(km.metric.to_string()).or_default().push(("key metric", cuts));
+        }
+        for md in &s.global_metrics_display {
+            let n = md.thresholds.len();
+            let cuts: Vec<f64> = md.thresholds.iter().take(n.saturating_sub(1)).map(|t| t.below).collect();
+            bounds.entry(md.metric.to_string()).or_default().push(("panel", cuts));
+        }
+        for (metric, consumers) in &bounds {
+            if consumers.len() < 2 {
+                continue;
+            }
+            compared += 1;
+            let first = &consumers[0].1;
+            if consumers.iter().any(|(_, c)| c != first) {
+                mismatches.push(format!("{id} {metric}: {consumers:?}"));
+            }
+        }
+    }
+    assert!(compared >= 7, "expected at least seven metrics read by two or more consumers, found {compared}");
+    assert!(mismatches.is_empty(), "consumers of one metric disagree on band bounds:\n{}", mismatches.join("\n"));
+}
