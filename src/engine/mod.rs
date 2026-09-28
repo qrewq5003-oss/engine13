@@ -506,12 +506,7 @@ fn phase_random_events(
 // ============================================================================
 
 fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
-    // Decay cultural displacement progress
-    for val in world.cultural_displacement_progress.values_mut() {
-        *val = (*val - 5.0).max(0.0);
-    }
-    world.cultural_displacement_progress.retain(|_, v| *v > 0.0);
-
+    // The decay of cultural displacement progress lived here — removed with the mechanic (A30).
     apply_actor_tags(world, scenario);
 }
 
