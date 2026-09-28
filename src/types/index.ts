@@ -149,6 +149,7 @@ export interface VictoryCondition {
   minimum_tick: number;
   additional_conditions: Condition[];
   sustained_ticks_required: number;
+  requires_alive: string[];
 }
 
 /// Scenario feature flags for UI

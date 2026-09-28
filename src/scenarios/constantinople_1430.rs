@@ -249,6 +249,9 @@ pub fn load_constantinople_1430() -> Scenario {
                 },
             ],
             sustained_ticks_required: 3,
+            // A10: the federation is a coalition to save the city — not a victory once it
+            // has fallen.
+            requires_alive: vec!["byzantium".to_string()],
         }),
         global_metrics_display: vec![
             crate::core::MetricDisplay {

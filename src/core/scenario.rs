@@ -360,6 +360,14 @@ pub struct VictoryCondition {
     pub minimum_tick: u32,
     pub additional_conditions: Vec<Condition>,
     pub sustained_ticks_required: u32,
+    /// Actors that must be alive for the victory to count (A10), checked before anything
+    /// else. An explicit list, not a metric condition: a dead actor's metrics read 0.0
+    /// and its conditions silently switch off (B44). constantinople's victory is the
+    /// coalition that gives the city «a chance of rescue» — worthless once it has fallen:
+    /// 1 of 33 wins on `main` was over a dead Byzantium. Validated at load: each id is a
+    /// starting actor, not a successor template.
+    #[serde(default)]
+    pub requires_alive: Vec<String>,
 }
 
 /// Status indicator for UI display

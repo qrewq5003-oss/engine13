@@ -201,6 +201,8 @@ pub fn load_rome_375() -> Scenario {
             minimum_tick: 30,  // 15 years × 2 ticks/year
             additional_conditions: vec![],
             sustained_ticks_required: 1,
+            // The family's rise does not depend on a living Rome.
+            requires_alive: vec![],
         }),
         global_metrics_display: vec![],
         initial_family_metrics: Some(HashMap::from([
