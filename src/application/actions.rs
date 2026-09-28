@@ -40,24 +40,16 @@ pub fn apply_player_action(
     let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
     let world_state = state.world_state.as_mut().ok_or("No active world state")?;
 
-    // Check actions_per_tick limit
-    if scenario.actions_per_tick > 0 
-        && world_state.actions_this_tick >= scenario.actions_per_tick {
-        return Err(format!(
-            "Достигнут лимит действий за тик: {}/{}",
-            world_state.actions_this_tick,
-            scenario.actions_per_tick
-        ));
-    }
-
     let action = scenario.patron_actions.iter()
         .find(|a| a.id == action_input.action_id)
         .ok_or_else(|| format!("Action '{}' not found", action_input.action_id))?
         .clone();
 
-    // Check availability using unified function
-    if !is_action_available(&action, world_state) {
-        return Err("Action is not available".to_string());
+    // The same rule the UI's list draws (B42): per-tick limit, condition, cost. The
+    // cost used to be checked by the list only, so the scripted player — which goes
+    // through this path — bought what a human could not click.
+    if let Err(reason) = action_availability(&action, world_state, scenario) {
+        return Err(describe_unavailable(&reason));
     }
 
     // Apply cost
@@ -137,13 +129,49 @@ pub fn apply_player_action(
     Ok((applied_effects, applied_costs))
 }
 
-/// Unified action availability check - works for all scenarios via MetricRef
-fn is_action_available(action: &PatronAction, world_state: &WorldState) -> bool {
-    match &action.available_if {
-        crate::core::ActionCondition::Always => true,
-        crate::core::ActionCondition::Metric { metric, operator, value } => {
-            let current = metric.get(world_state);
-            compare_value(current, operator, value)
+/// The one availability rule (B42): the UI's list and the apply path both read it, so
+/// the list shows exactly the reason the model would refuse. Order: per-tick limit,
+/// authored condition, cost (a negative cost the actor cannot cover).
+pub fn action_availability(
+    action: &PatronAction,
+    world_state: &WorldState,
+    scenario: &Scenario,
+) -> Result<(), UnavailableReason> {
+    if scenario.actions_per_tick > 0 && world_state.actions_this_tick >= scenario.actions_per_tick {
+        return Err(UnavailableReason::ActionsPerTickExhausted { limit: scenario.actions_per_tick });
+    }
+    if let crate::core::ActionCondition::Metric { metric, operator, value } = &action.available_if {
+        if !compare_value(metric.get(world_state), operator, value) {
+            return Err(UnavailableReason::ConditionNotMet {
+                description: describe_condition(&Condition {
+                    metric: metric.clone(),
+                    operator: operator.clone(),
+                    value: *value,
+                }),
+            });
+        }
+    }
+    let mut costs: Vec<(&crate::core::MetricRef, &f64)> = action.cost.iter().collect();
+    costs.sort_by_key(|(m, _)| m.to_string());
+    for (metric, cost) in costs {
+        let current = metric.get(world_state);
+        if current < cost.abs() && *cost < 0.0 {
+            // Human-readable resource name for the UI ("venice treasury").
+            let key = metric.to_string();
+            let resource = key.strip_prefix("actor:").unwrap_or(&key).replace(['.', '_'], " ");
+            return Err(UnavailableReason::InsufficientCost { required: cost.abs(), available: current, resource });
+        }
+    }
+    Ok(())
+}
+
+/// The refusal text the apply path returns for a reason from [`action_availability`].
+fn describe_unavailable(reason: &UnavailableReason) -> String {
+    match reason {
+        UnavailableReason::ActionsPerTickExhausted { limit } => format!("Достигнут лимит действий за тик: {limit}/{limit}"),
+        UnavailableReason::ConditionNotMet { description } => description.clone(),
+        UnavailableReason::InsufficientCost { required, available, resource } => {
+            format!("Недостаточно ресурса «{resource}»: нужно {required}, есть {available}")
         }
     }
 }
@@ -194,59 +222,10 @@ pub fn list_actions_with_availability(
     let mut actions = Vec::new();
 
     for action in &scenario.patron_actions {
-        let mut available = true;
-        let mut unavailable_reason: Option<UnavailableReason> = None;
-
-        // Check actions_per_tick limit first
-        if scenario.actions_per_tick > 0
-            && world_state.actions_this_tick >= scenario.actions_per_tick {
-            available = false;
-            unavailable_reason = Some(UnavailableReason::ActionsPerTickExhausted {
-                limit: scenario.actions_per_tick,
-            });
-        }
-
-        // Check action conditions
-        if available {
-            match &action.available_if {
-                crate::core::ActionCondition::Always => {}
-                crate::core::ActionCondition::Metric { metric, operator, value } => {
-                    let current = metric.get(world_state);
-                    if !compare_value(current, operator, value) {
-                        available = false;
-                        unavailable_reason = Some(UnavailableReason::ConditionNotMet {
-                            description: describe_condition(&Condition {
-                                metric: metric.clone(),
-                                operator: operator.clone(),
-                                value: *value,
-                            }),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Check action costs
-        if available {
-            for (metric, cost) in &action.cost {
-                let current = metric.get(world_state);
-                if current < cost.abs() && *cost < 0.0 {
-                    available = false;
-                    // Human-readable resource name for the UI ("venice treasury").
-                    let key = metric.to_string();
-                    let resource = key
-                        .strip_prefix("actor:")
-                        .unwrap_or(&key)
-                        .replace(['.', '_'], " ");
-                    unavailable_reason = Some(UnavailableReason::InsufficientCost {
-                        required: cost.abs(),
-                        available: current,
-                        resource,
-                    });
-                    break;
-                }
-            }
-        }
+        let (available, unavailable_reason) = match action_availability(action, world_state, scenario) {
+            Ok(()) => (true, None),
+            Err(reason) => (false, Some(reason)),
+        };
 
         actions.push(ActionInfo {
             action: action.clone(),
@@ -256,32 +235,6 @@ pub fn list_actions_with_availability(
     }
 
     actions
-}
-
-/// Get available actions for the player
-pub fn get_available_actions(state: &AppState) -> Result<Vec<PatronAction>, String> {
-    let world_state = state.world_state.as_ref().ok_or("No active world state")?;
-
-    // In Consequences and Free modes, return universal actions from scenario
-    if world_state.game_mode == crate::core::GameMode::Consequences
-        || world_state.game_mode == crate::core::GameMode::Free
-    {
-        let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-        return Ok(scenario.universal_actions.clone());
-    }
-
-    // In Scenario mode, use scenario-specific actions
-    let scenario = state.current_scenario.as_ref().ok_or("No active scenario")?;
-
-    // Unified action filtering - works for all scenarios via MetricRef
-    let available_actions = scenario
-        .patron_actions
-        .iter()
-        .filter(|action| is_action_available(action, world_state))
-        .cloned()
-        .collect();
-
-    Ok(available_actions)
 }
 
 /// Submit a player action - applies effects/costs WITHOUT advancing tick
