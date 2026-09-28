@@ -132,16 +132,16 @@ state = "dead"
 
 [[milestone_events]]
 id = "wallachia_emerges"
-is_key = true
+# A31 (решение владельца 2026-09-29): Валахия в 1430 году уже есть, поэтому веха —
+# описание положения на старте, а не перемена. Прежнее условие
+# `ottomans.military_size > 70` при стартовых 180 было тем же тиком 0 под видом порога.
+is_key = false
 triggers_collapse = false
-llm_context_shift = "Валахия усилилась под давлением османской угрозы."
+llm_context_shift = "Валахия — дунайское пограничье между Венгрией и Портой; её господари лавируют между двумя дворами."
 cooldown_ticks = 999
 [milestone_events.condition]
-type = "metric"
-metric = "military_size"
-actor_id = "ottomans"
-operator = "greater"
-value = 70.0
+type = "tick"
+tick = 0
 [milestone_events.spawn_actor]
 # Identity (A32, решение владельца 2026-09-28): церковь и канцелярия церковнославянские; политически — православно-славянский мир; ранг C — провинция, которая сама себя кормит.
 region_rank = "C"
