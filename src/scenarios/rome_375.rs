@@ -1495,32 +1495,20 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             llm_context_shift: "Семья Анициев стала одной из значимых сил города. Их больше не игнорируют.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: None,
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
+            // A12 (owner's decision (a)): the split of 395 by date, tick 40. It was a
+            // dynastic partition after Theodosius's death — of an empire still whole — not
+            // a collapse, so no state variable caused it and none reproduces it: a
+            // `cohesion < 30` trigger fired at ticks 103–138 whatever its duration, because
+            // Rome's cohesion first drops below 30 around tick 100
+            // (docs/TRIAGE.md, «A12: стадия 1»). The fall of the West stays with the state:
+            // the collapse gates (A11).
             condition: EventCondition {
-                condition_type: EventConditionType::Metric {
-                    metric: crate::core::MetricRef::actor("rome", "cohesion").expect("scenario metric key"),
-                    actor_id: Some("rome".to_string()),
-                    operator: ComparisonOperator::Less,
-                    value: 30.0,
-                },
-                // Ten years of broken cohesion, not two and a half. `duration = 5`
-                // fired on a *temporary* dip: 9 of 27 no-player runs split the empire
-                // within a decade, and 3 of 10 played runs switched out of the scenario
-                // period before 385 — before the player has played "Rome 375" at all.
-                //
-                // The threshold is deliberately NOT touched: a sweep of 15
-                // combinations showed it is not the lever. Coverage is 27/30 for every
-                // pair and the median firing tick stays in 79…100 while the threshold
-                // moves from 35 to 15 — because once rome's cohesion falls below 30 it
-                // stays there for a median of 216 ticks, so any level is eventually
-                // crossed and only the trajectory decides when. Duration separates a
-                // temporary dip from a durable collapse, and since the real collapse
-                // lasts four times the decade required, the tightening costs no
-                // coverage at all (27/30 at both values).
-                // See docs/investigation_rome_splits_threshold.md §2–§5.
-                duration: Some(20),
+                condition_type: EventConditionType::Tick { tick: 40 },
+                duration: None,
             },
             is_key: true,
             triggers_collapse: true,
@@ -1532,6 +1520,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             llm_context_shift: "Империя разделилась. Запад удержал прежнюю столицу и меньшую половину, Восток пошёл своим путём.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: Some("rome".to_string()),
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1549,6 +1538,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             llm_context_shift: "Готы перешли черту. Адрианополь. Валент мёртв. Мир изменился навсегда.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: None,
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1565,6 +1555,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             llm_context_shift: "Гунны больше не слухи. Их видели у Дуная. Паника нарастает.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: None,
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1582,6 +1573,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             llm_context_shift: "Семья Анициев потеряла всё что нажила. Они снова никто.".to_string(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: None,
         },
     ]
 }
@@ -1792,9 +1784,10 @@ fn create_consequence_context() -> String {
     // «Роль игрока — наблюдатель с ограниченным влиянием» removed (B42): the player keeps
     // every scenario action after the split — the mode never restricted the UI's list —
     // so the chronicler was told the opposite of the game.
-    r#"Сценарный период завершён. Симуляция продолжается.
-Нарратив охватывает более широкий период истории.
-Семья по-прежнему действует — теми же средствами, что и прежде.
+    // «Сценарный период завершён…» and «нарратив охватывает более широкий период» removed
+    // (A12): the split now comes in 395, with 130 years of scenario and the fall of the
+    // West still ahead — neither sentence was true.
+    r#"Семья по-прежнему действует — теми же средствами, что и прежде.
 Семья продолжает существовать в том мире который сложился."#.to_string()
 }
 

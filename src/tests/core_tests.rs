@@ -612,11 +612,11 @@ fn test_constantinople_sim_balance() {
 fn test_rome_375_sim_balance() {
     use crate::application::scripted::{play_scripted_tick, ScriptedStrategy};
 
-    let victory_tick = |strategy: Option<&str>| {
+    let victory_tick = |strategy: Option<&str>, seed: u64| {
         let db = crate::db::Db::open_in_memory().unwrap();
         let mut st = crate::commands::AppState::default();
         crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
-        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
         let keys: Vec<String> = st.world_state.as_ref().unwrap().family_state.as_ref().unwrap()
             .metrics.keys().cloned().collect();
         assert!(keys.iter().all(|k| !k.starts_with("family:")), "raw family keys seeded: {keys:?}");
@@ -639,12 +639,16 @@ fn test_rome_375_sim_balance() {
         None
     };
 
-    let played = victory_tick(Some("balanced"));
+    // Over seeds, not one: the split by date (A12) shrinks Rome at tick 40, and balanced
+    // wins in 18 of 30 games — seed 42 alone stopped winning, a precondition, not the
+    // claim. At least one game must be won, and every win must land in ticks 25–100.
+    let wins: Vec<u32> = (0..8).filter_map(|seed| victory_tick(Some("balanced"), seed)).collect();
+    assert!(!wins.is_empty(), "played rome (balanced) must win in at least one of 8 games");
     assert!(
-        played.is_some_and(|t| (25..=100).contains(&t)),
-        "played rome (balanced) must win within ticks 25–100, got {played:?}"
+        wins.iter().all(|t| (25..=100).contains(t)),
+        "every played win must land within ticks 25–100, got {wins:?}"
     );
-    assert_eq!(victory_tick(None), None, "without a player the family influence has no source");
+    assert_eq!(victory_tick(None, 42), None, "without a player the family influence has no source");
 }
 
 #[test]
@@ -1776,4 +1780,24 @@ fn a_world_saved_with_displacement_progress_still_loads() {
     v.as_object_mut().unwrap().insert("cultural_displacement_progress".into(), serde_json::json!({ "alamanni": 12.5 }));
     let loaded: Result<WorldState, _> = serde_json::from_value(v);
     assert!(loaded.is_ok(), "an older save must load: {:?}", loaded.err());
+}
+
+/// A12: `rome_splits` fires by date (tick 40) and splits the actor its `splits_actor`
+/// names. After it: `rome` carries the western name and `rome_east` lives. Deriving the
+/// actor from the condition — as the engine did until A12 — finds nobody in a `Tick`
+/// condition, and the split silently does not happen while the mode still switches.
+#[test]
+fn the_split_by_date_divides_rome() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(1));
+    let west_name = st.current_scenario.as_ref().unwrap().actors.iter().find(|a| a.id == "rome_west").unwrap().name.clone();
+    for _ in 0..42 {
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+    }
+    let ws = st.world_state.as_ref().unwrap();
+    assert!(ws.milestone_events_fired.iter().any(|m| m == "rome_splits"), "the split must have fired by tick 42");
+    assert_eq!(ws.actors.get("rome").map(|r| r.name.clone()), Some(west_name), "the seat keeps `rome` under the western name");
+    assert!(ws.actors.contains_key("rome_east"), "the East must be alive after the split");
 }

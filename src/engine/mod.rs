@@ -1055,8 +1055,8 @@ fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
 
 /// Check and handle game mode transitions
 /// Scenario → Consequences: automatic when milestone with triggers_collapse fires
-/// "Split as shrink": a milestone with `triggers_collapse` divides the actor its
-/// condition names instead of killing it.
+/// "Split as shrink": a milestone with `triggers_collapse` divides the actor named in its
+/// `splits_actor` instead of killing it.
 ///
 /// The literal reading of `ENGINE13_ARCHITECTURE.md` — run `on_collapse`, i.e. kill
 /// the parent and bear both heirs — was implemented as a probe and measured: it
@@ -1082,12 +1082,10 @@ fn apply_seat_split(
     milestone: &crate::core::MilestoneEvent,
     event_log: &mut EventLog,
 ) {
-    let actor_id = match &milestone.condition.condition_type {
-        crate::core::EventConditionType::Metric { actor_id, .. } => actor_id.clone(),
-        crate::core::EventConditionType::ActorState { actor_id, .. } => Some(actor_id.clone()),
-        crate::core::EventConditionType::Tick { .. } => None,
-    };
-    let Some(actor_id) = actor_id else { return };
+    // Whom to split is the milestone's own field (A12), never its condition: `final_assault`
+    // and `italy_unified` name the Ottomans and Milan in their conditions and are no
+    // splits at all, and a split by date names nobody there.
+    let Some(actor_id) = milestone.splits_actor.clone() else { return };
     let Some(parent) = world.actors.get(&actor_id) else { return };
     let heirs = parent.on_collapse.clone();
     let Some(seat) = heirs.iter().find(|h| h.keeps_seat).cloned() else { return };
@@ -1212,6 +1210,21 @@ fn check_game_mode_transitions(
     scenario: &Scenario,
     event_log: &mut EventLog,
 ) {
+    // The split happens to the world on the tick its milestone fires, in any mode (A12).
+    // It used to run inside the mode transition below, which returns unless the mode is
+    // still `Scenario` — so a player who had already won (`Ended`) saw «Империя
+    // разделилась» with no split behind it: in played rome, 7 of 30 `balanced` games won
+    // before tick 40. The actor `splits_actor` names shrinks to its share and the other
+    // heir separates. See docs/investigation_split_as_shrink.md §11.
+    for milestone in &scenario.milestone_events {
+        let fired_now = event_log.events.iter().rev()
+            .take_while(|e| e.tick == world.tick)
+            .any(|e| e.id == milestone.id);
+        if milestone.triggers_collapse && fired_now {
+            apply_seat_split(world, scenario, milestone, event_log);
+        }
+    }
+
     // Only transition from Scenario to Consequences
     if world.game_mode != crate::core::GameMode::Scenario {
         return;
@@ -1222,12 +1235,6 @@ fn check_game_mode_transitions(
         if world.milestone_events_fired.contains(&milestone.id) 
             && milestone.triggers_collapse 
         {
-            // The scenario's turning point actually happens to the world now, not
-            // only in the chronicler's text: the actor the condition names shrinks to
-            // its share and the other heir separates. See
-            // docs/investigation_split_as_shrink.md §11.
-            apply_seat_split(world, scenario, milestone, event_log);
-
             // Transition to Consequences mode
             world.game_mode = crate::core::GameMode::Consequences;
             
@@ -2602,6 +2609,7 @@ mod tests {
             llm_context_shift: String::new(),
             cooldown_ticks: None,
             spawn_actor: None,
+            splits_actor: Some("parent".into()),
         }];
         let mut world = WorldState::new("test".into(), 375);
         world.actors.insert("parent".into(), parent);
@@ -2680,6 +2688,7 @@ mod tests {
                 religion: crate::core::Religion::Orthodox,
                 culture: crate::core::Culture::Slavic,
             }),
+            splits_actor: None,
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);
