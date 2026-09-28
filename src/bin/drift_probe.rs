@@ -73,11 +73,6 @@ fn main() {
             for (k, v) in ms {
                 lines.push(format!("{t} M {id} {k} {}", bits(*v)));
             }
-            let mut sm: Vec<(&String, &f64)> = a.scenario_metrics.iter().collect();
-            sm.sort_by(|a, b| a.0.cmp(b.0));
-            for (k, v) in sm {
-                lines.push(format!("{t} S {id} {k} {}", bits(*v)));
-            }
         }
         let mut gm: Vec<(&String, &f64)> = ws.global_metrics.iter().collect();
         gm.sort_by(|a, b| a.0.cmp(b.0));

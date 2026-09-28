@@ -1863,22 +1863,11 @@ fn scenario_specifications_quote_numbers_that_still_match() {
             }
         }
     }
-    // The family block is a KNOWN, unresolved disagreement, and it is pinned rather than
-    // hidden. The specification says `8 / 12 / 22 / 15`; the code says `0 / 0 / 0 / 0`;
-    // and the first version of the code said `60 / 40 / 50 / 45` before a commit about
-    // tag spreading zeroed it (`e235fb8`, unrelated to families). Three different sets:
-    // the two were never in agreement, so this is not drift from a merged decision.
-    //
-    // It is not silently reconciled here because which side is right is a content
-    // question with measured consequences: starting at zero is consistent with
-    // `family_rises` (`influence >= 60`) never firing without a player, with
-    // `senator_bribe` (then `wealth > 200`, `>= 60` since A1) never firing, with `recruit_soldiers`
-    // (`wealth > 100`) never being available, and with the four family-conditioned
-    // auto-delta modifiers that never apply — see
-    // docs/investigation_silent_authored_content.md §12.
-    //
-    // Pinning both sides means the test fires the moment either changes, which forces the
-    // decision to be made rather than absorbed.
+    // Family start (A2, decided 2026-09-30): the specification's `8 / 12 / 22 / 15` is the
+    // one source, in `initial_family_metrics`. There used to be three sets — the
+    // specification, the code's `0 / 0 / 0 / 0`, and the first code's `60 / 40 / 50 / 45` —
+    // plus frozen copies of the specification's numbers in rome's `scenario_metrics`
+    // (removed, B47). This pins the code to the specification: either changing alone fails.
     {
         const SPEC_SIDE: [(&str, f64); 4] = [
             ("family_influence", 8.0),
@@ -1900,11 +1889,10 @@ fn scenario_specifications_quote_numbers_that_still_match() {
                      docs/investigation_silent_authored_content.md §12 instead of editing one side"
                 ));
             }
-            if in_code != Some(0.0) {
+            if in_code != Some(expected_spec) {
                 failures.push(format!(
-                    "  family {key}: the code changed ({in_code:?} instead of 0.0) — if the \
-                     starting values are being restored, the specification and the measured \
-                     consequences in §12 both need updating"
+                    "  family {key}: initial_family_metrics says {in_code:?}, the specification \
+                     {expected_spec} — the specification is the one source (A2)"
                 ));
             }
         }
@@ -2824,8 +2812,6 @@ fn metric_milestones_are_closed_in_the_starting_world() {
     // id -> why it is open on tick 0 today. Each is an authored question, recorded rather
     // than silently fixed; an entry that is no longer open at start fails the guard.
     const ALLOWED: &[(&str, &str)] = &[
-        ("family_falls", "A2: rome's family starts at 0/0/0/0 (the specification says \
-          8/12/22/15), so «the family lost everything» fires on tick 0 in 30/30 games"),
         ("wallachia_emerges", "A31: the Ottomans start at military_size 180 against a gate of \
           > 70, so Wallachia spawns on tick 0 in 30/30 games of every world"),
     ];

@@ -893,6 +893,14 @@ fn check_milestone_events(
             continue;
         }
 
+        // A milestone that follows another does not even start counting until that one
+        // has fired (A2).
+        if let Some(prev) = &milestone.after {
+            if !world.milestone_events_fired.contains(prev) {
+                continue;
+            }
+        }
+
         // Check cooldown
         if let Some(cooldown) = milestone.cooldown_ticks {
             if let Some(last_tick) = world.milestone_cooldowns.get(&milestone.id) {
@@ -953,7 +961,6 @@ fn check_milestone_events(
                         metrics: cfg.initial_metrics.iter()
                             .map(|(k, v)| (k.as_str().to_string(), *v))
                             .collect(),
-                        scenario_metrics: HashMap::new(),
                         // Neighbor edges from config. `get_neighbor_pairs` treats
                         // an edge as bidirectional (it dedups sorted pairs), so
                         // listing them on the spawned actor alone is enough for it
@@ -2257,7 +2264,6 @@ mod tests {
             narrative_status: NarrativeStatus::Foreground,
             tags: vec![],
             metrics,
-            scenario_metrics: HashMap::new(),
             neighbors: neighbors.iter().map(|n| Neighbor { id: n.to_string(), distance: 1, border_type: BorderType::Land }).collect(),
             on_collapse: vec![],
             actor_tags: HashMap::new(),
@@ -2647,6 +2653,7 @@ mod tests {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: Some("parent".into()),
+            after: None,
         }];
         let mut world = WorldState::new("test".into(), 375);
         world.actors.insert("parent".into(), parent);
@@ -2726,6 +2733,7 @@ mod tests {
                 culture: crate::core::Culture::Slavic,
             }),
             splits_actor: None,
+            after: None,
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);

@@ -45,7 +45,6 @@ export interface Actor {
   narrative_status: NarrativeStatus;
   tags: string[];
   metrics: ActorMetrics;
-  scenario_metrics: Record<string, number>;
   neighbors: Neighbor[];
   on_collapse: Successor[];
   actor_tags: Record<string, ActorTag>;

@@ -25,7 +25,6 @@ export const ActorDetailPanel: React.FC<ActorDetailPanelProps> = ({ actor, onClo
     </div>
   );
 
-  const hasScenarioMetrics = Object.keys(actor.scenario_metrics).length > 0;
   const hasTags = actor.tags.length > 0;
 
   return (
@@ -69,18 +68,6 @@ export const ActorDetailPanel: React.FC<ActorDetailPanelProps> = ({ actor, onClo
             <span className="detail-resource-value">{(actor.metrics.population ?? 0).toFixed(0)}</span>
           </div>
         </div>
-
-        {hasScenarioMetrics && (
-          <div className="detail-section">
-            <h3 className="detail-section-title">Доп. метрики</h3>
-            {Object.entries(actor.scenario_metrics).map(([key, value]) => (
-              <div key={key} className="detail-scenario-metric">
-                <span className="detail-scenario-key">{key}</span>
-                <span className="detail-scenario-value">{(value ?? 0).toFixed(0)}</span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {hasTags && (
           <div className="detail-section">

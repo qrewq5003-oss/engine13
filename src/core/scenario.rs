@@ -602,6 +602,12 @@ pub struct MilestoneEvent {
     /// heir that `keeps_seat`, and the milestone must `triggers_collapse`.
     #[serde(default)]
     pub splits_actor: Option<String>,
+    /// A milestone that may fire only after another one has (A2). `family_falls` says «the
+    /// family lost everything it had gained», true only if it had gained something — a
+    /// single condition cannot say that, and the milestone fired on tick 0 in every rome
+    /// game. Validated at load: an existing milestone of the same scenario, not itself.
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 /// Configuration for spawning a new actor via milestone event
