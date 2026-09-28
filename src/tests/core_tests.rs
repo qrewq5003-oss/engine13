@@ -286,9 +286,8 @@ fn test_scenario_victory_requires_byzantium_alive() {
     let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
     let mut event_log = crate::engine::EventLog::new();
     
-    // Add byzantium and ottomans actors. The victory additional-condition gate is
-    // `ottomans.military_size < 40` (replaced the old `external_pressure < 85`),
-    // so ottomans must be present for the gate to read a real value.
+    // Add byzantium (the victory requires her alive) and ottomans (the federation's
+    // upkeep term reads their army). The Ottoman victory gate was removed in A10.
     for actor in &scenario.actors {
         if actor.id == "byzantium" || actor.id == "ottomans" {
             world.actors.insert(actor.id.clone(), actor.clone());
@@ -300,23 +299,16 @@ fn test_scenario_victory_requires_byzantium_alive() {
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
     world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
 
-    // Set ottomans.military_size = 120 (well above threshold 40) → gate fails.
-    // Wide margin so any per-tick combat drift can't cross 40.
-    if let Some(ott) = world.actors.get_mut("ottomans") {
-        ott.set_metric("military_size", 120.0);
-    }
-
-    // Run check_victory_condition via tick
+    // A10: the Ottoman gate is gone; the federation threshold decides. Below it (and
+    // Byzantium alive) there is no progress toward the victory.
+    world.global_metrics.insert("federation_progress".to_string(), 10.0);
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
     crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
+    assert!(!world.victory_achieved, "Victory must not come with federation below 80");
+    assert_eq!(world.victory_sustained_ticks, 0);
 
-    // victory_achieved should be false because ottoman military is too strong
-    assert!(!world.victory_achieved, "Victory should not be achieved when ottoman military_size >= 40");
-
-    // Break the Ottoman army: military_size = 10 (well below threshold 40)
-    if let Some(ott) = world.actors.get_mut("ottomans") {
-        ott.set_metric("military_size", 10.0);
-    }
+    // Federation back at 100 — above 80 even after this tick's upkeep.
+    world.global_metrics.insert("federation_progress".to_string(), 100.0);
 
     // Run tick again
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
@@ -341,13 +333,10 @@ fn test_victory_sustained_ticks_resets() {
         }
     }
 
-    // Set victory conditions: federation = 100 (high enough to stay above 80),
-    // ottomans.military_size = 10 (below threshold 40 → gate passes), tick = 45
+    // Victory conditions: federation = 100 (high enough to stay above 80 after the
+    // coalition upkeep), Byzantium alive, tick = 45. The Ottoman gate was removed (A10).
     world.global_metrics.insert("federation_progress".to_string(), 100.0);
     world.tick = 45;  // minimum_tick is 40 (20 years × 2 ticks/year)
-    if let Some(ott) = world.actors.get_mut("ottomans") {
-        ott.set_metric("military_size", 10.0);
-    }
 
     // Run 2 ticks - should accumulate sustained ticks
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
@@ -357,10 +346,8 @@ fn test_victory_sustained_ticks_resets() {
 
     assert_eq!(world.victory_sustained_ticks, 2, "Should have 2 sustained ticks");
 
-    // Rebuild the Ottoman army above threshold → gate fails
-    if let Some(ott) = world.actors.get_mut("ottomans") {
-        ott.set_metric("military_size", 120.0);
-    }
+    // The federation falls below 80 → the condition fails
+    world.global_metrics.insert("federation_progress".to_string(), 10.0);
 
     // Run another tick - should reset sustained ticks
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
