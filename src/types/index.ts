@@ -196,10 +196,7 @@ export interface Scenario {
   label: string;
   description: string;
   start_year: number;
-  tempo: number;
-  tick_span: number;
   era: Era;
-  tick_label: string;
   actors: Actor[];
   auto_deltas: AutoDelta[];
   patron_actions: PatronAction[];
