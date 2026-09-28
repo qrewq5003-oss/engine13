@@ -587,6 +587,14 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
     }
 
     if let Some(ref vc) = scenario.victory_condition {
+        // Before everything else (A10): a victory over a fallen power does not count, and
+        // the streak it would have built is reset.
+        let all_alive = vc.requires_alive.iter()
+            .all(|id| world.actors.contains_key(id) && !world.dead_actor_ids.contains(id));
+        if !all_alive {
+            world.victory_sustained_ticks = 0;
+            return;
+        }
         if world.tick >= vc.minimum_tick {
             let value = vc.metric.get(world);
             let main_condition = value >= vc.threshold;
@@ -2101,6 +2109,33 @@ mod tests {
             results.insert(world.actors[&actor.id].metrics["economic_output"].to_bits());
         }
         assert_eq!(results.len(), 1, "tag application order leaked into the result: {results:x?}");
+    }
+
+    /// A10: constantinople's victory requires a living Byzantium. Federation at 90, the
+    /// Ottoman army at 0, three sustained ticks from `minimum_tick`: the victory comes with
+    /// Byzantium in the world and does not come with her removed — both ways.
+    #[test]
+    fn victory_requires_a_living_byzantium() {
+        let scenario = crate::scenarios::registry::load_by_id("constantinople_1430").expect("scenario");
+        let run = |byzantium_alive: bool| {
+            let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 1);
+            for a in scenario.actors.iter().filter(|a| !a.is_successor_template) {
+                world.actors.insert(a.id.clone(), a.clone());
+            }
+            if !byzantium_alive {
+                world.actors.remove("byzantium");
+                world.dead_actor_ids.insert("byzantium".to_string());
+            }
+            world.tick = scenario.victory_condition.as_ref().unwrap().minimum_tick;
+            MetricRef::literal("global:federation_progress").apply(&mut world, 90.0);
+            world.actors.get_mut("ottomans").unwrap().set_metric("military_size", 0.0);
+            for _ in 0..3 {
+                check_victory_condition(&mut world, &scenario);
+            }
+            world.victory_achieved
+        };
+        assert!(run(true), "with Byzantium alive the victory must come");
+        assert!(!run(false), "over a fallen Byzantium there is no victory");
     }
 
     #[test]

@@ -169,6 +169,16 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A victory's `requires_alive` names starting actors (A10) — a successor template is not
+    // alive at the start and may never be, so the victory could never count.
+    if let Some(vc) = &scenario.victory_condition {
+        for id in &vc.requires_alive {
+            if !scenario.actors.iter().any(|a| &a.id == id && !a.is_successor_template) {
+                errors.push(format!("victory_condition: requires_alive '{id}' is not a starting actor"));
+            }
+        }
+    }
+
     // The consequence context is read only in `Consequences`, which only a milestone with
     // `triggers_collapse` reaches. Text with no way to be shown is dead, and dead text lies
     // the day someone restores the flag: it must be present if and only if some milestone
@@ -342,6 +352,14 @@ mod tests {
         scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().triggers_collapse = true;
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("consequence_context")), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_rejects_a_victory_requiring_a_template() {
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.victory_condition.as_mut().unwrap().requires_alive = vec!["rome_west".to_string()];
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("requires_alive 'rome_west'")), "{errors:?}");
     }
 
     #[test]
