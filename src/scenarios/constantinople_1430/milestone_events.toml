@@ -12,13 +12,15 @@ id = "church_union"
 is_key = true
 triggers_collapse = false
 llm_context_shift = "Уния церквей подписана. Папа обещает помощь. Православные недовольны."
+# A9 (owner's decision): a historical date — the Council of Florence, 1439, tick 18.
+# The union is the scenario's premise, concluded for the West's help whatever that help
+# turns out to be — not a result of play. `byzantium.legitimacy > 65` fired 0 of 120; a
+# gate on the federation axis fired on the same tick in every seed (the start rush holds
+# federation above 50–60 until ~tick 21) or, above 80, over a fallen Byzantium. Same
+# precedent as `huns_visible` (A3). The milestone carries text only, no mechanics.
 [milestone_events.condition]
-type = "metric"
-metric = "legitimacy"
-actor_id = "byzantium"
-operator = "greater"
-value = 65.0
-duration = 3
+type = "tick"
+tick = 18
 
 [[milestone_events]]
 id = "varna_crusade"

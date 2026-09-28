@@ -1806,3 +1806,26 @@ fn rome_split_does_not_end_the_scenario() {
     assert_eq!(ws.game_mode, crate::core::GameMode::Scenario, "the split must not end the scenario");
     assert!(!st.event_log.events.iter().any(|e| e.id == "game_mode_consequences"), "no mode-change event");
 }
+
+/// A9: `church_union` is a historical date — the Council of Florence, 1439, tick 18 — and
+/// fires there with Byzantium alive (120 of 120 runs over four worlds × 30 seeds when
+/// decided). The gate it replaced, `byzantium.legitimacy > 65`, fired 0 of 120.
+#[test]
+fn church_union_is_signed_in_1439() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    let mut fired_at = None;
+    for _ in 0..20 {
+        let tick = st.world_state.as_ref().unwrap().tick;
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+        let ws = st.world_state.as_ref().unwrap();
+        if fired_at.is_none() && ws.milestone_events_fired.iter().any(|m| m == "church_union") {
+            fired_at = Some(tick);
+            assert!(ws.actors.contains_key("byzantium"), "the union is signed by a living Byzantium");
+        }
+    }
+    assert_eq!(fired_at, Some(18));
+    assert!(st.event_log.events.iter().any(|e| e.id == "church_union" && e.tick == 18), "the event is logged at tick 18");
+}
