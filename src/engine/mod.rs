@@ -1220,7 +1220,9 @@ fn check_game_mode_transitions(
         let fired_now = event_log.events.iter().rev()
             .take_while(|e| e.tick == world.tick)
             .any(|e| e.id == milestone.id);
-        if milestone.triggers_collapse && fired_now {
+        // By `splits_actor`, not by `triggers_collapse`: a split is not the end of a
+        // scenario (rome's 395 leaves 130 years of it), and the two no longer ride one flag.
+        if milestone.splits_actor.is_some() && fired_now {
             apply_seat_split(world, scenario, milestone, event_log);
         }
     }

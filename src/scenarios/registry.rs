@@ -158,9 +158,6 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
     // and that actor must be splittable — exactly one heir keeps the seat.
     for m in &scenario.milestone_events {
         let Some(target) = &m.splits_actor else { continue };
-        if !m.triggers_collapse {
-            errors.push(format!("milestone '{}': splits_actor without triggers_collapse — the split would never run", m.id));
-        }
         match scenario.actors.iter().find(|a| &a.id == target && !a.is_successor_template) {
             None => errors.push(format!("milestone '{}': splits_actor '{}' is not a starting actor", m.id, target)),
             Some(a) => {
@@ -170,6 +167,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
                 }
             }
         }
+    }
+
+    // The consequence context is read only in `Consequences`, which only a milestone with
+    // `triggers_collapse` reaches. Text with no way to be shown is dead, and dead text lies
+    // the day someone restores the flag: it must be present if and only if some milestone
+    // ends the scenario.
+    let ends = scenario.milestone_events.iter().any(|m| m.triggers_collapse);
+    if ends == scenario.consequence_context.trim().is_empty() {
+        errors.push(format!(
+            "consequence_context must be non-empty exactly when a milestone triggers_collapse \
+             (triggers_collapse: {ends}, context empty: {})",
+            scenario.consequence_context.trim().is_empty()
+        ));
     }
 
     // Check dependency thresholds. Centralized here so every scenario routed
@@ -318,10 +328,20 @@ mod tests {
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("rome_splits") && e.contains("seat-keeping")), "{errors:?}");
 
+        // A split is not the end of a scenario: rome's split does not trigger_collapse, and
+        // that is valid (the flag and the target no longer ride together).
+        let scenario = crate::scenarios::rome_375::load_rome_375();
+        assert!(!scenario.milestone_events.iter().find(|m| m.id == "rome_splits").unwrap().triggers_collapse);
+
+        // Consequence text present iff some milestone ends the scenario.
         let mut scenario = crate::scenarios::rome_375::load_rome_375();
-        scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().triggers_collapse = false;
+        scenario.consequence_context = "Сценарный период завершён.".to_string();
         let errors = validate_scenario(&scenario).unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("without triggers_collapse")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("consequence_context")), "{errors:?}");
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().triggers_collapse = true;
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("consequence_context")), "{errors:?}");
     }
 
     #[test]
