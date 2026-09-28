@@ -198,13 +198,20 @@ metric = "actor:milan.legitimacy"
 operator = "greater"
 value = 58.0
 delta = 0.2
+# Coalition upkeep (A10, owner's decision: lever (b)×2, exactly in the measured form).
+# The pressure condition holds in 91–99 % of Byzantium's living ticks — pressure
+# saturates near 100 — so −4 is in effect a standing tax on keeping the coalition
+# together: the federation has to be held by a steady flow of actions, which the allies'
+# treasuries limit. Measured (federation_probe, 30 × 300): the share of living ticks at
+# ≥ 80 falls from 71–85 % to 15–19 %, and the victory is no longer a timer on tick ~40.
+# If the pressure ever stops saturating, A10 has to be measured again.
 [[auto_deltas.conditions]]
 metric = "actor:byzantium.external_pressure"
 operator = "greater"
 value = 70.0
-delta = -2.0
+delta = -4.0
 [[auto_deltas.conditions]]
 metric = "actor:ottomans.military_size"
 operator = "greater"
 value = 220.0
-delta = -3.0
+delta = -6.0

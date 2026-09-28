@@ -177,6 +177,20 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
                 errors.push(format!("victory_condition: requires_alive '{id}' is not a starting actor"));
             }
         }
+        // Every actor the victory reads must be required alive (B44): a dead actor's
+        // metric reads 0.0, and `ottomans.military_size < 40` passed on a dead Ottoman
+        // empire in all 26 of its wins under the coalition upkeep.
+        let reads = std::iter::once(&vc.metric).chain(vc.additional_conditions.iter().map(|c| &c.metric));
+        for m in reads {
+            if let crate::core::MetricRef::Actor { actor_id, .. } = m {
+                if !vc.requires_alive.iter().any(|id| id == actor_id.as_str()) {
+                    errors.push(format!(
+                        "victory_condition reads actor '{}' ({m}) but does not require it alive",
+                        actor_id.as_str()
+                    ));
+                }
+            }
+        }
     }
 
     // The consequence context is read only in `Consequences`, which only a milestone with
@@ -352,6 +366,23 @@ mod tests {
         scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().triggers_collapse = true;
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("consequence_context")), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_requires_victory_actors_alive() {
+        // Both ways: the Ottoman condition back without the Ottomans in `requires_alive`
+        // is rejected; with them listed it passes.
+        let mut scenario = crate::scenarios::constantinople_1430::load_constantinople_1430();
+        let vc = scenario.victory_condition.as_mut().unwrap();
+        vc.additional_conditions = vec![crate::core::Condition {
+            metric: crate::core::MetricRef::literal("actor:ottomans.military_size"),
+            operator: crate::core::ComparisonOperator::Less,
+            value: 40.0,
+        }];
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("reads actor 'ottomans'")), "{errors:?}");
+        scenario.victory_condition.as_mut().unwrap().requires_alive.push("ottomans".to_string());
+        assert!(validate_scenario(&scenario).is_ok());
     }
 
     #[test]
