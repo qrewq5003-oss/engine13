@@ -267,7 +267,6 @@ pub fn force_spawn(
         narrative_status: NarrativeStatus::Background,
         tags: vec![],
         metrics: initial_metrics,
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),

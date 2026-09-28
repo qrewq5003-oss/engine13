@@ -340,11 +340,6 @@ fn create_actors() -> Vec<Actor> {
 // ============================================================================
 
 fn create_rome() -> Actor {
-    let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome".to_string(),
@@ -371,7 +366,6 @@ fn create_rome() -> Actor {
             ("external_pressure".to_string(), 38.0),
             ("treasury".to_string(), 1800.0),
         ]),
-        scenario_metrics,
         neighbors: vec![
             Neighbor { id: "visigoths".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "ostrogoths".to_string(), distance: 3, border_type: BorderType::Land },
@@ -423,7 +417,6 @@ fn create_huns() -> Actor {
             ("external_pressure".to_string(), 5.0),
             ("treasury".to_string(), 80.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ostrogoths".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -464,7 +457,6 @@ fn create_visigoths() -> Actor {
             ("external_pressure".to_string(), 65.0),
             ("treasury".to_string(), 40.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "ostrogoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -504,7 +496,6 @@ fn create_ostrogoths() -> Actor {
             ("external_pressure".to_string(), 78.0),
             ("treasury".to_string(), 30.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "huns".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -546,7 +537,6 @@ fn create_sassanids() -> Actor {
             ("external_pressure".to_string(), 30.0),
             ("treasury".to_string(), 900.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "armenia".to_string(), distance: 1, border_type: BorderType::Land },
@@ -588,7 +578,6 @@ fn create_vandals() -> Actor {
             ("external_pressure".to_string(), 55.0),
             ("treasury".to_string(), 25.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
@@ -626,7 +615,6 @@ fn create_burgundians() -> Actor {
             ("external_pressure".to_string(), 35.0),
             ("treasury".to_string(), 20.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
@@ -666,7 +654,6 @@ fn create_franks() -> Actor {
             ("external_pressure".to_string(), 25.0),
             ("treasury".to_string(), 30.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
@@ -705,7 +692,6 @@ fn create_saxons() -> Actor {
             ("external_pressure".to_string(), 15.0),
             ("treasury".to_string(), 15.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 3, border_type: BorderType::Sea },
         ],
@@ -743,7 +729,6 @@ fn create_alamanni() -> Actor {
             ("external_pressure".to_string(), 30.0),
             ("treasury".to_string(), 22.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 1, border_type: BorderType::Land },
         ],
@@ -782,7 +767,6 @@ fn create_berbers() -> Actor {
             ("external_pressure".to_string(), 20.0),
             ("treasury".to_string(), 35.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Sea },
         ],
@@ -822,7 +806,6 @@ fn create_armenia() -> Actor {
             ("external_pressure".to_string(), 55.0),
             ("treasury".to_string(), 120.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "rome".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "sassanids".to_string(), distance: 1, border_type: BorderType::Land },
@@ -863,7 +846,6 @@ fn create_kushans() -> Actor {
             ("external_pressure".to_string(), 50.0),
             ("treasury".to_string(), 300.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "sassanids".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "guptas".to_string(), distance: 2, border_type: BorderType::Land },
@@ -905,7 +887,6 @@ fn create_guptas() -> Actor {
             ("external_pressure".to_string(), 15.0),
             ("treasury".to_string(), 1200.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "kushans".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "eastern_jin".to_string(), distance: 3, border_type: BorderType::Sea },
@@ -946,7 +927,6 @@ fn create_eastern_jin() -> Actor {
             ("external_pressure".to_string(), 40.0),
             ("treasury".to_string(), 800.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "kushans".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "guptas".to_string(), distance: 3, border_type: BorderType::Sea },
@@ -963,11 +943,6 @@ fn create_eastern_jin() -> Actor {
 }
 
 fn create_rome_west() -> Actor {
-    let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome_west".to_string(),
@@ -994,7 +969,6 @@ fn create_rome_west() -> Actor {
             ("external_pressure".to_string(), 50.0),
             ("treasury".to_string(), 810.0)
         ]),
-        scenario_metrics,
         neighbors: vec![
             Neighbor { id: "visigoths".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "ostrogoths".to_string(), distance: 3, border_type: BorderType::Land },
@@ -1017,11 +991,6 @@ fn create_rome_west() -> Actor {
 }
 
 fn create_rome_east() -> Actor {
-    let mut scenario_metrics = HashMap::new();
-    scenario_metrics.insert("family:family_influence".to_string(), 8.0);
-    scenario_metrics.insert("family:family_knowledge".to_string(), 12.0);
-    scenario_metrics.insert("family:family_wealth".to_string(), 22.0);
-    scenario_metrics.insert("family:family_connections".to_string(), 15.0);
 
     Actor {
         id: "rome_east".to_string(),
@@ -1048,7 +1017,6 @@ fn create_rome_east() -> Actor {
             ("external_pressure".to_string(), 45.0),
             ("treasury".to_string(), 990.0)
         ]),
-        scenario_metrics,
         neighbors: vec![
             Neighbor { id: "sassanids".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "armenia".to_string(), distance: 2, border_type: BorderType::Land },
@@ -1095,7 +1063,6 @@ pub fn create_visigoth_kingdom_template() -> Actor {
             ("external_pressure".to_string(), 30.0),
             ("treasury".to_string(), 60.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),
@@ -1133,7 +1100,6 @@ pub fn create_ostrogoth_kingdom_template() -> Actor {
             ("external_pressure".to_string(), 35.0),
             ("treasury".to_string(), 40.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),
@@ -1171,7 +1137,6 @@ pub fn create_late_sassanids_template() -> Actor {
             ("external_pressure".to_string(), 50.0),
             ("treasury".to_string(), 300.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),
@@ -1209,7 +1174,6 @@ pub fn create_vandal_kingdom_africa_template() -> Actor {
             ("external_pressure".to_string(), 25.0),
             ("treasury".to_string(), 150.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),
@@ -1247,7 +1211,6 @@ pub fn create_frankish_kingdom_template() -> Actor {
             ("external_pressure".to_string(), 20.0),
             ("treasury".to_string(), 80.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![],
         on_collapse: vec![],
         actor_tags: HashMap::new(),

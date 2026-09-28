@@ -953,7 +953,6 @@ fn check_milestone_events(
                         metrics: cfg.initial_metrics.iter()
                             .map(|(k, v)| (k.as_str().to_string(), *v))
                             .collect(),
-                        scenario_metrics: HashMap::new(),
                         // Neighbor edges from config. `get_neighbor_pairs` treats
                         // an edge as bidirectional (it dedups sorted pairs), so
                         // listing them on the spawned actor alone is enough for it
@@ -2257,7 +2256,6 @@ mod tests {
             narrative_status: NarrativeStatus::Foreground,
             tags: vec![],
             metrics,
-            scenario_metrics: HashMap::new(),
             neighbors: neighbors.iter().map(|n| Neighbor { id: n.to_string(), distance: 1, border_type: BorderType::Land }).collect(),
             on_collapse: vec![],
             actor_tags: HashMap::new(),

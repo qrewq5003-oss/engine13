@@ -75,7 +75,7 @@ const SCENARIO_FIELDS_WALKED: &[(&str, &str)] = &[
     ("description", "scalar"),
     ("start_year", "scalar"),
     ("era", "scalar"),
-    ("actors", "WALKED: metrics, scenario_metrics, actor_tags[].metrics_modifier"),
+    ("actors", "WALKED: metrics, actor_tags[].metrics_modifier"),
     ("auto_deltas", "WALKED: metric, conditions[], ratio_conditions[]"),
     ("patron_actions", "WALKED: available_if, effects, cost"),
     ("milestone_events", "WALKED: condition, spawn_actor.initial_metrics"),
@@ -161,9 +161,6 @@ fn walk_scenario(sc: &Scenario, out: &mut Vec<Hit>) {
     for a in &sc.actors {
         for (k, v) in &a.metrics {
             push(out, id, "actors[].metrics", a.id.clone(), k.clone(), "INIT", format!("= {}", v));
-        }
-        for (k, v) in &a.scenario_metrics {
-            push(out, id, "actors[].scenario_metrics", a.id.clone(), k.clone(), "INIT", format!("= {}", v));
         }
         for (tag_id, t) in &a.actor_tags {
             for (k, v) in &t.metrics_modifier {

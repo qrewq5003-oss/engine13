@@ -1829,3 +1829,21 @@ fn church_union_is_signed_in_1439() {
     assert_eq!(fired_at, Some(18));
     assert!(st.event_log.events.iter().any(|e| e.id == "church_union" && e.tick == 18), "the event is logged at tick 18");
 }
+
+/// B47: `Actor::scenario_metrics` was removed. A save written before carries it on rome
+/// (8/12/22/15) and must load into the same world as the same save without the field.
+#[test]
+fn a_save_with_actor_scenario_metrics_still_loads() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+    let clean = serde_json::to_value(st.world_state.as_ref().unwrap()).unwrap();
+    let mut old = clean.clone();
+    old["actors"]["rome"].as_object_mut().unwrap().insert(
+        "scenario_metrics".into(),
+        serde_json::json!({ "family:family_influence": 8.0, "family:family_knowledge": 12.0 }),
+    );
+    let from_old: WorldState = serde_json::from_value(old).expect("an older save must load");
+    let from_clean: WorldState = serde_json::from_value(clean).unwrap();
+    assert_eq!(serde_json::to_value(&from_old).unwrap(), serde_json::to_value(&from_clean).unwrap());
+}

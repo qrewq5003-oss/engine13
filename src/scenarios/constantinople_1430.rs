@@ -391,7 +391,6 @@ fn create_byzantium() -> Actor {
             ("external_pressure".to_string(), 60.0),
             ("treasury".to_string(), 80.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Sea },
@@ -441,7 +440,6 @@ fn create_ottomans() -> Actor {
             ("external_pressure".to_string(), 20.0),
             ("treasury".to_string(), 400.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 1, border_type: BorderType::Land },
             Neighbor { id: "serbia".to_string(), distance: 1, border_type: BorderType::Land },
@@ -488,7 +486,6 @@ fn create_venice() -> Actor {
             ("external_pressure".to_string(), 35.0),
             ("treasury".to_string(), 600.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "genoa".to_string(), distance: 2, border_type: BorderType::Sea },
             Neighbor { id: "milan".to_string(), distance: 2, border_type: BorderType::Land },
@@ -532,7 +529,6 @@ fn create_genoa() -> Actor {
             ("external_pressure".to_string(), 40.0),
             ("treasury".to_string(), 450.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Sea },
             Neighbor { id: "milan".to_string(), distance: 2, border_type: BorderType::Land },
@@ -574,7 +570,6 @@ fn create_milan() -> Actor {
             ("external_pressure".to_string(), 30.0),
             ("treasury".to_string(), 500.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "genoa".to_string(), distance: 2, border_type: BorderType::Land },
@@ -615,7 +610,6 @@ fn create_papacy() -> Actor {
             ("external_pressure".to_string(), 25.0),
             ("treasury".to_string(), 300.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "venice".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "genoa".to_string(), distance: 2, border_type: BorderType::Land },
@@ -657,7 +651,6 @@ fn create_hungary() -> Actor {
             ("external_pressure".to_string(), 55.0),
             ("treasury".to_string(), 200.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 3, border_type: BorderType::Land },
             Neighbor { id: "serbia".to_string(), distance: 2, border_type: BorderType::Land },
@@ -699,7 +692,6 @@ fn create_serbia() -> Actor {
             ("external_pressure".to_string(), 65.0),
             ("treasury".to_string(), 100.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "byzantium".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "ottomans".to_string(), distance: 1, border_type: BorderType::Land },
@@ -745,7 +737,6 @@ fn create_trebizond() -> Actor {
             ("external_pressure".to_string(), 50.0),
             ("treasury".to_string(), 120.0)
         ]),
-        scenario_metrics: HashMap::new(),
         neighbors: vec![
             Neighbor { id: "ottomans".to_string(), distance: 2, border_type: BorderType::Land },
             Neighbor { id: "byzantium".to_string(), distance: 3, border_type: BorderType::Sea },

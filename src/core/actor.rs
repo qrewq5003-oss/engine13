@@ -137,7 +137,9 @@ pub struct Actor {
     pub narrative_status: NarrativeStatus,
     pub tags: Vec<String>,
     pub metrics: HashMap<String, f64>,
-    pub scenario_metrics: HashMap<String, f64>,
+    // `scenario_metrics` removed (B47): no engine writer; its only reader, the actor
+    // detail panel, showed rome's family numbers frozen at 8/12/22/15 next to their live
+    // values in the family panel. An older save's copy is ignored on load.
     pub neighbors: Vec<Neighbor>,
     pub on_collapse: Vec<Successor>,
     pub actor_tags: HashMap<String, ActorTag>,
