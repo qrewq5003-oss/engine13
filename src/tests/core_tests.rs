@@ -1801,3 +1801,21 @@ fn the_split_by_date_divides_rome() {
     assert_eq!(ws.actors.get("rome").map(|r| r.name.clone()), Some(west_name), "the seat keeps `rome` under the western name");
     assert!(ws.actors.contains_key("rome_east"), "the East must be alive after the split");
 }
+
+/// The split of 395 is not the end of rome's scenario: by tick 41 the empire is divided
+/// and the game is still in `Scenario` — no switch to `Consequences`, no mode-change event.
+/// Restoring `triggers_collapse` on `rome_splits` makes this fail.
+#[test]
+fn rome_split_does_not_end_the_scenario() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(3));
+    for _ in 0..42 {
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+    }
+    let ws = st.world_state.as_ref().unwrap();
+    assert!(ws.actors.contains_key("rome_east"), "the split must have happened");
+    assert_eq!(ws.game_mode, crate::core::GameMode::Scenario, "the split must not end the scenario");
+    assert!(!st.event_log.events.iter().any(|e| e.id == "game_mode_consequences"), "no mode-change event");
+}

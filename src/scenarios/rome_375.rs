@@ -177,7 +177,9 @@ pub fn load_rome_375() -> Scenario {
         rank_conditions: create_rank_conditions(),
         generation_mechanics: Some(create_generation_mechanics()),
         llm_context: create_llm_context(),
-        consequence_context: create_consequence_context(),
+        // No milestone ends rome's scenario (the split does not), so `Consequences` is
+        // never reached and there is no consequence text to show — see the validator.
+        consequence_context: String::new(),
         player_actor_id: Some("rome".to_string()),
         status_indicators: create_status_indicators(),
         global_metric_weights: HashMap::new(),
@@ -1511,7 +1513,9 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
                 duration: None,
             },
             is_key: true,
-            triggers_collapse: true,
+            // Not the end of the scenario: 395 leaves 130 years of it, and the fall of the
+            // West is the collapse gates' (A11). The split rides `splits_actor` alone.
+            triggers_collapse: false,
             // The split is now real: this milestone shrinks Rome to its western
             // share and separates the East (`keeps_seat`, docs/investigation_split_as_shrink.md
             // §11). The wording says exactly that and nothing more — between
@@ -1776,19 +1780,6 @@ fn create_status_indicators() -> Vec<crate::core::StatusIndicator> {
             ],
         },
     ]
-}
-
-fn create_consequence_context() -> String {
-    // No "survived — or did not": the family metrics that answer it are in the
-    // same prompt (docs/investigation_consequence_context.md §2.3).
-    // «Роль игрока — наблюдатель с ограниченным влиянием» removed (B42): the player keeps
-    // every scenario action after the split — the mode never restricted the UI's list —
-    // so the chronicler was told the opposite of the game.
-    // «Сценарный период завершён…» and «нарратив охватывает более широкий период» removed
-    // (A12): the split now comes in 395, with 130 years of scenario and the fall of the
-    // West still ahead — neither sentence was true.
-    r#"Семья по-прежнему действует — теми же средствами, что и прежде.
-Семья продолжает существовать в том мире который сложился."#.to_string()
 }
 
 #[cfg(test)]
