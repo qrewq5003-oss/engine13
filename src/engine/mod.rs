@@ -1910,6 +1910,50 @@ fn check_collapses(
                 if let Some(heir) = world.actors.get_mut(&successor.id) {
                     heir.add_metric("expansion_count", 1.0);
                 }
+
+                // The border passes to a sole absorber, by the same rule as a fresh sole
+                // heir above (B24): every living neighbour of the dead power names the
+                // absorber in its place (or drops the dead id if it already names the
+                // absorber), and the absorber gains those edges from their side. Before,
+                // absorption touched no edges — neighbours kept a dangling reference and
+                // the absorber never met them. Measured in emulation (100 seeds × 300):
+                // dangling references −60…−67 %, deaths and victories unchanged, wars in
+                // milan +20 %. Actors walked in id order. See docs/TRIAGE.md, «B24».
+                if successors.len() == 1 {
+                    let heir_id = successor.id.clone();
+                    let mut ids: Vec<String> = world.actors.keys().cloned().collect();
+                    ids.sort();
+                    let mut inherited: Vec<crate::core::Neighbor> = Vec::new();
+                    for id in &ids {
+                        if *id == heir_id || *id == actor_id {
+                            continue;
+                        }
+                        let Some(other) = world.actors.get_mut(id) else { continue };
+                        let Some(edge) = other.neighbors.iter().find(|n| n.id == actor_id).cloned() else { continue };
+                        if other.neighbors.iter().any(|n| n.id == heir_id) {
+                            other.neighbors.retain(|n| n.id != actor_id);
+                        } else {
+                            for n in other.neighbors.iter_mut() {
+                                if n.id == actor_id {
+                                    n.id = heir_id.clone();
+                                }
+                            }
+                            inherited.push(crate::core::Neighbor {
+                                id: id.clone(),
+                                distance: edge.distance,
+                                border_type: edge.border_type,
+                            });
+                        }
+                    }
+                    if let Some(heir) = world.actors.get_mut(&heir_id) {
+                        heir.neighbors.retain(|n| n.id != actor_id);
+                        for n in inherited {
+                            if !heir.neighbors.iter().any(|m| m.id == n.id) {
+                                heir.neighbors.push(n);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2447,8 +2491,11 @@ mod tests {
         assert_eq!(neighbor_ids(&world, "west"), ["huns"]);
     }
 
+    /// Absorption by a living heir: the border passes to it (B24). This test pinned the
+    /// opposite until then — «absorption does not touch any list» — as the scope line
+    /// of D₄ (docs/investigation_successor_edges.md §8 left the question open).
     #[test]
-    fn absorption_does_not_touch_any_list() {
+    fn absorption_passes_the_parents_edges_to_the_heir() {
         let heir = vassalage_actor("heir", 50.0, 30.0, 60.0, 60.0, &[]);
         let mut parent = doomed_actor("parent", &["heir"]);
         parent.neighbors = vassalage_actor("parent", 0.0, 0.0, 0.0, 0.0, &["huns"]).neighbors;
@@ -2463,8 +2510,8 @@ mod tests {
 
         kill(&mut world, &scenario, &mut log);
 
-        assert!(neighbor_ids(&world, "heir").is_empty());
-        assert_eq!(neighbor_ids(&world, "huns"), ["parent"]);
+        assert_eq!(neighbor_ids(&world, "heir"), ["huns"], "the absorber gains the parent's edge");
+        assert_eq!(neighbor_ids(&world, "huns"), ["heir"], "the neighbour names the absorber instead of the dead parent");
     }
 
     // ------------------------------------------------------------------
