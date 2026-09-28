@@ -154,6 +154,24 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Check the split target (A12): a milestone that splits names its actor explicitly,
+    // and that actor must be splittable — exactly one heir keeps the seat.
+    for m in &scenario.milestone_events {
+        let Some(target) = &m.splits_actor else { continue };
+        if !m.triggers_collapse {
+            errors.push(format!("milestone '{}': splits_actor without triggers_collapse — the split would never run", m.id));
+        }
+        match scenario.actors.iter().find(|a| &a.id == target && !a.is_successor_template) {
+            None => errors.push(format!("milestone '{}': splits_actor '{}' is not a starting actor", m.id, target)),
+            Some(a) => {
+                let seats = a.on_collapse.iter().filter(|h| h.keeps_seat).count();
+                if seats != 1 {
+                    errors.push(format!("milestone '{}': splits_actor '{}' has {} seat-keeping heirs, exactly one is needed", m.id, target, seats));
+                }
+            }
+        }
+    }
+
     // Check dependency thresholds. Centralized here so every scenario routed
     // through `load_by_id` is checked even if it omits a per-scenario
     // `validate_dependencies` call. Metric-name checks (from/to) stay per-scenario
@@ -287,6 +305,23 @@ mod tests {
         }
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("lone heir")), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_checks_the_split_target() {
+        // A12: the split target is named, and must be splittable.
+        let scenario = crate::scenarios::rome_375::load_rome_375();
+        assert!(validate_scenario(&scenario).is_ok(), "rome as authored must validate");
+
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().splits_actor = Some("visigoths".to_string());
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("rome_splits") && e.contains("seat-keeping")), "{errors:?}");
+
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.milestone_events.iter_mut().find(|m| m.id == "rome_splits").unwrap().triggers_collapse = false;
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("without triggers_collapse")), "{errors:?}");
     }
 
     #[test]

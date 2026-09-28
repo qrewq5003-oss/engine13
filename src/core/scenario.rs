@@ -586,6 +586,14 @@ pub struct MilestoneEvent {
     pub cooldown_ticks: Option<u32>,  // Minimum ticks between firings
     #[serde(default)]
     pub spawn_actor: Option<SpawnActorConfig>,
+    /// The actor this milestone splits into its heirs (A12). Named, not read off the
+    /// condition: the condition says *when*, this says *whom*. A date-triggered split
+    /// (`Tick`) names no actor in its condition, and deriving the actor from it would
+    /// silently skip the split while the mode switched and the chronicler was told the
+    /// empire divided. Validated at load: the actor must exist and have exactly one
+    /// heir that `keeps_seat`, and the milestone must `triggers_collapse`.
+    #[serde(default)]
+    pub splits_actor: Option<String>,
 }
 
 /// Configuration for spawning a new actor via milestone event
