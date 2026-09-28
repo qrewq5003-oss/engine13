@@ -893,6 +893,14 @@ fn check_milestone_events(
             continue;
         }
 
+        // A milestone that follows another does not even start counting until that one
+        // has fired (A2).
+        if let Some(prev) = &milestone.after {
+            if !world.milestone_events_fired.contains(prev) {
+                continue;
+            }
+        }
+
         // Check cooldown
         if let Some(cooldown) = milestone.cooldown_ticks {
             if let Some(last_tick) = world.milestone_cooldowns.get(&milestone.id) {
@@ -2645,6 +2653,7 @@ mod tests {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: Some("parent".into()),
+            after: None,
         }];
         let mut world = WorldState::new("test".into(), 375);
         world.actors.insert("parent".into(), parent);
@@ -2724,6 +2733,7 @@ mod tests {
                 culture: crate::core::Culture::Slavic,
             }),
             splits_actor: None,
+            after: None,
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);

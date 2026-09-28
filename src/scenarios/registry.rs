@@ -154,6 +154,16 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Check `after` (A2): an existing milestone of this scenario, not the milestone itself.
+    for m in &scenario.milestone_events {
+        let Some(prev) = &m.after else { continue };
+        if prev == &m.id {
+            errors.push(format!("milestone '{}': after names itself", m.id));
+        } else if !scenario.milestone_events.iter().any(|o| &o.id == prev) {
+            errors.push(format!("milestone '{}': after names unknown milestone '{}'", m.id, prev));
+        }
+    }
+
     // Check the split target (A12): a milestone that splits names its actor explicitly,
     // and that actor must be splittable — exactly one heir keeps the seat.
     for m in &scenario.milestone_events {
@@ -391,6 +401,18 @@ mod tests {
         scenario.victory_condition.as_mut().unwrap().requires_alive = vec!["rome_west".to_string()];
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("requires_alive 'rome_west'")), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_checks_milestone_after() {
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.milestone_events.iter_mut().find(|m| m.id == "family_falls").unwrap().after = Some("family_falls".to_string());
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("after names itself")), "{errors:?}");
+        let mut scenario = crate::scenarios::rome_375::load_rome_375();
+        scenario.milestone_events.iter_mut().find(|m| m.id == "family_falls").unwrap().after = Some("ghost".to_string());
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("unknown milestone 'ghost'")), "{errors:?}");
     }
 
     #[test]

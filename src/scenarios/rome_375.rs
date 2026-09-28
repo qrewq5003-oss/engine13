@@ -205,11 +205,14 @@ pub fn load_rome_375() -> Scenario {
             requires_alive: vec![],
         }),
         global_metrics_display: vec![],
+        // A2: the specification's start, 8 / 12 / 22 / 15 — a modest family, the scenario's
+        // premise. The single source: the three frozen copies in `scenario_metrics` were
+        // removed (B47), and the guard holds this map equal to the specification.
         initial_family_metrics: Some(HashMap::from([
-            ("family:family_influence".to_string(), 0.0),
-            ("family:family_knowledge".to_string(), 0.0),
-            ("family:family_wealth".to_string(), 0.0),
-            ("family:family_connections".to_string(), 0.0),
+            ("family:family_influence".to_string(), 8.0),
+            ("family:family_knowledge".to_string(), 12.0),
+            ("family:family_wealth".to_string(), 22.0),
+            ("family:family_connections".to_string(), 15.0),
         ])),
         max_random_events_per_tick: 2,
         narrative_config: crate::core::NarrativeConfig {
@@ -1463,6 +1466,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: None,
+            after: None,
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1490,6 +1494,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: Some("rome".to_string()),
+            after: None,
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1508,6 +1513,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: None,
+            after: None,
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1525,6 +1531,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: None,
+            after: None,
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1543,6 +1550,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             cooldown_ticks: None,
             spawn_actor: None,
             splits_actor: None,
+            // «Lost everything it had gained» — only after it had risen (A2).
+            after: Some("family_rises".to_string()),
         },
     ]
 }

@@ -1847,3 +1847,30 @@ fn a_save_with_actor_scenario_metrics_still_loads() {
     let from_clean: WorldState = serde_json::from_value(clean).unwrap();
     assert_eq!(serde_json::to_value(&from_old).unwrap(), serde_json::to_value(&from_clean).unwrap());
 }
+
+/// A2: `family_falls` («lost everything it had gained») fires only after `family_rises`.
+/// Both ways: with the family's influence pushed below the fall threshold and no rise
+/// yet, the fall does not fire; the same world with `after` removed fires it.
+#[test]
+fn family_falls_only_after_family_rises() {
+    let run = |keep_after: bool| {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(1));
+        if !keep_after {
+            for m in st.current_scenario.as_mut().unwrap().milestone_events.iter_mut() {
+                if m.id == "family_falls" { m.after = None; }
+            }
+        }
+        MetricRef::literal("family:influence").apply(st.world_state.as_mut().unwrap(), -100.0);
+        for _ in 0..3 {
+            crate::commands::advance_tick_silent(&mut st).unwrap();
+        }
+        let fired = &st.world_state.as_ref().unwrap().milestone_events_fired;
+        assert!(!fired.iter().any(|m| m == "family_rises"), "precondition: no rise in three ticks");
+        fired.iter().any(|m| m == "family_falls")
+    };
+    assert!(!run(true), "no fall before a rise");
+    assert!(run(false), "without `after` the fall fires on the melted influence");
+}
