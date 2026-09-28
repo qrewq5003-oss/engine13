@@ -1730,3 +1730,32 @@ fn friction_is_read_one_way_by_the_war_roll() {
         "a strong attacker must be likelier to strike the more foreign defender"
     );
 }
+
+/// B24: when a power dies into an heir that is already alive (absorption), the border
+/// passes to the absorber: no living actor keeps a reference to the dead power, and the
+/// absorber names its former neighbours. In milan `savoy` is absorbed by `milan` in every
+/// game; the test plays until that happens.
+#[test]
+fn absorption_passes_the_border_to_the_absorber() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    let savoy_neighbours: Vec<String> = st.world_state.as_ref().unwrap().actors["savoy"]
+        .neighbors.iter().map(|n| n.id.clone()).filter(|id| id != "milan").collect();
+    for _ in 0..300 {
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+        if st.world_state.as_ref().unwrap().dead_actor_ids.contains("savoy") {
+            break;
+        }
+    }
+    let ws = st.world_state.as_ref().unwrap();
+    let absorbed = ws.dead_actors.iter().any(|d| d.id == "savoy" && d.successor_ids.iter().any(|s| s.id == "milan"))
+        && ws.actors.contains_key("milan");
+    assert!(absorbed, "precondition: savoy must be absorbed by a living milan within 300 ticks");
+    let dangling: Vec<&String> = ws.actors.values().filter(|a| a.neighbors.iter().any(|n| n.id == "savoy")).map(|a| &a.id).collect();
+    assert!(dangling.is_empty(), "living actors still name the absorbed savoy: {dangling:?}");
+    for id in savoy_neighbours.iter().filter(|id| ws.actors.contains_key(*id)) {
+        assert!(ws.actors["milan"].neighbors.iter().any(|n| &n.id == id), "milan did not inherit savoy's border with {id}");
+    }
+}
