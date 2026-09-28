@@ -248,9 +248,13 @@ pub fn load_constantinople_1430() -> Scenario {
                 metric: crate::core::MetricRef::literal("global:federation_progress"),
                 label: "Прогресс федерации".to_string(),
                 panel_title: "Федерация".to_string(),
+                // Bounds 30 / 60 / 80, the same as the status indicator and the key metric
+                // (B32): the panel said 20 / 50 / 80, so between 20–30 and 50–60 it named a
+                // band the other two did not. Its own, longer wording stays. Guarded by
+                // `every_consumer_of_a_metric_uses_the_same_band_bounds`.
                 thresholds: vec![
-                    crate::core::MetricThreshold { below: 20.0, text: "Разговоры ни к чему не обязывающие".to_string() },
-                    crate::core::MetricThreshold { below: 50.0, text: "Первые договорённости, взаимное недоверие".to_string() },
+                    crate::core::MetricThreshold { below: 30.0, text: "Разговоры ни к чему не обязывающие".to_string() },
+                    crate::core::MetricThreshold { below: 60.0, text: "Первые договорённости, взаимное недоверие".to_string() },
                     crate::core::MetricThreshold { below: 80.0, text: "Реальный союз, совместные действия".to_string() },
                     crate::core::MetricThreshold { below: 101.0, text: "Федерация — исторически беспрецедентное событие".to_string() },
                 ],
