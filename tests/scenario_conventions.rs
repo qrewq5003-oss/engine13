@@ -2811,10 +2811,8 @@ fn scenario_indicator_count(pred: impl Fn(&engine13::core::StatusIndicator) -> b
 fn metric_milestones_are_closed_in_the_starting_world() {
     // id -> why it is open on tick 0 today. Each is an authored question, recorded rather
     // than silently fixed; an entry that is no longer open at start fails the guard.
-    const ALLOWED: &[(&str, &str)] = &[
-        ("wallachia_emerges", "A31: the Ottomans start at military_size 180 against a gate of \
-          > 70, so Wallachia spawns on tick 0 in 30/30 games of every world"),
-    ];
+    // Empty since A31 wrote `wallachia_emerges` as `Tick { tick: 0 }`.
+    const ALLOWED: &[(&str, &str)] = &[];
     let mut allowed_hit: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut failures = Vec::new();
     for &id in SCENARIO_IDS {

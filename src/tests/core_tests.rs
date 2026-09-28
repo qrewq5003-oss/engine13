@@ -1874,3 +1874,25 @@ fn family_falls_only_after_family_rises() {
     assert!(!run(true), "no fall before a rise");
     assert!(run(false), "without `after` the fall fires on the melted influence");
 }
+
+/// A31: `wallachia_emerges` is the start of 1430, written as a date — not a threshold
+/// that holds on tick 0 (`ottomans.military_size > 70` against a start of 180). It fires
+/// on the first tick, as before, and spawns Wallachia.
+#[test]
+fn wallachia_emerges_is_dated_tick_zero() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(1));
+    let m = st.current_scenario.as_ref().unwrap().milestone_events.iter()
+        .find(|m| m.id == "wallachia_emerges").expect("wallachia_emerges").clone();
+    assert!(
+        matches!(m.condition.condition_type, crate::core::EventConditionType::Tick { tick: 0 }),
+        "wallachia_emerges must stand on Tick {{ tick: 0 }}, got {:?}", m.condition.condition_type
+    );
+    assert!(!m.is_key, "introducing an actor at the start is not a turning point");
+    crate::commands::advance_tick_silent(&mut st).unwrap();
+    let ws = st.world_state.as_ref().unwrap();
+    assert!(ws.milestone_events_fired.iter().any(|f| f == "wallachia_emerges"), "fires on the first tick");
+    assert!(ws.actors.contains_key("wallachia"), "the spawn comes with it");
+}
