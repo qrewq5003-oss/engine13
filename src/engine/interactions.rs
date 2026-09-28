@@ -881,27 +881,11 @@ fn calculate_cultural_interaction(
         event_log.add(event);
     }
 
-    // Cultural displacement: stronger culture pressures weaker neighbor
-    if distance <= 2 {
-        let actor_a = match world.actors.get(actor_a_id) {
-            Some(a) => a,
-            None => return,
-        };
-        let actor_b = match world.actors.get(actor_b_id) {
-            Some(a) => a,
-            None => return,
-        };
-        let a_power = cultural_power(actor_a);
-        let b_power = cultural_power(actor_b);
-
-        if a_power > b_power * 1.5 {
-            let delta = a_power - b_power;
-            apply_cultural_pressure(world, actor_a_id, actor_b_id, delta, current_tick, current_year, event_log);
-        } else if b_power > a_power * 1.5 {
-            let delta = b_power - a_power;
-            apply_cultural_pressure(world, actor_b_id, actor_a_id, delta, current_tick, current_year, event_log);
-        }
-    }
+    // Cultural displacement was here: a stronger culture accumulated progress on a weaker
+    // neighbour and at 100 took its culture and three tags. Removed (A30, owner's decision
+    // (a)): it could never fire — progress gained at most 3.0 per interaction and lost
+    // 5.0 per tick — and its `.take(3)` over a `HashMap` was the last order-dependent site
+    // of B37. See docs/TRIAGE.md, «A30 + B37».
 }
 
 // ============================================================================
@@ -925,7 +909,7 @@ fn in_vassalage_band(actor: &crate::core::Actor) -> bool {
 /// Three sequential steps:
 /// 1. Prune relationships whose vassal or overlord is no longer alive.
 /// 2. Dissolve (revolt) where the vassal's military has caught up to the overlord's
-///    (`vassal_mil >= overlord_mil * 0.8`, the `cultural_power` comparison shape) OR
+///    (`vassal_mil >= overlord_mil * 0.8`) OR
 ///    the overlord has itself entered the full vassalage band (`in_vassalage_band`:
 ///    external_pressure 70–85 AND legitimacy 10–25 AND cohesion 15–30).
 /// 3. Form new relationships for actors that have spent 3 consecutive ticks in the
@@ -1146,82 +1130,6 @@ fn should_record_event(interaction_type: &InteractionType, intensity: f64) -> bo
         InteractionType::Migration => intensity > 5.0,
         InteractionType::Vassalage => intensity > 3.0,
         InteractionType::Cultural => intensity > 3.0,
-    }
-}
-
-/// Calculate cultural power of an actor for displacement comparison
-fn cultural_power(actor: &crate::core::Actor) -> f64 {
-    let base = actor.get_metric("legitimacy") * 0.3
-        + actor.get_metric("cohesion") * 0.3
-        + actor.get_metric("economic_output") * 0.2;
-    let tag_bonus = actor.actor_tags.len() as f64 * 2.0;
-    base + tag_bonus
-}
-
-/// Apply cultural pressure from aggressor to target
-/// Accumulates displacement progress; at 100.0 triggers culture change
-fn apply_cultural_pressure(
-    world: &mut WorldState,
-    aggressor_id: &str,
-    target_id: &str,
-    pressure_delta: f64,
-    current_tick: u32,
-    current_year: i32,
-    event_log: &mut EventLog,
-) {
-    // Cap progress gain at 3.0 per tick
-    let progress_gain = (pressure_delta * 0.05).min(3.0);
-
-    let entry = world.cultural_displacement_progress
-        .entry(target_id.to_string())
-        .or_insert(0.0);
-    *entry += progress_gain;
-
-    // Check if displacement threshold reached
-    if *entry >= 100.0 {
-        // Get aggressor's culture and tags before mutable borrow
-        let aggressor_culture = world.actors.get(aggressor_id)
-            .map(|a| a.culture.clone());
-        let aggressor_tags: Vec<(String, ActorTag)> = world.actors.get(aggressor_id)
-            .map(|a| {
-                a.actor_tags.iter()
-                    .filter(|(id, _)| {
-                        // Only transfer tags the target doesn't already have
-                        !world.actors.get(target_id)
-                            .map(|t| t.tags.contains(id))
-                            .unwrap_or(true)
-                    })
-                    .take(3)
-                    .map(|(id, tag)| (id.clone(), tag.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        if let (Some(culture), Some(target)) = (aggressor_culture, world.actors.get_mut(target_id)) {
-            target.culture = culture;
-
-            // Transfer tags
-            for (tag_id, actor_tag) in aggressor_tags {
-                if !target.tags.contains(&tag_id) {
-                    target.tags.push(tag_id.clone());
-                    target.actor_tags.insert(tag_id, actor_tag);
-                }
-            }
-
-            let event = Event::new(
-                format!("cultural_displacement_{}", target_id),
-                current_tick,
-                current_year,
-                target_id.to_string(),
-                EventType::Cultural,
-                true,
-                format!("{} попал под культурное доминирование {}", target_id, aggressor_id),
-            );
-            event_log.add(event);
-        }
-
-        // Reset progress
-        world.cultural_displacement_progress.insert(target_id.to_string(), 0.0);
     }
 }
 

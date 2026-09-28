@@ -163,9 +163,9 @@ pub struct WorldState {
     /// Tag spread cooldowns - key: "tag_{id}_{sorted_pair}", value: last tick
     #[serde(default)]
     pub tag_spread_cooldowns: HashMap<String, u32>,
-    /// Cultural displacement progress - key: target actor_id, value: accumulated progress (0..100)
-    #[serde(default)]
-    pub cultural_displacement_progress: HashMap<String, f64>,
+    // `cultural_displacement_progress` removed with the mechanic (A30). It was
+    // `#[serde(default)]`, so older builds still load a save written without it, and an
+    // older save's copy is ignored here.
 }
 
 impl WorldState {
@@ -213,7 +213,6 @@ impl WorldState {
             actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
-            cultural_displacement_progress: HashMap::new(),
         }
     }
 
@@ -256,7 +255,6 @@ impl WorldState {
             actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
-            cultural_displacement_progress: HashMap::new(),
         }
     }
 

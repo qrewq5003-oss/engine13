@@ -854,42 +854,6 @@ fn test_exhausted_actor_survives_when_no_one_can_finish_it() {
     );
 }
 
-#[test]
-fn test_cultural_displacement_progress_accumulates() {
-    // Verify cultural displacement progress accumulates when there's a big power gap
-    let scenario = registry::load_by_id("rome_375").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
-
-    // Add rome (strong) and alamanni (weak; distance-1 neighbours since the limes edges)
-    for actor in &scenario.actors {
-        if actor.id == "rome" || actor.id == "alamanni" {
-            world.actors.insert(actor.id.clone(), actor.clone());
-        }
-    }
-
-    // Make alamanni very weak to create big cultural power gap
-    if let Some(alamanni) = world.actors.get_mut("alamanni") {
-        alamanni.set_metric("legitimacy", 10.0);
-        alamanni.set_metric("cohesion", 10.0);
-        alamanni.set_metric("economic_output", 5.0);
-    }
-
-    let mut event_log = crate::engine::EventLog::new();
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
-
-    // Run several ticks
-    for _ in 0..10 {
-        crate::engine::tick(&mut world, &scenario, &mut event_log, &mut rng);
-    }
-
-    // Check if displacement progress accumulated for alamanni
-    // (may or may not have triggered full displacement, but progress should exist or have triggered)
-    let progress = world.cultural_displacement_progress.get("alamanni").copied().unwrap_or(0.0);
-    // Progress accumulates then decays, so it might have triggered or be building up
-    // The key test is that it didn't panic and the system works
-    assert!(progress >= 0.0, "Displacement progress should be non-negative");
-}
-
 // --- Dependency rule validation (load-time guard for threshold-required modes) ---
 
 fn dep_rule(id: &str, mode: crate::core::DependencyMode, threshold: Option<f64>) -> crate::core::DependencyRule {
@@ -1800,4 +1764,16 @@ fn ui_list_and_apply_path_agree_on_every_action() {
         }
         assert!(seen.0 > 0 && seen.1 > 0, "{sc}: both available and unavailable actions must occur, got {seen:?}");
     }
+}
+
+/// A30: `cultural_displacement_progress` was removed with the mechanic. A save written
+/// before carries it and must still load; the field was `#[serde(default)]`, so a save
+/// written now also loads in an older build.
+#[test]
+fn a_world_saved_with_displacement_progress_still_loads() {
+    let world = WorldState::new("rome_375".into(), 375);
+    let mut v = serde_json::to_value(&world).unwrap();
+    v.as_object_mut().unwrap().insert("cultural_displacement_progress".into(), serde_json::json!({ "alamanni": 12.5 }));
+    let loaded: Result<WorldState, _> = serde_json::from_value(v);
+    assert!(loaded.is_ok(), "an older save must load: {:?}", loaded.err());
 }
