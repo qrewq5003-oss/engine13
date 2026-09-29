@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::core::census;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use crate::core::{
@@ -259,6 +260,7 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         // Check conditions
         let mut delta = auto_delta.base;
         for cond in &auto_delta.conditions {
+            census::begin(|| format!("auto_delta[{index}] {} | if {}", auto_delta.metric, cond.metric));
             if check_auto_delta_condition(world, cond) {
                 delta += cond.delta;
             }
@@ -266,15 +268,20 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
 
         // Check ratio conditions
         for ratio_cond in &auto_delta.ratio_conditions {
+            census::begin(|| format!("auto_delta[{index}] {} | ratio {} / {}", auto_delta.metric, ratio_cond.metric_a, ratio_cond.metric_b));
             let val_a = ratio_cond.metric_a.get(world);
             let val_b = ratio_cond.metric_b.get(world);
 
             if val_b == 0.0 {
+                census::condition(|| format!("{:?} {} — skipped, denominator 0", ratio_cond.operator, ratio_cond.ratio), false);
                 continue;
             }
             
             let actual_ratio = val_a / val_b;
-            let condition_met = ratio_cond.operator.evaluate(actual_ratio, ratio_cond.ratio);
+            let condition_met = census::condition(
+                || format!("{:?} {}", ratio_cond.operator, ratio_cond.ratio),
+                ratio_cond.operator.evaluate(actual_ratio, ratio_cond.ratio),
+            );
             
             if condition_met {
                 delta += ratio_cond.delta;
@@ -305,13 +312,14 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
 /// scope — it was resolved against the block's `actor_id` at load.
 fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
     let value = cond.metric.get(world);
-    match cond.operator {
+    let result = match cond.operator {
         crate::core::ComparisonOperator::Less => value < cond.value,
         crate::core::ComparisonOperator::LessOrEqual => value <= cond.value,
         crate::core::ComparisonOperator::Greater => value > cond.value,
         crate::core::ComparisonOperator::GreaterOrEqual => value >= cond.value,
         crate::core::ComparisonOperator::Equal => (value - cond.value).abs() < 0.001,
-    }
+    };
+    census::condition(|| format!("{:?} {}", cond.operator, cond.value), result)
 }
 
 // ============================================================================
@@ -459,11 +467,12 @@ fn phase_random_events(
         // Check conditions for each target
         for target_id in &target_ids {
             let conditions_met = event.conditions.iter().all(|cond| {
+                census::begin(|| format!("event {} @{} | if {}", event.id, target_id, cond.metric));
                 let value = cond.metric
                     .resolve(target_id)
                     .expect("event target actor id")
                     .get(world);
-                cond.operator.evaluate(value, cond.value)
+                census::condition(|| format!("{:?} {}", cond.operator, cond.value), cond.operator.evaluate(value, cond.value))
             });
 
             if !conditions_met {
@@ -596,13 +605,15 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
             return;
         }
         if world.tick >= vc.minimum_tick {
+            census::begin(|| format!("victory | {}", vc.metric));
             let value = vc.metric.get(world);
-            let main_condition = value >= vc.threshold;
+            let main_condition = census::condition(|| format!(">= {}", vc.threshold), value >= vc.threshold);
 
             // Check additional conditions
             let additional_ok = vc.additional_conditions.iter().all(|cond| {
+                census::begin(|| format!("victory | and {}", cond.metric));
                 let metric_value = cond.metric.get(world);
-                cond.operator.evaluate(metric_value, cond.value)
+                census::condition(|| format!("{:?} {}", cond.operator, cond.value), cond.operator.evaluate(metric_value, cond.value))
             });
 
             if main_condition && additional_ok {
@@ -795,7 +806,10 @@ fn check_rank_conditions(
                 actor_id,
                 operator,
                 value,
-            } => eval_metric_condition(world, metric, actor_id, operator, *value),
+            } => {
+                census::begin(|| format!("rank_condition {}", rank_cond.region_id));
+                eval_metric_condition(world, metric, actor_id, operator, *value)
+            }
             EventConditionType::ActorState { actor_id, state } => match state {
                 crate::core::ActorState::Dead => !world.is_actor_alive(actor_id),
                 crate::core::ActorState::Alive => world.is_actor_alive(actor_id),
@@ -872,11 +886,12 @@ fn eval_metric_condition(
 ) -> bool {
     if actor_id.is_some() {
         let Some(current) = metric.try_get(world) else {
-            return false; // the actor is not in the world
+            // the actor is not in the world
+            return census::condition(|| format!("{operator:?} {value} (actor_id: absent → false)"), false);
         };
         return compare(current, operator, &value);
     }
-    compare(metric.get(world), operator, &value)
+    census::condition(|| format!("{operator:?} {value}"), compare(metric.get(world), operator, &value))
 }
 
 fn check_milestone_events(
@@ -915,6 +930,7 @@ fn check_milestone_events(
             continue;
         }
 
+        census::begin(|| format!("milestone {}", milestone.id));
         let condition_met = check_event_condition(world, &milestone.condition);
 
         // Handle duration: condition must be met for `duration` consecutive ticks
@@ -1581,8 +1597,9 @@ fn check_generation_transfer(
         if patriarch_age < age {
             return false;
         }
+        census::begin(|| "early_transfer".to_string());
         let metric_value = metric.get(world);
-        operator.evaluate(metric_value, value)
+        census::condition(|| format!("{operator:?} {value}"), operator.evaluate(metric_value, value))
     });
 
     // Process generation transfer if triggered
