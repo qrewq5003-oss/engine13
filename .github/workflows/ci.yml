@@ -19,6 +19,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - run: cargo clippy --workspace -- -D warnings
+      # The B44 census (`core::census`, `dead_read_probe`) builds only with its feature;
+      # without this line nothing compiles it and the instrument rots unseen.
+      - run: cargo clippy --workspace --features census -- -D warnings
 
   tauri:
     # Крейт src-tauri не входит в воркспейс, поэтому `cargo test --workspace`

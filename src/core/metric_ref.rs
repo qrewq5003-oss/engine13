@@ -216,6 +216,7 @@ impl MetricRef {
     /// Use [`try_get`](Self::try_get) where the *absence* of an actor must be
     /// distinguishable from a zero value — a `less`-than condition on a dead
     /// actor is satisfied by the `0.0` default and would fire forever.
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn get(&self, world_state: &WorldState) -> f64 {
         self.try_get(world_state).unwrap_or(0.0)
     }
@@ -227,12 +228,26 @@ impl MetricRef {
     /// state. A present container with an unset metric still reads `0.0`, which
     /// preserves the historical behaviour for every metric that simply has not
     /// been written yet.
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn try_get(&self, world_state: &WorldState) -> Option<f64> {
         match self {
-            MetricRef::Actor { actor_id, metric } => world_state
-                .actors
-                .get(actor_id.as_str())
-                .map(|a| a.metrics.get(metric.as_str()).copied().unwrap_or(0.0)),
+            MetricRef::Actor { actor_id, metric } => {
+                let found = world_state
+                    .actors
+                    .get(actor_id.as_str())
+                    .map(|a| a.metrics.get(metric.as_str()).copied().unwrap_or(0.0));
+                // B44 census: a read of an absent actor, recorded at its call site.
+                #[cfg(feature = "census")]
+                if found.is_none() {
+                    super::census::read(
+                        std::panic::Location::caller(),
+                        || format!("actor:{}.{}", actor_id.as_str(), metric.as_str()),
+                        world_state.tick,
+                        world_state.dead_actor_ids.contains(actor_id.as_str()),
+                    );
+                }
+                found
+            }
             MetricRef::Family { key } => world_state
                 .family_state
                 .as_ref()

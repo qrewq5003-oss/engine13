@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod census;
 pub mod event;
 pub mod metric_ref;
 pub mod scenario;

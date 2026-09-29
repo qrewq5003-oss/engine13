@@ -141,7 +141,9 @@ pub fn action_availability(
         return Err(UnavailableReason::ActionsPerTickExhausted { limit: scenario.actions_per_tick });
     }
     if let crate::core::ActionCondition::Metric { metric, operator, value } = &action.available_if {
-        if !compare_value(metric.get(world_state), operator, value) {
+        crate::core::census::begin(|| format!("action {} | available_if {}", action.id, metric));
+        let met = compare_value(metric.get(world_state), operator, value);
+        if !crate::core::census::condition(|| format!("{operator:?} {value}"), met) {
             return Err(UnavailableReason::ConditionNotMet {
                 description: describe_condition(&Condition {
                     metric: metric.clone(),
@@ -154,8 +156,12 @@ pub fn action_availability(
     let mut costs: Vec<(&crate::core::MetricRef, &f64)> = action.cost.iter().collect();
     costs.sort_by_key(|(m, _)| m.to_string());
     for (metric, cost) in costs {
+        crate::core::census::begin(|| format!("action {} | cost {}", action.id, metric));
         let current = metric.get(world_state);
-        if current < cost.abs() && *cost < 0.0 {
+        // Annotated, not flipped by the census counterfactual: here `true` is the refusal.
+        let insufficient = current < cost.abs() && *cost < 0.0;
+        crate::core::census::condition(|| format!("cost {cost} insufficient"), insufficient);
+        if insufficient {
             // Human-readable resource name for the UI ("venice treasury").
             let key = metric.to_string();
             let resource = key.strip_prefix("actor:").unwrap_or(&key).replace(['.', '_'], " ");
