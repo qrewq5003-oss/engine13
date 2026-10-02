@@ -9,6 +9,9 @@
 //! (`ottomans.military_size < 40`) — federation at or above the threshold for the
 //! required sustained ticks, not before `minimum_tick`. rome: victory tick.
 //!
+//! The last column is the spread of the real victory, for the A10 criteria (B44 stage 2
+//! re-measures them): p10 / p50 / p90 and how many wins land on ticks 40–43.
+//!
 //! Usage: cargo run --release --bin victory_probe -- [seeds] [ticks]
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
@@ -32,7 +35,7 @@ fn main() {
         ("constantinople_1430", Some("diplomacy")), ("constantinople_1430", Some("military")),
         ("rome_375", Some("balanced")), ("rome_375", Some("influence")), ("rome_375", Some("wealth")),
     ];
-    println!("{:<20} {:<10} {:>22} {:>22} {:>28}", "scenario", "world", "fed >= 80 first (n)", "victory tick (n)", "victory w/o extra cond (n)");
+    println!("{:<20} {:<10} {:>22} {:>22} {:>28} {:>30}", "scenario", "world", "fed >= 80 first (n)", "victory tick (n)", "victory w/o extra cond (n)", "victory p10/50/90, on 40–43");
     for (sc, strat) in worlds {
         let (mut fed, mut win, mut bare) = (Vec::new(), Vec::new(), Vec::new());
         for seed in 0..seeds {
@@ -71,6 +74,12 @@ fn main() {
             if let Some(x) = b { bare.push(x); }
         }
         let fmt = |v: &Vec<u32>| format!("{} ({}/{})", p50(v.clone()), v.len(), seeds);
-        println!("{:<20} {:<10} {:>22} {:>22} {:>28}", sc, strat.unwrap_or("none"), fmt(&fed), fmt(&win), fmt(&bare));
+        let spread = {
+            let mut s = win.clone();
+            s.sort();
+            let q = |p: f64| s.get(((s.len().max(1) - 1) as f64 * p).round() as usize).map_or("—".into(), |x| x.to_string());
+            format!("{}/{}/{}, {}", q(0.1), q(0.5), q(0.9), s.iter().filter(|t| (40..=43).contains(*t)).count())
+        };
+        println!("{:<20} {:<10} {:>22} {:>22} {:>28} {:>30}", sc, strat.unwrap_or("none"), fmt(&fed), fmt(&win), fmt(&bare), spread);
     }
 }

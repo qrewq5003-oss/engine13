@@ -272,12 +272,10 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
             let val_a = ratio_cond.metric_a.get(world);
             let val_b = ratio_cond.metric_b.get(world);
 
-            if val_b == 0.0 {
-                census::condition(|| format!("{:?} {} — skipped, denominator 0", ratio_cond.operator, ratio_cond.ratio), false);
+            let Some(actual_ratio) = ratio_value(val_a, val_b) else {
+                census::condition(|| format!("{:?} {} — skipped, 0 / 0", ratio_cond.operator, ratio_cond.ratio), false);
                 continue;
-            }
-            
-            let actual_ratio = val_a / val_b;
+            };
             let condition_met = census::condition(
                 || format!("{:?} {}", ratio_cond.operator, ratio_cond.ratio),
                 ratio_cond.operator.evaluate(actual_ratio, ratio_cond.ratio),
@@ -308,8 +306,32 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
     }
 }
 
+/// The value of a ratio condition `a / b`, or `None` when it is undefined (B44 stage 2).
+///
+/// An absent actor reads as `0.0` (`MetricRef::get`), and the arithmetic takes one rule
+/// for a zero denominator: a non-zero numerator over zero is a limit, `±∞` — a dead
+/// opponent is the utmost superiority, so `own_army / enemy_army > r` holds. The rule is
+/// the same for a dead actor and for a living one at zero: it is the same mathematics.
+/// Only `0 / 0` is undefined and skipped, as before. A dead numerator needs no rule of
+/// its own: it reads `0.0`, the ratio is `0`.
+pub(crate) fn ratio_value(a: f64, b: f64) -> Option<f64> {
+    if b == 0.0 {
+        if a == 0.0 {
+            return None;
+        }
+        return Some(if a > 0.0 { f64::INFINITY } else { f64::NEG_INFINITY });
+    }
+    Some(a / b)
+}
+
 /// Check auto_delta condition against world state. The key already carries its
 /// scope — it was resolved against the block's `actor_id` at load.
+///
+/// An absent actor reads as `0.0`: `>` gives false, `<` gives true. Declared, not
+/// accidental (B44 stage 2): for rome's family a fallen Rome is a Rome with zero
+/// legitimacy and cohesion. Milestones and rank conditions with an `actor_id` answer
+/// `false` instead (`eval_metric_condition`); the two rules differ only on `<`, and the
+/// one such case, the `rome_city` rank, has a log line as its only consequence.
 fn check_auto_delta_condition(world: &WorldState, cond: &crate::core::DeltaCondition) -> bool {
     let value = cond.metric.get(world);
     let result = match cond.operator {
@@ -2190,6 +2212,70 @@ mod tests {
     // check_rank_conditions must resolve global:/family:/actor: scopes the
     // same way victory_condition does, via the shared eval_metric_condition.
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // B44 stage 2: an absent actor in auto-deltas. It reads as 0.0; a ratio over a zero
+    // denominator is a limit (±∞), 0 / 0 is skipped; a single condition keeps 0.0.
+    // ------------------------------------------------------------------
+
+    /// One auto-delta on `global:probe`, run through the engine's own phase. `byz` is
+    /// present with `military_size` 50 unless `byz_alive` is false; `ott` is never
+    /// present. Returns the authored delta that reached the global (noise 0).
+    fn auto_delta_on_absent(
+        byz_alive: bool,
+        conditions: Vec<crate::core::DeltaCondition>,
+        ratios: Vec<crate::core::DeltaConditionRatio>,
+    ) -> f64 {
+        let mut world = WorldState::new("test".to_string(), 1430);
+        if byz_alive {
+            world.actors.insert("byz".into(), vassalage_actor("byz", 50.0, 50.0, 50.0, 50.0, &[]));
+        }
+        let mut scenario = empty_scenario();
+        scenario.auto_deltas = vec![crate::core::AutoDelta {
+            metric: mr("global:probe", None),
+            base: 0.0,
+            conditions,
+            ratio_conditions: ratios,
+            noise: 0.0,
+            actor_id: None,
+        }];
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+        phase_auto_deltas(&mut world, &scenario, &mut rng);
+        world.global_metrics.get("probe").copied().unwrap_or(0.0)
+    }
+
+    fn ratio(operator: ComparisonOperator, delta: f64) -> crate::core::DeltaConditionRatio {
+        crate::core::DeltaConditionRatio {
+            metric_a: mr("actor:byz.military_size", None),
+            metric_b: mr("actor:ott.military_size", None),
+            ratio: 0.25,
+            operator,
+            delta,
+        }
+    }
+
+    /// A living numerator over a dead (or zero) denominator: the utmost superiority.
+    /// `>` holds, `<` does not. Under the old skip both were off (0 reached the global).
+    #[test]
+    fn ratio_over_an_absent_denominator_is_infinite() {
+        assert_eq!(auto_delta_on_absent(true, vec![], vec![ratio(ComparisonOperator::Greater, 1.0)]), 1.0, "`>` over a dead opponent holds");
+        assert_eq!(auto_delta_on_absent(true, vec![], vec![ratio(ComparisonOperator::Less, 10.0)]), 0.0, "`<` over a dead opponent does not");
+    }
+
+    /// 0 / 0 is undefined and skipped, whichever the operator.
+    #[test]
+    fn ratio_zero_over_zero_is_skipped() {
+        assert_eq!(auto_delta_on_absent(false, vec![], vec![ratio(ComparisonOperator::Greater, 1.0)]), 0.0, "0 / 0 with `>` is skipped");
+        assert_eq!(auto_delta_on_absent(false, vec![], vec![ratio(ComparisonOperator::Less, 10.0)]), 0.0, "0 / 0 with `<` is skipped");
+    }
+
+    /// A single condition on an absent actor reads 0.0: `>` false, `<` true — declared.
+    #[test]
+    fn single_condition_on_an_absent_actor_reads_zero() {
+        let cond = |operator, delta| crate::core::DeltaCondition { metric: mr("actor:ott.military_size", None), operator, value: 10.0, delta };
+        assert_eq!(auto_delta_on_absent(true, vec![cond(ComparisonOperator::Greater, 1.0)], vec![]), 0.0, "`>` on an absent actor is false");
+        assert_eq!(auto_delta_on_absent(true, vec![cond(ComparisonOperator::Less, 10.0)], vec![]), 10.0, "`<` on an absent actor is true");
+    }
 
     #[test]
     fn eval_metric_condition_resolves_all_scopes() {
