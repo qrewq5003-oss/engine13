@@ -61,6 +61,8 @@ struct World {
     ep_dep_sum: BTreeMap<String, f64>,
     ep_observed_change: f64,
     ottomans_die_first: u64,
+    // B44 stage 2: pressure on the Ottomans' neighbours once the Ottomans are gone.
+    neighbour_ep: BTreeMap<String, (f64, u64)>,
     milestones_after_byz: BTreeMap<String, u64>,
     milestones_fired: BTreeMap<String, u64>,
     byz_dead_ticks: u64,
@@ -142,6 +144,21 @@ fn run_world(scenario: &str, world: &str, seeds: u64, ticks: u32, uniform_false:
                 }
             }
 
+            // Rome once the Huns are gone (B44 stage 2: the ratio relief returns).
+            if ws.dead_actor_ids.contains("huns") {
+                if let Some(v) = ws.actors.get("rome").and_then(|a| a.metrics.get("external_pressure")) {
+                    let e = w.neighbour_ep.entry("rome (huns dead)".to_string()).or_default();
+                    e.0 += v; e.1 += 1;
+                }
+            }
+            if ott_dead_before {
+                for n in ["byzantium", "serbia", "trebizond", "hungary"] {
+                    if let Some(v) = ws.actors.get(n).and_then(|a| a.metrics.get("external_pressure")) {
+                        let e = w.neighbour_ep.entry(n.to_string()).or_default();
+                        e.0 += v; e.1 += 1;
+                    }
+                }
+            }
             // Byzantine pressure while the Ottomans are already dead and Byzantium lives.
             if ott_dead_before {
                 if let (Some(before), Some(after)) = (ep_before, ws.actors.get("byzantium").and_then(|a| a.metrics.get("external_pressure").copied())) {
@@ -263,12 +280,16 @@ fn main() {
                 println!("\ncase: Byzantine pressure after the Ottomans die (Byzantium alive): runs {}, ticks {}, mean {ep_mean}, observed Δ total {:.2}",
                     base.ottomans_die_first, base.ep_ticks_after_ottomans, base.ep_observed_change);
                 for (i, s) in &base.ep_block_sum { println!("  auto_delta[{i}] applied Σ {s:.2}"); }
+
                 for (r, s) in &base.ep_dep_sum { println!("  dependency {r} Σ {s:.2}"); }
                 println!("case: federation bands with Byzantium dead: {} dead ticks, ≥ 80 («готова») {} ticks in {} runs, 60–80 {} ticks",
                     base.byz_dead_ticks, base.byz_dead_fed80, base.byz_dead_runs_fed80.len(), base.byz_dead_fed60);
                 for (m, n) in &base.milestones_fired {
                     println!("case: milestone {m}: fired {n}/{seeds}, of them after Byzantium's death {}", base.milestones_after_byz.get(m).copied().unwrap_or(0));
                 }
+            }
+            for (n, (s, c)) in &base.neighbour_ep {
+                println!("case: {n} external_pressure (after the opponent died): mean {:.2} over {c} living ticks", s / *c as f64);
             }
             println!();
         }
