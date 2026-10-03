@@ -180,7 +180,6 @@ fn contagious_tag_check_catches_a_new_violator() {
         spread_cooldown_ticks: 6,
         spread_chance: chance,
         requires_era: None,
-        unlocks: Vec::new(),
             sea_going: false,
     };
 
@@ -863,7 +862,9 @@ fn consequence_context_states_no_alternatives() {
     }
 }
 
-/// Fields authored in `Scenario` / `NarrativeConfig` must have a reader.
+/// Fields authored in `Scenario` / `NarrativeConfig` / `TagDefinition` / `EraDefinition`
+/// must have a reader. The last two were added by B49: `TagDefinition.unlocks` was a dead
+/// contract the guard could not see because it looked at two structs only.
 ///
 /// Four authored fields were found dead in a single cycle: the paragraph target and
 /// its length hint, the forbidden-claims list, and the player's own actor id. The
@@ -886,6 +887,8 @@ fn authored_scenario_fields_have_readers() {
     // field -> why it may stay unread
     const ALLOWED: &[(&str, &str)] = &[
         ("features", "read off `WorldState`, which now carries a copy taken from the scenario at load — docs/investigation_world_features.md"),
+        ("unlocks_tags", "EraDefinition — DEAD, recorded as A44: authored in all three scenarios, read by nothing; wire or delete is the owner's decision"),
+        ("auto_delta_modifier", "EraDefinition — DEAD, recorded as A44 (rome 0.9 → 0.6, milan 0.85, constantinople 0.8, never applied); the owner's decision"),
         ("universal_actions", "DEAD, recorded (B42): the UI's list never offered them — it lists scenario actions in every mode — and the only reader, the mode-aware `get_available_actions`, was a path no frontend called; removed. Owner's decision (b): the mode does not change actions"),
     ];
 
@@ -924,7 +927,7 @@ fn authored_scenario_fields_have_readers() {
     collect(Path::new("src-tauri/src"), &["rs"], &mut sources);
 
     let mut dead: BTreeSet<String> = BTreeSet::new();
-    for name in ["Scenario", "NarrativeConfig"] {
+    for name in ["Scenario", "NarrativeConfig", "TagDefinition", "EraDefinition"] {
         let (block, fields) = struct_block(name);
         for field in fields {
             let needle = format!(".{field}");
@@ -2947,4 +2950,94 @@ fn every_consumer_of_a_metric_uses_the_same_band_bounds() {
     }
     assert!(compared >= 7, "expected at least seven metrics read by two or more consumers, found {compared}");
     assert!(mismatches.is_empty(), "consumers of one metric disagree on band bounds:\n{}", mismatches.join("\n"));
+}
+
+/// B51: a `FamilyState` literal must seed `metrics` through `normalize_family_metrics` (or
+/// from a literal map whose keys are already canonical). Content writes family keys as
+/// `family:family_influence`; runtime reads `influence`. A raw seed puts keys the runtime
+/// never reads beside the ones it does — the §5.H defect, which task 30 found again in a
+/// test. Forty places build `FamilyState` by hand (probes, tests, the load path), all by
+/// convention; this holds the convention, lexically, over `src/`, `src-tauri/src` and
+/// `tests/`.
+fn raw_family_seeds(path: &str, src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(i) = src[from..].find("FamilyState {") {
+        let at = from + i;
+        from = at + 1;
+        if src[..at].ends_with("pub struct ") {
+            continue;
+        }
+        let line = src[..at].lines().count();
+        let rest = &src[at..];
+        let Some(m) = rest.find("metrics:") else {
+            out.push(format!("{path}:{line}: FamilyState literal without a `metrics:` field"));
+            continue;
+        };
+        let body = &rest[m + "metrics:".len()..];
+        let end = ["patriarch_age", "generation_count"].iter().filter_map(|k| body.find(k)).min().unwrap_or(body.len());
+        let expr = body[..end].trim();
+        if expr.contains("normalize_family_metrics(") || expr.starts_with("HashMap::new()") {
+            continue;
+        }
+        let keys: Vec<&str> = expr.split('"').skip(1).step_by(2).collect();
+        if expr.contains("HashMap::from(")
+            && !keys.is_empty()
+            && keys.iter().all(|k| !k.starts_with("family:") && !k.starts_with("family_"))
+        {
+            continue;
+        }
+        let shown: String = expr.chars().take(80).collect();
+        out.push(format!("{path}:{line}: FamilyState seeded without normalize_family_metrics: `{shown}`"));
+    }
+    out
+}
+
+#[test]
+fn family_state_is_seeded_canonically() {
+    fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect(&p, out);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for d in ["src", "src-tauri/src", "tests"] {
+        collect(std::path::Path::new(d), &mut files);
+    }
+    let mut literals = 0;
+    let mut bad = Vec::new();
+    for f in &files {
+        let sp = f.to_string_lossy().replace('\\', "/");
+        let text = std::fs::read_to_string(f).unwrap();
+        // this file holds the check itself and its synthetic examples, at the end
+        let text = if sp.ends_with("tests/scenario_conventions.rs") {
+            text.split("/// B51: a `FamilyState` literal").next().unwrap().to_string()
+        } else {
+            text
+        };
+        literals += text.matches("FamilyState {").count();
+        bad.extend(raw_family_seeds(&sp, &text));
+    }
+    assert!(literals > 30, "only {literals} FamilyState literals found — the scan has drifted");
+    assert!(bad.is_empty(), "family state seeded with raw content keys:\n{}", bad.join("\n"));
+}
+
+/// The other half: the check must flag a raw seed and a prefixed literal key, and pass a
+/// normalized seed and a canonical literal.
+#[test]
+fn raw_family_seed_check_catches_a_raw_seed() {
+    let raw = "let s = FamilyState { metrics: initial.clone(), patriarch_age: 40, generation_count: 0 };";
+    let prefixed = "let s = FamilyState { metrics: HashMap::from([(\"family:influence\".to_string(), 1.0)]), patriarch_age: 40, generation_count: 0 };";
+    let normalized = "let s = FamilyState { metrics: normalize_family_metrics(&m), patriarch_age: 40, generation_count: 0 };";
+    let canonical = "let s = FamilyState { metrics: HashMap::from([(\"influence\".to_string(), 1.0)]), patriarch_age: 40, generation_count: 0 };";
+    assert_eq!(raw_family_seeds("x", raw).len(), 1, "a raw clone must be flagged");
+    assert_eq!(raw_family_seeds("x", prefixed).len(), 1, "a prefixed literal key must be flagged");
+    assert!(raw_family_seeds("x", normalized).is_empty());
+    assert!(raw_family_seeds("x", canonical).is_empty());
 }

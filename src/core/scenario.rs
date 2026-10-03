@@ -175,10 +175,13 @@ pub struct TagDefinition {
     /// next sea tag joins by declaring itself, not by being added to a list in Rust.
     #[serde(default)]
     pub sea_going: bool,
+    /// Era gate for spreading (`try_spread_direction`). A working mechanism that no tag in
+    /// the three scenarios uses today (B49) — kept: it is a reader, not a dead field.
     #[serde(default)]
     pub requires_era: Option<Era>,
-    #[serde(default)]
-    pub unlocks: Vec<String>,
+    // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
+    // — a dead contract. Without `deny_unknown_fields` an authored `unlocks = […]` would be
+    // skipped silently; no tag file has one.
 }
 
 /// Era definition loaded from scenario config

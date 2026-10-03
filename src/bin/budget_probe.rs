@@ -9094,7 +9094,7 @@ fn tagwalk() {
             }
             let start = carriers.get(&t.id).cloned().unwrap_or_default();
             println!(
-                "TAGDEF\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "TAGDEF\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t-\t{}\t{}\t{}",
                 id,
                 t.id,
                 metrics
@@ -9123,11 +9123,8 @@ fn tagwalk() {
                     .as_ref()
                     .map(|e| format!("{:?}", e))
                     .unwrap_or_else(|| "-".into()),
-                if t.unlocks.is_empty() {
-                    "-".to_string()
-                } else {
-                    t.unlocks.join(",")
-                },
+                // (the `-` column is `TagDefinition.unlocks`, removed by B49 — it was empty in
+                // every tag; the column stays so the published tagwalk output keeps its shape)
                 if start.is_empty() {
                     "NONE".to_string()
                 } else {
