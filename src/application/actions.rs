@@ -9,6 +9,9 @@ use crate::AppState;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum UnavailableReason {
+    /// An actor the action is addressed to — an effect, a cost, its source, or the
+    /// player's chosen target — is not in the world.
+    AddresseeDead { actor: String },
     InsufficientCost { required: f64, available: f64, resource: String },
     ActionsPerTickExhausted { limit: u32 },
     ConditionNotMet { description: String },
@@ -48,7 +51,7 @@ pub fn apply_player_action(
     // The same rule the UI's list draws (B42): per-tick limit, condition, cost. The
     // cost used to be checked by the list only, so the scripted player — which goes
     // through this path — bought what a human could not click.
-    if let Err(reason) = action_availability(&action, world_state, scenario) {
+    if let Err(reason) = action_availability_for(&action, action_input.target_actor_id.as_deref(), world_state, scenario) {
         return Err(describe_unavailable(&reason));
     }
 
@@ -130,13 +133,51 @@ pub fn apply_player_action(
 }
 
 /// The one availability rule (B42): the UI's list and the apply path both read it, so
-/// the list shows exactly the reason the model would refuse. Order: per-tick limit,
-/// authored condition, cost (a negative cost the actor cannot cover).
+/// the list shows exactly the reason the model would refuse. Order: addressee, per-tick
+/// limit, authored condition, cost (a negative cost the actor cannot cover).
+///
+/// The list has no target to offer; the apply path passes the player's choice through
+/// [`action_availability_for`], the same rule.
 pub fn action_availability(
     action: &PatronAction,
     world_state: &WorldState,
     scenario: &Scenario,
 ) -> Result<(), UnavailableReason> {
+    action_availability_for(action, None, world_state, scenario)
+}
+
+/// [`action_availability`] with the player's chosen target.
+///
+/// **An action addressed to an actor who is not in the world is unavailable, whole**
+/// (B46, owner's rule): if any effect or cost names an absent actor, or the source or the
+/// chosen target is absent. Its living effects do not survive on their own —
+/// `genoa_financial_aid` is help to a city that is gone, and the federation bonus is not
+/// a separate purchase. Checked first, so a dead addressee is not reported as a missing
+/// resource of the dead (`sabotage_federation`: «не хватает: byzantium legitimacy»).
+pub fn action_availability_for(
+    action: &PatronAction,
+    target: Option<&str>,
+    world_state: &WorldState,
+    scenario: &Scenario,
+) -> Result<(), UnavailableReason> {
+    let present = |id: &str| world_state.actors.contains_key(id);
+    let addressed = action.effects.keys().chain(action.cost.keys()).filter_map(|m| match m {
+        crate::core::MetricRef::Actor { actor_id, .. } => Some(actor_id.as_str()),
+        _ => None,
+    });
+    let mut gone: Vec<&str> = addressed
+        .chain(action.source_actor_id.as_deref())
+        .chain(target)
+        .filter(|id| !present(id))
+        .collect();
+    gone.sort_unstable();
+    if let Some(id) = gone.first() {
+        // The display name lives only in `dead_actors` once the actor has fallen; an
+        // actor not yet in the world (a spawn to come) has none, and shows its id.
+        let actor = world_state.dead_actors.iter().find(|d| d.id == *id)
+            .map_or_else(|| id.to_string(), |d| d.name.clone());
+        return Err(UnavailableReason::AddresseeDead { actor });
+    }
     if scenario.actions_per_tick > 0 && world_state.actions_this_tick >= scenario.actions_per_tick {
         return Err(UnavailableReason::ActionsPerTickExhausted { limit: scenario.actions_per_tick });
     }
@@ -174,6 +215,7 @@ pub fn action_availability(
 /// The refusal text the apply path returns for a reason from [`action_availability`].
 fn describe_unavailable(reason: &UnavailableReason) -> String {
     match reason {
+        UnavailableReason::AddresseeDead { actor } => format!("Адресат погиб: {actor}"),
         UnavailableReason::ActionsPerTickExhausted { limit } => format!("Достигнут лимит действий за тик: {limit}/{limit}"),
         UnavailableReason::ConditionNotMet { description } => description.clone(),
         UnavailableReason::InsufficientCost { required, available, resource } => {

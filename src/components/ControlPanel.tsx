@@ -46,6 +46,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   // Get reason text for display
   function reasonText(reason: UnavailableReason): string {
     switch (reason.type) {
+      case 'AddresseeDead':
+        return `Адресат погиб: ${reason.actor}`;
       case 'InsufficientCost':
         return `Требует ${reason.required} ${reason.resource} (есть: ${reason.available})`;
       case 'ActionsPerTickExhausted':

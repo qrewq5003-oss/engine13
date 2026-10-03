@@ -244,6 +244,7 @@ export interface PatronAction {
 
 /// Reason why an action is unavailable
 export type UnavailableReason =
+  | { type: 'AddresseeDead'; actor: string }
   | { type: 'InsufficientCost'; required: number; available: number; resource: string }
   | { type: 'ActionsPerTickExhausted'; limit: number }
   | { type: 'ConditionNotMet'; description: string };

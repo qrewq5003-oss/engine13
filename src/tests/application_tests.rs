@@ -450,3 +450,62 @@ fn test_scripted_victory_achievable() {
         "Scripted strategy should approach victory: victory={}, federation={:.1}",
         world.victory_achieved, fed_final);
 }
+
+/// constantinople as loaded, with `byzantium` optionally taken out of the world the way
+/// a collapse does (removed from `actors`, recorded in `dead_actor_ids`).
+fn constantinople_with_byzantium(alive: bool) -> AppState {
+    let db = setup_test_db();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "constantinople_1430".to_string()).unwrap();
+    if !alive {
+        let ws = state.world_state.as_mut().unwrap();
+        ws.actors.remove("byzantium");
+        ws.dead_actor_ids.insert("byzantium".to_string());
+    }
+    state
+}
+
+fn availability_of(state: &AppState, id: &str) -> Result<(), crate::application::actions::UnavailableReason> {
+    let sc = state.current_scenario.as_ref().unwrap();
+    let action = sc.patron_actions.iter().find(|a| a.id == id).expect("action");
+    crate::application::actions::action_availability(action, state.world_state.as_ref().unwrap(), sc)
+}
+
+/// B46 rule: an action addressed to an absent actor is unavailable, whole — even with a
+/// living effect (`genoa_financial_aid` also adds to the federation). Both ways: with
+/// Byzantium alive the same action is available.
+#[test]
+fn action_addressed_to_an_absent_actor_is_unavailable() {
+    use crate::application::actions::UnavailableReason;
+    assert!(availability_of(&constantinople_with_byzantium(true), "genoa_financial_aid").is_ok(),
+        "with Byzantium alive the help is available");
+    match availability_of(&constantinople_with_byzantium(false), "genoa_financial_aid") {
+        Err(UnavailableReason::AddresseeDead { actor }) => assert_eq!(actor, "byzantium"),
+        other => panic!("help to a fallen city must be refused as «адресат погиб», got {other:?}"),
+    }
+    // The apply path draws the same rule — the bot cannot spend on the dead either.
+    let mut state = constantinople_with_byzantium(false);
+    let input = PlayerActionInput { action_id: "genoa_financial_aid".into(), target_actor_id: None };
+    assert!(apply_player_action(&mut state, &input).unwrap_err().starts_with("Адресат погиб"));
+}
+
+/// «Адресат погиб» comes before the cost: `sabotage_federation` pays with Byzantium's
+/// legitimacy, and over a fallen Byzantium it used to be refused as a missing resource
+/// of the dead.
+#[test]
+fn addressee_dead_is_reported_before_a_missing_cost() {
+    use crate::application::actions::UnavailableReason;
+    match availability_of(&constantinople_with_byzantium(false), "sabotage_federation") {
+        Err(UnavailableReason::AddresseeDead { actor }) => assert_eq!(actor, "byzantium"),
+        other => panic!("expected «адресат погиб» before the cost check, got {other:?}"),
+    }
+}
+
+/// The player's chosen target is held to the same rule.
+#[test]
+fn a_chosen_target_that_is_absent_refuses_the_action() {
+    let mut state = constantinople_with_byzantium(true);
+    let input = PlayerActionInput { action_id: "venice_diplomacy".into(), target_actor_id: Some("mamluks".into()) };
+    assert!(apply_player_action(&mut state, &input).unwrap_err().starts_with("Адресат погиб"),
+        "`mamluks` is not in the world at start");
+}
