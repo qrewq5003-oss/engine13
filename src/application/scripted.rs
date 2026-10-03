@@ -48,8 +48,12 @@ impl ScriptedStrategy {
     pub fn priority_actions(&self) -> Vec<&'static str> {
         match self {
             // Constantinople strategies
+            // `milan_legitimacy` (A38, owner's decision): the one action that raises Byzantium's
+            // legitimacy — second in balanced and diplomacy, last in military. A player would
+            // press it as soon as it is available; an honest bot plays the full set.
             ScriptedStrategy::Balanced => vec![
                 "venice_diplomacy",
+                "milan_legitimacy",
                 "genoa_financial_aid",
                 "milan_bankers",
                 "venice_naval_support",
@@ -60,6 +64,7 @@ impl ScriptedStrategy {
             ],
             ScriptedStrategy::Diplomacy => vec![
                 "venice_diplomacy",
+                "milan_legitimacy",
                 "genoa_financial_aid",
                 "milan_bankers",
                 "venice_trade_deal",
@@ -77,6 +82,7 @@ impl ScriptedStrategy {
                 "genoa_financial_aid",
                 "milan_bankers",
                 "venice_trade_deal",
+                "milan_legitimacy",
             ],
             // Rome strategies - using actual IDs from rome_375.rs
             // Note: Many actions have availability gates (e.g., family_wealth > 10)

@@ -49,9 +49,12 @@ fn lever(seeds: u64, ticks: u32) {
     println!("# A38 stage 2: {sc}, {seeds} seeds × {ticks} ticks\n");
     for world in ["balanced", "diplomacy", "military"] {
         let mut p = ScriptedStrategy::from_str(world, sc).priority_actions();
-        match p.iter().position(|a| *a == "venice_diplomacy") {
-            Some(i) if world != "military" => p.insert(i + 1, "milan_legitimacy"),
-            _ => p.push("milan_legitimacy"),
+        // Since A38 the committed strategies carry it already; insert only into an older list.
+        if !p.contains(&"milan_legitimacy") {
+            match p.iter().position(|a| *a == "venice_diplomacy") {
+                Some(i) if world != "military" => p.insert(i + 1, "milan_legitimacy"),
+                _ => p.push("milan_legitimacy"),
+            }
         }
         let at = p.iter().position(|a| *a == "milan_legitimacy").unwrap();
         println!("placement {world}: {} of {} — {}", at + 1, p.len(), p.join(", "));
@@ -63,9 +66,11 @@ fn lever(seeds: u64, ticks: u32) {
         for world in ["none", "balanced", "diplomacy", "military"] {
             let prio: Option<Vec<&'static str>> = (world != "none").then(|| {
                 let mut p = ScriptedStrategy::from_str(world, sc).priority_actions();
-                match p.iter().position(|a| *a == "venice_diplomacy") {
-                    Some(i) if world != "military" => p.insert(i + 1, "milan_legitimacy"),
-                    _ => p.push("milan_legitimacy"),
+                if !p.contains(&"milan_legitimacy") {
+                    match p.iter().position(|a| *a == "venice_diplomacy") {
+                        Some(i) if world != "military" => p.insert(i + 1, "milan_legitimacy"),
+                        _ => p.push("milan_legitimacy"),
+                    }
                 }
                 p
             });
