@@ -69,6 +69,7 @@ struct World {
     byz_dead_fed80: u64,
     byz_dead_fed60: u64,
     byz_dead_runs_fed80: BTreeSet<u64>,
+    byz_death_ticks: Vec<u32>,
 }
 
 fn run_world(scenario: &str, world: &str, seeds: u64, ticks: u32, uniform_false: bool) -> World {
@@ -202,6 +203,7 @@ fn run_world(scenario: &str, world: &str, seeds: u64, ticks: u32, uniform_false:
         if ws.dead_actor_ids.is_empty() { w.runs_without_death += 1; }
         if ws.victory_achieved { w.victories += 1; }
         w.deaths += ws.dead_actor_ids.len() as u64;
+        if let Some(t) = byz_death { w.byz_death_ticks.push(t); }
         if ws.dead_actor_ids.contains("ottomans") && !ws.dead_actor_ids.contains("byzantium") {
             w.ottomans_die_first += 1;
         }
@@ -282,6 +284,9 @@ fn main() {
                 for (i, s) in &base.ep_block_sum { println!("  auto_delta[{i}] applied Σ {s:.2}"); }
 
                 for (r, s) in &base.ep_dep_sum { println!("  dependency {r} Σ {s:.2}"); }
+                let mut d = base.byz_death_ticks.clone();
+                d.sort();
+                println!("case: Byzantium dies in {}/{seeds} runs, tick p50 {}", d.len(), d.get(d.len() / 2).map_or("—".into(), |t| t.to_string()));
                 println!("case: federation bands with Byzantium dead: {} dead ticks, ≥ 80 («готова») {} ticks in {} runs, 60–80 {} ticks",
                     base.byz_dead_ticks, base.byz_dead_fed80, base.byz_dead_runs_fed80.len(), base.byz_dead_fed60);
                 for (m, n) in &base.milestones_fired {

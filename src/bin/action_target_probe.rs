@@ -17,6 +17,10 @@
 //! The availability is the product's own `action_availability` (B42), evaluated at the
 //! start of each tick, before the player acts. Nothing is changed.
 //!
+//! Also, per run, the first tick at which some patron action has an absent addressee or
+//! source (`first-absent` lines) — the earliest tick the «адресат погиб» rule can refuse
+//! anything, so a world must be byte-identical to the old engine up to it.
+//!
 //! Usage: cargo run --release --bin action_target_probe -- [seeds] [ticks]
 
 use engine13::application::actions::{action_availability, UnavailableReason};
@@ -76,7 +80,16 @@ fn main() {
                 engine13::load_scenario(&mut st, &db, scenario.to_string()).unwrap();
                 st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
                 let strategy = (*world != "none").then(|| ScriptedStrategy::from_str(world, scenario));
-                for _ in 0..ticks {
+                let mut first_absent: Option<u32> = None;
+                for t in 0..ticks {
+                    if first_absent.is_none() {
+                        let ws = st.world_state.as_ref().unwrap();
+                        let any = st.current_scenario.as_ref().unwrap().patron_actions.iter().any(|a| {
+                            a.effects.keys().chain(a.cost.keys()).any(|m| absent(m, ws).is_some())
+                                || a.source_actor_id.as_ref().is_some_and(|s| !ws.actors.contains_key(s))
+                        });
+                        if any { first_absent = Some(t); }
+                    }
                     {
                         let ws = st.world_state.as_ref().unwrap();
                         let sc = st.current_scenario.as_ref().unwrap();
@@ -86,9 +99,10 @@ fn main() {
                             match action_availability(a, ws, sc) {
                                 Ok(()) if all => { r.void.0.insert(seed); r.void.1 += 1; r.addressees.extend(gone); }
                                 Ok(()) if !gone.is_empty() => { r.partial.0.insert(seed); r.partial.1 += 1; r.addressees.extend(gone); }
-                                Err(reason) if reads_absent(a, ws) => {
+                                Err(reason) if reads_absent(a, ws) || !gone.is_empty() => {
                                     r.refused.0.insert(seed); r.refused.1 += 1;
                                     r.reasons.insert(match reason {
+                                        UnavailableReason::AddresseeDead { actor } => format!("адресат погиб: {actor}"),
                                         UnavailableReason::ConditionNotMet { description } => format!("условие: {description}"),
                                         UnavailableReason::InsufficientCost { resource, .. } => format!("не хватает: {resource}"),
                                         UnavailableReason::ActionsPerTickExhausted { .. } => "лимит действий".into(),
@@ -132,6 +146,7 @@ fn main() {
                         }
                     }
                 }
+                eprintln!("first-absent {scenario} {world} {seed} {}", first_absent.map_or("-".into(), |t| t.to_string()));
             }
             println!("## {scenario} / {world}\n");
             println!("| action | addressee absent | shown available: void (runs/ticks) | partial | refused on an absent read | reason shown | bot applied (runs/times) | paid by the living | still delivered |");
