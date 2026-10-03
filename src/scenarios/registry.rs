@@ -193,6 +193,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // An actor never starts carrying a tag that is a relation to itself (A37 follow-up):
+    // the engine refuses to spread it there, and a template or starting actor may not
+    // bring it in either.
+    for a in &scenario.actors {
+        for tag in &a.tags {
+            if let Some(t) = scenario.tag_definitions.iter().find(|t| &t.id == tag) {
+                if t.requires_alive.iter().any(|id| id == &a.id) {
+                    errors.push(format!("actor '{}' carries tag '{tag}', which is a relation to itself", a.id));
+                }
+            }
+        }
+    }
+
     // A milestone's `requires_alive` names starting actors, as the victory's does (B46).
     for m in &scenario.milestone_events {
         for id in &m.requires_alive {
@@ -476,6 +489,16 @@ mod tests {
         s.tag_definitions.iter_mut().find(|t| t.id == "ottoman_frontier").unwrap().requires_alive = vec!["wallachia".into()];
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("tag 'ottoman_frontier': requires_alive 'wallachia'")), "{e:?}");
+    }
+
+    /// A37 follow-up: an actor may not carry a tag that is a relation to itself.
+    #[test]
+    fn validate_rejects_a_tag_related_to_its_carrier() {
+        let mut s = crate::scenarios::rome_375::load_rome_375();
+        assert!(validate_scenario(&s).is_ok());
+        s.actors.iter_mut().find(|a| a.id == "rome").unwrap().tags.push("roman_border".into());
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("actor 'rome' carries tag 'roman_border'")), "{e:?}");
     }
 
     #[test]
