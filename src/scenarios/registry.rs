@@ -184,6 +184,17 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Every tag an actor carries is defined in the scenario (B48): a starting actor or a
+    // successor template carrying an undefined tag still counts in the shared-tag bonus while
+    // nothing else knows it. Spawns carry no tags (`SpawnActorConfig` has no tag field).
+    for a in &scenario.actors {
+        for tag in &a.tags {
+            if !scenario.tag_definitions.iter().any(|t| &t.id == tag) {
+                errors.push(format!("actor '{}' carries tag '{tag}', which the scenario does not define", a.id));
+            }
+        }
+    }
+
     // A tag's `requires_alive` names starting actors too (A37 stage 2).
     for t in &scenario.tag_definitions {
         for id in &t.requires_alive {
@@ -499,6 +510,20 @@ mod tests {
         s.actors.iter_mut().find(|a| a.id == "rome").unwrap().tags.push("roman_border".into());
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("actor 'rome' carries tag 'roman_border'")), "{e:?}");
+    }
+
+    /// B48: every carried tag is defined. Both ways: the three scenarios load clean, and
+    /// rome without the `successor_state` definition fails naming the tag.
+    #[test]
+    fn validate_requires_carried_tags_defined() {
+        for load in [crate::scenarios::rome_375::load_rome_375, crate::scenarios::constantinople_1430::load_constantinople_1430, crate::scenarios::milan_1477::load_milan_1477] {
+            let s = load();
+            assert!(validate_scenario(&s).is_ok(), "{}: {:?}", s.id, validate_scenario(&s));
+        }
+        let mut s = crate::scenarios::rome_375::load_rome_375();
+        s.tag_definitions.retain(|t| t.id != "successor_state");
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("tag 'successor_state', which the scenario does not define")), "{e:?}");
     }
 
     #[test]
