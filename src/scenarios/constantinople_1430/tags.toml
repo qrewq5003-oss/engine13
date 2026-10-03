@@ -104,6 +104,9 @@ metrics_modifier = { external_pressure = 1 }
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
 spread_chance = 0.1
+# A37 stage 2 (решение владельца 2026-10-03): отношение к Османам — граница с ними,
+# призыв к походу против них. С гибелью Османов тег уходит со всех носителей.
+requires_alive = ["ottomans"]
 
 [[tags]]
 id = "kingdom"
@@ -118,6 +121,9 @@ metrics_modifier = { external_pressure = 1, military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
 spread_chance = 0.25
+# A37 stage 2 (решение владельца 2026-10-03): отношение к Османам — граница с ними,
+# призыв к походу против них. С гибелью Османов тег уходит со всех носителей.
+requires_alive = ["ottomans"]
 
 [[tags]]
 id = "vassal"

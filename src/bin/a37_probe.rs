@@ -25,7 +25,7 @@ use engine13::core::census;
 use rand::SeedableRng;
 use std::collections::{BTreeMap, HashMap};
 
-const RALLY: &str = "external_pressure_legitimacy_to_cohesion_bonus";
+const RALLY: &str = "siege_rally_cohesion_bonus";
 
 fn q(v: &[f64]) -> String {
     if v.is_empty() {
@@ -173,6 +173,8 @@ fn counterfactuals(seeds: u64, ticks: u32, with_c: bool) {
                 let mut wins = Vec::new();
                 let (mut held, mut ff, mut fell, mut none) = (0, 0, 0, 0);
                 let mut ceil: BTreeMap<&str, (u64, u64)> = BTreeMap::new();
+                // A37 stage 2: the ceiling after the Ottomans died, for the three the tied tags held.
+                let mut ceil_after: BTreeMap<&str, (u64, u64)> = BTreeMap::new();
                 for seed in 0..seeds {
                     let mut st = new_state(sc, seed);
                     {
@@ -199,6 +201,15 @@ fn counterfactuals(seeds: u64, ticks: u32, with_c: bool) {
                         let ws = st.world_state.as_ref().unwrap();
                         if fall.is_none() && ws.dead_actor_ids.contains("byzantium") { fall = Some(ws.dead_actor_ids.contains("ottomans")); }
                         if won.is_none() && ws.victory_achieved { won = Some(ws.tick as f64 - 1.0); }
+                        if ws.dead_actor_ids.contains("ottomans") {
+                            for a in ["byzantium", "serbia", "trebizond"] {
+                                if let Some(x) = ws.actors.get(a) {
+                                    let e = ceil_after.entry(a).or_default();
+                                    e.1 += 1;
+                                    if x.get_metric("external_pressure") >= 100.0 { e.0 += 1; }
+                                }
+                            }
+                        }
                         for a in ["byzantium", "serbia", "trebizond", "hungary", "rome"] {
                             if let Some(x) = ws.actors.get(a) {
                                 let e = ceil.entry(a).or_default();
@@ -220,7 +231,11 @@ fn counterfactuals(seeds: u64, ticks: u32, with_c: bool) {
                     if let Some(t) = won { wins.push(t); }
                 }
                 let on = wins.iter().filter(|t| (40.0..=43.0).contains(*t)).count();
-                let c: Vec<String> = ceil.iter().map(|(a, (h, n))| format!("{a} {:.0} %", 100.0 * *h as f64 / (*n).max(1) as f64)).collect();
+                let mut c: Vec<String> = ceil.iter().map(|(a, (h, n))| format!("{a} {:.0} %", 100.0 * *h as f64 / (*n).max(1) as f64)).collect();
+                if !ceil_after.is_empty() {
+                    let a: Vec<String> = ceil_after.iter().map(|(a, (h, n))| format!("{a} {:.0} % of {n}", 100.0 * *h as f64 / (*n).max(1) as f64)).collect();
+                    c.push(format!("after Ottomans: {}", a.join(", ")));
+                }
                 let falls = if sc == "constantinople_1430" { format!("{under} · {after} · {never}") } else { "—".into() };
                 let ends = if sc == "constantinople_1430" { format!("{held} · {ff} · {fell} · {none}") } else { "—".into() };
                 println!("| {sc} | {world} | {label} | {falls} | {ott} | {} | {}, {}, {on} | {ends} | {} |",

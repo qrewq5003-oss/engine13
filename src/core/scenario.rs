@@ -179,6 +179,14 @@ pub struct TagDefinition {
     /// the three scenarios uses today (B49) — kept: it is a reader, not a dead field.
     #[serde(default)]
     pub requires_era: Option<Era>,
+    /// Actors this tag is a relation to (A37 stage 2): a border with them, a call to arms
+    /// against them. When one is gone the tag leaves every carrier and cannot come back —
+    /// a frontier with a power that no longer exists disappears, it does not merely stop
+    /// working. constantinople's `ottoman_frontier` and `crusade_caller` held the ceiling of
+    /// pressure on Byzantium, Serbia and Trebizond alone after the Ottomans died. Validated at
+    /// load: each id is a starting actor.
+    #[serde(default)]
+    pub requires_alive: Vec<String>,
     // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
     // — a dead contract. Without `deny_unknown_fields` an authored `unlocks = […]` would be
     // skipped silently; no tag file has one.

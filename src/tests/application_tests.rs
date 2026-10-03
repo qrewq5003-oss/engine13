@@ -509,3 +509,29 @@ fn a_chosen_target_that_is_absent_refuses_the_action() {
     assert!(apply_player_action(&mut state, &input).unwrap_err().starts_with("Адресат погиб"),
         "`mamluks` is not in the world at start");
 }
+
+/// A37 stage 2: a tag that is a relation to an actor (`requires_alive`) leaves every
+/// carrier once that actor is gone, and does not come back — not through spreading, not
+/// through heirs born later. Both ways: while the Ottomans live the tags are carried.
+#[test]
+fn a_tag_tied_to_a_dead_actor_leaves_and_stays_gone() {
+    let tied = ["ottoman_frontier", "crusade_caller"];
+    let carriers = |state: &AppState| -> usize {
+        state.world_state.as_ref().unwrap().actors.values()
+            .filter(|a| a.tags.iter().any(|t| tied.contains(&t.as_str()))
+                || a.actor_tags.keys().any(|t| tied.contains(&t.as_str())))
+            .count()
+    };
+    let mut state = constantinople_with_byzantium(true);
+    assert!(carriers(&state) > 0, "precondition: the tags are carried at the start");
+    crate::commands::advance_tick_silent(&mut state).unwrap();
+    assert!(carriers(&state) > 0, "with the Ottomans alive the tags stay");
+
+    let ws = state.world_state.as_mut().unwrap();
+    ws.actors.remove("ottomans");
+    ws.dead_actor_ids.insert("ottomans".to_string());
+    for t in 0..40 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+        assert_eq!(carriers(&state), 0, "tick {t} after the Ottomans died: a tied tag is still carried");
+    }
+}

@@ -12,6 +12,10 @@
 //! The last column is the spread of the real victory, for the A10 criteria (B44 stage 2
 //! re-measures them): p10 / p50 / p90 and how many wins land on ticks 40–43.
 //!
+//! And, for constantinople, the state at each victory (A10's criterion as refined after A37
+//! stage 2: without a player there is no victory **while the Ottomans live**): per seed, the
+//! tick and whether the Ottomans are dead and Byzantium alive at that moment.
+//!
 //! Usage: cargo run --release --bin victory_probe -- [seeds] [ticks]
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
@@ -47,6 +51,7 @@ fn main() {
             let vc = st.current_scenario.as_ref().unwrap().victory_condition.clone();
             let fed_ref = MetricRef::literal("global:federation_progress");
             let (mut f, mut w, mut b, mut streak) = (None, None, None, 0u32);
+            let mut at_win = None;
             for t in 0..ticks {
                 match &strategy {
                     Some(s) => { play_scripted_tick(&mut st, s); }
@@ -67,10 +72,18 @@ fn main() {
                         }
                     }
                 }
-                if w.is_none() && ws.victory_achieved { w = Some(t); }
+                if w.is_none() && ws.victory_achieved {
+                    w = Some(t);
+                    at_win = Some((ws.dead_actor_ids.contains("ottomans"), ws.actors.contains_key("byzantium")));
+                }
             }
             if let Some(x) = f { fed.push(x); }
             if let Some(x) = w { win.push(x); }
+            if let (Some(t), Some((ott_dead, byz_alive)), true) = (w, at_win, sc.starts_with("constantinople")) {
+                if strat.is_none() || ott_dead {
+                    eprintln!("victory-state {sc} {} seed {seed} tick {t} ottomans_dead={ott_dead} byzantium_alive={byz_alive}", strat.unwrap_or("none"));
+                }
+            }
             if let Some(x) = b { bare.push(x); }
         }
         let fmt = |v: &Vec<u32>| format!("{} ({}/{})", p50(v.clone()), v.len(), seeds);

@@ -180,6 +180,7 @@ fn contagious_tag_check_catches_a_new_violator() {
         spread_cooldown_ticks: 6,
         spread_chance: chance,
         requires_era: None,
+        requires_alive: Vec::new(),
             sea_going: false,
     };
 
