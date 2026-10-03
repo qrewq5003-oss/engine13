@@ -1,4 +1,4 @@
-# NOTE: `mehmed_accelerates`, `outcome_best`, and `outcome_fell_federation`
+# NOTE: `mehmed_accelerates`, `outcome_fell_federation` and `outcome_historical`
 # below use `metric = "global:federation_progress"` with no `actor_id`. This
 # is a supported form as of ENGINE13_INFRASTRUCTURE_TASKS.md Задача 4:
 # `check_event_condition`/`check_rank_conditions` now route metric conditions
@@ -39,6 +39,8 @@ duration = 2
 id = "mehmed_accelerates"
 is_key = true
 triggers_collapse = false
+# B46: over a fallen city it fired in 22 of 22 no-player games.
+requires_alive = ["byzantium"]
 llm_context_shift = "Мехмед форсирует подготовку. Федерация работает — османы торопятся."
 [milestone_events.condition]
 type = "metric"
@@ -51,6 +53,7 @@ duration = 2
 id = "mehmed_rises"
 is_key = true
 triggers_collapse = false
+requires_alive = ["byzantium"]
 llm_context_shift = "Мехмед II восходит на трон. Молодой амбициозный султан."
 [milestone_events.condition]
 type = "metric"
@@ -63,7 +66,9 @@ duration = 5
 [[milestone_events]]
 id = "final_assault"
 is_key = true
-triggers_collapse = true
+# B46: the start of the assault is not yet the end — `constantinople_falls` ends the scenario.
+triggers_collapse = false
+requires_alive = ["byzantium"]
 llm_context_shift = "Финальный штурм Константинополя начался."
 [milestone_events.condition]
 type = "metric"
@@ -77,6 +82,11 @@ duration = 3
 id = "constantinople_holds"
 is_key = true
 triggers_collapse = false
+# B46: «held, unconquerable» only after an assault beaten off. On cohesion alone it fired on
+# ticks 9–17 of every game, before any assault; until A8 makes the assault reachable it is
+# expected to stay silent — more honest than a false claim.
+after = "final_assault"
+requires_alive = ["byzantium"]
 llm_context_shift = "Константинополь выстоял! Город непобедим."
 [milestone_events.condition]
 type = "metric"
@@ -86,49 +96,58 @@ operator = "greater"
 value = 70.0
 duration = 5
 
+# B46 (решение владельца 2026-10-03): концовки — таблица 2×2 «город пал / выстоял» ×
+# «федерация сложилась / нет». Каждая оценивается один раз, в свой решающий момент, и за
+# партию срабатывает не больше одной (`group = "ending"`). «Сложилась при живом городе» —
+# это победа: она закрывает группу, а прежний `outcome_best` удалён, его текст — в описании
+# победы. Решающие моменты: падение — сама гибель Византии; «выстоял» — 1453 год, тик 46.
+
 [[milestone_events]]
-id = "outcome_best"
+id = "constantinople_falls"
 is_key = true
-triggers_collapse = false
-llm_context_shift = "Север Италии — новый центр Запада. Черноморская торговля под контролем федерации. Константинополь как протекторат. Венеция, Генуя, Милан выходят из этого сильнее чем вошли."
+triggers_collapse = true
+llm_context_shift = "Константинополь пал."
 [milestone_events.condition]
-type = "metric"
-metric = "global:federation_progress"
-operator = "greater_or_equal"
-value = 100.0
-duration = 2
+type = "actor_state"
+actor_id = "byzantium"
+state = "dead"
 
 [[milestone_events]]
 id = "outcome_survived_alone"
 is_key = true
 triggers_collapse = false
 llm_context_shift = "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова."
+group = "ending"
+requires_alive = ["byzantium"]
 [milestone_events.condition]
-type = "actor_state"
-actor_id = "byzantium"
-state = "alive"
+type = "tick"
+tick = 46
 
 [[milestone_events]]
 id = "outcome_fell_federation"
 is_key = true
 triggers_collapse = false
 llm_context_shift = "Константинополь пал. Но федерация выжила. Греческие учёные бегут на север — в Венецию, в Милан. Знания, рукописи, мастера. Ренессанс ускоряется. Север Италии выигрывает от трагедии которую не смог предотвратить."
+after = "constantinople_falls"
+group = "ending"
 [milestone_events.condition]
 type = "metric"
 metric = "global:federation_progress"
 operator = "greater_or_equal"
 value = 80.0
-duration = 2
 
 [[milestone_events]]
 id = "outcome_historical"
 is_key = true
 triggers_collapse = false
 llm_context_shift = "Исторический исход. Город пал. Федерация не сложилась. Ottoman давит на Адриатику. Венеция платит дань. Генуя теряет Галату. Милан смотрит в сторону."
+after = "constantinople_falls"
+group = "ending"
 [milestone_events.condition]
-type = "actor_state"
-actor_id = "byzantium"
-state = "dead"
+type = "metric"
+metric = "global:federation_progress"
+operator = "less"
+value = 80.0
 
 [[milestone_events]]
 id = "wallachia_emerges"

@@ -938,6 +938,26 @@ fn check_milestone_events(
             }
         }
 
+        // A closed group does not fire (B46): another of its milestones fired first, or the
+        // victory closed it. Derived from what has fired, so nothing new is saved.
+        if let Some(group) = &milestone.group {
+            let taken = scenario.milestone_events.iter().any(|o| {
+                o.group.as_ref() == Some(group) && world.milestone_events_fired.contains(&o.id)
+            });
+            let won = world.victory_achieved
+                && scenario.victory_condition.as_ref().and_then(|v| v.closes_group.as_ref()) == Some(group);
+            if taken || won {
+                continue;
+            }
+        }
+
+        // Required actors alive (B46), the victory's rule: checked first, and a sustained
+        // count does not survive their absence.
+        if !milestone.requires_alive.iter().all(|id| world.is_actor_alive(id)) {
+            world.milestone_condition_ticks.remove(&milestone.id);
+            continue;
+        }
+
         // Check cooldown
         if let Some(cooldown) = milestone.cooldown_ticks {
             if let Some(last_tick) = world.milestone_cooldowns.get(&milestone.id) {
@@ -945,11 +965,6 @@ fn check_milestone_events(
                     continue;  // Still on cooldown
                 }
             }
-        }
-
-        // Outcome milestones require tick >= 20 to fire
-        if milestone.id.starts_with("outcome_") && current_tick < 20 {
-            continue;
         }
 
         census::begin(|| format!("milestone {}", milestone.id));
@@ -2214,6 +2229,86 @@ mod tests {
     // ------------------------------------------------------------------
 
     // ------------------------------------------------------------------
+    // B46: `group`, `requires_alive` on milestones, `closes_group` on the victory.
+    // ------------------------------------------------------------------
+
+    /// A milestone that holds from tick 0, with the B46 fields given.
+    fn dated_milestone(id: &str, group: Option<&str>, requires_alive: &[&str]) -> crate::core::MilestoneEvent {
+        crate::core::MilestoneEvent {
+            id: id.to_string(),
+            condition: crate::core::EventCondition {
+                condition_type: EventConditionType::Tick { tick: 0 },
+                duration: None,
+            },
+            is_key: true,
+            triggers_collapse: false,
+            llm_context_shift: String::new(),
+            cooldown_ticks: None,
+            spawn_actor: None,
+            splits_actor: None,
+            after: None,
+            group: group.map(str::to_string),
+            requires_alive: requires_alive.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn fired_after_one_check(scenario: &Scenario, world: &mut WorldState) -> Vec<String> {
+        let mut log = EventLog::new();
+        check_milestone_events(world, scenario, &mut log);
+        world.milestone_events_fired.clone()
+    }
+
+    /// Within a group the first milestone to fire closes the rest — both hold on the same
+    /// tick, only the first fires. Without the group both would.
+    #[test]
+    fn a_group_lets_only_its_first_milestone_fire() {
+        let mut scenario = empty_scenario();
+        scenario.milestone_events = vec![dated_milestone("a", Some("g"), &[]), dated_milestone("b", Some("g"), &[])];
+        let mut world = WorldState::new("test".into(), 1430);
+        assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["a".to_string()]);
+        scenario.milestone_events = vec![dated_milestone("a", None, &[]), dated_milestone("b", None, &[])];
+        let mut world = WorldState::new("test".into(), 1430);
+        assert_eq!(fired_after_one_check(&scenario, &mut world).len(), 2, "ungrouped, both fire");
+    }
+
+    /// A victory with `closes_group` closes the group; without it the milestone fires.
+    #[test]
+    fn a_victory_closes_its_group() {
+        let mut scenario = empty_scenario();
+        scenario.milestone_events = vec![dated_milestone("held", Some("ending"), &[])];
+        scenario.victory_condition = Some(crate::core::VictoryCondition {
+            metric: mr("global:x", None),
+            threshold: 1.0,
+            title: String::new(),
+            description: String::new(),
+            minimum_tick: 0,
+            additional_conditions: vec![],
+            sustained_ticks_required: 1,
+            requires_alive: vec![],
+            closes_group: Some("ending".into()),
+        });
+        let mut world = WorldState::new("test".into(), 1430);
+        world.victory_achieved = true;
+        assert!(fired_after_one_check(&scenario, &mut world).is_empty(), "won: the ending is closed");
+        scenario.victory_condition.as_mut().unwrap().closes_group = None;
+        let mut world = WorldState::new("test".into(), 1430);
+        world.victory_achieved = true;
+        assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["held".to_string()]);
+    }
+
+    /// `requires_alive`: an absent actor keeps the milestone from firing; present, it fires.
+    #[test]
+    fn a_milestone_requires_its_actors_alive() {
+        let mut scenario = empty_scenario();
+        scenario.milestone_events = vec![dated_milestone("m", None, &["city"])];
+        let mut world = WorldState::new("test".into(), 1430);
+        assert!(fired_after_one_check(&scenario, &mut world).is_empty(), "the city is absent");
+        let mut world = WorldState::new("test".into(), 1430);
+        world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
+        assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["m".to_string()]);
+    }
+
+    // ------------------------------------------------------------------
     // B44 stage 2: an absent actor in auto-deltas. It reads as 0.0; a ratio over a zero
     // denominator is a limit (±∞), 0 / 0 is skipped; a single condition keeps 0.0.
     // ------------------------------------------------------------------
@@ -2757,6 +2852,8 @@ mod tests {
             spawn_actor: None,
             splits_actor: Some("parent".into()),
             after: None,
+            group: None,
+            requires_alive: vec![],
         }];
         let mut world = WorldState::new("test".into(), 375);
         world.actors.insert("parent".into(), parent);
@@ -2837,6 +2934,8 @@ mod tests {
             }),
             splits_actor: None,
             after: None,
+            group: None,
+            requires_alive: vec![],
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);

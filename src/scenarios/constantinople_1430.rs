@@ -230,7 +230,9 @@ pub fn load_constantinople_1430() -> Scenario {
             metric: crate::core::MetricRef::literal("global:federation_progress"),
             threshold: 80.0,
             title: "Федерация Севера основана".to_string(),
-            description: "Торговые республики объединились. Константинополь получил шанс на спасение.".to_string(),
+            // B46: the text of the deleted `outcome_best` («the federation formed and the city
+            // stands») — that ending *is* the victory, so it is said here, once.
+            description: "Торговые республики объединились. Константинополь получил шанс на спасение. Север Италии — новый центр Запада. Черноморская торговля под контролем федерации. Константинополь как протекторат. Венеция, Генуя, Милан выходят из этого сильнее чем вошли.".to_string(),
             minimum_tick: 40,  // 20 years × 2 ticks/year
             // `ottomans.military_size < 40` removed (A10). By its own comment it controlled
             // the victory's timing, which the coalition upkeep in the federation auto-delta
@@ -242,6 +244,9 @@ pub fn load_constantinople_1430() -> Scenario {
             // A10: the federation is a coalition to save the city — not a victory once it
             // has fallen.
             requires_alive: vec!["byzantium".to_string()],
+            // B46: the victory closes the endings — «formed while the city lives» is this
+            // victory; the endings never block it.
+            closes_group: Some("ending".to_string()),
         }),
         global_metrics_display: vec![
             crate::core::MetricDisplay {

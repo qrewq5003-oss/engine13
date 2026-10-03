@@ -11,7 +11,12 @@
 //!    alive or dead at the firing;
 //! 4. outcomes that fire together in one game (they read as mutually exclusive endings);
 //! 5. the mode: when the game goes to `Consequences`, and games where the city fell but the
-//!    mode never changed.
+//!    mode never changed;
+//! 6. acceptance of the B46 endings (stage 2): outcomes per game, victory + outcome pairs,
+//!    each ending's tick and condition, `constantinople_falls` and the mode in every fallen
+//!    game, milestones fired over a dead city, `constantinople_holds` after `final_assault`.
+//!
+//! Ticks are `world.tick` after the turn; the tick a condition was checked on is one less.
 //!
 //! Usage: cargo run --release --bin b46_probe -- [seeds] [ticks]
 
@@ -37,6 +42,7 @@ struct Run {
     fired: BTreeMap<String, (u32, bool)>, // milestone -> (tick, Byzantium alive)
     consequences: Option<u32>,
     end_mode: String,
+    victory: Option<u32>,
 }
 
 fn main() {
@@ -73,6 +79,7 @@ fn main() {
                 for m in &ws.milestone_events_fired {
                     r.fired.entry(m.clone()).or_insert((ws.tick, byz_alive));
                 }
+                if r.victory.is_none() && ws.victory_achieved { r.victory = Some(ws.tick); }
                 if r.consequences.is_none() && ws.game_mode == GameMode::Consequences {
                     r.consequences = Some(ws.tick);
                 }
@@ -129,5 +136,58 @@ fn main() {
         for r in &runs { *ends.entry(r.end_mode.clone()).or_default() += 1; }
         println!("\nmode: Consequences in {}/{seeds} (tick p10/50/90 {}); city fell but mode never changed: {fell_no_switch}; end modes {ends:?}\n",
             cons.len(), q(&cons));
+
+        // 6. B46 acceptance.
+        let endings = ["outcome_survived_alone", "outcome_fell_federation", "outcome_historical"];
+        let n_end = |r: &Run| endings.iter().filter(|e| r.fired.contains_key(**e)).count();
+        let mut dist: BTreeMap<usize, usize> = BTreeMap::new();
+        for r in &runs { *dist.entry(n_end(r)).or_default() += 1; }
+        let won_and: Vec<String> = endings.iter().map(|e| format!("{e} {}", runs.iter().filter(|r| r.victory.is_some() && r.fired.contains_key(*e)).count())).collect();
+        println!("B46 · endings per game (count → games): {dist:?}; victory + ending: {}; victories {}", won_and.join(", "), runs.iter().filter(|r| r.victory.is_some()).count());
+        // survived_alone: checked on tick 46 only, Byzantium alive, never after a victory
+        let sa: Vec<&Run> = runs.iter().filter(|r| r.fired.contains_key("outcome_survived_alone")).collect();
+        let sa_bad_tick = sa.iter().filter(|r| r.fired["outcome_survived_alone"].0 != 47).count();
+        // Alive at the check: milestones run before collapses in a turn, so a city that falls
+        // later in the same turn reads «dead» after it — count those apart.
+        let sa_dead = sa.iter().filter(|r| !r.fired["outcome_survived_alone"].1
+            && r.byz_fall.map(|f| f.0) != Some(r.fired["outcome_survived_alone"].0)).count();
+        let sa_same_turn = sa.iter().filter(|r| r.byz_fall.map(|f| f.0) == Some(r.fired["outcome_survived_alone"].0)).count();
+        let sa_after_win = sa.iter().filter(|r| r.victory.is_some_and(|v| v < r.fired["outcome_survived_alone"].0)).count();
+        println!("B46 · survived_alone {} (checked off tick 46: {sa_bad_tick}; over a dead city: {sa_dead}; city fell later in the same turn: {sa_same_turn}; after a victory: {sa_after_win})", sa.len());
+        // fall endings: on the fall tick or the next, city dead, fell_federation iff federation at the fall ≥ 80
+        let mut fall_bad = 0; let mut iff_bad = 0; let mut alive_bad = 0;
+        for r in &runs {
+            for e in ["outcome_fell_federation", "outcome_historical"] {
+                if let Some((t, alive)) = r.fired.get(e) {
+                    if *alive { alive_bad += 1; }
+                    match r.byz_fall { Some((ft, _, _)) if *t == ft || *t == ft + 1 => {}, _ => fall_bad += 1 }
+                }
+            }
+            if let Some((_, fed, _)) = r.byz_fall {
+                let ff = r.fired.contains_key("outcome_fell_federation");
+                let ended_on_fall = ff || r.fired.contains_key("outcome_historical");
+                if ended_on_fall && ff != (fed >= 80.0) { iff_bad += 1; }
+            }
+        }
+        let fall_endings = runs.iter().filter(|r| r.fired.contains_key("outcome_fell_federation") || r.fired.contains_key("outcome_historical")).count();
+        println!("B46 · fall endings {fall_endings} (not on the fall tick or next: {fall_bad}; over a living city: {alive_bad}; fell_federation ≠ (federation at fall ≥ 80): {iff_bad})");
+        // constantinople_falls and the mode
+        let fallen: Vec<&Run> = runs.iter().filter(|r| r.byz_fall.is_some()).collect();
+        let cf_missing = fallen.iter().filter(|r| !r.fired.contains_key("constantinople_falls")).count();
+        let not_cons = fallen.iter().filter(|r| r.consequences.is_none()).count();
+        let not_cons_won = fallen.iter().filter(|r| r.consequences.is_none() && r.victory.is_some()).count();
+        let unfallen_without_ending = runs.iter().filter(|r| r.byz_fall.is_none() && n_end(r) == 0).count();
+        println!("B46 · fallen {} — constantinople_falls missing {cf_missing}; mode not Consequences {not_cons} (of them won earlier: {not_cons_won}); never fell and no ending: {unfallen_without_ending}", fallen.len());
+        for m in ["final_assault", "mehmed_rises", "mehmed_accelerates"] {
+            let f: Vec<&(u32, bool)> = runs.iter().filter_map(|r| r.fired.get(m)).collect();
+            println!("B46 · {m}: fired {}, over a dead city {}", f.len(), f.iter().filter(|x| !x.1).count());
+        }
+        let holds: Vec<&Run> = runs.iter().filter(|r| r.fired.contains_key("constantinople_holds")).collect();
+        let holds_bad = holds.iter().filter(|r| {
+            let h = r.fired["constantinople_holds"];
+            let after_assault = r.fired.get("final_assault").is_some_and(|fa| fa.0 <= h.0);
+            !(after_assault && h.1)
+        }).count();
+        println!("B46 · constantinople_holds: fired {} (without a prior final_assault or over a dead city: {holds_bad})\n", holds.len());
     }
 }

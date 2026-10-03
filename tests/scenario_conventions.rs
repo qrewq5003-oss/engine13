@@ -1430,6 +1430,11 @@ fn engine_knows_authored_content_only_by_these_names() {
     .into_iter()
     .collect();
 
+    // The engine's own grammar, which happens to begin some authored ids: a border type
+    // (`"sea"`, `seafaring`) and the family-key prefix the engine strips itself
+    // (`"family_"`, `family_rises`). Not authored names, so not a prefix check.
+    const ENGINE_GRAMMAR: &[&str] = &["sea", "land", "family_"];
+
     let mut found: BTreeSet<String> = BTreeSet::new();
     for dir in ["src/engine", "src/core"] {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -1444,6 +1449,10 @@ fn engine_knows_authored_content_only_by_these_names() {
             for lit in production_string_literals(&src) {
                 if authored.contains(&lit) && !metrics.contains(lit.as_str()) {
                     found.insert(lit);
+                } else if !metrics.contains(lit.as_str()) && !ENGINE_GRAMMAR.contains(&lit.as_str()) {
+                    if let Some(prefix) = authored_prefix(&lit, &authored) {
+                        found.insert(prefix);
+                    }
                 }
             }
         }
@@ -1463,6 +1472,22 @@ fn engine_knows_authored_content_only_by_these_names() {
          newly hard-coded: {extra:?}\n\
          no longer present (drop from the list and say so): {gone:?}"
     );
+}
+
+/// A literal that is a proper prefix of authored ids, reported as `prefix:<literal>` (B46).
+///
+/// `starts_with("outcome_")` decided which milestones waited until tick 20 — membership by
+/// a name's spelling, the same class as enumerating names, and invisible to an equality
+/// check: `"outcome_"` is no authored id, only the start of four. Three characters or
+/// more, so single letters and separators do not count.
+fn authored_prefix(lit: &str, authored: &std::collections::BTreeSet<String>) -> Option<String> {
+    if lit.chars().count() < 3 {
+        return None;
+    }
+    authored
+        .iter()
+        .any(|a| a.len() > lit.len() && a.starts_with(lit))
+        .then(|| format!("prefix:{lit}"))
 }
 
 /// The other half: the scanner must see code and must NOT see comments — the exact
@@ -2821,6 +2846,13 @@ fn metric_milestones_are_closed_in_the_starting_world() {
         engine13::load_scenario(&mut st, &db, id.to_string()).unwrap();
         let world = st.world_state.as_ref().unwrap();
         for m in &st.current_scenario.as_ref().unwrap().milestone_events {
+            // A milestone that follows another (`after`, A2) is not evaluated until that one
+            // fires, so its own condition being true at start opens nothing: the
+            // predecessor carries the tick-0 check. constantinople's `outcome_historical`
+            // (`federation < 80`, after `constantinople_falls`) is the case (B46).
+            if m.after.is_some() {
+                continue;
+            }
             if let engine13::core::EventConditionType::Metric { metric, operator, value, .. } =
                 &m.condition.condition_type
             {
