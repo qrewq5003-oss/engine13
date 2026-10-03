@@ -25,3 +25,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 [[bin]]
 name = "dead_read_probe"
 required-features = ["census"]
+
+[[bin]]
+name = "condition_occupancy_probe"
+required-features = ["census"]
