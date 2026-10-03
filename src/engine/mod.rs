@@ -1249,6 +1249,16 @@ fn apply_seat_split(
         .map(|t| (t.name.clone(), t.name_short.clone(), t.on_collapse.clone()));
     if let Some(p) = world.actors.get_mut(&actor_id) {
         p.metrics = cut(&parent_metrics, seat.weight / total, false);
+        // A46: the split rewrites the seat's metrics wholesale — record it for the census.
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "seat_split".to_string());
+            for (k, v) in &p.metrics {
+                let old = parent_metrics.get(k).copied().unwrap_or(0.0);
+                census::metric_write(std::panic::Location::caller(), &p.id, k, v - old, old, *v);
+            }
+            census::clear_write_source();
+        }
         if let Some((name, short, on_collapse)) = seat_template {
             p.name = name;
             p.name_short = short;
@@ -1690,6 +1700,12 @@ fn check_generation_transfer(
                     .copied()
                     .unwrap_or(0.7);
                 let new_value = value * coefficient;
+                #[cfg(feature = "census")]
+                {
+                    census::write_source(|| "generation_transfer".to_string());
+                    census::metric_write(std::panic::Location::caller(), "family", metric, new_value - value, *value, new_value);
+                    census::clear_write_source();
+                }
                 family_state.metrics.insert(metric.clone(), new_value);
             }
         }

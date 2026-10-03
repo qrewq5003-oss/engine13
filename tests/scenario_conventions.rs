@@ -1435,9 +1435,10 @@ fn engine_knows_authored_content_only_by_these_names() {
     .collect();
 
     // The engine's own grammar, which happens to begin some authored ids: a border type
-    // (`"sea"`, `seafaring`) and the family-key prefix the engine strips itself
-    // (`"family_"`, `family_rises`). Not authored names, so not a prefix check.
-    const ENGINE_GRAMMAR: &[&str] = &["sea", "land", "family_"];
+    // (`"sea"`, `seafaring`), the family-key prefix the engine strips itself (`"family_"`,
+    // `family_rises`) and the family container's name in the census (`"family"`, A46).
+    // Not authored names, so not a prefix check.
+    const ENGINE_GRAMMAR: &[&str] = &["sea", "land", "family_", "family"];
 
     let mut found: BTreeSet<String> = BTreeSet::new();
     for dir in ["src/engine", "src/core"] {

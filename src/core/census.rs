@@ -91,10 +91,17 @@ mod imp {
         static WRITES: RefCell<Option<Vec<Write>>> = const { RefCell::new(None) };
         static WRITE_SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
         static DEP_CAP: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
+        static WATCH_ONLY: Cell<bool> = const { Cell::new(true) };
     }
 
     pub fn enable_writes() {
         WRITES.with(|w| *w.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// Record every metric, not only `external_pressure` and `cohesion` (A46: the clamp
+    /// losses of all metrics; family metrics come as actor `family`, globals as `global`).
+    pub fn watch_all_metrics(all: bool) {
+        WATCH_ONLY.with(|w| w.set(!all));
     }
 
     pub fn take_writes() -> Vec<Write> {
@@ -113,7 +120,7 @@ mod imp {
     }
 
     pub fn metric_write(location: &'static std::panic::Location<'static>, actor: &str, metric: &str, requested: f64, before: f64, after: f64) {
-        if !WATCHED.contains(&metric) {
+        if WATCH_ONLY.with(|w| w.get()) && !WATCHED.contains(&metric) {
             return;
         }
         WRITES.with(|w| {

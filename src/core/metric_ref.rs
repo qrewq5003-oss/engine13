@@ -290,9 +290,15 @@ impl MetricRef {
             MetricRef::Family { key } => {
                 let metric_key = Self::family_key(key).to_string();
                 if let Some(ref mut fs) = world_state.family_state {
+                    #[cfg(feature = "census")]
+                    let name = metric_key.clone();
                     let val = fs.metrics.entry(metric_key).or_insert(0.0);
+                    #[cfg(feature = "census")]
+                    let before = *val;
                     let new_value = (*val + delta).clamp(0.0, 100.0);
                     *val = if new_value == 0.0 { 0.0 } else { new_value };
+                    #[cfg(feature = "census")]
+                    super::census::metric_write(std::panic::Location::caller(), "family", &name, delta, before, *val);
                 }
             }
             MetricRef::Global { key } => {
@@ -300,7 +306,11 @@ impl MetricRef {
                     .global_metrics
                     .entry(key.as_str().to_string())
                     .or_insert(0.0);
+                #[cfg(feature = "census")]
+                let before = *val;
                 *val = (*val + delta).clamp(0.0, 100.0);
+                #[cfg(feature = "census")]
+                super::census::metric_write(std::panic::Location::caller(), "global", key.as_str(), delta, before, *val);
             }
         }
     }
