@@ -663,6 +663,26 @@ fn check_victory_condition(world: &mut WorldState, scenario: &Scenario) {
 
 fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
     check_collapses(world, scenario, event_log);
+    strip_tags_of_absent_actors(world, scenario);
+}
+
+/// A tag that names actors in `requires_alive` leaves every carrier once one of them is
+/// gone (A37 stage 2). Run after the collapses, so heirs born this tick lose it too; with
+/// every named actor alive it changes nothing.
+fn strip_tags_of_absent_actors(world: &mut WorldState, scenario: &Scenario) {
+    let gone: Vec<&str> = scenario
+        .tag_definitions
+        .iter()
+        .filter(|t| t.requires_alive.iter().any(|id| !world.actors.contains_key(id)))
+        .map(|t| t.id.as_str())
+        .collect();
+    if gone.is_empty() {
+        return;
+    }
+    for actor in world.actors.values_mut() {
+        actor.tags.retain(|t| !gone.contains(&t.as_str()));
+        actor.actor_tags.retain(|t, _| !gone.contains(&t.as_str()));
+    }
 }
 
 // ============================================================================

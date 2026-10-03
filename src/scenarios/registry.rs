@@ -184,6 +184,15 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A tag's `requires_alive` names starting actors too (A37 stage 2).
+    for t in &scenario.tag_definitions {
+        for id in &t.requires_alive {
+            if !scenario.actors.iter().any(|a| &a.id == id && !a.is_successor_template) {
+                errors.push(format!("tag '{}': requires_alive '{id}' is not a starting actor", t.id));
+            }
+        }
+    }
+
     // A milestone's `requires_alive` names starting actors, as the victory's does (B46).
     for m in &scenario.milestone_events {
         for id in &m.requires_alive {
@@ -462,6 +471,11 @@ mod tests {
         s.milestone_events.iter_mut().find(|m| m.id == "mehmed_rises").unwrap().requires_alive = vec!["wallachia".into()];
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("requires_alive 'wallachia' is not a starting actor")), "{e:?}");
+        // A37 stage 2: a tag's `requires_alive` too.
+        let mut s = base();
+        s.tag_definitions.iter_mut().find(|t| t.id == "ottoman_frontier").unwrap().requires_alive = vec!["wallachia".into()];
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("tag 'ottoman_frontier': requires_alive 'wallachia'")), "{e:?}");
     }
 
     #[test]
