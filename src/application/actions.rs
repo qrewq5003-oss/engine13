@@ -55,6 +55,7 @@ pub fn apply_player_action(
         return Err(describe_unavailable(&reason));
     }
 
+    crate::core::census::write_source(|| format!("action {}", action.id));
     // Apply cost
     let mut applied_costs = HashMap::new();
     for (metric, cost) in &action.cost {
@@ -79,6 +80,7 @@ pub fn apply_player_action(
         metric.apply(world_state, weighted_effect);
         applied_effects.insert(metric.to_string(), weighted_effect);
     }
+    crate::core::census::clear_write_source();
 
     // Record event — attributed to the scenario's own player actor.
     //

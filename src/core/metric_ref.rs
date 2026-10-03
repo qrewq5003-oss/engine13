@@ -270,6 +270,7 @@ impl MetricRef {
     }
 
     /// Apply a delta to the metric in world_state
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn apply(&self, world_state: &mut WorldState, delta: f64) {
         match self {
             MetricRef::Actor { actor_id, metric } => {
@@ -282,6 +283,8 @@ impl MetricRef {
                         _ => (current + delta).clamp(0.0, 100.0), // cohesion, legitimacy, etc.
                     };
                     actor.metrics.insert(metric_name.to_string(), new_value);
+                    #[cfg(feature = "census")]
+                    super::census::metric_write(std::panic::Location::caller(), &actor.id, metric_name, delta, current, new_value);
                 }
             }
             MetricRef::Family { key } => {

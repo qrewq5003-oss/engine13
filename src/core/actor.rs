@@ -163,20 +163,43 @@ impl Actor {
     }
 
     /// Set metric value
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn set_metric(&mut self, key: &str, value: f64) {
+        #[cfg(feature = "census")]
+        let before = self.get_metric(key);
         self.metrics.insert(key.to_string(), value);
+        #[cfg(feature = "census")]
+        crate::core::census::metric_write(std::panic::Location::caller(), &self.id, key, value - before, before, value);
     }
 
     /// Add delta to metric (creates if missing)
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn add_metric(&mut self, key: &str, delta: f64) {
         let v = self.metrics.entry(key.to_string()).or_insert(0.0);
+        #[cfg(feature = "census")]
+        let before = *v;
         *v += delta;
+        #[cfg(feature = "census")]
+        {
+            let after = *v;
+            crate::core::census::metric_write(std::panic::Location::caller(), &self.id, key, delta, before, after);
+        }
     }
 
     /// Clamp metric to range (only if key exists - doesn't create missing metrics)
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn clamp_metric(&mut self, key: &str, min: f64, max: f64) {
         if let Some(v) = self.metrics.get_mut(key) {
+            #[cfg(feature = "census")]
+            let before = *v;
             *v = v.clamp(min, max);
+            #[cfg(feature = "census")]
+            {
+                let after = *v;
+                if after != before {
+                    crate::core::census::metric_write(std::panic::Location::caller(), &self.id, key, 0.0, before, after);
+                }
+            }
         }
     }
 
