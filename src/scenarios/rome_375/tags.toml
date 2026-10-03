@@ -223,3 +223,15 @@ metrics_modifier = { cohesion = -1 }
 spreads_via = []
 spread_cooldown_ticks = 0
 spread_chance = 0.0
+
+[[tags]]
+# B48 (решение владельца 2026-10-04): метка преемника у пяти шаблонов-наследников
+# (`visigoth_kingdom`, `ostrogoth_kingdom`, `late_sassanids`, `vandal_kingdom_africa`,
+# `frankish_kingdom`). Без модификатора и без распространения: тег участвует только в
+# счёте общих тегов (когезия за «общий тег» во взаимодействии). Определение записывает то,
+# что движок уже делал с неопределённым тегом — замер B48 (`b48_probe`): вариант
+# «определён без модификатора» совпадает с прежним миром побайтово 120 / 120.
+id = "successor_state"
+metrics_modifier = {}
+spreads_via = []
+spread_chance = 0.0
