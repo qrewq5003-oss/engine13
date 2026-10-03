@@ -535,3 +535,23 @@ fn a_tag_tied_to_a_dead_actor_leaves_and_stays_gone() {
         assert_eq!(carriers(&state), 0, "tick {t} after the Ottomans died: a tied tag is still carried");
     }
 }
+
+/// A37 follow-up: rome's «border with Rome» tags never reach Rome itself. Before the rule
+/// they spread to Rome and added +1 pressure a tick each — a border with oneself.
+#[test]
+fn rome_never_carries_a_border_with_itself() {
+    use rand::SeedableRng;
+    let own = ["roman_border", "roman_frontier", "rhine_border"];
+    let db = setup_test_db();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(3));
+    // Without the rule Rome picks up `roman_border` on tick 2 of this seed.
+    for t in 0..40 {
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+        if let Some(rome) = state.world_state.as_ref().unwrap().actors.get("rome") {
+            let bad: Vec<&String> = rome.tags.iter().filter(|x| own.contains(&x.as_str())).collect();
+            assert!(bad.is_empty(), "tick {t}: Rome carries {bad:?}");
+        }
+    }
+}

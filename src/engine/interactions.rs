@@ -1253,6 +1253,13 @@ fn try_spread_direction(
             continue;
         }
 
+        // A tag is never carried by the actor it is a relation to — rome's «border with Rome»
+        // on Rome itself (A37 follow-up). Checked after the roll, so the random stream is the
+        // same wherever the rule never applies.
+        if tag_def.requires_alive.iter().any(|id| id == target_id) {
+            continue;
+        }
+
         // Apply spread: add tag and ActorTag to target
         if let Some(target) = world.actors.get_mut(target_id) {
             if !target.tags.contains(tag_id) {

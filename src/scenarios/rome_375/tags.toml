@@ -123,6 +123,8 @@ metrics_modifier = { external_pressure = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
 spread_chance = 0.2
+# A37 follow-up (решение владельца 2026-10-03): отношение к Риму — после раскола id `rome` остаётся за Западом, а рейнская граница западная.
+requires_alive = ["rome"]
 
 [[tags]]
 id = "roman_contact"
@@ -152,6 +154,8 @@ metrics_modifier = { external_pressure = 1, economic_output = 1 }
 spreads_via = ["trade", "war"]
 spread_cooldown_ticks = 6
 spread_chance = 0.25
+# A37 follow-up (решение владельца 2026-10-03): отношение к Риму — после раскола id `rome` остаётся за Западом, а рейнская граница западная.
+requires_alive = ["rome"]
 
 [[tags]]
 id = "buffer_state"
@@ -166,6 +170,8 @@ metrics_modifier = { external_pressure = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
 spread_chance = 0.2
+# A37 follow-up (решение владельца 2026-10-03): отношение к Сасанидам.
+requires_alive = ["sassanids"]
 
 [[tags]]
 id = "roman_border"
@@ -173,6 +179,8 @@ metrics_modifier = { external_pressure = 1, economic_output = 1 }
 spreads_via = ["trade", "war"]
 spread_cooldown_ticks = 6
 spread_chance = 0.25
+# A37 follow-up (решение владельца 2026-10-03): отношение к Риму — после раскола id `rome` остаётся за Западом, а рейнская граница западная.
+requires_alive = ["rome"]
 
 [[tags]]
 id = "buddhism"
