@@ -368,6 +368,11 @@ pub struct VictoryCondition {
     /// starting actor, not a successor template.
     #[serde(default)]
     pub requires_alive: Vec<String>,
+    /// The milestone group a victory closes (B46) — one way: endings do not block the
+    /// victory. A win after «the city held, by chance» is the story moving on, not a
+    /// contradiction. Validated at load: a group some milestone belongs to.
+    #[serde(default)]
+    pub closes_group: Option<String>,
 }
 
 /// Status indicator for UI display
@@ -608,6 +613,19 @@ pub struct MilestoneEvent {
     /// game. Validated at load: an existing milestone of the same scenario, not itself.
     #[serde(default)]
     pub after: Option<String>,
+    /// Mutually exclusive milestones (B46): within a group the first to fire closes the
+    /// rest, and a victory with `closes_group` closes it too. constantinople's endings are
+    /// one 2×2 table — «fell / held» × «federation formed / not» — and gave 2–4 endings a
+    /// game, «held» and «fell» together in 23–29 of 30. Validated at load: a group has two
+    /// or more milestones, or the victory closes it.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Actors that must be alive for the milestone to count — the victory's rule (A10,
+    /// B46): checked before the condition, and a sustained count resets while one is gone.
+    /// «Mehmed accelerates» over a fallen city fired in 22 of 22 games without a player.
+    /// Validated at load: each id is a starting actor.
+    #[serde(default)]
+    pub requires_alive: Vec<String>,
 }
 
 /// Configuration for spawning a new actor via milestone event

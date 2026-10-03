@@ -164,6 +164,35 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Check groups (B46): a group of one excludes nothing unless the victory closes it; a
+    // victory closes a group some milestone belongs to.
+    let closed_by_victory = scenario.victory_condition.as_ref().and_then(|v| v.closes_group.as_ref());
+    let mut groups: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for m in &scenario.milestone_events {
+        if let Some(g) = &m.group {
+            *groups.entry(g.as_str()).or_default() += 1;
+        }
+    }
+    for (g, n) in &groups {
+        if *n < 2 && closed_by_victory.map(|c| c.as_str()) != Some(*g) {
+            errors.push(format!("milestone group '{g}' has {n} milestone and the victory does not close it — it excludes nothing"));
+        }
+    }
+    if let Some(c) = closed_by_victory {
+        if !groups.contains_key(c.as_str()) {
+            errors.push(format!("victory_condition: closes_group '{c}' is no milestone's group"));
+        }
+    }
+
+    // A milestone's `requires_alive` names starting actors, as the victory's does (B46).
+    for m in &scenario.milestone_events {
+        for id in &m.requires_alive {
+            if !scenario.actors.iter().any(|a| &a.id == id && !a.is_successor_template) {
+                errors.push(format!("milestone '{}': requires_alive '{id}' is not a starting actor", m.id));
+            }
+        }
+    }
+
     // Check the split target (A12): a milestone that splits names its actor explicitly,
     // and that actor must be splittable — exactly one heir keeps the seat.
     for m in &scenario.milestone_events {
@@ -413,6 +442,26 @@ mod tests {
         scenario.milestone_events.iter_mut().find(|m| m.id == "family_falls").unwrap().after = Some("ghost".to_string());
         let errors = validate_scenario(&scenario).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("unknown milestone 'ghost'")), "{errors:?}");
+    }
+
+    /// B46 validators: a group of one that the victory does not close, a victory closing a
+    /// group nobody belongs to, a milestone requiring a non-starting actor alive.
+    #[test]
+    fn validate_checks_groups_and_required_actors() {
+        let base = crate::scenarios::constantinople_1430::load_constantinople_1430;
+        assert!(validate_scenario(&base()).is_ok(), "{:?}", validate_scenario(&base()));
+        let mut s = base();
+        s.milestone_events.iter_mut().find(|m| m.id == "church_union").unwrap().group = Some("lonely".into());
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("group 'lonely' has 1 milestone")), "{e:?}");
+        let mut s = base();
+        s.victory_condition.as_mut().unwrap().closes_group = Some("ghost".into());
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("closes_group 'ghost'")), "{e:?}");
+        let mut s = base();
+        s.milestone_events.iter_mut().find(|m| m.id == "mehmed_rises").unwrap().requires_alive = vec!["wallachia".into()];
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("requires_alive 'wallachia' is not a starting actor")), "{e:?}");
     }
 
     #[test]

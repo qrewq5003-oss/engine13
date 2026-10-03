@@ -203,6 +203,7 @@ pub fn load_rome_375() -> Scenario {
             sustained_ticks_required: 1,
             // The family's rise does not depend on a living Rome.
             requires_alive: vec![],
+            closes_group: None,
         }),
         global_metrics_display: vec![],
         // A2: the specification's start, 8 / 12 / 22 / 15 — a modest family, the scenario's
@@ -1467,6 +1468,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             spawn_actor: None,
             splits_actor: None,
             after: None,
+            group: None,
+            requires_alive: vec![],
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1495,6 +1498,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             spawn_actor: None,
             splits_actor: Some("rome".to_string()),
             after: None,
+            group: None,
+            requires_alive: vec![],
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1514,6 +1519,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             spawn_actor: None,
             splits_actor: None,
             after: None,
+            group: None,
+            requires_alive: vec![],
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1532,6 +1539,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             spawn_actor: None,
             splits_actor: None,
             after: None,
+            group: None,
+            requires_alive: vec![],
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1552,6 +1561,8 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             splits_actor: None,
             // «Lost everything it had gained» — only after it had risen (A2).
             after: Some("family_rises".to_string()),
+            group: None,
+            requires_alive: vec![],
         },
     ]
 }
