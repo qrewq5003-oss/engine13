@@ -121,7 +121,7 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
             _ => 0.0,
         },
         DependencyMode::Bonus => match rule.threshold {
-            Some(threshold) if from_val > threshold => (from_val - threshold) * rule.coefficient,
+            Some(threshold) if from_val > threshold => (census::dependency_source(&rule.id, from_val) - threshold) * rule.coefficient,
             _ => 0.0,
         },
         DependencyMode::Linear => from_val * rule.coefficient,
@@ -150,7 +150,9 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
         delta,
     });
     if delta != 0.0 {
+        census::write_source(|| format!("dependency {}", rule.id));
         actor.add_metric(rule.to.as_str(), delta);
+        census::clear_write_source();
     }
 }
 
@@ -302,7 +304,9 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         });
 
         // Apply via MetricRef - scope to actor if actor_id is set
+        census::write_source(|| format!("auto_delta[{index}] {}", auto_delta.metric));
         auto_delta.metric.apply(world, final_delta);
+        census::clear_write_source();
     }
 }
 
@@ -502,12 +506,14 @@ fn phase_random_events(
             }
 
             // Apply effects
+            census::write_source(|| format!("event {}", event.id));
             for (metric, delta) in &event.effects {
                 metric
                     .resolve(target_id)
                     .expect("event target actor id")
                     .apply(world, *delta);
             }
+            census::clear_write_source();
 
             // Record event
             let event_record = crate::core::Event::new(
@@ -728,9 +734,15 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
                 .flat_map(|(tag, t)| t.metrics_modifier.iter().map(move |(m, v)| (tag.as_str(), m.as_str(), *v)))
                 .collect();
             modifiers.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-            for (_, metric, modifier) in modifiers {
+            for (_tag, metric, modifier) in modifiers {
                 let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
                 actor.metrics.insert(metric.to_string(), current + modifier as f64);
+                #[cfg(feature = "census")]
+                {
+                    census::write_source(|| format!("tag {_tag}"));
+                    census::metric_write(std::panic::Location::caller(), &actor.id, metric, modifier as f64, current, current + modifier as f64);
+                    census::clear_write_source();
+                }
             }
             // Note: No clamping here - clamp_metrics is called on step 5
         }

@@ -20,6 +20,13 @@
 //! moves inside the tick before the auto-deltas read it). Every condition, present actor
 //! or absent.
 //!
+//! # Writes (A37)
+//!
+//! [`enable_writes`] records every write to an actor's `external_pressure` or `cohesion`:
+//! call site, the source named by the writing site when it names one ([`write_source`]),
+//! the delta asked for and the delta that landed after any clamp. Completeness is checked
+//! by the probe, not assumed: the landed deltas of a tick must sum to the tick's change.
+//!
 //! # The counterfactual
 //!
 //! [`set_uniform_false`] makes every annotated condition whose read hit an absent actor
@@ -67,6 +74,75 @@ mod imp {
     }
 
     /// Start counting condition outcomes: (context, test) -> (times true, times evaluated).
+    /// One write to a watched metric of an actor.
+    #[derive(Debug, Clone)]
+    pub struct Write {
+        pub location: &'static std::panic::Location<'static>,
+        pub source: Option<String>,
+        pub actor: String,
+        pub metric: String,
+        pub requested: f64,
+        pub applied: f64,
+    }
+
+    const WATCHED: &[&str] = &["external_pressure", "cohesion"];
+
+    thread_local! {
+        static WRITES: RefCell<Option<Vec<Write>>> = const { RefCell::new(None) };
+        static WRITE_SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
+        static DEP_CAP: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
+    }
+
+    pub fn enable_writes() {
+        WRITES.with(|w| *w.borrow_mut() = Some(Vec::new()));
+    }
+
+    pub fn take_writes() -> Vec<Write> {
+        WRITES.with(|w| w.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    /// Name the source of the writes that follow, until [`clear_write_source`].
+    pub fn write_source(name: impl FnOnce() -> String) {
+        if WRITES.with(|w| w.borrow().is_some()) {
+            WRITE_SOURCE.with(|s| *s.borrow_mut() = Some(name()));
+        }
+    }
+
+    pub fn clear_write_source() {
+        WRITE_SOURCE.with(|s| *s.borrow_mut() = None);
+    }
+
+    pub fn metric_write(location: &'static std::panic::Location<'static>, actor: &str, metric: &str, requested: f64, before: f64, after: f64) {
+        if !WATCHED.contains(&metric) {
+            return;
+        }
+        WRITES.with(|w| {
+            if let Some(rows) = w.borrow_mut().as_mut() {
+                rows.push(Write {
+                    location,
+                    source: WRITE_SOURCE.with(|s| s.borrow().clone()),
+                    actor: actor.to_string(),
+                    metric: metric.to_string(),
+                    requested,
+                    applied: after - before,
+                });
+            }
+        });
+    }
+
+    /// Counterfactual (A37 (б)): the named dependency rule reads its source as
+    /// `min(source, cap)`.
+    pub fn set_dependency_cap(cap: Option<(String, f64)>) {
+        DEP_CAP.with(|c| *c.borrow_mut() = cap);
+    }
+
+    pub fn dependency_source(rule: &str, from: f64) -> f64 {
+        DEP_CAP.with(|c| match &*c.borrow() {
+            Some((r, cap)) if r == rule => from.min(*cap),
+            _ => from,
+        })
+    }
+
     pub fn enable_occupancy() {
         OCCUPANCY.with(|o| *o.borrow_mut() = Some(Default::default()));
     }
@@ -153,6 +229,22 @@ mod imp {
 
 #[cfg(feature = "census")]
 pub use imp::*;
+
+/// Name the source of the next metric writes (A37). No-op without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn write_source(_name: impl FnOnce() -> String) {}
+
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn clear_write_source() {}
+
+/// A dependency rule's source value; the identity without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn dependency_source(_rule: &str, from: f64) -> f64 {
+    from
+}
 
 /// Name the content the next reads belong to. No-op without the feature.
 #[cfg(not(feature = "census"))]
