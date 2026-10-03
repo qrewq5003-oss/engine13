@@ -175,10 +175,19 @@ pub fn apply_scripted_actions(
     state: &mut crate::commands::AppState,
     strategy: &ScriptedStrategy,
 ) -> ScriptedTurn {
+    apply_scripted_priorities(state, &strategy.priority_actions())
+}
+
+/// [`apply_scripted_actions`] over an explicit priority list — the same policy, so a probe
+/// can try a strategy changed in memory (A38: `milan_legitimacy` added) without copying the
+/// loop (A29).
+pub fn apply_scripted_priorities(
+    state: &mut crate::commands::AppState,
+    priority_actions: &[&'static str],
+) -> ScriptedTurn {
     use crate::application::actions::{apply_player_action, PlayerActionInput};
 
     let scenario = state.current_scenario.as_ref().expect("scenario").clone();
-    let priority_actions = strategy.priority_actions();
     let mut turn = ScriptedTurn::default();
     let milan_treasury = |state: &crate::commands::AppState| {
         state.world_state.as_ref().unwrap()
@@ -223,7 +232,7 @@ pub fn apply_scripted_actions(
             }
         }
     } else {
-        for action_id in &priority_actions {
+        for action_id in priority_actions {
             if turn.applied.len() as u32 >= scenario.actions_per_tick {
                 break;
             }
@@ -246,7 +255,15 @@ pub fn play_scripted_tick(
     state: &mut crate::commands::AppState,
     strategy: &ScriptedStrategy,
 ) -> ScriptedTurn {
-    let turn = apply_scripted_actions(state, strategy);
+    play_scripted_priorities_tick(state, &strategy.priority_actions())
+}
+
+/// [`play_scripted_tick`] over an explicit priority list (see [`apply_scripted_priorities`]).
+pub fn play_scripted_priorities_tick(
+    state: &mut crate::commands::AppState,
+    priority_actions: &[&'static str],
+) -> ScriptedTurn {
+    let turn = apply_scripted_priorities(state, priority_actions);
     let ws = state.world_state.as_mut().expect("world");
     let sc = state.current_scenario.as_ref().expect("scenario");
     crate::engine::tick(ws, sc, &mut state.event_log, state.rng.as_mut().expect("rng"));
