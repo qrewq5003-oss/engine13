@@ -13,6 +13,13 @@
 //! `#[track_caller]`: the shipped build is the build without it. With the feature,
 //! recording is still off until [`enable`]; recording draws no RNG and writes no state.
 //!
+//! # Occupancy
+//!
+//! [`enable_occupancy`] counts, for every annotated condition, how often it was true —
+//! at the point of evaluation, not from a tick-boundary snapshot (the treasury, for one,
+//! moves inside the tick before the auto-deltas read it). Every condition, present actor
+//! or absent.
+//!
 //! # The counterfactual
 //!
 //! [`set_uniform_false`] makes every annotated condition whose read hit an absent actor
@@ -48,11 +55,28 @@ mod imp {
         pub used: bool,
     }
 
+    /// (context, test) -> (times true, times evaluated).
+    pub type Occupancy = std::collections::BTreeMap<(String, String), (u64, u64)>;
+
     thread_local! {
         static RECORDS: RefCell<Option<Vec<DeadRead>>> = const { RefCell::new(None) };
         static CONTEXT: RefCell<String> = const { RefCell::new(String::new()) };
         static PENDING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
         static UNIFORM_FALSE: Cell<bool> = const { Cell::new(false) };
+        static OCCUPANCY: RefCell<Option<Occupancy>> = const { RefCell::new(None) };
+    }
+
+    /// Start counting condition outcomes: (context, test) -> (times true, times evaluated).
+    pub fn enable_occupancy() {
+        OCCUPANCY.with(|o| *o.borrow_mut() = Some(Default::default()));
+    }
+
+    pub fn take_occupancy() -> Occupancy {
+        OCCUPANCY.with(|o| o.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    fn occupancy_on() -> bool {
+        OCCUPANCY.with(|o| o.borrow().is_some())
     }
 
     pub fn enable() {
@@ -68,7 +92,7 @@ mod imp {
     }
 
     fn on() -> bool {
-        RECORDS.with(|r| r.borrow().is_some())
+        RECORDS.with(|r| r.borrow().is_some()) || occupancy_on()
     }
 
     pub fn begin(context: impl FnOnce() -> String) {
@@ -97,11 +121,25 @@ mod imp {
 
     pub fn condition(test: impl FnOnce() -> String, result: bool) -> bool {
         let pending: Vec<usize> = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
+        let counting = occupancy_on();
+        if pending.is_empty() && !counting {
+            return result;
+        }
+        let test = test();
+        if counting {
+            let ctx = CONTEXT.with(|c| c.borrow().clone());
+            OCCUPANCY.with(|o| {
+                if let Some(m) = o.borrow_mut().as_mut() {
+                    let e = m.entry((ctx, test.clone())).or_default();
+                    e.0 += result as u64;
+                    e.1 += 1;
+                }
+            });
+        }
         if pending.is_empty() {
             return result;
         }
         let used = if UNIFORM_FALSE.with(|u| u.get()) { false } else { result };
-        let test = test();
         RECORDS.with(|r| {
             if let Some(rows) = r.borrow_mut().as_mut() {
                 for i in pending {
