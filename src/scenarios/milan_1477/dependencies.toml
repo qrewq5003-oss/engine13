@@ -105,7 +105,10 @@ threshold = 50.0
 mode = "deficit_proportional"
 
 [[dependencies]]
-id = "external_pressure_legitimacy_to_cohesion_bonus"
+# B50: was `external_pressure_legitimacy_to_cohesion_bonus` — the rule never reads
+# legitimacy (`DependencyMode::Bonus` looks at `from > threshold` only). Siege rally:
+# +0.1 cohesion per point of pressure above 65 (A37: the balance model of all three scenarios).
+id = "siege_rally_cohesion_bonus"
 from = "external_pressure"
 to = "cohesion"
 coefficient = 0.1

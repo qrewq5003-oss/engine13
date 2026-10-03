@@ -25,7 +25,7 @@ use engine13::core::census;
 use rand::SeedableRng;
 use std::collections::{BTreeMap, HashMap};
 
-const RALLY: &str = "external_pressure_legitimacy_to_cohesion_bonus";
+const RALLY: &str = "siege_rally_cohesion_bonus";
 
 fn q(v: &[f64]) -> String {
     if v.is_empty() {
