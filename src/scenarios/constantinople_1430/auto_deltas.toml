@@ -205,6 +205,12 @@ delta = 0.2
 # treasuries limit. Measured (federation_probe, 30 × 300): the share of living ticks at
 # ≥ 80 falls from 71–85 % to 15–19 %, and the victory is no longer a timer on tick ~40.
 # If the pressure ever stops saturating, A10 has to be measured again.
+# A37 stage 2 (2026-10-03): it did — `ottoman_frontier` and `crusade_caller` now leave with
+# the Ottomans, so the pressure condition holds while the threat lives, not always. After the
+# Ottomans die the tax switches off honestly and the republics can converge on their own
+# auto-deltas. A10 re-measured in that world: wins 14 / 20 / 25 (balanced / diplomacy /
+# military), spread kept, 1 / 6 / 1 on ticks 40–43, games without a win remain; without a
+# player 1 of 30 — seed 22, tick 243, Ottomans dead, Byzantium alive.
 [[auto_deltas.conditions]]
 metric = "actor:byzantium.external_pressure"
 operator = "greater"
