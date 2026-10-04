@@ -98,6 +98,7 @@ mod imp {
         static INCOME_COEF: Cell<Option<f64>> = const { Cell::new(None) };
         static TREASURY_PARTS: RefCell<Option<Vec<(String, f64, f64)>>> = const { RefCell::new(None) };
         static TAG_LEVEL: RefCell<Option<String>> = const { RefCell::new(None) };
+        static ERA_CF: Cell<(bool, bool)> = const { Cell::new((false, false)) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -169,6 +170,21 @@ mod imp {
 
     pub fn income_coefficient(default: f64) -> f64 {
         INCOME_COEF.with(|x| x.get()).unwrap_or(default)
+    }
+
+    /// Counterfactual (A44 stage 1): connect the eras' authored fields the engine does not
+    /// read — `unlocks_tags` (granted to the actor entering the era) and
+    /// `auto_delta_modifier` (scales an auto-delta on an actor in that era).
+    pub fn set_era_counterfactual(unlocks: bool, modifier: bool) {
+        ERA_CF.with(|x| x.set((unlocks, modifier)));
+    }
+
+    pub fn era_grants_unlocks() -> bool {
+        ERA_CF.with(|x| x.get().0)
+    }
+
+    pub fn era_scales_auto_deltas() -> bool {
+        ERA_CF.with(|x| x.get().1)
     }
 
     /// The treasury formula's two parts, per actor and tick: (actor, income, upkeep).
@@ -359,6 +375,19 @@ pub fn clear_write_source() {}
 #[inline(always)]
 pub fn income_coefficient(default: f64) -> f64 {
     default
+}
+
+/// A44 counterfactual switches; off without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn era_grants_unlocks() -> bool {
+    false
+}
+
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn era_scales_auto_deltas() -> bool {
+    false
 }
 
 /// A tag's modifier for this tick; the value without the feature.
