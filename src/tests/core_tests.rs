@@ -628,12 +628,14 @@ fn test_rome_375_sim_balance() {
 
     // Over seeds, not one: the split by date (A12) shrinks Rome at tick 40, and balanced
     // wins in 18 of 30 games — seed 42 alone stopped winning, a precondition, not the
-    // claim. At least one game must be won, and every win must land in ticks 25–100.
+    // claim. At least one game must be won, and every win must land in ticks 5–100: since
+    // A35 there is no minimum tick, and a win needs five sustained ticks, so `ws.tick` after
+    // the earliest possible win is 5 (the old lower bound 25 stood on `minimum_tick: 30`).
     let wins: Vec<u32> = (0..8).filter_map(|seed| victory_tick(Some("balanced"), seed)).collect();
     assert!(!wins.is_empty(), "played rome (balanced) must win in at least one of 8 games");
     assert!(
-        wins.iter().all(|t| (25..=100).contains(t)),
-        "every played win must land within ticks 25–100, got {wins:?}"
+        wins.iter().all(|t| (5..=100).contains(t)),
+        "every played win must land within ticks 5–100, got {wins:?}"
     );
     assert_eq!(victory_tick(None, 42), None, "without a player the family influence has no source");
 }

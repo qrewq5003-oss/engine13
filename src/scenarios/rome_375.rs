@@ -198,9 +198,15 @@ pub fn load_rome_375() -> Scenario {
             threshold: 90.0,
             title: "Семья достигла величия".to_string(),
             description: "Аниции стали опорой угасающей империи.".to_string(),
-            minimum_tick: 30,  // 15 years × 2 ticks/year
+            // A35: no minimum tick, five sustained ticks. With `minimum_tick: 30` and a hold
+            // of 1, 35–47 % of wins fell exactly on tick 30 — games that had reached 90
+            // earlier waited for the gate — and a longer hold only moved the pile to
+            // 30 + N − 1. Influence ≥ 90 is a short peak (median 3–8 ticks), so a hold of 5
+            // asks the family to keep its position, not to land one `build_reputation`.
+            // Measured by `a35_probe` (stage 2): no tick holds more than 14 % of a world's wins.
+            minimum_tick: 0,
             additional_conditions: vec![],
-            sustained_ticks_required: 1,
+            sustained_ticks_required: 5,
             // The family's rise does not depend on a living Rome.
             requires_alive: vec![],
             closes_group: None,
