@@ -53,6 +53,3 @@ required-features = ["census"]
 [[bin]]
 name = "a8_probe"
 
-[[bin]]
-name = "a44_probe"
-required-features = ["census"]

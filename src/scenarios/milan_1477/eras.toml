@@ -9,5 +9,3 @@ era = "early_modern"
 min_tick = 25
 requires_tags = 4
 from_tags = ["banking", "humanism", "condottieri", "trade_empire", "patronage", "aragonese_crown"]
-auto_delta_modifier = 0.85
-unlocks_tags = ["printing_press", "gunpowder_artillery"]
