@@ -729,9 +729,13 @@ fn apply_treasury(world: &mut WorldState) {
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * 0.001;
+            let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * census::income_coefficient(0.001);
             let expenses = actor.get_metric("military_size") * 0.8;
+            #[cfg(feature = "census")]
+            census::treasury_parts(&actor.id, incomes, expenses);
+            census::write_source(|| "treasury formula".to_string());
             actor.add_metric("treasury", incomes - expenses);
+            census::clear_write_source();
         }
     }
 }
@@ -761,12 +765,25 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
             modifiers.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
             for (_tag, metric, modifier) in modifiers {
                 let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
-                let add = census::tag_modifier(metric, modifier as f64);
+                let add = census::tag_modifier_for(&actor.id, _tag, metric, modifier as f64);
                 actor.metrics.insert(metric.to_string(), current + add);
                 #[cfg(feature = "census")]
                 {
                     census::write_source(|| format!("tag {_tag}"));
                     census::metric_write(std::panic::Location::caller(), &actor.id, metric, add, current, current + add);
+                    census::clear_write_source();
+                }
+            }
+            // A46 stage 4 (д): under the tag-level counterfactual, take back the level of tags
+            // the actor no longer carries.
+            #[cfg(feature = "census")]
+            {
+                let present: Vec<String> = actor.actor_tags.keys().cloned().collect();
+                for (metric, delta) in census::tag_level_removals(&actor.id, &present) {
+                    let current = actor.metrics.get(&metric).copied().unwrap_or(0.0);
+                    actor.metrics.insert(metric.clone(), current + delta);
+                    census::write_source(|| "tag level removal".to_string());
+                    census::metric_write(std::panic::Location::caller(), &actor.id, &metric, delta, current, current + delta);
                     census::clear_write_source();
                 }
             }

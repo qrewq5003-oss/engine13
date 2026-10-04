@@ -95,6 +95,10 @@ mod imp {
         static READS: RefCell<Option<Occupancy>> = const { RefCell::new(None) };
         static OCC_LIVE_ONLY: Cell<bool> = const { Cell::new(false) };
         static TAG_SCALE: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
+        static INCOME_COEF: Cell<Option<f64>> = const { Cell::new(None) };
+        static TREASURY_PARTS: RefCell<Option<Vec<(String, f64, f64)>>> = const { RefCell::new(None) };
+        static TAG_LEVEL: RefCell<Option<String>> = const { RefCell::new(None) };
+        static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
     pub fn enable_writes() {
@@ -155,6 +159,64 @@ mod imp {
         TAG_SCALE.with(|t| match &*t.borrow() {
             Some((m, f)) if m == metric => value * f,
             _ => value,
+        })
+    }
+
+    /// Counterfactual (A46 stage 4): the income coefficient of the treasury formula.
+    pub fn set_income_coefficient(c: Option<f64>) {
+        INCOME_COEF.with(|x| x.set(c));
+    }
+
+    pub fn income_coefficient(default: f64) -> f64 {
+        INCOME_COEF.with(|x| x.get()).unwrap_or(default)
+    }
+
+    /// The treasury formula's two parts, per actor and tick: (actor, income, upkeep).
+    pub fn enable_treasury_parts() {
+        TREASURY_PARTS.with(|t| *t.borrow_mut() = Some(Vec::new()));
+    }
+
+    pub fn take_treasury_parts() -> Vec<(String, f64, f64)> {
+        TREASURY_PARTS.with(|t| t.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    pub fn treasury_parts(actor: &str, income: f64, upkeep: f64) {
+        TREASURY_PARTS.with(|t| {
+            if let Some(v) = t.borrow_mut().as_mut() {
+                v.push((actor.to_string(), income, upkeep));
+            }
+        });
+    }
+
+    /// Counterfactual (A46 stage 4 (д)): tags' modifiers on the named metric as a level —
+    /// added once when the tag appears on an actor, taken back when it leaves — not every
+    /// tick. Setting it (or clearing it) forgets what was applied: call once per run.
+    pub fn set_tag_level(metric: Option<String>) {
+        TAG_LEVEL.with(|t| *t.borrow_mut() = metric);
+        TAG_APPLIED.with(|a| a.borrow_mut().clear());
+    }
+
+    /// The modifier a tag adds this tick: scaled (`set_tag_scale`), and under the level mode
+    /// only on the tick the tag first counts for the actor.
+    pub fn tag_modifier_for(actor: &str, tag: &str, metric: &str, value: f64) -> f64 {
+        let v = tag_modifier(metric, value);
+        let level = TAG_LEVEL.with(|t| t.borrow().as_deref() == Some(metric));
+        if !level {
+            return v;
+        }
+        TAG_APPLIED.with(|a| match a.borrow_mut().entry((actor.to_string(), tag.to_string())) {
+            std::collections::btree_map::Entry::Occupied(_) => 0.0,
+            std::collections::btree_map::Entry::Vacant(e) => { e.insert(v); v }
+        })
+    }
+
+    /// Under the level mode: what to take back from an actor for tags no longer carried.
+    pub fn tag_level_removals(actor: &str, present: &[String]) -> Vec<(String, f64)> {
+        let Some(metric) = TAG_LEVEL.with(|t| t.borrow().clone()) else { return Vec::new() };
+        TAG_APPLIED.with(|a| {
+            let mut a = a.borrow_mut();
+            let gone: Vec<(String, String)> = a.keys().filter(|(ac, tag)| ac == actor && !present.contains(tag)).cloned().collect();
+            gone.into_iter().map(|k| (metric.clone(), -a.remove(&k).unwrap_or(0.0))).collect()
         })
     }
 
@@ -291,6 +353,20 @@ pub fn write_source(_name: impl FnOnce() -> String) {}
 #[cfg(not(feature = "census"))]
 #[inline(always)]
 pub fn clear_write_source() {}
+
+/// The treasury income coefficient; the default without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn income_coefficient(default: f64) -> f64 {
+    default
+}
+
+/// A tag's modifier for this tick; the value without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn tag_modifier_for(_actor: &str, _tag: &str, _metric: &str, value: f64) -> f64 {
+    value
+}
 
 /// A tag modifier's value; the identity without the feature.
 #[cfg(not(feature = "census"))]
