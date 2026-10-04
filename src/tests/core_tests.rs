@@ -1853,8 +1853,8 @@ fn church_union_is_signed_in_1439() {
 
 /// A8: the culmination is dated — `mehmed_rises` on tick 42 (1451), `final_assault` on
 /// tick 46 (1453) — and `outcome_survived_alone` follows the siege (`after`), so the log
-/// reads siege, then outcome, on the same tick. Both ways: as authored, every survived
-/// outcome comes after a `final_assault` of the same tick; with the siege taken out of the
+/// reads siege, then outcome (tick 47: it asserts a state, see the next test). Both ways: as authored, every survived
+/// outcome comes after the `final_assault`; with the siege taken out of the
 /// scenario in memory, the outcome never fires — `after` gates it, not the order alone.
 /// `constantinople_holds` was removed (its cohesion condition is pinned by saturation, A46).
 #[test]
@@ -1897,7 +1897,7 @@ fn the_siege_is_dated_and_the_survived_outcome_follows_it() {
         assert_eq!(siege, Some(46), "seed {seed}: the siege is dated 1453, tick 46");
         if outcome.is_some() {
             survived += 1;
-            assert_eq!(outcome, Some(46), "seed {seed}: the outcome is decided on the siege's tick");
+            assert_eq!(outcome, Some(47), "seed {seed}: the outcome is decided on the tick after the siege (a state milestone)");
             assert!(ordered, "seed {seed}: the survived outcome must come after the siege in the log");
         }
         let ([_, siege, outcome], _) = play(true, seed);
@@ -1905,6 +1905,37 @@ fn the_siege_is_dated_and_the_survived_outcome_follows_it() {
         assert_eq!(outcome, None, "seed {seed}: without the siege the survived outcome must not fire (`after`)");
     }
     assert!(survived > 0, "precondition: the city must survive the siege in at least one of 4 balanced games");
+}
+
+/// A state milestone is checked on the tick after its moment. Milestones see the state at
+/// the start of a tick, before its collapses; `outcome_survived_alone` («the city survived
+/// 1453») was checked on tick 46 and, in seeds 7 and 27 without a player, fired for a city
+/// that fell later in that same tick — closing `ending`, so the fall outcome never came. On
+/// tick 47 the claim is true by construction. Seed 7: Byzantium falls on tick 46.
+#[test]
+fn a_city_that_falls_on_the_siege_tick_gets_a_fall_outcome() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(7));
+    let mut fell = None;
+    for _ in 0..50 {
+        let tick = st.world_state.as_ref().unwrap().tick;
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+        if fell.is_none() && !st.world_state.as_ref().unwrap().actors.contains_key("byzantium") {
+            fell = Some(tick);
+        }
+    }
+    assert_eq!(fell, Some(46), "precondition: in seed 7 Byzantium falls on the siege tick");
+    let fired = &st.world_state.as_ref().unwrap().milestone_events_fired;
+    assert!(fired.iter().any(|m| m == "final_assault"), "the siege happened on tick 46, as an event");
+    assert!(
+        fired.iter().any(|m| m == "outcome_historical" || m == "outcome_fell_federation"),
+        "the ending must be a fall outcome, got {:?}",
+        fired.iter().filter(|m| m.starts_with("outcome_")).collect::<Vec<_>>()
+    );
+    assert!(!fired.iter().any(|m| m == "outcome_survived_alone"), "a fallen city did not survive 1453");
+    assert!(!st.event_log.events.iter().any(|e| e.id == "outcome_survived_alone"), "nor does the log say so");
 }
 
 /// B47: `Actor::scenario_metrics` was removed. A save written before carries it on rome

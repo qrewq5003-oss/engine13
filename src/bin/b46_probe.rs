@@ -144,16 +144,17 @@ fn main() {
         for r in &runs { *dist.entry(n_end(r)).or_default() += 1; }
         let won_and: Vec<String> = endings.iter().map(|e| format!("{e} {}", runs.iter().filter(|r| r.victory.is_some() && r.fired.contains_key(*e)).count())).collect();
         println!("B46 · endings per game (count → games): {dist:?}; victory + ending: {}; victories {}", won_and.join(", "), runs.iter().filter(|r| r.victory.is_some()).count());
-        // survived_alone: checked on tick 46 only, Byzantium alive, never after a victory
+        // survived_alone: checked on tick 47 only (since A8 — the state after the siege tick;
+        // `ws.tick` 48 after the turn), Byzantium alive, never after a victory
         let sa: Vec<&Run> = runs.iter().filter(|r| r.fired.contains_key("outcome_survived_alone")).collect();
-        let sa_bad_tick = sa.iter().filter(|r| r.fired["outcome_survived_alone"].0 != 47).count();
+        let sa_bad_tick = sa.iter().filter(|r| r.fired["outcome_survived_alone"].0 != 48).count();
         // Alive at the check: milestones run before collapses in a turn, so a city that falls
         // later in the same turn reads «dead» after it — count those apart.
         let sa_dead = sa.iter().filter(|r| !r.fired["outcome_survived_alone"].1
             && r.byz_fall.map(|f| f.0) != Some(r.fired["outcome_survived_alone"].0)).count();
         let sa_same_turn = sa.iter().filter(|r| r.byz_fall.map(|f| f.0) == Some(r.fired["outcome_survived_alone"].0)).count();
         let sa_after_win = sa.iter().filter(|r| r.victory.is_some_and(|v| v < r.fired["outcome_survived_alone"].0)).count();
-        println!("B46 · survived_alone {} (checked off tick 46: {sa_bad_tick}; over a dead city: {sa_dead}; city fell later in the same turn: {sa_same_turn}; after a victory: {sa_after_win})", sa.len());
+        println!("B46 · survived_alone {} (checked off tick 47: {sa_bad_tick}; over a dead city: {sa_dead}; city fell later in the same turn: {sa_same_turn}; after a victory: {sa_after_win})", sa.len());
         // fall endings: on the fall tick or the next, city dead, fell_federation iff federation at the fall ≥ 80
         let mut fall_bad = 0; let mut iff_bad = 0; let mut alive_bad = 0;
         for r in &runs {

@@ -104,11 +104,16 @@ triggers_collapse = false
 llm_context_shift = "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова."
 group = "ending"
 requires_alive = ["byzantium"]
-# A8: after the siege, so the log reads siege, then outcome. Both fire on tick 46 in file order.
+# A8: after the siege, so the log reads siege, then outcome.
 after = "final_assault"
+# Tick 47, not 46: «the city survived 1453» asserts a state, and milestones see the state at
+# the start of a tick, before its collapses. Checked on tick 46 it fired in 2 of 30 no-player
+# games for a city that fell later in that same tick — and closed `ending`, so the fall outcome
+# could not fire. Alive at the start of tick 47 = survived the siege tick. (An event milestone
+# like `final_assault` may fire on its own tick; a state milestone is checked on the next one.)
 [milestone_events.condition]
 type = "tick"
-tick = 46
+tick = 47
 
 [[milestone_events]]
 id = "outcome_fell_federation"
