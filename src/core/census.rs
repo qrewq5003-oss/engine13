@@ -92,6 +92,8 @@ mod imp {
         static WRITE_SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
         static DEP_CAP: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
         static WATCH_ONLY: Cell<bool> = const { Cell::new(true) };
+        static READS: RefCell<Option<Occupancy>> = const { RefCell::new(None) };
+        static OCC_LIVE_ONLY: Cell<bool> = const { Cell::new(false) };
     }
 
     pub fn enable_writes() {
@@ -150,6 +152,37 @@ mod imp {
         })
     }
 
+    /// A46 stage 2: count reads of the named metrics where they happen — (call site, metric)
+    /// → (reads, reads at the boundary: ≥ 99 or ≤ 1). Present actors and the family only.
+    pub fn enable_reads() {
+        READS.with(|r| *r.borrow_mut() = Some(Default::default()));
+    }
+
+    pub fn take_reads() -> Occupancy {
+        READS.with(|r| r.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    const READ_WATCHED: &[&str] = &["economic_output", "external_pressure", "legitimacy", "military_quality", "cohesion", "knowledge", "influence"];
+
+    pub fn metric_read(location: &'static std::panic::Location<'static>, metric: &str, value: f64) {
+        if !READ_WATCHED.contains(&metric) {
+            return;
+        }
+        READS.with(|r| {
+            if let Some(m) = r.borrow_mut().as_mut() {
+                let e = m.entry((format!("{}:{}", location.file(), location.line()), metric.to_string())).or_default();
+                e.0 += 1;
+                if !(1.0..99.0).contains(&value) { e.1 += 1; }
+            }
+        });
+    }
+
+    /// Occupancy over living actors only: an evaluation whose read hit an absent actor is not
+    /// counted (needs the dead-read recording on, which marks it).
+    pub fn occupancy_live_only(on: bool) {
+        OCC_LIVE_ONLY.with(|o| o.set(on));
+    }
+
     pub fn enable_occupancy() {
         OCCUPANCY.with(|o| *o.borrow_mut() = Some(Default::default()));
     }
@@ -204,7 +237,7 @@ mod imp {
 
     pub fn condition(test: impl FnOnce() -> String, result: bool) -> bool {
         let pending: Vec<usize> = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
-        let counting = occupancy_on();
+        let counting = occupancy_on() && (pending.is_empty() || !OCC_LIVE_ONLY.with(|o| o.get()));
         if pending.is_empty() && !counting {
             return result;
         }

@@ -139,6 +139,11 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
             _ => 0.0,
         },
     };
+    // A46 stage 2: the rule as a reader — active or not, and its source at the boundary.
+    census::begin(|| format!("dependency {}", rule.id));
+    census::condition(|| format!("{:?} {:?}", rule.mode, rule.threshold), delta != 0.0);
+    census::begin(|| format!("dependency {} source", rule.id));
+    census::condition(|| "source at boundary".to_string(), !(1.0..99.0).contains(&from_val));
     // Emitted even when `delta == 0.0`: the share of actor-ticks on which a rule fires at
     // all is a question probes ask, and a zero is an answer to it.
     trace::record_dependency(|| trace::DependencyRow {
@@ -943,7 +948,7 @@ fn eval_metric_condition(
             // the actor is not in the world
             return census::condition(|| format!("{operator:?} {value} (actor_id: absent → false)"), false);
         };
-        return compare(current, operator, &value);
+        return census::condition(|| format!("{operator:?} {value}"), compare(current, operator, &value));
     }
     census::condition(|| format!("{operator:?} {value}"), compare(metric.get(world), operator, &value))
 }

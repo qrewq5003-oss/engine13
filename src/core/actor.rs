@@ -158,8 +158,12 @@ pub struct Actor {
 
 impl Actor {
     /// Get metric value (returns 0.0 if missing)
+    #[cfg_attr(feature = "census", track_caller)]
     pub fn get_metric(&self, key: &str) -> f64 {
-        self.metrics.get(key).copied().unwrap_or(0.0)
+        let v = self.metrics.get(key).copied().unwrap_or(0.0);
+        #[cfg(feature = "census")]
+        crate::core::census::metric_read(std::panic::Location::caller(), key, v);
+        v
     }
 
     /// Set metric value

@@ -236,6 +236,11 @@ impl MetricRef {
                     .actors
                     .get(actor_id.as_str())
                     .map(|a| a.metrics.get(metric.as_str()).copied().unwrap_or(0.0));
+                // A46 census: a read of a present actor's metric, at its call site.
+                #[cfg(feature = "census")]
+                if let Some(v) = found {
+                    super::census::metric_read(std::panic::Location::caller(), metric.as_str(), v);
+                }
                 // B44 census: a read of an absent actor, recorded at its call site.
                 #[cfg(feature = "census")]
                 if found.is_none() {
@@ -248,10 +253,17 @@ impl MetricRef {
                 }
                 found
             }
-            MetricRef::Family { key } => world_state
-                .family_state
-                .as_ref()
-                .map(|fs| fs.metrics.get(Self::family_key(key)).copied().unwrap_or(0.0)),
+            MetricRef::Family { key } => {
+                let v = world_state
+                    .family_state
+                    .as_ref()
+                    .map(|fs| fs.metrics.get(Self::family_key(key)).copied().unwrap_or(0.0));
+                #[cfg(feature = "census")]
+                if let Some(x) = v {
+                    super::census::metric_read(std::panic::Location::caller(), Self::family_key(key), x);
+                }
+                v
+            }
             MetricRef::Global { key } => {
                 Some(world_state.global_metrics.get(key.as_str()).copied().unwrap_or(0.0))
             }
