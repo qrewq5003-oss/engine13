@@ -295,7 +295,18 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
 
         // Apply noise
         let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
-        let final_delta = delta + noise;
+        let mut final_delta = delta + noise;
+        // A44 counterfactual (census only): the target actor's era scales the delta.
+        if census::era_scales_auto_deltas() {
+            if let crate::core::MetricRef::Actor { actor_id, .. } = &auto_delta.metric {
+                if let Some(actor) = world.actors.get(actor_id.as_str()) {
+                    let m = scenario.era_definitions.iter().find(|d| d.era == actor.era).map(|d| d.auto_delta_modifier);
+                    if let Some(m) = m.filter(|m| *m != 0.0) {
+                        final_delta *= m;
+                    }
+                }
+            }
+        }
 
         // The number the engine is about to use, emitted where it is already computed —
         // nothing is recalculated alongside it. See `engine::trace`.
@@ -585,6 +596,14 @@ fn phase_era_progression(world: &mut WorldState, scenario: &Scenario, event_log:
             if matching >= era_def.requires_tags {
                 let old_era = actor.era.clone();
                 actor.era = era_def.era.clone();
+                // A44 counterfactual (census only): the era grants its `unlocks_tags`.
+                if census::era_grants_unlocks() {
+                    for t in &era_def.unlocks_tags {
+                        if !actor.tags.contains(t) {
+                            actor.tags.push(t.clone());
+                        }
+                    }
+                }
 
                 let event = Event::new(
                     format!("era_{}_{}", actor.id, format!("{:?}", era_def.era).to_lowercase()),
