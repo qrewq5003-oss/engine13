@@ -1851,6 +1851,62 @@ fn church_union_is_signed_in_1439() {
     assert!(st.event_log.events.iter().any(|e| e.id == "church_union" && e.tick == 18), "the event is logged at tick 18");
 }
 
+/// A8: the culmination is dated — `mehmed_rises` on tick 42 (1451), `final_assault` on
+/// tick 46 (1453) — and `outcome_survived_alone` follows the siege (`after`), so the log
+/// reads siege, then outcome, on the same tick. Both ways: as authored, every survived
+/// outcome comes after a `final_assault` of the same tick; with the siege taken out of the
+/// scenario in memory, the outcome never fires — `after` gates it, not the order alone.
+/// `constantinople_holds` was removed (its cohesion condition is pinned by saturation, A46).
+#[test]
+fn the_siege_is_dated_and_the_survived_outcome_follows_it() {
+    use crate::application::scripted::{play_scripted_tick, ScriptedStrategy};
+    // per seed: (tick of mehmed_rises, tick of final_assault, tick of outcome, outcome after siege)
+    let play = |drop_siege: bool, seed: u64| {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+        let sc = st.current_scenario.as_mut().unwrap();
+        assert!(!sc.milestone_events.iter().any(|m| m.id == "constantinople_holds"), "constantinople_holds was removed");
+        if drop_siege {
+            sc.milestone_events.retain(|m| m.id != "final_assault");
+        }
+        let strategy = ScriptedStrategy::from_str("balanced", "constantinople_1430");
+        let mut at: [Option<u32>; 3] = [None; 3];
+        let mut ordered = true;
+        for _ in 0..50 {
+            let tick = st.world_state.as_ref().unwrap().tick;
+            play_scripted_tick(&mut st, &strategy);
+            let fired = &st.world_state.as_ref().unwrap().milestone_events_fired;
+            for (i, id) in ["mehmed_rises", "final_assault", "outcome_survived_alone"].iter().enumerate() {
+                if at[i].is_none() && fired.iter().any(|m| m == id) {
+                    at[i] = Some(tick);
+                }
+            }
+            let pos = |x: &str| fired.iter().position(|m| m == x);
+            if let Some(o) = pos("outcome_survived_alone") {
+                ordered &= pos("final_assault").is_some_and(|f| f < o);
+            }
+        }
+        (at, ordered)
+    };
+    let mut survived = 0;
+    for seed in 0..4 {
+        let ([rises, siege, outcome], ordered) = play(false, seed);
+        assert_eq!(rises, Some(42), "seed {seed}: Mehmed II's accession is dated 1451, tick 42");
+        assert_eq!(siege, Some(46), "seed {seed}: the siege is dated 1453, tick 46");
+        if outcome.is_some() {
+            survived += 1;
+            assert_eq!(outcome, Some(46), "seed {seed}: the outcome is decided on the siege's tick");
+            assert!(ordered, "seed {seed}: the survived outcome must come after the siege in the log");
+        }
+        let ([_, siege, outcome], _) = play(true, seed);
+        assert_eq!(siege, None);
+        assert_eq!(outcome, None, "seed {seed}: without the siege the survived outcome must not fire (`after`)");
+    }
+    assert!(survived > 0, "precondition: the city must survive the siege in at least one of 4 balanced games");
+}
+
 /// B47: `Actor::scenario_metrics` was removed. A save written before carries it on rome
 /// (8/12/22/15) and must load into the same world as the same save without the field.
 #[test]
