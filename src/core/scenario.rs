@@ -189,6 +189,12 @@ pub struct TagDefinition {
     /// load: each id is a starting actor.
     #[serde(default)]
     pub requires_alive: Vec<String>,
+    /// A milestone that ends this tag (A4): when it fires, the tag leaves every carrier and
+    /// never returns — the pattern of `requires_alive`, keyed on an event instead of a death.
+    /// milan's `regency_crisis` ends with `ludovico_takes_regency` (1480). Validated at load:
+    /// the id names a milestone of the same scenario.
+    #[serde(default)]
+    pub ends_with: Option<String>,
     // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
     // — a dead contract. An authored `unlocks = […]` is now a load error (`deny_unknown_fields`).
 }

@@ -1938,6 +1938,42 @@ fn a_city_that_falls_on_the_siege_tick_gets_a_fall_outcome() {
     assert!(!st.event_log.events.iter().any(|e| e.id == "outcome_survived_alone"), "nor does the log say so");
 }
 
+/// A4: `regency_crisis` ends with `ludovico_takes_regency` (1480, tick 6). Milan carries it
+/// through tick 6 — its last effect is that tick's — and from then on never again: put back
+/// by hand on a later tick, it is gone again by the end of that tick (`ends_with`, the
+/// `requires_alive` pattern).
+#[test]
+fn the_regency_crisis_ends_when_ludovico_takes_the_regency() {
+    let db = crate::db::Db::open_in_memory().unwrap();
+    let mut st = crate::commands::AppState::default();
+    crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    let carries = |st: &crate::commands::AppState| {
+        let m = &st.world_state.as_ref().unwrap().actors["milan"];
+        (m.tags.iter().any(|t| t == "regency_crisis"), m.actor_tags.contains_key("regency_crisis"))
+    };
+    assert_eq!(carries(&st), (true, true), "precondition: Milan starts in the regency crisis");
+    for _ in 0..30 {
+        let tick = st.world_state.as_ref().unwrap().tick;
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+        let fired = st.world_state.as_ref().unwrap().milestone_events_fired.iter().any(|m| m == "ludovico_takes_regency");
+        assert_eq!(fired, tick >= 6, "tick {tick}: Ludovico takes the regency in 1480, tick 6");
+        let expected = if tick < 6 { (true, true) } else { (false, false) };
+        assert_eq!(carries(&st), expected, "after tick {tick}");
+        if tick == 15 {
+            // put back by hand: the ended tag must not survive the next tick
+            let ws = st.world_state.as_mut().unwrap();
+            let def = st.current_scenario.as_ref().unwrap().tag_definitions.iter().find(|t| t.id == "regency_crisis").unwrap().clone();
+            let m = ws.actors.get_mut("milan").unwrap();
+            m.tags.push("regency_crisis".into());
+            m.actor_tags.insert("regency_crisis".into(), crate::core::ActorTag {
+                metrics_modifier: def.metrics_modifier.clone(),
+                spreads_via: def.spreads_via.clone(),
+            });
+        }
+    }
+}
+
 /// B47: `Actor::scenario_metrics` was removed. A save written before carries it on rome
 /// (8/12/22/15) and must load into the same world as the same save without the field.
 #[test]

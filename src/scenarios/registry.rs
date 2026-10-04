@@ -204,6 +204,15 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A tag's `ends_with` names a milestone of the same scenario (A4).
+    for t in &scenario.tag_definitions {
+        if let Some(m) = &t.ends_with {
+            if !scenario.milestone_events.iter().any(|x| &x.id == m) {
+                errors.push(format!("tag '{}': ends_with '{m}' is not a milestone of this scenario", t.id));
+            }
+        }
+    }
+
     // An actor never starts carrying a tag that is a relation to itself (A37 follow-up):
     // the engine refuses to spread it there, and a template or starting actor may not
     // bring it in either.
@@ -500,6 +509,25 @@ mod tests {
         s.tag_definitions.iter_mut().find(|t| t.id == "ottoman_frontier").unwrap().requires_alive = vec!["wallachia".into()];
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("tag 'ottoman_frontier': requires_alive 'wallachia'")), "{e:?}");
+    }
+
+    /// A4: a tag's `ends_with` must name a milestone of the same scenario. Both ways: milan
+    /// as authored (`regency_crisis` ends with `ludovico_takes_regency`) validates; with the
+    /// id misspelt, or naming another scenario's milestone, it does not.
+    #[test]
+    fn validate_checks_tag_ends_with() {
+        let base = crate::scenarios::milan_1477::load_milan_1477;
+        assert!(validate_scenario(&base()).is_ok(), "{:?}", validate_scenario(&base()));
+        assert_eq!(
+            base().tag_definitions.iter().find(|t| t.id == "regency_crisis").unwrap().ends_with.as_deref(),
+            Some("ludovico_takes_regency")
+        );
+        for bad in ["ludovico_takes_regenzy", "mehmed_rises"] {
+            let mut s = base();
+            s.tag_definitions.iter_mut().find(|t| t.id == "regency_crisis").unwrap().ends_with = Some(bad.into());
+            let e = validate_scenario(&s).unwrap_err();
+            assert!(e.iter().any(|e| e.contains(&format!("tag 'regency_crisis': ends_with '{bad}' is not a milestone"))), "{e:?}");
+        }
     }
 
     /// A37 follow-up: an actor may not carry a tag that is a relation to itself.

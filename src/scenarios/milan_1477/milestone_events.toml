@@ -43,6 +43,19 @@ value = 35.0
 duration = 3
 
 [[milestone_events]]
+id = "ludovico_takes_regency"
+is_key = true
+triggers_collapse = false
+# A4: a historical date — 1480, tick 6. It reports an event, so it fires on its own tick (the
+# content rule of B46/A8). It ends `regency_crisis` (`ends_with`); after it the regency fork is
+# decided by play: without a player both branches occur, aggressive play deepens the crisis.
+requires_alive = ["milan"]
+llm_context_shift = "Лодовико Сфорца отстраняет Бону Савойскую и берёт регентство в свои руки."
+[milestone_events.condition]
+type = "tick"
+tick = 6
+
+[[milestone_events]]
 id = "milan_regency_stabilizes"
 is_key = true
 triggers_collapse = false
