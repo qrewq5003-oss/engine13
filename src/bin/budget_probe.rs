@@ -103,7 +103,7 @@ const SCENARIO_FIELDS_WALKED: &[(&str, &str)] = &[
     ("rank_bonuses", "WALKED: effects[] (delta or FLOOR)"),
     ("map", "no metric keys"),
     ("tag_definitions", "WALKED: metrics_modifier keys"),
-    ("era_definitions", "no metric keys (auto_delta_modifier is a scalar)"),
+    ("era_definitions", "no metric keys"),
 ];
 
 /// One metric reference found by the container walk.

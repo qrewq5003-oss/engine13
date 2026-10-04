@@ -888,8 +888,6 @@ fn authored_scenario_fields_have_readers() {
     // field -> why it may stay unread
     const ALLOWED: &[(&str, &str)] = &[
         ("features", "read off `WorldState`, which now carries a copy taken from the scenario at load — docs/investigation_world_features.md"),
-        ("unlocks_tags", "EraDefinition — DEAD, recorded as A44: authored in all three scenarios, read by nothing; wire or delete is the owner's decision"),
-        ("auto_delta_modifier", "EraDefinition — DEAD, recorded as A44 (rome 0.9 → 0.6, milan 0.85, constantinople 0.8, never applied); the owner's decision"),
         ("universal_actions", "DEAD, recorded (B42): the UI's list never offered them — it lists scenario actions in every mode — and the only reader, the mode-aware `get_available_actions`, was a path no frontend called; removed. Owner's decision (b): the mode does not change actions"),
     ];
 
@@ -3163,4 +3161,42 @@ fn clock_seed_check_catches_a_clock_seed() {
     assert_eq!(flagged("fn t() {\n    load_scenario(&mut st, &db, id).unwrap();\n    st.rng = Some(ChaCha8Rng::seed_from_u64(7));\n}"), 0);
     assert_eq!(flagged("let w = WorldState::with_seed(id, 375, 0);"), 0);
     assert_eq!(flagged("// WorldState::new( in a comment\npub fn load_scenario(state: &mut S) {}"), 0);
+}
+
+/// A44: an authored key with no field is a load error in an era or tag file, not a silent
+/// skip (B49 found `unlocks` skipped that way; A44 deleted `unlocks_tags` and
+/// `auto_delta_modifier`, which nothing read). Both ways, on the real files: as authored
+/// they load; with one unknown key added to the first entry the load fails and names it.
+#[test]
+fn era_and_tag_files_reject_unknown_keys() {
+    #[derive(serde::Deserialize)]
+    struct Eras {
+        #[allow(dead_code)]
+        eras: Vec<engine13::core::EraDefinition>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Tags {
+        #[allow(dead_code)]
+        tags: Vec<engine13::core::TagDefinition>,
+    }
+    // the unknown key goes right after the first entry's id line, inside that entry
+    let inject = |text: &str, first_key: &str, key: &str| {
+        let at = text.find(first_key).expect("first entry");
+        let eol = at + text[at..].find('\n').unwrap() + 1;
+        format!("{}{key} = 1\n{}", &text[..eol], &text[eol..])
+    };
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        let eras = std::fs::read_to_string(format!("src/scenarios/{sc}/eras.toml")).unwrap();
+        toml::from_str::<Eras>(&eras).unwrap_or_else(|e| panic!("{sc}/eras.toml as authored: {e}"));
+        for key in ["unlocks_tags", "auto_delta_modifier", "typo_key"] {
+            let err = toml::from_str::<Eras>(&inject(&eras, "era = ", key)).err()
+                .unwrap_or_else(|| panic!("{sc}/eras.toml with `{key}` must not load"));
+            assert!(err.to_string().contains(key), "{sc}/eras.toml: the error must name `{key}`: {err}");
+        }
+        let tags = std::fs::read_to_string(format!("src/scenarios/{sc}/tags.toml")).unwrap();
+        toml::from_str::<Tags>(&tags).unwrap_or_else(|e| panic!("{sc}/tags.toml as authored: {e}"));
+        let err = toml::from_str::<Tags>(&inject(&tags, "id = ", "unlocks")).err()
+            .unwrap_or_else(|| panic!("{sc}/tags.toml with `unlocks` must not load"));
+        assert!(err.to_string().contains("unlocks"), "{sc}/tags.toml: the error must name `unlocks`: {err}");
+    }
 }

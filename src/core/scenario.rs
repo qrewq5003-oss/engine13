@@ -151,8 +151,10 @@ fn default_spread_cooldown() -> u32 { 5 }
 /// Default spread probability
 fn default_spread_chance() -> f64 { 0.3 }
 
-/// Tag definition loaded from scenario config
+/// Tag definition loaded from scenario config. Unknown keys are a load error (A44): an
+/// authored key with no field used to be skipped silently (B49).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TagDefinition {
     pub id: String,
     /// Bare metric names; the actor is the one carrying the tag.
@@ -188,12 +190,18 @@ pub struct TagDefinition {
     #[serde(default)]
     pub requires_alive: Vec<String>,
     // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
-    // — a dead contract. Without `deny_unknown_fields` an authored `unlocks = […]` would be
-    // skipped silently; no tag file has one.
+    // — a dead contract. An authored `unlocks = […]` is now a load error (`deny_unknown_fields`).
 }
 
-/// Era definition loaded from scenario config
+/// Era definition loaded from scenario config. Unknown keys are a load error.
+///
+/// `auto_delta_modifier` and `unlocks_tags` were removed (A44): authored in all three
+/// scenarios and read by nothing. The modifier's meaning was not settled by the content
+/// (three readings, the measured one shifted the balance), and the unlocked ids name no
+/// defined tag. Rome's eras after `early_medieval` require tags only `unlocks_tags` would
+/// have granted, so they are unreachable — recorded as a separate item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EraDefinition {
     pub era: Era,
     #[serde(default)]
@@ -202,10 +210,6 @@ pub struct EraDefinition {
     pub requires_tags: u32,
     #[serde(default)]
     pub from_tags: Vec<String>,
-    #[serde(default)]
-    pub auto_delta_modifier: f64,
-    #[serde(default)]
-    pub unlocks_tags: Vec<String>,
 }
 
 /// Одна ключевая метрика в фактическом блоке промпта.
