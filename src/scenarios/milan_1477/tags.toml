@@ -25,6 +25,10 @@ metrics_modifier = { legitimacy = -2, cohesion = -1 }
 spreads_via = []
 spread_cooldown_ticks = 5
 spread_chance = 0.0
+# A4 (owner's decision): the crisis ends in 1480, when Ludovico Sforza takes the regency.
+# Permanent, it decided the regency fork by construction — legitimacy at the floor 83–88 % of
+# living ticks, `milan_regency_crisis_deepens` always, `milan_regency_stabilizes` never.
+ends_with = "ludovico_takes_regency"
 
 [[tags]]
 id = "maritime"

@@ -181,6 +181,7 @@ fn contagious_tag_check_catches_a_new_violator() {
         spread_chance: chance,
         requires_era: None,
         requires_alive: Vec::new(),
+        ends_with: None,
             sea_going: false,
     };
 

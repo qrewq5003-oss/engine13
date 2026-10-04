@@ -1259,6 +1259,10 @@ fn try_spread_direction(
         if tag_def.requires_alive.iter().any(|id| id == target_id) {
             continue;
         }
+        // An ended tag never returns (A4); after the roll for the same reason.
+        if tag_def.ends_with.as_ref().is_some_and(|m| world.milestone_events_fired.contains(m)) {
+            continue;
+        }
 
         // Apply spread: add tag and ActorTag to target
         if let Some(target) = world.actors.get_mut(target_id) {

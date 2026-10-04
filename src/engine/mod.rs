@@ -673,12 +673,16 @@ fn phase_collapses(world: &mut WorldState, scenario: &Scenario, event_log: &mut 
 
 /// A tag that names actors in `requires_alive` leaves every carrier once one of them is
 /// gone (A37 stage 2). Run after the collapses, so heirs born this tick lose it too; with
-/// every named actor alive it changes nothing.
+/// every named actor alive it changes nothing. A tag whose `ends_with` milestone has fired
+/// leaves the same way (A4) — on the milestone's own tick, after its last effect.
 fn strip_tags_of_absent_actors(world: &mut WorldState, scenario: &Scenario) {
     let gone: Vec<&str> = scenario
         .tag_definitions
         .iter()
-        .filter(|t| t.requires_alive.iter().any(|id| !world.actors.contains_key(id)))
+        .filter(|t| {
+            t.requires_alive.iter().any(|id| !world.actors.contains_key(id))
+                || t.ends_with.as_ref().is_some_and(|m| world.milestone_events_fired.contains(m))
+        })
         .map(|t| t.id.as_str())
         .collect();
     if gone.is_empty() {
