@@ -2272,7 +2272,7 @@ mod tests {
 
     #[test]
     fn test_tick_advances_time() {
-        let mut world = WorldState::new("test".to_string(), 375);
+        let mut world = WorldState::with_seed("test".to_string(), 375, 0);
         let scenario = empty_scenario();
         let mut event_log = EventLog::new();
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
@@ -2335,10 +2335,10 @@ mod tests {
     fn a_group_lets_only_its_first_milestone_fire() {
         let mut scenario = empty_scenario();
         scenario.milestone_events = vec![dated_milestone("a", Some("g"), &[]), dated_milestone("b", Some("g"), &[])];
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["a".to_string()]);
         scenario.milestone_events = vec![dated_milestone("a", None, &[]), dated_milestone("b", None, &[])];
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         assert_eq!(fired_after_one_check(&scenario, &mut world).len(), 2, "ungrouped, both fire");
     }
 
@@ -2358,11 +2358,11 @@ mod tests {
             requires_alive: vec![],
             closes_group: Some("ending".into()),
         });
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         world.victory_achieved = true;
         assert!(fired_after_one_check(&scenario, &mut world).is_empty(), "won: the ending is closed");
         scenario.victory_condition.as_mut().unwrap().closes_group = None;
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         world.victory_achieved = true;
         assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["held".to_string()]);
     }
@@ -2372,9 +2372,9 @@ mod tests {
     fn a_milestone_requires_its_actors_alive() {
         let mut scenario = empty_scenario();
         scenario.milestone_events = vec![dated_milestone("m", None, &["city"])];
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         assert!(fired_after_one_check(&scenario, &mut world).is_empty(), "the city is absent");
-        let mut world = WorldState::new("test".into(), 1430);
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
         world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
         assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["m".to_string()]);
     }
@@ -2392,7 +2392,7 @@ mod tests {
         conditions: Vec<crate::core::DeltaCondition>,
         ratios: Vec<crate::core::DeltaConditionRatio>,
     ) -> f64 {
-        let mut world = WorldState::new("test".to_string(), 1430);
+        let mut world = WorldState::with_seed("test".to_string(), 1430, 0);
         if byz_alive {
             world.actors.insert("byz".into(), vassalage_actor("byz", 50.0, 50.0, 50.0, 50.0, &[]));
         }
@@ -2445,7 +2445,7 @@ mod tests {
 
     #[test]
     fn eval_metric_condition_resolves_all_scopes() {
-        let mut world = WorldState::new("test".to_string(), 1430);
+        let mut world = WorldState::with_seed("test".to_string(), 1430, 0);
         world.global_metrics.insert("federation_progress".to_string(), 90.0);
         world.family_state = Some(crate::core::FamilyState {
             metrics: HashMap::from([("influence".to_string(), 75.0)]),
@@ -2477,7 +2477,7 @@ mod tests {
 
     #[test]
     fn check_event_condition_fires_global_and_family_scoped_milestones() {
-        let mut world = WorldState::new("test".to_string(), 1430);
+        let mut world = WorldState::with_seed("test".to_string(), 1430, 0);
         world.global_metrics.insert("federation_progress".to_string(), 85.0);
         world.family_state = Some(crate::core::FamilyState {
             metrics: HashMap::from([("influence".to_string(), 20.0)]),
@@ -2547,7 +2547,7 @@ mod tests {
 
     #[test]
     fn test_vassalage_forms_after_three_ticks_and_pays_tribute() {
-        let mut world = WorldState::new("test".to_string(), 1477);
+        let mut world = WorldState::with_seed("test".to_string(), 1477, 0);
         // Weak actor sitting inside the danger band, strong healthy neighbour.
         world.actors.insert("small".into(), vassalage_actor("small", 10.0, 78.0, 18.0, 22.0, &["big"]));
         world.actors.insert("big".into(), vassalage_actor("big", 100.0, 30.0, 60.0, 60.0, &["small"]));
@@ -2583,7 +2583,7 @@ mod tests {
         // No hierarchy: a vassal can never gain a vassal, so overlord attribution
         // must skip a neighbour that is itself a vassal — even if it is the
         // strongest one available.
-        let mut world = WorldState::new("test".to_string(), 1477);
+        let mut world = WorldState::with_seed("test".to_string(), 1477, 0);
         world.actors.insert("small".into(), vassalage_actor("small", 10.0, 78.0, 18.0, 22.0, &["free", "v"]));
         world.actors.insert("free".into(), vassalage_actor("free", 50.0, 30.0, 60.0, 60.0, &["small"]));
         world.actors.insert("v".into(), vassalage_actor("v", 100.0, 30.0, 60.0, 60.0, &["small", "lord"]));
@@ -2605,7 +2605,7 @@ mod tests {
 
     #[test]
     fn test_vassalage_revolt_conditions() {
-        let mut world = WorldState::new("test".to_string(), 1477);
+        let mut world = WorldState::with_seed("test".to_string(), 1477, 0);
         world.actors.insert("small".into(), vassalage_actor("small", 10.0, 30.0, 60.0, 60.0, &["big"]));
         world.actors.insert("big".into(), vassalage_actor("big", 20.0, 30.0, 60.0, 60.0, &["small"]));
         world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "big".into(), formed_tick: 0 });
@@ -2664,7 +2664,7 @@ mod tests {
         template.is_successor_template = true;
         let mut scenario = empty_scenario();
         scenario.actors = vec![doomed_actor("parent", &["heir"]), template.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), doomed_actor("parent", &["heir"]));
         let mut log = EventLog::new();
 
@@ -2691,7 +2691,7 @@ mod tests {
     fn dead_heir_is_not_resurrected() {
         let mut scenario = empty_scenario();
         scenario.actors = vec![doomed_actor("first", &[]), doomed_actor("second", &["first"])];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("first".into(), doomed_actor("first", &[]));
         let mut log = EventLog::new();
 
@@ -2714,7 +2714,7 @@ mod tests {
         // must not depend on HashMap iteration order.
         let mut scenario = empty_scenario();
         scenario.actors = vec![doomed_actor("milan", &[]), doomed_actor("genoa", &[]), doomed_actor("france", &[])];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         for id in ["milan", "genoa", "france"] {
             world.actors.insert(id.into(), doomed_actor(id, &[]));
         }
@@ -2745,7 +2745,7 @@ mod tests {
         let rome = vassalage_actor("rome", 350.0, 38.0, 62.0, 42.0, &["parent", "huns"]);
         let mut scenario = empty_scenario();
         scenario.actors = vec![parent.clone(), template, huns.clone(), rome.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
         world.actors.insert("huns".into(), huns);
         world.actors.insert("rome".into(), rome);
@@ -2770,7 +2770,7 @@ mod tests {
         let rome = vassalage_actor("rome", 350.0, 38.0, 62.0, 42.0, &[]);
         let mut scenario = empty_scenario();
         scenario.actors = vec![parent.clone(), template, huns.clone(), rome.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
         world.actors.insert("huns".into(), huns);
         world.actors.insert("rome".into(), rome);
@@ -2793,7 +2793,7 @@ mod tests {
         let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
         let mut scenario = empty_scenario();
         scenario.actors = vec![parent.clone(), west, east, huns.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
         world.actors.insert("huns".into(), huns);
         let mut log = EventLog::new();
@@ -2816,7 +2816,7 @@ mod tests {
         let huns = vassalage_actor("huns", 120.0, 5.0, 60.0, 72.0, &["parent"]);
         let mut scenario = empty_scenario();
         scenario.actors = vec![parent.clone(), heir.clone(), huns.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
         world.actors.insert("heir".into(), heir);
         world.actors.insert("huns".into(), huns);
@@ -2835,7 +2835,7 @@ mod tests {
     #[test]
     fn army_recovers_toward_capacity_but_never_above_it() {
         use crate::engine::interactions::{military_capacity, MILITARY_RECOVERY_RATE};
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         // pop 8000 -> capacity 0.767 * 8000^(2/3) = 306.8 (rome's authored army is 350)
         let mut spent = vassalage_actor("spent", 2.0, 30.0, 60.0, 60.0, &[]);
         spent.set_metric("population", 8000.0);
@@ -2864,7 +2864,7 @@ mod tests {
     #[test]
     fn recovery_converges_to_capacity_and_stops() {
         use crate::engine::interactions::military_capacity;
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         let mut a = vassalage_actor("a", 0.0, 30.0, 60.0, 60.0, &[]);
         a.set_metric("population", 250.0);
         let capacity = military_capacity(&a);
@@ -2926,7 +2926,7 @@ mod tests {
             group: None,
             requires_alive: vec![],
         }];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
         world.actors.insert("huns".into(), huns);
         let mut log = EventLog::new();
@@ -3011,7 +3011,7 @@ mod tests {
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);
         milan_lists_france.neighbors.push(Neighbor { id: "france".into(), distance: 2, border_type: BorderType::Land });
-        let mut world = WorldState::new("test".into(), 1477);
+        let mut world = WorldState::with_seed("test".into(), 1477, 0);
         for a in &scenario.actors { world.actors.insert(a.id.clone(), a.clone()); }
         world.actors.insert("milan".into(), milan_lists_france);
         let mut log = EventLog::new();
@@ -3036,7 +3036,7 @@ mod tests {
         let heir = vassalage_actor("heir", 50.0, 30.0, 60.0, 60.0, &[]);
         let mut scenario = empty_scenario();
         scenario.actors = vec![doomed_actor("parent", &["heir"]), heir.clone()];
-        let mut world = WorldState::new("test".into(), 375);
+        let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), doomed_actor("parent", &["heir"]));
         world.actors.insert("heir".into(), heir);
         let mut log = EventLog::new();

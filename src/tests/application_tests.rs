@@ -11,7 +11,7 @@ fn setup_test_db() -> Db {
 fn setup_rome_state() -> AppState {
     let mut state = AppState::default();
     let scenario = registry::load_by_id("rome_375").expect("Failed to load rome_375");
-    let mut world_state = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world_state = crate::core::WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
             world_state.actors.insert(actor.id.clone(), actor.clone());
@@ -28,7 +28,7 @@ fn setup_rome_state() -> AppState {
 fn setup_constantinople_state() -> AppState {
     let mut state = AppState::default();
     let scenario = registry::load_by_id("constantinople_1430").expect("Failed to load constantinople_1430");
-    let mut world_state = crate::core::WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world_state = crate::core::WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
             world_state.actors.insert(actor.id.clone(), actor.clone());
@@ -136,6 +136,7 @@ fn test_save_load_preserves_state() {
     // Load the save - use double underscore separator
     let save_id = format!("constantinople_1430__slot_1");
     let load_result = crate::application::load_game(&mut state, &db, save_id);
+    state.rng = Some(<rand_chacha::ChaCha8Rng as rand::SeedableRng>::seed_from_u64(0));
     assert!(load_result.is_ok(), "load_game failed: {:?}", load_result);
     
     let year_after = state.world_state.as_ref().unwrap().year;
@@ -457,6 +458,7 @@ fn constantinople_with_byzantium(alive: bool) -> AppState {
     let db = setup_test_db();
     let mut state = AppState::default();
     crate::application::load_scenario(&mut state, &db, "constantinople_1430".to_string()).unwrap();
+    state.rng = Some(<rand_chacha::ChaCha8Rng as rand::SeedableRng>::seed_from_u64(0));
     if !alive {
         let ws = state.world_state.as_mut().unwrap();
         ws.actors.remove("byzantium");
