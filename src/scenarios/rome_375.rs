@@ -1829,7 +1829,7 @@ mod tests {
         // Old: (8000-5000) * 0.0005 = 1.5 per tick from population alone
         // New: (8000-3000) * 0.00005 = 0.25 per tick from population
         let scenario = load_rome_375();
-        let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
         
         // Initialize world with scenario actors (clone to preserve scenario)
         for actor in &scenario.actors {

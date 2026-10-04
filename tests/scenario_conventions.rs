@@ -2849,6 +2849,7 @@ fn metric_milestones_are_closed_in_the_starting_world() {
         let db = engine13::db::Db::open_in_memory().unwrap();
         let mut st = engine13::AppState::default();
         engine13::load_scenario(&mut st, &db, id.to_string()).unwrap();
+        st.rng = Some(<rand_chacha::ChaCha8Rng as rand::SeedableRng>::seed_from_u64(0));
         let world = st.world_state.as_ref().unwrap();
         for m in &st.current_scenario.as_ref().unwrap().milestone_events {
             // A milestone that follows another (`after`, A2) is not evaluated until that one
@@ -3042,4 +3043,124 @@ fn raw_family_seed_check_catches_a_raw_seed() {
     assert_eq!(raw_family_seeds("x", prefixed).len(), 1, "a prefixed literal key must be flagged");
     assert!(raw_family_seeds("x", normalized).is_empty());
     assert!(raw_family_seeds("x", canonical).is_empty());
+}
+
+/// B55: test code seeds its randomness from the clock. Such a test is not one test but a
+/// random sample of tests: `test_no_living_actor_carries_a_dead_actors_name` played a
+/// different world on every run and failed in 5 of 2000 seeds, where nobody dies — and on
+/// a luckier seed it can pass without checking anything. Production may seed from the clock
+/// (`WorldState::new`, which `load_scenario` uses); test code may not. Lexically, over the
+/// test code of `src/`, `src-tauri/src` and `tests/` (`src/tests/`, `tests/`, and every file
+/// from its `#[cfg(test)]` on):
+///
+/// - no clock or OS entropy: `SystemTime::now`, `thread_rng(`, `from_entropy(`,
+///   `from_os_rng(`, `OsRng`, `rand::rng()`;
+/// - no `WorldState::new(` — it seeds from the clock; `WorldState::with_seed` instead;
+/// - every `load_scenario(` and `load_game(` is followed, in the same function and before the
+///   next such call, by `.rng = Some(` — both restart the RNG from a seed the test does not own
+///   (`load_scenario` from the clock, `load_game` from the save's clock seed).
+fn clock_seeds_in_test_code(path: &str, src: &str) -> Vec<String> {
+    const CLOCK: &[&str] = &["SystemTime::now", "thread_rng(", "from_entropy(", "from_os_rng(", "OsRng", "rand::rng()"];
+    let code_of = |line: &str| line.split("//").next().unwrap_or("").to_string();
+    let lines: Vec<String> = src.lines().map(code_of).collect();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        for c in CLOCK.iter().chain(["WorldState::new("].iter()) {
+            if l.contains(c) {
+                out.push(format!("{path}:{}: `{c}` in test code", i + 1));
+            }
+        }
+    }
+    let is_load = |l: &str| {
+        ["load_scenario(", "load_game("].iter().any(|k| l.contains(k) && !l.contains(&format!("fn {k}")))
+    };
+    let fn_start = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with("fn ") || t.starts_with("pub fn ") || t.starts_with("#[test]")
+    };
+    for (i, l) in lines.iter().enumerate() {
+        if !is_load(l) {
+            continue;
+        }
+        let mut seeded = false;
+        for later in &lines[i + 1..] {
+            if later.contains(".rng = Some(") {
+                seeded = true;
+                break;
+            }
+            if is_load(later) || fn_start(later) {
+                break;
+            }
+        }
+        if !seeded {
+            out.push(format!("{path}:{}: load without `.rng = Some(..)` after it: `{}`", i + 1, l.trim()));
+        }
+    }
+    out
+}
+
+fn test_code_sources() -> Vec<(String, String)> {
+    fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect(&p, out);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for d in ["src", "src-tauri/src", "tests"] {
+        collect(std::path::Path::new(d), &mut files);
+    }
+    let mut out = Vec::new();
+    for f in files {
+        let sp = f.to_string_lossy().replace('\\', "/");
+        let text = std::fs::read_to_string(&f).unwrap();
+        let whole = sp.starts_with("src/tests/") || sp.starts_with("tests/");
+        let test_part = if whole {
+            text
+        } else if let Some(at) = text.find("#[cfg(test)]") {
+            text[at..].to_string()
+        } else {
+            continue;
+        };
+        // this file holds the check itself and its synthetic examples, at the end
+        let test_part = if sp.ends_with("tests/scenario_conventions.rs") {
+            test_part.split("/// B55: test code seeds").next().unwrap().to_string()
+        } else {
+            test_part
+        };
+        out.push((sp, test_part));
+    }
+    out
+}
+
+#[test]
+fn test_code_does_not_seed_from_the_clock() {
+    let sources = test_code_sources();
+    let loads: usize = sources.iter().map(|(_, t)| t.matches("load_scenario(").count()).sum();
+    assert!(loads > 20, "only {loads} load_scenario calls in test code — the scan has drifted");
+    let bad: Vec<String> = sources.iter().flat_map(|(p, t)| clock_seeds_in_test_code(p, t)).collect();
+    assert!(bad.is_empty(), "test code seeds from the clock:\n{}", bad.join("\n"));
+}
+
+/// The other half: the check flags each clock source, `WorldState::new`, and a load left
+/// unseeded (also when a second load follows the seeding of the first), and passes a seeded
+/// load and `with_seed`.
+#[test]
+fn clock_seed_check_catches_a_clock_seed() {
+    let flagged = |s: &str| clock_seeds_in_test_code("x", s).len();
+    assert_eq!(flagged("let r = rand::thread_rng();"), 1);
+    assert_eq!(flagged("let t = std::time::SystemTime::now();"), 1);
+    assert_eq!(flagged("let r = ChaCha8Rng::from_entropy();"), 1);
+    assert_eq!(flagged("let w = WorldState::new(id, 375);"), 1);
+    assert_eq!(flagged("fn t() {\n    load_scenario(&mut st, &db, id).unwrap();\n    advance_tick_silent(&mut st);\n}"), 1);
+    assert_eq!(flagged("fn t() {\n    load_scenario(&mut st, &db, a);\n    st.rng = Some(r(1));\n    load_game(&mut st, &db, s);\n    tick();\n}"), 1);
+    assert_eq!(flagged("fn a() {\n    load_scenario(&mut st, &db, id);\n}\nfn b() {\n    st.rng = Some(r(1));\n}"), 1);
+    assert_eq!(flagged("fn t() {\n    load_scenario(&mut st, &db, id).unwrap();\n    st.rng = Some(ChaCha8Rng::seed_from_u64(7));\n}"), 0);
+    assert_eq!(flagged("let w = WorldState::with_seed(id, 375, 0);"), 0);
+    assert_eq!(flagged("// WorldState::new( in a comment\npub fn load_scenario(state: &mut S) {}"), 0);
 }

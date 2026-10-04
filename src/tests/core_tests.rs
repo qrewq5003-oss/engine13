@@ -128,7 +128,7 @@ fn test_resolve_at_load_explicit_prefix_wins_over_actor_scope() {
 #[test]
 fn test_metric_ref_apply_actor_treasury() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
 
     // Add venice actor
     for actor in &scenario.actors {
@@ -149,7 +149,7 @@ fn test_metric_ref_apply_actor_treasury() {
 #[test]
 fn test_metric_ref_apply_actor_treasury_negative() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
 
     // Add venice actor with low treasury
     for actor in &scenario.actors {
@@ -171,7 +171,7 @@ fn test_metric_ref_apply_actor_treasury_negative() {
 #[test]
 fn test_metric_ref_apply_global_clamped() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     
     // Global metrics should clamp to 0-100
     MetricRef::literal("federation_progress").apply(&mut world, 150.0);
@@ -183,7 +183,7 @@ fn test_metric_ref_apply_global_clamped() {
 #[test]
 fn test_metric_ref_apply_legitimacy_clamped() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     
     // Add venice actor
     for actor in &scenario.actors {
@@ -204,7 +204,7 @@ fn test_metric_ref_apply_legitimacy_clamped() {
 #[test]
 fn test_metric_ref_apply_military_size_min_zero() {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     
     // Add venice actor with low military
     for actor in &scenario.actors {
@@ -231,6 +231,7 @@ fn test_family_state_initialized() {
     let _db = crate::db::Db::open_in_memory().unwrap();
 
     crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
@@ -248,6 +249,7 @@ fn test_family_state_none_for_constantinople() {
     let _db = crate::db::Db::open_in_memory().unwrap();
 
     crate::application::load_scenario(&mut state, &_db, "constantinople_1430".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
 
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_none(), "family_state should be None for Constantinople");
@@ -283,7 +285,7 @@ fn test_generation_mechanics_has_era_texts() {
 fn test_scenario_victory_requires_byzantium_alive() {
     // Load constantinople_1430
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     let mut event_log = crate::engine::EventLog::new();
     
     // Add byzantium (the victory requires her alive) and ottomans (the federation's
@@ -323,7 +325,7 @@ fn test_scenario_victory_requires_byzantium_alive() {
 fn test_victory_sustained_ticks_resets() {
     // Load constantinople_1430
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     let mut event_log = crate::engine::EventLog::new();
     
     // Add byzantium and ottomans actors (victory gate is ottomans.military_size < 40)
@@ -360,7 +362,7 @@ fn test_victory_sustained_ticks_resets() {
 fn test_generation_transfer_applies_inheritance() {
     // Load rome_375
     let scenario = registry::load_by_id("rome_375").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     let mut event_log = crate::engine::EventLog::new();
     
     // Add rome actor
@@ -443,7 +445,7 @@ fn test_generation_transfer_uses_every_authored_coefficient() {
         .map(|(key, _)| ((*key).to_string(), START))
         .collect();
 
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     let mut event_log = crate::engine::EventLog::new();
     for actor in &scenario.actors {
         if actor.id == "rome" {
@@ -482,6 +484,7 @@ fn test_initial_family_metrics_loaded() {
     let _db = crate::db::Db::open_in_memory().unwrap();
 
     crate::application::load_scenario(&mut state, &_db, "rome_375".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
 
     let world_state = state.world_state.as_ref().unwrap();
     assert!(world_state.family_state.is_some(), "family_state should be Some for Rome 375");
@@ -530,6 +533,7 @@ fn test_family_metric_keys_stay_canonical_after_ticks() {
     let db = crate::db::Db::open_in_memory().unwrap();
 
     crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     for _ in 0..40 {
         crate::commands::advance_tick_silent(&mut state).unwrap();
     }
@@ -561,7 +565,7 @@ fn test_scenario_all_metrics_valid() {
 fn test_constantinople_sim_balance() {
     use rand::SeedableRng;
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     for actor in &scenario.actors {
         if !actor.is_successor_template {
             world.actors.insert(actor.id.clone(), actor.clone());
@@ -628,14 +632,17 @@ fn test_rome_375_sim_balance() {
 
     // Over seeds, not one: the split by date (A12) shrinks Rome at tick 40, and balanced
     // wins in 18 of 30 games — seed 42 alone stopped winning, a precondition, not the
-    // claim. At least one game must be won, and every win must land in ticks 5–100: since
-    // A35 there is no minimum tick, and a win needs five sustained ticks, so `ws.tick` after
-    // the earliest possible win is 5 (the old lower bound 25 stood on `minimum_tick: 30`).
+    // claim. At least one game must be won, and no win may land before the rule allows nor
+    // after tick 100. The lower bound is derived from the rule, not fitted to the data
+    // (A35): with `minimum_tick` 0 and a hold of N ticks the earliest win is checked on tick
+    // N − 1, and `ws.tick` after it is N — the old bound 25 stood on `minimum_tick: 30`.
+    let vc = crate::scenarios::registry::load_by_id("rome_375").unwrap().victory_condition.unwrap();
+    let earliest = vc.minimum_tick + vc.sustained_ticks_required.max(1);
     let wins: Vec<u32> = (0..8).filter_map(|seed| victory_tick(Some("balanced"), seed)).collect();
     assert!(!wins.is_empty(), "played rome (balanced) must win in at least one of 8 games");
     assert!(
-        wins.iter().all(|t| (5..=100).contains(t)),
-        "every played win must land within ticks 5–100, got {wins:?}"
+        wins.iter().all(|t| (earliest..=100).contains(t)),
+        "every played win must land within ticks {earliest}–100, got {wins:?}"
     );
     assert_eq!(victory_tick(None, 42), None, "without a player the family influence has no source");
 }
@@ -687,7 +694,7 @@ fn test_era_definitions_loaded() {
 fn test_era_progression_fires() {
     // Verify era progression works: give actor enough tags and run ticks
     let scenario = registry::load_by_id("rome_375").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
 
     // Add rome with enough tags for early_medieval
     for actor in &scenario.actors {
@@ -719,7 +726,7 @@ fn test_era_progression_fires() {
 /// Returns the ids of every military conflict that occurred.
 fn run_combat_only(byzantium_military: f64, rounds: u32) -> Vec<String> {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     for actor in &scenario.actors {
         if actor.id == "byzantium" || actor.id == "ottomans" {
             world.actors.insert(actor.id.clone(), actor.clone());
@@ -792,7 +799,7 @@ fn test_combat_still_happens_against_a_real_army() {
 /// Returns whether byzantium was still alive after `rounds` ticks.
 fn byzantium_survives_exhaustion(with_ottomans: bool, rounds: u32) -> bool {
     let scenario = registry::load_by_id("constantinople_1430").unwrap();
-    let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+    let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
     for actor in &scenario.actors {
         let keep = actor.id == "byzantium" || (with_ottomans && actor.id == "ottomans");
         if keep {
@@ -954,7 +961,7 @@ fn test_narrative_key_metrics_actually_resolve() {
     // Nothing read these values back, so nothing ever complained.
     for scenario_id in ["constantinople_1430", "milan_1477"] {
         let scenario = registry::load_by_id(scenario_id).unwrap();
-        let mut world = WorldState::new(scenario.id.clone(), scenario.start_year);
+        let mut world = WorldState::with_seed(scenario.id.clone(), scenario.start_year, 0);
         for actor in &scenario.actors {
             if !actor.is_successor_template {
                 world.actors.insert(actor.id.clone(), actor.clone());
@@ -1206,6 +1213,7 @@ fn test_collapse_warnings_hold_only_living_actors() {
     let mut state = crate::AppState::default();
     let db = crate::db::Db::open_in_memory().unwrap();
     crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
 
     let mut stale_seen: Vec<String> = Vec::new();
     for _ in 0..120 {
@@ -1295,10 +1303,18 @@ fn test_spawned_power_reaches_the_lifecycle_block() {
 /// См. `docs/investigation_rome_immortality.md` §9.
 #[test]
 fn test_no_living_actor_carries_a_dead_actors_name() {
+    // B55: a fixed seed. The test used to play the clock's seed — a different world every
+    // run — and failed in 5 of 2000 seeds, where nobody dies in constantinople within 200
+    // ticks. Seed 0 is chosen so deaths happen in all three worlds (as of B55: 7 in rome,
+    // byzantium in constantinople, siena and savoy in milan); the assertion below keeps
+    // that a precondition, so a change that removes them fails here instead of passing
+    // without checking anything.
+    const SEED: u64 = 0;
     for scenario_id in ["rome_375", "constantinople_1430", "milan_1477"] {
         let mut state = crate::AppState::default();
         let db = crate::db::Db::open_in_memory().unwrap();
         crate::application::load_scenario(&mut state, &db, scenario_id.to_string()).unwrap();
+        state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED));
 
         let mut clashes: Vec<String> = Vec::new();
         for _ in 0..200 {
@@ -1319,7 +1335,7 @@ fn test_no_living_actor_carries_a_dead_actors_name() {
         let ws = state.world_state.as_ref().unwrap();
         assert!(
             !ws.dead_actors.is_empty(),
-            "{scenario_id}: за 200 тиков никто не погиб — проверка ничего не проверяет"
+            "{scenario_id}, сид {SEED}: за 200 тиков никто не погиб — проверка ничего не проверяет; выберите сид, где гибель есть"
         );
         clashes.dedup();
         assert!(
@@ -1556,9 +1572,11 @@ fn event_log_survives_save_and_load_and_ticks_ship_only_their_events() {
 
     let save_id = crate::commands::save_game(&mut st, &db, Some("guard".to_string())).unwrap().save_id.unwrap();
     crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     assert!(st.event_log.events.is_empty(), "a fresh scenario starts with an empty log");
 
     crate::commands::load_game(&mut st, &db, save_id).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     assert_eq!(serde_json::to_value(&st.event_log.events).unwrap(), log, "load restores the save's own log");
 }
 
@@ -1574,6 +1592,7 @@ fn player_action_metadata_and_history_do_not_depend_on_hash_order() {
         let db = crate::db::Db::open_in_memory().unwrap();
         let mut st = crate::commands::AppState::default();
         crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
         // `support_city` needs family wealth > 15; the rome family starts at 0.
         MetricRef::literal("family:family_wealth").apply(st.world_state.as_mut().unwrap(), 50.0);
         let input = crate::application::PlayerActionInput { action_id: "support_city".to_string(), target_actor_id: None };
@@ -1764,7 +1783,7 @@ fn ui_list_and_apply_path_agree_on_every_action() {
 /// written now also loads in an older build.
 #[test]
 fn a_world_saved_with_displacement_progress_still_loads() {
-    let world = WorldState::new("rome_375".into(), 375);
+    let world = WorldState::with_seed("rome_375".into(), 375, 0);
     let mut v = serde_json::to_value(&world).unwrap();
     v.as_object_mut().unwrap().insert("cultural_displacement_progress".into(), serde_json::json!({ "alamanni": 12.5 }));
     let loaded: Result<WorldState, _> = serde_json::from_value(v);
@@ -1839,6 +1858,7 @@ fn a_save_with_actor_scenario_metrics_still_loads() {
     let db = crate::db::Db::open_in_memory().unwrap();
     let mut st = crate::commands::AppState::default();
     crate::application::load_scenario(&mut st, &db, "rome_375".to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     let clean = serde_json::to_value(st.world_state.as_ref().unwrap()).unwrap();
     let mut old = clean.clone();
     old["actors"]["rome"].as_object_mut().unwrap().insert(
