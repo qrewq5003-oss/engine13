@@ -53,48 +53,33 @@ duration = 2
 id = "mehmed_rises"
 is_key = true
 triggers_collapse = false
+# A8 (owner's decision): a historical date — Mehmed II's accession, 1451, tick 42. Same
+# precedent as `church_union` (A9) and `huns_visible` (A3). The old gate, `ottomans.military_size
+# > 250` for 5 ticks, was unreachable for anyone while the city stands: the Ottoman army peaks
+# at its start (~183) and its mobilisation capacity is 193 (A8 stage 1, `a8_probe`). Text only,
+# no mechanics; `requires_alive` keeps it from firing over a fallen city.
 requires_alive = ["byzantium"]
 llm_context_shift = "Мехмед II восходит на трон. Молодой амбициозный султан."
 [milestone_events.condition]
-type = "metric"
-metric = "military_size"
-actor_id = "ottomans"
-operator = "greater"
-value = 250.0
-duration = 5
+type = "tick"
+tick = 42
 
 [[milestone_events]]
 id = "final_assault"
 is_key = true
 # B46: the start of the assault is not yet the end — `constantinople_falls` ends the scenario.
 triggers_collapse = false
+# A8: a historical date — the siege, 1453, tick 46 (the old gate `> 280` for 3 ticks was out of
+# reach, as for `mehmed_rises`). Whether the city survives stays with the simulation: the B46
+# outcome on the same tick decides it. Listed before `outcome_survived_alone`, which follows it.
+# `constantinople_holds` («выстоял, непобедим») was removed with this change: its condition,
+# cohesion > 70 for 5 ticks, is pinned by cohesion saturation (A46) and passed after any
+# trigger, and it duplicated `outcome_survived_alone` in the opposite tone.
 requires_alive = ["byzantium"]
 llm_context_shift = "Финальный штурм Константинополя начался."
 [milestone_events.condition]
-type = "metric"
-metric = "military_size"
-actor_id = "ottomans"
-operator = "greater"
-value = 280.0
-duration = 3
-
-[[milestone_events]]
-id = "constantinople_holds"
-is_key = true
-triggers_collapse = false
-# B46: «held, unconquerable» only after an assault beaten off. On cohesion alone it fired on
-# ticks 9–17 of every game, before any assault; until A8 makes the assault reachable it is
-# expected to stay silent — more honest than a false claim.
-after = "final_assault"
-requires_alive = ["byzantium"]
-llm_context_shift = "Константинополь выстоял! Город непобедим."
-[milestone_events.condition]
-type = "metric"
-metric = "cohesion"
-actor_id = "byzantium"
-operator = "greater"
-value = 70.0
-duration = 5
+type = "tick"
+tick = 46
 
 # B46 (решение владельца 2026-10-03): концовки — таблица 2×2 «город пал / выстоял» ×
 # «федерация сложилась / нет». Каждая оценивается один раз, в свой решающий момент, и за
@@ -119,6 +104,8 @@ triggers_collapse = false
 llm_context_shift = "Город выстоял — но случайно. Разрозненная помощь, никакой координации. Ottoman отступил но не сломлен. Через десять лет попробует снова."
 group = "ending"
 requires_alive = ["byzantium"]
+# A8: after the siege, so the log reads siege, then outcome. Both fire on tick 46 in file order.
+after = "final_assault"
 [milestone_events.condition]
 type = "tick"
 tick = 46

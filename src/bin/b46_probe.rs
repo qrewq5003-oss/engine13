@@ -179,8 +179,12 @@ fn main() {
         let unfallen_without_ending = runs.iter().filter(|r| r.byz_fall.is_none() && n_end(r) == 0).count();
         println!("B46 · fallen {} — constantinople_falls missing {cf_missing}; mode not Consequences {not_cons} (of them won earlier: {not_cons_won}); never fell and no ending: {unfallen_without_ending}", fallen.len());
         for m in ["final_assault", "mehmed_rises", "mehmed_accelerates"] {
-            let f: Vec<&(u32, bool)> = runs.iter().filter_map(|r| r.fired.get(m)).collect();
-            println!("B46 · {m}: fired {}, over a dead city {}", f.len(), f.iter().filter(|x| !x.1).count());
+            let f: Vec<&Run> = runs.iter().filter(|r| r.fired.contains_key(m)).collect();
+            // as for survived_alone: a city that falls later in the firing turn reads «dead» after it
+            let same_turn = |r: &&Run| r.byz_fall.map(|b| b.0) == Some(r.fired[m].0);
+            let dead = f.iter().filter(|r| !r.fired[m].1 && !same_turn(r)).count();
+            let st = f.iter().filter(|r| same_turn(r)).count();
+            println!("B46 · {m}: fired {}, over a dead city {dead}; city fell later in the same turn {st}", f.len());
         }
         let holds: Vec<&Run> = runs.iter().filter(|r| r.fired.contains_key("constantinople_holds")).collect();
         let holds_bad = holds.iter().filter(|r| {

@@ -21,6 +21,10 @@
 //! with the current thresholds and holds, the games where its own reading would fire
 //! `mehmed_rises` / `final_assault`, next to how often the engine actually fired them.
 //!
+//! § 5 (stage 2, after the owner dated the climax): `mehmed_rises` on tick 42 and
+//! `final_assault` on tick 46 fire exactly where Byzantium is alive at the start of that tick;
+//! none over a dead city; `outcome_survived_alone` on tick 46 and never before the siege.
+//!
 //! Usage: cargo run --release --bin a8_probe -- [seeds] [ticks]
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
@@ -60,6 +64,8 @@ struct Run {
     cohesion: Vec<Option<f64>>,
     fall: Option<usize>,
     fired: [bool; 3],
+    // tick each watched milestone first appears (`ws.tick - 1`), and the tick-end order
+    fired_at: std::collections::BTreeMap<String, usize>,
     // the Ottoman army every tick regardless of Byzantium (where the old firings lived)
     army_any: Vec<Option<f64>>,
     // the Ottomans' mobilisation capacity (`military_capacity`), Byzantium alive
@@ -72,7 +78,7 @@ fn run(world: &str, seed: u64, ticks: u32) -> Run {
     engine13::load_scenario(&mut st, &db, "constantinople_1430".into()).unwrap();
     st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, "constantinople_1430"));
-    let mut r = Run { army: Vec::new(), cohesion: Vec::new(), fall: None, fired: [false; 3], army_any: Vec::new(), capacity: Vec::new() };
+    let mut r = Run { army: Vec::new(), cohesion: Vec::new(), fall: None, fired: [false; 3], fired_at: Default::default(), army_any: Vec::new(), capacity: Vec::new() };
     for _ in 0..ticks {
         match &strategy {
             Some(s) => { play_scripted_tick(&mut st, s); }
@@ -92,6 +98,18 @@ fn run(world: &str, seed: u64, ticks: u32) -> Run {
         r.capacity.push(byz.and(ott).map(engine13::engine::interactions::military_capacity));
         r.army_any.push(ott.filter(|_| !ws.dead_actor_ids.contains("ottomans")).map(|o| o.get_metric("military_size")));
         r.cohesion.push(byz.map(|b| b.get_metric("cohesion")));
+        for id in ["mehmed_rises", "final_assault", "outcome_survived_alone"] {
+            if ws.milestone_events_fired.iter().any(|m| m == id) && !r.fired_at.contains_key(id) {
+                // same tick: order by position in the fired list
+                r.fired_at.insert(id.to_string(), ws.tick as usize - 1);
+                if id == "outcome_survived_alone" {
+                    let pos = |x: &str| ws.milestone_events_fired.iter().position(|m| m == x);
+                    if pos("final_assault").is_none_or(|f| Some(f) > pos(id)) {
+                        r.fired_at.insert("outcome_before_assault".into(), 1);
+                    }
+                }
+            }
+        }
         for (i, id) in ["mehmed_rises", "final_assault", "constantinople_holds"].iter().enumerate() {
             r.fired[i] = ws.milestone_events_fired.iter().any(|m| m == id);
         }
@@ -230,5 +248,26 @@ fn main() {
         let would_f = runs.iter().filter(|r| longest_run(&r.army, 0..r.army.len(), 280.0) >= 3).count();
         let fired = |i: usize| runs.iter().filter(|r| r.fired[i]).count();
         println!("| {w} | {} ({}) | {would_m} / {would_f} | {} / {} / {} |", falls.len(), q(&falls), fired(0), fired(1), fired(2));
+    }
+
+    println!("\n## 5. Dated milestones (A8 stage 2): `mehmed_rises` tick 42, `final_assault` tick 46\n");
+    println!("| world | Byzantium alive at the start of tick 42 / `mehmed_rises` fired / on tick 42 / mismatched games | alive at the start of 46 / `final_assault` fired / on tick 46 / mismatched | fired over a dead city | `outcome_survived_alone` fired (ticks) / before `final_assault` |");
+    println!("|---|---|---|---|---|");
+    for (w, runs) in &all {
+        // `cohesion[t]` is Some iff Byzantium is alive at the end of tick t
+        let alive_at = |r: &Run, t: usize| r.cohesion.get(t - 1).copied().flatten().is_some();
+        let cell = |id: &str, t: usize| {
+            let alive = runs.iter().filter(|r| alive_at(r, t)).count();
+            let fired = runs.iter().filter(|r| r.fired_at.contains_key(id)).count();
+            let on = runs.iter().filter(|r| r.fired_at.get(id) == Some(&t)).count();
+            let bad = runs.iter().filter(|r| alive_at(r, t) != r.fired_at.contains_key(id)).count();
+            format!("{alive} / {fired} / {on} / {bad}")
+        };
+        let dead = runs.iter().filter(|r| {
+            ["mehmed_rises", "final_assault", "outcome_survived_alone"].iter().any(|id| r.fired_at.get(*id).is_some_and(|&t| r.fall.is_some_and(|f| f < t)))
+        }).count();
+        let ticks: Vec<f64> = runs.iter().filter_map(|r| r.fired_at.get("outcome_survived_alone").map(|t| *t as f64)).collect();
+        let before = runs.iter().filter(|r| r.fired_at.contains_key("outcome_before_assault")).count();
+        println!("| {w} | {} | {} | {dead} | {} ({}) / {before} |", cell("mehmed_rises", 42), cell("final_assault", 46), ticks.len(), q(&ticks));
     }
 }
