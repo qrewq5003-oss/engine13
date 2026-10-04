@@ -23,7 +23,7 @@
 //!
 //! § 5 (stage 2, after the owner dated the climax): `mehmed_rises` on tick 42 and
 //! `final_assault` on tick 46 fire exactly where Byzantium is alive at the start of that tick;
-//! none over a dead city; `outcome_survived_alone` on tick 46 and never before the siege.
+//! none over a dead city; `outcome_survived_alone` (tick 47 since the state rule) never before the siege.
 //!
 //! Usage: cargo run --release --bin a8_probe -- [seeds] [ticks]
 
