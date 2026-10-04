@@ -98,6 +98,7 @@ mod imp {
         static INCOME_COEF: Cell<Option<f64>> = const { Cell::new(None) };
         static TREASURY_PARTS: RefCell<Option<Vec<(String, f64, f64)>>> = const { RefCell::new(None) };
         static TAG_LEVEL: RefCell<Option<String>> = const { RefCell::new(None) };
+        static TAG_SCALE_OF: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -196,10 +197,20 @@ mod imp {
         TAG_APPLIED.with(|a| a.borrow_mut().clear());
     }
 
+    /// Counterfactual (A4 stage 1): every modifier of one tag scaled by a factor — the
+    /// modifiers are integers, so a halved `regency_crisis` (−1, −0.5) needs this.
+    pub fn set_tag_scale_of(scale: Option<(String, f64)>) {
+        TAG_SCALE_OF.with(|t| *t.borrow_mut() = scale);
+    }
+
     /// The modifier a tag adds this tick: scaled (`set_tag_scale`), and under the level mode
     /// only on the tick the tag first counts for the actor.
     pub fn tag_modifier_for(actor: &str, tag: &str, metric: &str, value: f64) -> f64 {
         let v = tag_modifier(metric, value);
+        let v = TAG_SCALE_OF.with(|t| match &*t.borrow() {
+            Some((id, f)) if id == tag => v * f,
+            _ => v,
+        });
         let level = TAG_LEVEL.with(|t| t.borrow().as_deref() == Some(metric));
         if !level {
             return v;
