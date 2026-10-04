@@ -154,11 +154,6 @@
 | site | metric | reads per world | at boundary per world | listed |
 |---|---|---|---|---|
 | application/actions.rs:203 | influence | — · 5879 · 6949 · 9000 | — · 44 % · 69 % · 93 % | content-driven |
-| bin/a46_readers_probe.rs:203 | cohesion | 8448 · 8510 · 7383 · 8091 | 30 % · 32 % · 29 % · 29 % | content-driven |
-| bin/a46_readers_probe.rs:203 | external_pressure | 8448 · 8510 · 7383 · 8091 | 96 % · 96 % · 95 % · 95 % | content-driven |
-| bin/a46_readers_probe.rs:203 | influence | 18000 · 18000 · 18000 · 18000 | 85 % · 33 % · 58 % · 93 % | content-driven |
-| bin/a46_readers_probe.rs:203 | knowledge | 9000 · 9000 · 9000 · 9000 | 0 % · 87 % · 89 % · 93 % | content-driven |
-| bin/a46_readers_probe.rs:203 | legitimacy | 8448 · 8510 · 7383 · 8091 | 0 % · 0 % · 0 % · 0 % | content-driven |
 | core/actor.rs:226 | military_quality | 231469 · 243286 · 239233 · 232664 | 75 % · 76 % · 76 % · 75 % | literal |
 | engine/interactions.rs:1092 | economic_output | 2 · — · — · 113 | 100 % · — · — · 99 % | literal |
 | engine/interactions.rs:1208 | economic_output | 86270 · 93912 · 87543 · 87217 | 75 % · 75 % · 77 % · 74 % | literal |
@@ -288,9 +283,6 @@
 | application/actions.rs:188 | economic_output | — · 12703 · 12279 · 12021 | — · 98 % · 97 % · 99 % | content-driven |
 | application/actions.rs:188 | legitimacy | — · 15565 · 15254 · 14636 | — · 44 % · 44 % · 41 % | content-driven |
 | application/actions.rs:203 | legitimacy | — · 30 · 30 · 1239 | — · 0 % · 0 % · 0 % | content-driven |
-| bin/a46_readers_probe.rs:203 | cohesion | 1301 · 6540 · 6232 · 6300 | 56 % · 53 % · 50 % · 46 % | content-driven |
-| bin/a46_readers_probe.rs:203 | external_pressure | 2602 · 13080 · 12464 · 12600 | 90 % · 83 % · 87 % · 57 % | content-driven |
-| bin/a46_readers_probe.rs:203 | legitimacy | 1301 · 6540 · 6232 · 6300 | 7 % · 47 % · 45 % · 32 % | content-driven |
 | core/actor.rs:226 | military_quality | 180963 · 191194 · 190333 · 184858 | 86 % · 81 % · 82 % · 83 % | literal |
 | engine/interactions.rs:1208 | economic_output | 6181 · 6967 · 6402 · 7928 | 17 % · 26 % · 19 % · 28 % | literal |
 | engine/interactions.rs:1209 | economic_output | 6181 · 6967 · 6402 · 7928 | 2 % · 1 % · 1 % · 1 % | literal |
@@ -416,9 +408,6 @@
 | application/actions.rs:188 | cohesion | — · 87 | — · 0 % | content-driven |
 | application/actions.rs:188 | economic_output | — · 6 | — · 67 % | content-driven |
 | application/actions.rs:203 | legitimacy | — · 86 | — · 0 % | content-driven |
-| bin/a46_readers_probe.rs:203 | cohesion | 27000 · 27000 | 32 % · 33 % | content-driven |
-| bin/a46_readers_probe.rs:203 | external_pressure | 27000 · 27000 | 97 % · 97 % | content-driven |
-| bin/a46_readers_probe.rs:203 | legitimacy | 18000 · 18000 | 83 % · 88 % | content-driven |
 | core/actor.rs:226 | military_quality | 225842 · 226430 | 77 % · 77 % | literal |
 | engine/interactions.rs:1208 | economic_output | 3134 · 3176 | 5 % · 5 % | literal |
 | engine/interactions.rs:1209 | economic_output | 3134 · 3176 | 2 % · 2 % | literal |

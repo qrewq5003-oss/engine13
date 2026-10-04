@@ -761,11 +761,12 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
             modifiers.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
             for (_tag, metric, modifier) in modifiers {
                 let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
-                actor.metrics.insert(metric.to_string(), current + modifier as f64);
+                let add = census::tag_modifier(metric, modifier as f64);
+                actor.metrics.insert(metric.to_string(), current + add);
                 #[cfg(feature = "census")]
                 {
                     census::write_source(|| format!("tag {_tag}"));
-                    census::metric_write(std::panic::Location::caller(), &actor.id, metric, modifier as f64, current, current + modifier as f64);
+                    census::metric_write(std::panic::Location::caller(), &actor.id, metric, add, current, current + add);
                     census::clear_write_source();
                 }
             }
