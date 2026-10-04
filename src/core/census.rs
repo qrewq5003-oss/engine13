@@ -94,6 +94,7 @@ mod imp {
         static WATCH_ONLY: Cell<bool> = const { Cell::new(true) };
         static READS: RefCell<Option<Occupancy>> = const { RefCell::new(None) };
         static OCC_LIVE_ONLY: Cell<bool> = const { Cell::new(false) };
+        static TAG_SCALE: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
     }
 
     pub fn enable_writes() {
@@ -143,6 +144,18 @@ mod imp {
     /// `min(source, cap)`.
     pub fn set_dependency_cap(cap: Option<(String, f64)>) {
         DEP_CAP.with(|c| *c.borrow_mut() = cap);
+    }
+
+    /// Counterfactual (A46 stage 3): every tag modifier on the named metric × factor.
+    pub fn set_tag_scale(scale: Option<(String, f64)>) {
+        TAG_SCALE.with(|t| *t.borrow_mut() = scale);
+    }
+
+    pub fn tag_modifier(metric: &str, value: f64) -> f64 {
+        TAG_SCALE.with(|t| match &*t.borrow() {
+            Some((m, f)) if m == metric => value * f,
+            _ => value,
+        })
     }
 
     pub fn dependency_source(rule: &str, from: f64) -> f64 {
@@ -278,6 +291,13 @@ pub fn write_source(_name: impl FnOnce() -> String) {}
 #[cfg(not(feature = "census"))]
 #[inline(always)]
 pub fn clear_write_source() {}
+
+/// A tag modifier's value; the identity without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn tag_modifier(_metric: &str, value: f64) -> f64 {
+    value
+}
 
 /// A dependency rule's source value; the identity without the feature.
 #[cfg(not(feature = "census"))]
