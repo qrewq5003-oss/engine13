@@ -25,6 +25,8 @@
 //! Plus milan's legitimacy decomposed by source (the write sink of A37): the mirror case,
 //! actors whose legitimacy rises.
 //!
+//! `ECONOMY_V2=1` runs the same census with the economy v2 switch on (brief §9.6).
+//!
 //! Usage: cargo run --release --features census --bin a46_readers_probe -- [seeds] [ticks]
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
@@ -104,6 +106,10 @@ fn main() {
                 let db = engine13::db::Db::open_in_memory().unwrap();
                 let mut st = engine13::AppState::default();
                 engine13::load_scenario(&mut st, &db, sc_id.to_string()).unwrap();
+                // Economy v2 (brief §9.6) in memory: `ECONOMY_V2=1` measures the same readers there.
+                if std::env::var("ECONOMY_V2").is_ok_and(|v| v == "1") {
+                    st.current_scenario.as_mut().unwrap().features.economy_v2 = true;
+                }
                 st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
                 let strategy = (*world != "none").then(|| ScriptedStrategy::from_str(world, sc_id));
                 let _ = census::take_writes();

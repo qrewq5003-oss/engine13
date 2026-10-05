@@ -207,7 +207,10 @@ pub fn load_milan_1477() -> Scenario {
             family_panel: false,
             global_metrics_panel: false,
             patron_actions: true,
+            economy_v2: false,
         },
+        // Economy v2 (Ц1): income coefficient refitted for tags-as-level, A46 stage 4 (д′).
+        economy_v2_income_coefficient: Some(0.001516),
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),
