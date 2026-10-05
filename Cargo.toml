@@ -60,3 +60,7 @@ name = "a42_probe"
 [[bin]]
 name = "a4_probe"
 required-features = ["census"]
+
+[[bin]]
+name = "stage1_open_probe"
+required-features = ["census"]

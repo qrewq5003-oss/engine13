@@ -99,6 +99,7 @@ mod imp {
         static TREASURY_PARTS: RefCell<Option<Vec<(String, f64, f64)>>> = const { RefCell::new(None) };
         static TAG_LEVEL: RefCell<Option<String>> = const { RefCell::new(None) };
         static TAG_SCALE_OF: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
+        static MUTED_EVENT: RefCell<Option<String>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -195,6 +196,17 @@ mod imp {
     pub fn set_tag_level(metric: Option<String>) {
         TAG_LEVEL.with(|t| *t.borrow_mut() = metric);
         TAG_APPLIED.with(|a| a.borrow_mut().clear());
+    }
+
+    /// Counterfactual (A20b + A41 stage 1): a random event that still rolls, picks its target
+    /// and is logged, but whose effects are not applied — the random stream is untouched, so
+    /// the difference to the base is the event's effect alone.
+    pub fn set_muted_event(id: Option<String>) {
+        MUTED_EVENT.with(|m| *m.borrow_mut() = id);
+    }
+
+    pub fn event_muted(id: &str) -> bool {
+        MUTED_EVENT.with(|m| m.borrow().as_deref() == Some(id))
     }
 
     /// Counterfactual (A4 stage 1): every modifier of one tag scaled by a factor — the
@@ -370,6 +382,13 @@ pub fn clear_write_source() {}
 #[inline(always)]
 pub fn income_coefficient(default: f64) -> f64 {
     default
+}
+
+/// A20b + A41 counterfactual switch; never muted without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn event_muted(_id: &str) -> bool {
+    false
 }
 
 /// A tag's modifier for this tick; the value without the feature.
