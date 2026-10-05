@@ -95,7 +95,7 @@ pub fn validate_dependencies(
 /// Apply a single dependency rule to an actor
 /// Sequential mutation semantics - each rule reads the current state
 /// of the actor (already modified by previous rules).
-fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32, threshold_scale: f64) {
+fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32, threshold_scale: f64, treasury_floor: bool) {
     let from_val = actor.get_metric(rule.from.as_str());
     // Economy v2 (Ц1 stage 3): a rule reading `economic_output` measures a fall below the
     // actor's own norm, not below an absolute line — `threshold × T / 100`. 1.0 in v1.
@@ -159,6 +159,11 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
     });
     if delta != 0.0 {
         census::write_source(|| format!("dependency {}", rule.id));
+        let delta = if treasury_floor && rule.to.as_str() == "treasury" {
+            treasury_delta_at_floor(&actor.id, actor.get_metric("treasury"), delta)
+        } else {
+            delta
+        };
         actor.add_metric(rule.to.as_str(), delta);
         census::clear_write_source();
     }
@@ -179,7 +184,7 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
         let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         for rule in &scenario.dependencies {
             let scale = if rule.from.as_str() == "economic_output" { eo_scale } else { 1.0 };
-            apply_dependency_rule(actor, rule, tick, scale);
+            apply_dependency_rule(actor, rule, tick, scale, scenario.features.economy_v2 && census::debt_as_pay());
         }
     }
 }
@@ -233,7 +238,7 @@ pub fn tick(
     // population supports, before this tick's fighting. Placed here, immediately
     // ahead of the interaction phase, because that is where it was measured; moving
     // it changes the numbers in docs/investigation_military_source.md §4.
-    phase_military_recovery(world);
+    phase_military_recovery(world, scenario);
 
     phase_interactions(world, scenario, event_log, rng);
 
@@ -395,8 +400,9 @@ fn phase_region_ranks(world: &mut WorldState, scenario: &Scenario) {
 // Phase 3: Dependency graph and interactions
 // ============================================================================
 
-fn phase_military_recovery(world: &mut WorldState) {
-    interactions::apply_military_recovery(world);
+fn phase_military_recovery(world: &mut WorldState, scenario: &Scenario) {
+    // Economy v2 (Ц2 stage 2): no money, no levy — an actor in debt does not recruit.
+    interactions::apply_military_recovery(world, scenario.features.economy_v2 && census::debt_as_pay());
 }
 
 fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
@@ -525,10 +531,15 @@ fn phase_random_events(
             // Apply effects (a census counterfactual can mute one event's effects, A20b + A41)
             census::write_source(|| format!("event {}", event.id));
             for (metric, delta) in event.effects.iter().filter(|_| !census::event_muted(&event.id)) {
-                metric
-                    .resolve(target_id)
-                    .expect("event target actor id")
-                    .apply(world, *delta);
+                let key = metric.resolve(target_id).expect("event target actor id");
+                let mut delta = *delta;
+                if scenario.features.economy_v2 && census::debt_as_pay() {
+                    if let Some(id) = is_treasury(&key) {
+                        let current = world.actors.get(id).map_or(0.0, |a| a.get_metric("treasury"));
+                        delta = treasury_delta_at_floor(id, current, delta);
+                    }
+                }
+                key.apply(world, delta);
             }
             census::clear_write_source();
 
@@ -794,6 +805,29 @@ fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     // Year is derived from tick: 2 ticks per year (tick 0-1 = year 0, tick 2-3 = year 1, etc.)
     world.year = scenario.start_year + (world.tick / 2) as i32;
     world.actions_this_tick = 0;
+}
+
+/// Economy v2 (Ц2 stage 2): a debt is unpaid soldiers' pay. Only the army's upkeep (the
+/// treasury formula) takes a treasury below zero; every other loss stops at zero — a storm
+/// cannot take money that is not there. Returns the part of `delta` that applies to a
+/// treasury at `current`; the rest is recorded as lost at the floor.
+fn treasury_delta_at_floor(actor_id: &str, current: f64, delta: f64) -> f64 {
+    if delta >= 0.0 {
+        return delta;
+    }
+    let applied = if current <= 0.0 { 0.0 } else { delta.max(-current) };
+    if applied != delta {
+        census::treasury_floor_loss(actor_id, applied - delta);
+    }
+    applied
+}
+
+/// Whether a metric key is an actor's treasury.
+fn is_treasury(key: &crate::core::MetricRef) -> Option<&str> {
+    match key {
+        crate::core::MetricRef::Actor { actor_id, metric } if metric.as_str() == "treasury" => Some(actor_id.as_str()),
+        _ => None,
+    }
 }
 
 fn apply_treasury(world: &mut WorldState, scenario: &Scenario) {
@@ -1175,7 +1209,7 @@ fn check_milestone_events(
             world.milestone_events_fired.push(milestone.id.clone());
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
             // One-time effects, authored on the milestone (B54)
-            apply_milestone_effects(world, milestone);
+            apply_milestone_effects(world, milestone, scenario.features.economy_v2 && census::debt_as_pay());
 
             // Spawn actor if configured
             if let Some(cfg) = &milestone.spawn_actor {
@@ -1294,12 +1328,19 @@ fn link_spawn_back(world: &mut WorldState, spawn_id: &str, edges: &[crate::core:
 /// A milestone's authored `effects`, applied once on its tick (B54). Sorted by key: the
 /// `HashMap` order is per process, and a fixed order keeps any future overlapping keys
 /// deterministic. An absent actor is skipped (`MetricRef::apply`).
-fn apply_milestone_effects(world: &mut WorldState, milestone: &crate::core::MilestoneEvent) {
+fn apply_milestone_effects(world: &mut WorldState, milestone: &crate::core::MilestoneEvent, treasury_floor: bool) {
     let mut effects: Vec<(&crate::core::MetricRef, &f64)> = milestone.effects.iter().collect();
     effects.sort_by_key(|(k, _)| k.to_string());
     for (key, delta) in effects {
         census::write_source(|| format!("milestone {}", milestone.id));
-        key.apply(world, *delta);
+        let mut delta = *delta;
+        if treasury_floor {
+            if let Some(id) = is_treasury(key) {
+                let current = world.actors.get(id).map_or(0.0, |a| a.get_metric("treasury"));
+                delta = treasury_delta_at_floor(id, current, delta);
+            }
+        }
+        key.apply(world, delta);
         census::clear_write_source();
     }
 }
@@ -2630,15 +2671,59 @@ mod tests {
             let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
             a.set_metric("economic_output", eo);
             a.set_metric("cohesion", 20.0);
-            a.set_metric("treasury", 0.0);
+            // room above the zero floor (Ц2 stage 2), so only the threshold is measured
+            a.set_metric("treasury", 100.0);
             world.actors.insert("city".into(), a);
             phase_apply_dependencies(&mut world, &scenario);
-            world.actors["city"].get_metric("treasury")
+            world.actors["city"].get_metric("treasury") - 100.0
         };
         assert_eq!(run(true, "economic_output", 20.0), 0.0, "v2: 20 is above half the norm (15) — no deficit");
         assert_eq!(run(true, "economic_output", 10.0), -5.0, "v2: 10 is 5 below half the norm");
         assert_eq!(run(false, "economic_output", 20.0), -30.0, "v1: 30 below the absolute 50");
         assert_eq!(run(true, "cohesion", 20.0), -30.0, "another source keeps its absolute threshold");
+    }
+
+    /// Economy v2 (Ц2 stage 2): a loss other than the army's upkeep stops at the treasury's
+    /// zero — a dependency draining the treasury takes what is there and no more, and takes
+    /// nothing from a treasury already in debt. Both ways: v1 lets it go below zero.
+    #[test]
+    fn economy_v2_losses_stop_at_the_treasury_floor() {
+        let rule = crate::core::DependencyRule {
+            id: "drain".into(),
+            from: crate::core::MetricName::new("cohesion").unwrap(),
+            to: crate::core::MetricName::new("treasury").unwrap(),
+            coefficient: 1.0,
+            threshold: Some(50.0),
+            mode: crate::core::DependencyMode::Deficit,
+        };
+        let run = |floor: bool, treasury: f64| {
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 20.0, &[]); // cohesion 20 → −30
+            a.set_metric("treasury", treasury);
+            apply_dependency_rule(&mut a, &rule, 0, 1.0, floor);
+            a.get_metric("treasury")
+        };
+        assert_eq!(run(true, 10.0), 0.0, "v2: −30 against 10 takes 10 and stops at zero");
+        assert_eq!(run(true, -5.0), -5.0, "v2: nothing more from a treasury in debt");
+        assert_eq!(run(true, 100.0), 70.0, "v2: a loss within the treasury applies in full");
+        assert_eq!(run(false, 10.0), -20.0, "v1: no floor");
+    }
+
+    /// Economy v2 (Ц2 stage 2): no money, no levy — an army in debt does not regrow toward its
+    /// capacity. Both ways: a solvent army regrows, and v1 regrows in debt too.
+    #[test]
+    fn economy_v2_no_recruiting_in_debt() {
+        let run = |solvent_only: bool, treasury: f64| {
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 2.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("population", 8000.0);
+            a.set_metric("treasury", treasury);
+            world.actors.insert("city".into(), a);
+            interactions::apply_military_recovery(&mut world, solvent_only);
+            world.actors["city"].get_metric("military_size")
+        };
+        assert_eq!(run(true, -1.0), 2.0, "v2: in debt, no recruiting");
+        assert!(run(true, 1.0) > 2.0, "v2: solvent, the army regrows");
+        assert!(run(false, -1.0) > 2.0, "v1: regrows in debt too");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,
@@ -3151,7 +3236,7 @@ mod tests {
         empty.set_metric("population", 0.0);
         world.actors.insert("empty".into(), empty);
 
-        interactions::apply_military_recovery(&mut world);
+        interactions::apply_military_recovery(&mut world, false);
 
         let expected = 2.0 + (capacity - 2.0) * MILITARY_RECOVERY_RATE;
         assert!((world.actors["spent"].get_metric("military_size") - expected).abs() < 1e-9);
@@ -3168,7 +3253,7 @@ mod tests {
         let capacity = military_capacity(&a);
         world.actors.insert("a".into(), a);
         for _ in 0..400 {
-            interactions::apply_military_recovery(&mut world);
+            interactions::apply_military_recovery(&mut world, false);
         }
         let mil = world.actors["a"].get_metric("military_size");
         assert!(mil <= capacity, "never exceeds capacity: {mil} > {capacity}");

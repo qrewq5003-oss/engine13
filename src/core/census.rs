@@ -101,6 +101,8 @@ mod imp {
         static TAG_SCALE_OF: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
         static MUTED_EVENT: RefCell<Option<String>> = const { RefCell::new(None) };
         static EO_ABSOLUTE: Cell<bool> = const { Cell::new(false) };
+        static FLOOR_LOSS: RefCell<Option<Vec<(String, String, f64)>>> = const { RefCell::new(None) };
+        static PAY_OFF: Cell<bool> = const { Cell::new(false) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -197,6 +199,34 @@ mod imp {
     pub fn set_tag_level(metric: Option<String>) {
         TAG_LEVEL.with(|t| *t.borrow_mut() = metric);
         TAG_APPLIED.with(|a| a.borrow_mut().clear());
+    }
+
+    /// Counterfactual (Ц2 stage 2): v2 as before the stage — no zero floor, recruiting in debt.
+    pub fn set_debt_as_pay_off(off: bool) {
+        PAY_OFF.with(|x| x.set(off));
+    }
+
+    pub fn debt_as_pay() -> bool {
+        !PAY_OFF.with(|x| x.get())
+    }
+
+    /// Economy v2 (Ц2 stage 2): what each source lost at the treasury's zero floor —
+    /// (actor, source, amount not taken).
+    pub fn enable_floor_losses() {
+        FLOOR_LOSS.with(|f| *f.borrow_mut() = Some(Vec::new()));
+    }
+
+    pub fn take_floor_losses() -> Vec<(String, String, f64)> {
+        FLOOR_LOSS.with(|f| f.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    pub fn treasury_floor_loss(actor: &str, amount: f64) {
+        let source = WRITE_SOURCE.with(|s| s.borrow().clone()).unwrap_or_else(|| "unlabelled".to_string());
+        FLOOR_LOSS.with(|f| {
+            if let Some(v) = f.borrow_mut().as_mut() {
+                v.push((actor.to_string(), source, amount));
+            }
+        });
     }
 
     /// Counterfactual (Ц1 stage 3): v2 as before the stage — `economic_output` deficit rules on
@@ -394,6 +424,18 @@ pub fn clear_write_source() {}
 pub fn income_coefficient(default: f64) -> f64 {
     default
 }
+
+/// Ц2 stage 2 counterfactual switch; debt-as-pay always on without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn debt_as_pay() -> bool {
+    true
+}
+
+/// Ц2 stage 2 floor-loss sink; a no-op without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn treasury_floor_loss(_actor: &str, _amount: f64) {}
 
 /// Ц1 stage 3 counterfactual switch; relative thresholds always on without the feature.
 #[cfg(not(feature = "census"))]
