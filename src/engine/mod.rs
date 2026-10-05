@@ -279,6 +279,9 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
     // Treasury via income/expenses formula (separate from auto_deltas)
     apply_treasury(world, scenario);
 
+    // Economy v2 (Ц6 stage 3): the threat takes the role of the authored pressure auto-deltas.
+    let pressure_deltas_off = scenario.features.economy_v2 && scenario.economy_v2_pressure_auto_deltas_off;
+
     // Apply auto_deltas via MetricRef - unified for actor/family/global
     for (index, auto_delta) in scenario.auto_deltas.iter().enumerate() {
         // Check conditions
@@ -313,6 +316,13 @@ fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand
         // Apply noise
         let noise = (rng.gen::<f64>() - 0.5) * 2.0 * auto_delta.noise;
         let final_delta = delta + noise;
+        let writes_pressure = match &auto_delta.metric {
+            crate::core::MetricRef::Actor { metric, .. } => metric.as_str() == "external_pressure",
+            crate::core::MetricRef::Global { key } | crate::core::MetricRef::Family { key } => key.as_str() == "external_pressure",
+        };
+        if pressure_deltas_off && writes_pressure {
+            continue;
+        }
 
         // The number the engine is about to use, emitted where it is already computed —
         // nothing is recalculated alongside it. See `engine::trace`.
@@ -2428,6 +2438,7 @@ mod tests {
             economy_v2_depopulation_ticks: None,
             economy_v2_pressure_tags_as_level: false,
             economy_v2_pressure_pull: None,
+            economy_v2_pressure_auto_deltas_off: false,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2885,6 +2896,35 @@ mod tests {
         assert!((pulled(true, Some(0.1)) - 16.5).abs() < 1e-9);
         assert_eq!(pulled(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(pulled(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц6 stage 3): with the switch the authored pressure auto-deltas are not applied;
+    /// every other auto-delta is. Both ways: without the switch (or without v2) both apply.
+    #[test]
+    fn economy_v2_drops_authored_pressure_auto_deltas() {
+        let run = |v2: bool, off: bool| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_pressure_auto_deltas_off = off;
+            for metric in ["actor:city.external_pressure", "actor:city.cohesion"] {
+                scenario.auto_deltas.push(crate::core::AutoDelta {
+                    metric: crate::core::MetricRef::literal(metric),
+                    base: 2.0,
+                    conditions: vec![],
+                    ratio_conditions: vec![],
+                    noise: 0.0,
+                    actor_id: Some("city".into()),
+                });
+            }
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 10.0, 50.0, 50.0, &[]));
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+            phase_auto_deltas(&mut world, &scenario, &mut rng);
+            (world.actors["city"].get_metric("external_pressure"), world.actors["city"].get_metric("cohesion"))
+        };
+        assert_eq!(run(true, true), (10.0, 52.0), "pressure delta dropped, cohesion delta kept");
+        assert_eq!(run(true, false), (12.0, 52.0));
+        assert_eq!(run(false, true), (12.0, 52.0), "v1 is untouched");
     }
 
     /// Economy v2 (Ц6 stage 2, items 2–3): a sea neighbour weighs half in N, and an army bound to
