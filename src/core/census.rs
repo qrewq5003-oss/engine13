@@ -103,6 +103,7 @@ mod imp {
         static EO_ABSOLUTE: Cell<bool> = const { Cell::new(false) };
         static FLOOR_LOSS: RefCell<Option<Vec<(String, String, f64)>>> = const { RefCell::new(None) };
         static PAY_OFF: Cell<bool> = const { Cell::new(false) };
+        static THREAT_ITEMS: Cell<u8> = const { Cell::new(3) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -199,6 +200,17 @@ mod imp {
     pub fn set_tag_level(metric: Option<String>) {
         TAG_LEVEL.with(|t| *t.borrow_mut() = metric);
         TAG_APPLIED.with(|a| a.borrow_mut().clear());
+    }
+
+    /// Counterfactual (Ц6 stage 2): which refinements of the threat model act — 0 none (stage 1:
+    /// combat and migration still write pressure), 1 only that (no direct writes), 3 all (also
+    /// the sea weight and the vassalage exclusion).
+    pub fn set_threat_items(n: u8) {
+        THREAT_ITEMS.with(|x| x.set(n));
+    }
+
+    pub fn threat_items() -> u8 {
+        THREAT_ITEMS.with(|x| x.get())
     }
 
     /// Counterfactual (Ц2 stage 2): v2 as before the stage — no zero floor, recruiting in debt.
@@ -423,6 +435,13 @@ pub fn clear_write_source() {}
 #[inline(always)]
 pub fn income_coefficient(default: f64) -> f64 {
     default
+}
+
+/// Ц6 stage 2 counterfactual switch; every refinement acts without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn threat_items() -> u8 {
+    3
 }
 
 /// Ц2 stage 2 counterfactual switch; debt-as-pay always on without the feature.
