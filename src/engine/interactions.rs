@@ -303,6 +303,12 @@ pub fn apply_interaction_rule(
     }
 }
 
+/// Economy v2 (Ц6): the threat model is on — pressure is pulled toward the threat, so war enters
+/// pressure only through the threat; combat and migration no longer write it directly.
+pub fn threat_model_on(scenario: &Scenario) -> bool {
+    scenario.features.economy_v2 && scenario.economy_v2_pressure_pull.is_some() && crate::core::census::threat_items() >= 1
+}
+
 /// Calculate all interactions between neighboring actors
 pub fn calculate_interactions(
     world: &mut WorldState,
@@ -351,7 +357,7 @@ pub fn calculate_interactions(
         calculate_migration_interaction(
             world, &actor_a_id, &actor_b_id, distance, bt.clone(),
             current_tick, current_year, event_log, rng,
-            &actor_pairs, &mut migrated_this_tick,
+            &actor_pairs, &mut migrated_this_tick, threat_model_on(scenario),
         );
 
         // Data-driven rules (empty for Rome/Constantinople by default)
@@ -544,7 +550,11 @@ fn calculate_military_interaction(
         defender_actor.set_metric("military_size", mil * (1.0 - defender_loss));
         let coh = defender_actor.get_metric("cohesion");
         defender_actor.set_metric("cohesion", (coh - cohesion_loss).max(0.0));
-        defender_actor.add_metric("external_pressure", pressure_gain);
+        // Economy v2 (Ц6 stage 2): under the threat model war enters pressure only through the
+        // threat (the attacker's army is already in N); combat no longer writes it directly.
+        if !threat_model_on(scenario) {
+            defender_actor.add_metric("external_pressure", pressure_gain);
+        }
     }
 
     // Set cooldown
@@ -729,6 +739,7 @@ fn calculate_migration_interaction(
     _rng: &mut ChaCha8Rng,
     all_pairs: &[(String, String, u32, crate::core::BorderType)],
     migrated_this_tick: &mut std::collections::HashSet<String>,
+    threat_model: bool,
 ) {
     // Condition: border Land, external_pressure > 65, cohesion < 40
     if border_type != crate::core::BorderType::Land {
@@ -809,7 +820,10 @@ fn calculate_migration_interaction(
         // it is задача 27's object, not this one's.
         let pressure_transfer = (pressuring_pressure - 65.0) * 0.2 / *dist as f64;
         if let Some(neighbor) = world.actors.get_mut(neighbor_id) {
-            neighbor.add_metric("external_pressure", pressure_transfer);
+            // Economy v2 (Ц6 stage 2): no direct pressure write under the threat model.
+            if !threat_model {
+                neighbor.add_metric("external_pressure", pressure_transfer);
+            }
             neighbor.add_metric("population", pop_gain_each);
         }
 

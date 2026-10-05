@@ -587,12 +587,23 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
 /// neighbour; 100 with an armed neighbour and no army of one's own.
 pub fn pressure_threat(world: &WorldState, actor_id: &str) -> Option<f64> {
     let actor = world.actors.get(actor_id)?;
+    // Ц6 stage 2: a sea neighbour weighs half, and an army bound to us by vassalage (either
+    // way) or an alliance is no threat. (`world.alliances` is declared but nothing forms one.)
+    let refined = census::threat_items() >= 3;
+    let bound = |other: &str| {
+        world.vassalages.iter().any(|v| (v.vassal_id == actor_id && v.overlord_id == other) || (v.overlord_id == actor_id && v.vassal_id == other))
+            || world.alliances.iter().any(|a| a.actor_ids.iter().any(|x| x == actor_id) && a.actor_ids.iter().any(|x| x == other))
+    };
     let n: f64 = actor
         .neighbors
         .iter()
         .filter(|nb| nb.distance == 1 && !world.dead_actor_ids.contains(&nb.id))
-        .filter_map(|nb| world.actors.get(&nb.id))
-        .map(|a| a.get_metric("military_size").max(0.0))
+        .filter(|nb| !refined || !bound(&nb.id))
+        .filter_map(|nb| world.actors.get(&nb.id).map(|a| (nb, a)))
+        .map(|(nb, a)| {
+            let w = if refined && nb.border_type == crate::core::BorderType::Sea { 0.5 } else { 1.0 };
+            w * a.get_metric("military_size").max(0.0)
+        })
         .sum();
     let own = actor.get_metric("military_size").max(0.0);
     Some(if n <= 0.0 { 0.0 } else { 100.0 * n / (n + own) })
@@ -2874,6 +2885,63 @@ mod tests {
         assert!((pulled(true, Some(0.1)) - 16.5).abs() < 1e-9);
         assert_eq!(pulled(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(pulled(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц6 stage 2, items 2–3): a sea neighbour weighs half in N, and an army bound to
+    /// us by vassalage (either way) is no threat. Both ways: on land and unbound, all count.
+    #[test]
+    fn economy_v2_threat_weighs_sea_half_and_skips_vassals() {
+        let world_with = |sea: bool, bound: bool| {
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut city = vassalage_actor("city", 100.0, 10.0, 50.0, 50.0, &["land", "sea", "liege"]);
+            if sea { city.neighbors.iter_mut().find(|n| n.id == "sea").unwrap().border_type = crate::core::BorderType::Sea; }
+            world.actors.insert("city".into(), city);
+            for id in ["land", "sea", "liege"] { world.actors.insert(id.into(), vassalage_actor(id, 100.0, 50.0, 50.0, 50.0, &[])); }
+            if bound { world.vassalages.push(crate::core::Vassalage { vassal_id: "city".into(), overlord_id: "liege".into(), formed_tick: 0 }); }
+            world
+        };
+        // N = 100 + 100 + 100, own 100 → 75
+        assert_eq!(pressure_threat(&world_with(false, false), "city"), Some(75.0));
+        // N = 100 + 50 + 100 → 100 × 250 / 350
+        assert!((pressure_threat(&world_with(true, false), "city").unwrap() - 100.0 * 250.0 / 350.0).abs() < 1e-9, "sea weighs half");
+        // N = 100 + 100 → 100 × 200 / 300
+        assert!((pressure_threat(&world_with(false, true), "city").unwrap() - 100.0 * 200.0 / 300.0).abs() < 1e-9, "the overlord is no threat");
+        // N = 100 + 50 → 60
+        assert_eq!(pressure_threat(&world_with(true, true), "city"), Some(60.0));
+    }
+
+    /// Economy v2 (Ц6 stage 2, item 1): under the threat model combat and migration no longer write
+    /// `external_pressure` — everything else they do stays. Both ways on the same seed, so the
+    /// draws are the same and the difference is exactly the write: combat's 15–25 to the defender,
+    /// migration's `(ep − 65) × 0.2` to the sink.
+    #[test]
+    fn economy_v2_war_enters_pressure_only_through_the_threat() {
+        let run = |threat: bool, combat: bool, seed: u64| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = threat;
+            scenario.economy_v2_pressure_pull = Some(0.05);
+            scenario.military_conflict_probability = 1.0;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            if combat {
+                world.tick = 5;
+                world.actors.insert("a".into(), vassalage_actor("a", 1000.0, 0.0, 50.0, 50.0, &["b"]));
+                world.actors.insert("b".into(), vassalage_actor("b", 100.0, 10.0, 50.0, 50.0, &["a"]));
+            } else {
+                world.actors.insert("a".into(), vassalage_actor("a", 0.0, 90.0, 50.0, 20.0, &["b"]));
+                world.actors.insert("b".into(), vassalage_actor("b", 0.0, 10.0, 50.0, 50.0, &["a"]));
+            }
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+            interactions::calculate_interactions(&mut world, &scenario, &mut log, &mut rng);
+            (world.actors["b"].get_metric("external_pressure"), world.actors["b"].get_metric("military_size"), world.actors["b"].get_metric("population"))
+        };
+        let seed = (0..100).find(|s| run(false, true, *s).1 < 100.0).expect("a fight in 100 seeds");
+        let (off, on) = (run(false, true, seed), run(true, true, seed));
+        assert!((15.0..=25.0).contains(&(off.0 - on.0)), "combat's write: {} vs {}", off.0, on.0);
+        assert_eq!(off.1, on.1, "the defender's losses stay");
+        let (off, on) = (run(false, false, 1), run(true, false, 1));
+        assert!((off.0 - on.0 - 5.0).abs() < 1e-9, "migration's write: {} vs {}", off.0, on.0);
+        assert_eq!(off.2, on.2, "the migrants still arrive");
     }
 
     /// Economy v2 (Ц6): tags' `external_pressure` modifiers as a level — given once, taken back
