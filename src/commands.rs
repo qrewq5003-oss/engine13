@@ -433,11 +433,6 @@ pub fn compute_status_indicators(
     }).collect()
 }
 
-/// Set game mode - delegates to application::modes
-pub fn set_game_mode(state: &mut AppState, new_mode: crate::core::GameMode) -> Result<(), String> {
-    crate::application::set_game_mode(state, new_mode)
-}
-
 /// Load a scenario - delegates to application::save_load
 pub fn load_scenario(state: &mut AppState, db: &Db, scenario_id: String) -> Result<SaveResponse, String> {
     crate::application::load_scenario(state, db, scenario_id)

@@ -351,7 +351,7 @@ pub fn build_snapshot(
     //      one producer — `engine::check_milestone_events`, for a milestone whose
     //      `triggers_collapse` flag is set — and that flag means "the scenario's
     //      premise has run its course, switch `GameMode::Scenario` → `Consequences`"
-    //      (`engine::check_game_mode_transitions`, `application/modes.rs`). Its
+    //      (`engine::check_game_mode_transitions`). Its
     //      `actor_id` is the literal string `"scenario"` by construction. Actor death
     //      is written as `EventType::Death` and was never read anywhere.
     //   2. It scanned the entire log, not the current period, despite being named
@@ -743,9 +743,6 @@ pub fn generate_narrative_prompt(
             prompt.push_str("\n\n");
             prompt.push_str(&scenario.consequence_context);
             prompt.push_str("\n\n");
-        }
-        crate::core::GameMode::Free => {
-            // Free mode: no scenario context
         }
         _ => {
             prompt.push_str(&start_frame);

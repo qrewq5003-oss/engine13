@@ -2389,8 +2389,10 @@ fn library_sources() -> Vec<(String, String)> {
 fn library_defines_no_twin_of_a_live_tauri_command() {
     let main_src = std::fs::read_to_string("src-tauri/src/main.rs").expect("src-tauri/src/main.rs");
     let registered = registered_tauri_commands(&main_src);
+    // A floor that catches a broken parse (it would find none or a few), not a pinned count:
+    // 19 commands since B43 removed `cmd_set_game_mode`.
     assert!(
-        registered.len() >= 20,
+        registered.len() >= 15,
         "разбор generate_handler! сломался: найдено {} команд",
         registered.len()
     );

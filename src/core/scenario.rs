@@ -325,7 +325,7 @@ pub struct Scenario {
     pub actions_per_tick: u32,
     /// Victory condition for the scenario (None = no victory condition)
     pub victory_condition: Option<VictoryCondition>,
-    /// Universal actions available in Consequences/Free modes (replaces get_universal_actions())
+    /// Universal actions available in Consequences mode (replaces get_universal_actions())
     pub universal_actions: Vec<PatronAction>,
     /// Global metrics to display in UI (for scenarios with global_metrics_panel)
     pub global_metrics_display: Vec<MetricDisplay>,

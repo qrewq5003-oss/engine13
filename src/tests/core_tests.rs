@@ -1974,6 +1974,29 @@ fn the_regency_crisis_ends_when_ludovico_takes_the_regency() {
     }
 }
 
+/// B43: `GameMode::Free` was removed — nothing could enter it. A save in each remaining
+/// mode (`Scenario`, `Consequences`, `Ended`) saves and loads back in that mode.
+#[test]
+fn a_save_in_every_remaining_game_mode_loads() {
+    use crate::core::GameMode;
+    for mode in [GameMode::Scenario, GameMode::Consequences, GameMode::Ended] {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        let mut st = crate::commands::AppState::default();
+        crate::application::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+        crate::commands::advance_tick_silent(&mut st).unwrap();
+        st.world_state.as_mut().unwrap().game_mode = mode;
+        let save_id = crate::commands::save_game(&mut st, &db, Some("mode".to_string())).unwrap().save_id.unwrap();
+        crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+        crate::commands::load_game(&mut st, &db, save_id).unwrap_or_else(|e| panic!("{mode:?}: {e}"));
+        st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+        let ws = st.world_state.as_ref().unwrap();
+        assert_eq!(ws.game_mode, mode, "the save restores its mode");
+        assert_eq!(ws.scenario_id, "constantinople_1430");
+    }
+}
+
 /// B47: `Actor::scenario_metrics` was removed. A save written before carries it on rome
 /// (8/12/22/15) and must load into the same world as the same save without the field.
 #[test]

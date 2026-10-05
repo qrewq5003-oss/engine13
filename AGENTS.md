@@ -104,7 +104,7 @@ Preserve canonical contracts. Do not "improve" adjacent systems while fixing a l
 
 `src-tauri/` is a **separate crate, outside the cargo workspace**. `cargo test --workspace`,
 `cargo clippy --workspace` and every `grep` scoped to `src/` miss all of it, including the
-23 Tauri commands the application actually runs.
+19 Tauri commands the application actually runs.
 
 - Any census of callers, writers or readers — «у этой функции нет вызовов», «в эту таблицу
   никто не пишет» — must search `src-tauri/src` as well as `src/`. Two such claims were
