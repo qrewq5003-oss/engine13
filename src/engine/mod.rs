@@ -95,8 +95,11 @@ pub fn validate_dependencies(
 /// Apply a single dependency rule to an actor
 /// Sequential mutation semantics - each rule reads the current state
 /// of the actor (already modified by previous rules).
-fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32) {
+fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, tick: u32, threshold_scale: f64) {
     let from_val = actor.get_metric(rule.from.as_str());
+    // Economy v2 (Ц1 stage 3): a rule reading `economic_output` measures a fall below the
+    // actor's own norm, not below an absolute line — `threshold × T / 100`. 1.0 in v1.
+    let threshold = rule.threshold.map(|t| t * threshold_scale);
     // Non-Linear modes require `threshold`. `validate_dependency_thresholds` runs
     // centrally at load (`load_by_id` -> `validate_scenario`) for every scenario,
     // plus per-scenario in `validate_dependencies`, so `None` is unreachable for
@@ -112,15 +115,15 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
         rule.mode
     );
     let delta = match rule.mode {
-        DependencyMode::Deficit => match rule.threshold {
+        DependencyMode::Deficit => match threshold {
             Some(threshold) if from_val < threshold => -((threshold - from_val) * rule.coefficient),
             _ => 0.0,
         },
-        DependencyMode::Excess => match rule.threshold {
+        DependencyMode::Excess => match threshold {
             Some(threshold) if from_val > threshold => -((from_val - threshold) * rule.coefficient),
             _ => 0.0,
         },
-        DependencyMode::Bonus => match rule.threshold {
+        DependencyMode::Bonus => match threshold {
             Some(threshold) if from_val > threshold => (census::dependency_source(&rule.id, from_val) - threshold) * rule.coefficient,
             _ => 0.0,
         },
@@ -130,7 +133,7 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
         // invariant (`validate_dependency_thresholds`), so the division is safe;
         // the `_ => 0.0` arm stays the no-op for an unvalidated scenario, exactly
         // as for the other three modes.
-        DependencyMode::DeficitProportional => match rule.threshold {
+        DependencyMode::DeficitProportional => match threshold {
             Some(threshold) if threshold > 0.0 && from_val < threshold => {
                 -(actor.get_metric(rule.to.as_str()) * rule.coefficient
                     * (threshold - from_val)
@@ -165,9 +168,18 @@ fn apply_dependency_rule(actor: &mut crate::core::Actor, rule: &DependencyRule, 
 /// Rules are applied in strict file order - order is part of simulation logic.
 fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
     let tick = world.tick;
+    // Economy v2 (Ц1 stage 3): each actor's `economic_output` target, read before the rules
+    // mutate anything; a rule whose source is `economic_output` scales its threshold by T / 100.
+    let targets: std::collections::HashMap<String, f64> = if scenario.features.economy_v2 && census::eo_relative_thresholds() {
+        world.actors.keys().filter_map(|id| eo_target(world, scenario, id).map(|t| (id.clone(), t))).collect()
+    } else {
+        std::collections::HashMap::new()
+    };
     for actor in world.actors.values_mut() {
+        let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         for rule in &scenario.dependencies {
-            apply_dependency_rule(actor, rule, tick);
+            let scale = if rule.from.as_str() == "economic_output" { eo_scale } else { 1.0 };
+            apply_dependency_rule(actor, rule, tick, scale);
         }
     }
 }
@@ -2591,6 +2603,42 @@ mod tests {
         assert_eq!(count, None, "the count resets above zero");
         assert_eq!(run(false, Some(0.5)).0, vec![100.0; 3], "v1: no debt rule");
         assert_eq!(run(true, None).0, vec![100.0; 3], "no cut, no rule");
+    }
+
+    /// Economy v2 (Ц1 stage 3): a rule whose source is `economic_output` measures a fall below
+    /// the actor's own norm — threshold × T / 100. A poor actor (T = 30) at 20 is not in deficit
+    /// against «below 50»; it is against «below 50 % of 30 = 15» only under 15. Both ways: v1
+    /// keeps the absolute 50, and a rule on another source is untouched.
+    #[test]
+    fn economy_v2_measures_economic_output_deficits_against_the_norm() {
+        let rule = |from: &str| crate::core::DependencyRule {
+            id: "r".into(),
+            from: crate::core::MetricName::new(from).unwrap(),
+            to: crate::core::MetricName::new("treasury").unwrap(),
+            coefficient: 1.0,
+            threshold: Some(50.0),
+            mode: crate::core::DependencyMode::Deficit,
+        };
+        let run = |v2: bool, from: &str, eo: f64| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            let mut authored = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            authored.set_metric("economic_output", 30.0); // the norm: T = 30
+            scenario.actors.push(authored);
+            scenario.dependencies = vec![rule(from)];
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("economic_output", eo);
+            a.set_metric("cohesion", 20.0);
+            a.set_metric("treasury", 0.0);
+            world.actors.insert("city".into(), a);
+            phase_apply_dependencies(&mut world, &scenario);
+            world.actors["city"].get_metric("treasury")
+        };
+        assert_eq!(run(true, "economic_output", 20.0), 0.0, "v2: 20 is above half the norm (15) — no deficit");
+        assert_eq!(run(true, "economic_output", 10.0), -5.0, "v2: 10 is 5 below half the norm");
+        assert_eq!(run(false, "economic_output", 20.0), -30.0, "v1: 30 below the absolute 50");
+        assert_eq!(run(true, "cohesion", 20.0), -30.0, "another source keeps its absolute threshold");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,
