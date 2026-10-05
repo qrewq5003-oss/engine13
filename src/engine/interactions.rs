@@ -147,11 +147,15 @@ pub fn military_capacity(actor: &crate::core::Actor) -> f64 {
 ///
 /// Actors are visited in id order and no RNG is drawn, so the random sequence the
 /// rest of the tick sees is unchanged.
-pub fn apply_military_recovery(world: &mut WorldState) {
+pub fn apply_military_recovery(world: &mut WorldState, solvent_only: bool) {
     let mut ids: Vec<String> = world.actors.keys().cloned().collect();
     ids.sort();
     for id in ids {
         if let Some(actor) = world.actors.get_mut(&id) {
+            // Economy v2 (Ц2 stage 2): recruiting costs money — none while in debt.
+            if solvent_only && actor.get_metric("treasury") < 0.0 {
+                continue;
+            }
             let capacity = military_capacity(actor);
             let current = actor.get_metric("military_size");
             if current < capacity {
