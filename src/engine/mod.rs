@@ -510,9 +510,9 @@ fn phase_random_events(
                 continue;
             }
 
-            // Apply effects
+            // Apply effects (a census counterfactual can mute one event's effects, A20b + A41)
             census::write_source(|| format!("event {}", event.id));
-            for (metric, delta) in &event.effects {
+            for (metric, delta) in event.effects.iter().filter(|_| !census::event_muted(&event.id)) {
                 metric
                     .resolve(target_id)
                     .expect("event target actor id")
