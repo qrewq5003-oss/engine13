@@ -318,6 +318,11 @@ pub struct Scenario {
     /// separated from poverty (variant (д′) of A46). `None` = `0.001`, the v1 constant.
     #[serde(default)]
     pub economy_v2_income_coefficient: Option<f64>,
+    /// Economy v2 only (Ц1 stage 2): the rate `r` at which `economic_output` is pulled toward
+    /// its target `T` each tick, `eo += r × (T − eo)`; `T` = the actor's authored starting
+    /// `economic_output` + the levels its tags give now. `None` = no pull.
+    #[serde(default)]
+    pub economy_v2_eo_pull: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
