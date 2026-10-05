@@ -802,7 +802,27 @@ fn apply_treasury(world: &mut WorldState, scenario: &Scenario) {
             census::write_source(|| "treasury formula".to_string());
             actor.add_metric("treasury", incomes - expenses);
             census::clear_write_source();
+            // Economy v2 (Ц2): a debt held `debt_ticks` ticks in a row costs the army `debt_cut`
+            // of itself every tick, until the treasury is back at zero or above.
+            if let (true, Some(n), Some(cut)) = (scenario.features.economy_v2, scenario.economy_v2_debt_ticks, scenario.economy_v2_debt_cut) {
+                if actor.get_metric("treasury") < 0.0 {
+                    let held = world.debt_ticks.entry(actor_id.clone()).or_insert(0);
+                    *held += 1;
+                    if *held >= n {
+                        let army = actor.get_metric("military_size");
+                        census::write_source(|| "debt".to_string());
+                        actor.add_metric("military_size", -army * cut);
+                        census::clear_write_source();
+                    }
+                } else {
+                    world.debt_ticks.remove(&actor_id);
+                }
+            }
         }
+    }
+    if scenario.features.economy_v2 {
+        let actors = &world.actors;
+        world.debt_ticks.retain(|id, _| actors.contains_key(id));
     }
 }
 
@@ -2251,6 +2271,8 @@ mod tests {
             features: crate::core::ScenarioFeatures::default(),
             economy_v2_income_coefficient: None,
             economy_v2_eo_pull: None,
+            economy_v2_debt_ticks: None,
+            economy_v2_debt_cut: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2537,6 +2559,38 @@ mod tests {
         assert!((run(true, Some(0.1)) - 14.4).abs() < 1e-9, "pulled a tenth of the way to T");
         assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(run(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц2): a treasury below zero `n` ticks in a row costs the army `cut` of itself
+    /// every tick from the n-th on, and the count resets once the treasury is back at zero or
+    /// above. Both ways: with v2 off, or with no cut, the army is untouched.
+    #[test]
+    fn economy_v2_debt_shrinks_the_army() {
+        let run = |v2: bool, cut: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_debt_ticks = Some(2);
+            scenario.economy_v2_debt_cut = cut;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 100.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("treasury", -1000.0);
+            a.set_metric("population", 0.0); // no income: the treasury stays below zero
+            world.actors.insert("city".into(), a);
+            let mut armies = Vec::new();
+            for _ in 0..3 {
+                apply_treasury(&mut world, &scenario);
+                armies.push(world.actors["city"].get_metric("military_size"));
+            }
+            // back above zero: the count resets
+            world.actors.get_mut("city").unwrap().set_metric("treasury", 1.0e6);
+            apply_treasury(&mut world, &scenario);
+            (armies, world.debt_ticks.get("city").copied())
+        };
+        let (with, count) = run(true, Some(0.5));
+        assert_eq!(with, vec![100.0, 50.0, 25.0], "the first tick of debt is free, then −50 % a tick");
+        assert_eq!(count, None, "the count resets above zero");
+        assert_eq!(run(false, Some(0.5)).0, vec![100.0; 3], "v1: no debt rule");
+        assert_eq!(run(true, None).0, vec![100.0; 3], "no cut, no rule");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,
