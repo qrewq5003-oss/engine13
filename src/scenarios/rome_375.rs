@@ -1476,6 +1476,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1506,6 +1507,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1527,6 +1529,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1547,6 +1550,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1569,6 +1573,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             after: Some("family_rises".to_string()),
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         },
     ]
 }

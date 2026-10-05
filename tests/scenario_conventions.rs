@@ -562,6 +562,9 @@ fn content_only_names_metrics_the_engine_knows() {
             if let Some(r) = m.condition.metric_ref() {
                 check_name(id, r, &format!("{id}: milestone '{}'", m.id), &mut failures);
             }
+            for k in m.effects.keys() {
+                check_name(id, k, &format!("{id}: milestone '{}' effects", m.id), &mut failures);
+            }
             if let Some(cfg) = &m.spawn_actor {
                 for k in cfg.initial_metrics.keys() {
                     check_bare_name(k, &format!("{id}: spawn '{}'", cfg.actor_id), &mut failures);
@@ -1060,6 +1063,9 @@ const PHASE_EVENTS_MUTATORS: &[&str] = &[
     "actors.insert(",
     "actors.remove(",
     ".metrics.insert(",
+    // B54: a write through `MetricRef::apply` — milestone `effects` now take this path. The
+    // marker was missing; with it no other function reachable from `phase_events` appeared.
+    ".apply(world,",
 ];
 
 /// Lexical: index every top-level `fn` in `src`, take the transitive closure of calls
@@ -1149,9 +1155,9 @@ fn phase_events_world_writers_are_the_expected_set() {
     const EXPECTED: &[(&str, &str)] = &[
         (
             "apply_milestone_effects",
-            "the only metric writer: `mehmed_accelerates` lowers ottomans military_quality/treasury/cohesion. \
-             Every write here must be a DECREASE for the boundary sample to stay a lower bound — \
-             see docs/investigation_pressure_military_form.md §18",
+            "the only metric writer: a milestone's authored `effects` (B54) — today only `mehmed_accelerates`, \
+             which lowers ottomans military_quality/treasury/cohesion. Every write here must be a DECREASE \
+             for the boundary sample to stay a lower bound — see docs/investigation_pressure_military_form.md §18",
         ),
         (
             "check_milestone_events",
@@ -1371,17 +1377,10 @@ fn production_string_literals(src: &str) -> Vec<String> {
 fn engine_knows_authored_content_only_by_these_names() {
     use std::collections::BTreeSet;
 
-    // literal -> why the engine is allowed to know this authored name
-    const EXPECTED: &[(&str, &str)] = &[
-        (
-            "mehmed_accelerates",
-            "apply_milestone_effects, mod.rs — one scenario's milestone hard-coded in the engine",
-        ),
-        (
-            "ottomans",
-            "the actor that same milestone writes to",
-        ),
-    ];
+    // literal -> why the engine is allowed to know this authored name. Empty since B54:
+    // the last case, `mehmed_accelerates` and the `ottomans` it wrote to, moved into the
+    // milestone's own `effects`. The check stays and holds the set empty.
+    const EXPECTED: &[(&str, &str)] = &[];
 
     // Authored vocabulary: ids of tags, actors, milestones, events.
     let mut authored: BTreeSet<String> = BTreeSet::new();
