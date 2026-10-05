@@ -220,7 +220,10 @@ pub fn load_constantinople_1430() -> Scenario {
             family_panel: false,
             global_metrics_panel: true,
             patron_actions: true,
+            economy_v2: false,
         },
+        // Economy v2 (Ц1): income coefficient refitted for tags-as-level, A46 stage 4 (д′).
+        economy_v2_income_coefficient: Some(0.001399),
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),

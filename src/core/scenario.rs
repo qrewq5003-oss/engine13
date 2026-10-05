@@ -313,6 +313,11 @@ pub struct Scenario {
     pub global_metric_weights: HashMap<MetricRef, HashMap<String, f64>>,
     /// Feature flags for UI
     pub features: ScenarioFeatures,
+    /// Economy v2 only (Ц1): the treasury income coefficient, refitted so a game's median
+    /// total income matches v1 when tags give `economic_output` as a level — informativeness
+    /// separated from poverty (variant (д′) of A46). `None` = `0.001`, the v1 constant.
+    #[serde(default)]
+    pub economy_v2_income_coefficient: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
@@ -411,6 +416,12 @@ pub struct ScenarioFeatures {
     pub family_panel: bool,
     pub global_metrics_panel: bool,
     pub patron_actions: bool,
+    /// The economy project's new model (brief §9.6), built stage by stage behind this
+    /// switch and off by default: with it off the world is byte-identical to v1. Stage Ц1:
+    /// tags' `economic_output` modifiers as a level, and the treasury income coefficient
+    /// `Scenario::economy_v2_income_coefficient` in place of `0.001`.
+    #[serde(default)]
+    pub economy_v2: bool,
 }
 
 /// A condition on an *absolute* metric key.

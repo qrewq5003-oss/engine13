@@ -187,7 +187,10 @@ pub fn load_rome_375() -> Scenario {
             family_panel: true,
             global_metrics_panel: false,
             patron_actions: false,
+            economy_v2: false,
         },
+        // Economy v2 (Ц1): income coefficient refitted for tags-as-level, A46 stage 4 (д′).
+        economy_v2_income_coefficient: Some(0.001289),
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),

@@ -64,3 +64,7 @@ required-features = ["census"]
 [[bin]]
 name = "stage1_open_probe"
 required-features = ["census"]
+
+[[bin]]
+name = "c1_probe"
+required-features = ["census"]

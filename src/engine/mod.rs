@@ -260,7 +260,7 @@ pub fn tick(
 
 fn phase_auto_deltas(world: &mut WorldState, scenario: &Scenario, rng: &mut rand_chacha::ChaCha8Rng) {
     // Treasury via income/expenses formula (separate from auto_deltas)
-    apply_treasury(world);
+    apply_treasury(world, scenario);
 
     // Apply auto_deltas via MetricRef - unified for actor/family/global
     for (index, auto_delta) in scenario.auto_deltas.iter().enumerate() {
@@ -728,12 +728,18 @@ fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
     world.actions_this_tick = 0;
 }
 
-fn apply_treasury(world: &mut WorldState) {
+fn apply_treasury(world: &mut WorldState, scenario: &Scenario) {
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
+    // Economy v2 (Ц1): the refitted coefficient; v1 keeps the constant.
+    let coefficient = if scenario.features.economy_v2 {
+        scenario.economy_v2_income_coefficient.unwrap_or(0.001)
+    } else {
+        0.001
+    };
 
     for actor_id in actor_ids {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
-            let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * census::income_coefficient(0.001);
+            let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * census::income_coefficient(coefficient);
             let expenses = actor.get_metric("military_size") * 0.8;
             #[cfg(feature = "census")]
             census::treasury_parts(&actor.id, incomes, expenses);
@@ -750,7 +756,10 @@ fn apply_treasury(world: &mut WorldState) {
 // Step 4: Actor Tags Effects
 // ============================================================================
 
-fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
+fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
+    // Economy v2 (Ц1, brief §9.6): a tag's `economic_output` modifier is a level — given
+    // once when the tag appears, taken back when it leaves — instead of a rate every tick.
+    let eo_as_level = scenario.features.economy_v2;
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
     for actor_id in actor_ids {
@@ -770,12 +779,36 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
             for (_tag, metric, modifier) in modifiers {
                 let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
                 let add = census::tag_modifier_for(&actor.id, _tag, metric, modifier as f64);
+                if eo_as_level && metric == "economic_output" {
+                    let levels = world.eo_tag_levels.entry(actor_id.clone()).or_default();
+                    if levels.contains_key(_tag) {
+                        continue; // already given
+                    }
+                    levels.insert(_tag.to_string(), add);
+                }
                 actor.metrics.insert(metric.to_string(), current + add);
                 #[cfg(feature = "census")]
                 {
                     census::write_source(|| format!("tag {_tag}"));
                     census::metric_write(std::panic::Location::caller(), &actor.id, metric, add, current, current + add);
                     census::clear_write_source();
+                }
+            }
+            // Economy v2: take back the level of tags the actor no longer carries.
+            if eo_as_level {
+                if let Some(levels) = world.eo_tag_levels.get_mut(&actor_id) {
+                    let gone: Vec<String> = levels.keys().filter(|t| !actor.actor_tags.contains_key(*t)).cloned().collect();
+                    for tag in gone {
+                        let level = levels.remove(&tag).unwrap_or(0.0);
+                        let current = actor.metrics.get("economic_output").copied().unwrap_or(0.0);
+                        actor.metrics.insert("economic_output".to_string(), current - level);
+                        #[cfg(feature = "census")]
+                        {
+                            census::write_source(|| "tag level removal".to_string());
+                            census::metric_write(std::panic::Location::caller(), &actor.id, "economic_output", -level, current, current - level);
+                            census::clear_write_source();
+                        }
+                    }
                 }
             }
             // A46 stage 4 (д): under the tag-level counterfactual, take back the level of tags
@@ -793,6 +826,10 @@ fn apply_actor_tags(world: &mut WorldState, _scenario: &Scenario) {
             }
             // Note: No clamping here - clamp_metrics is called on step 5
         }
+    }
+    if eo_as_level {
+        let actors = &world.actors;
+        world.eo_tag_levels.retain(|id, _| actors.contains_key(id));
     }
 }
 
@@ -2156,6 +2193,7 @@ mod tests {
             status_indicators: vec![],
             global_metric_weights: HashMap::new(),
             features: crate::core::ScenarioFeatures::default(),
+            economy_v2_income_coefficient: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2381,6 +2419,43 @@ mod tests {
         let mut world = WorldState::with_seed("test".into(), 1430, 0);
         world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
         assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["m".to_string()]);
+    }
+
+    /// Economy v2 (Ц1, brief §9.6): a tag's `economic_output` modifier is a level — given once,
+    /// taken back when the tag leaves; its other metrics stay a rate. Both ways: with the switch
+    /// off the same tag adds every tick, as in v1.
+    #[test]
+    fn economy_v2_gives_economic_output_tags_as_a_level() {
+        let run = |v2: bool| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.actor_tags.insert("trade".into(), crate::core::ActorTag {
+                metrics_modifier: HashMap::from([
+                    (crate::core::MetricName::new("economic_output").unwrap(), 2),
+                    (crate::core::MetricName::new("cohesion").unwrap(), 1),
+                ]),
+                spreads_via: vec![],
+            });
+            world.actors.insert("city".into(), a);
+            let mut seen = Vec::new();
+            for t in 0..5 {
+                if t == 3 {
+                    world.actors.get_mut("city").unwrap().actor_tags.remove("trade");
+                }
+                apply_actor_tags(&mut world, &scenario);
+                let c = &world.actors["city"];
+                seen.push((c.get_metric("economic_output"), c.get_metric("cohesion")));
+            }
+            (seen, world.eo_tag_levels.get("city").map(|m| m.len()).unwrap_or(0))
+        };
+        let (v2, left) = run(true);
+        assert_eq!(v2, vec![(52.0, 51.0), (52.0, 52.0), (52.0, 53.0), (50.0, 53.0), (50.0, 53.0)],
+            "v2: economic_output +2 once and back on removal; cohesion stays a rate");
+        assert_eq!(left, 0, "the level of a removed tag is forgotten");
+        let (v1, _) = run(false);
+        assert_eq!(v1, vec![(52.0, 51.0), (54.0, 52.0), (56.0, 53.0), (56.0, 53.0), (56.0, 53.0)], "v1: every tick");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,
