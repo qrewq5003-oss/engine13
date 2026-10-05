@@ -218,6 +218,8 @@ pub fn load_milan_1477() -> Scenario {
         // Economy v2 (Ц2): debt — owner's N = 4 ticks (2 years); the cut is chosen in stage 1.
         economy_v2_debt_ticks: Some(4),
         economy_v2_debt_cut: None,
+        // Economy v2 (Ц2 stage 3): depopulation as collapse — set by the stage's pre-commitment.
+        economy_v2_depopulation_ticks: None,
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),

@@ -2032,6 +2032,21 @@ fn check_collapses(
             // Reset counter if actor is no longer in danger
             world.collapse_warning_ticks.remove(actor_id);
         }
+
+        // Economy v2 (Ц2 stage 3): a state without people does not go on living — population ≤ 1
+        // for `economy_v2_depopulation_ticks` ticks in a row collapses by the usual path. None of
+        // the three paths above sees it: they read legitimacy, cohesion and pressure.
+        if let (true, Some(n)) = (scenario.features.economy_v2, scenario.economy_v2_depopulation_ticks) {
+            if actor.get_metric("population") <= 1.0 {
+                let held = world.depop_ticks.entry(actor_id.clone()).or_insert(0);
+                *held += 1;
+                if *held >= n && !to_collapse.iter().any(|(id, _)| id == actor_id) {
+                    to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+                }
+            } else {
+                world.depop_ticks.remove(actor_id);
+            }
+        }
     }
 
     // Process collapses
@@ -2283,6 +2298,7 @@ fn check_collapses(
     // См. docs/TRIAGE.md, B10.
     let living: std::collections::HashSet<String> = world.actors.keys().cloned().collect();
     world.collapse_warning_ticks.retain(|id, _| living.contains(id));
+    world.depop_ticks.retain(|id, _| living.contains(id));
 }
 
 fn metrics_to_snapshot(metrics: &HashMap<String, f64>) -> HashMap<String, f64> {
@@ -2326,6 +2342,7 @@ mod tests {
             economy_v2_eo_pull: None,
             economy_v2_debt_ticks: None,
             economy_v2_debt_cut: None,
+            economy_v2_depopulation_ticks: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2724,6 +2741,33 @@ mod tests {
         assert_eq!(run(true, -1.0), 2.0, "v2: in debt, no recruiting");
         assert!(run(true, 1.0) > 2.0, "v2: solvent, the army regrows");
         assert!(run(false, -1.0) > 2.0, "v1: regrows in debt too");
+    }
+
+    /// Economy v2 (Ц2 stage 3): a state with population ≤ 1 for n ticks in a row collapses by the
+    /// usual path — none of the three legitimacy/cohesion/pressure paths sees it. Both ways:
+    /// v1 keeps the empty state alive, and a populated state lives.
+    #[test]
+    fn economy_v2_depopulated_state_collapses() {
+        let run = |v2: bool, population: f64| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_depopulation_ticks = Some(2);
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            // healthy on the three classic paths: legitimacy, cohesion and pressure mid-scale
+            let mut a = vassalage_actor("city", 10.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("population", population);
+            world.actors.insert("city".into(), a);
+            let mut log = EventLog::new();
+            let mut alive = Vec::new();
+            for _ in 0..3 {
+                check_collapses(&mut world, &scenario, &mut log);
+                alive.push(!world.dead_actor_ids.contains("city"));
+            }
+            alive
+        };
+        assert_eq!(run(true, 0.0), vec![true, false, false], "v2: dies on the second tick without people");
+        assert_eq!(run(false, 0.0), vec![true, true, true], "v1: an empty state goes on living");
+        assert_eq!(run(true, 50.0), vec![true, true, true], "v2: a populated state lives");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,

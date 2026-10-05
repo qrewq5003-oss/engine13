@@ -330,6 +330,10 @@ pub struct Scenario {
     /// Economy v2 only (Ц2): the share of the army lost per tick of that debt (0.1 = −10 %).
     #[serde(default)]
     pub economy_v2_debt_cut: Option<f64>,
+    /// Economy v2 only (Ц2 stage 3): a state with population ≤ 1 for this many ticks in a row
+    /// collapses by the usual path (heirs or absorption). `None` = no such rule.
+    #[serde(default)]
+    pub economy_v2_depopulation_ticks: Option<u32>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
