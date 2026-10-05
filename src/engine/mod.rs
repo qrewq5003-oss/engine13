@@ -550,6 +550,62 @@ fn phase_random_events(
 fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     // The decay of cultural displacement progress lived here — removed with the mechanic (A30).
     apply_actor_tags(world, scenario);
+    // Economy v2 (Ц1 stage 2): here, after every outflow of the tick (dependencies and combat
+    // in the interaction phase, then random events) and after the tags have set this tick's
+    // levels — so the pull answers this tick's deviation toward a target that is already
+    // current — and before the clamp, which keeps the result on 0..100.
+    pull_economic_output_to_target(world, scenario);
+}
+
+/// The authored starting `economic_output` of an actor: a starting actor's or a successor
+/// template's own value, or a spawn's initial value (Ц1 stage 2). Read from the scenario, so
+/// heirs and spawns are covered by construction and nothing new is saved. A seat-keeping heir
+/// keeps its parent's id and therefore its parent's base.
+pub fn eo_base(scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    scenario
+        .actors
+        .iter()
+        .find(|a| a.id == actor_id)
+        .and_then(|a| a.metrics.get("economic_output").copied())
+        .or_else(|| {
+            scenario
+                .milestone_events
+                .iter()
+                .filter_map(|m| m.spawn_actor.as_ref())
+                .find(|c| c.actor_id == actor_id)
+                .and_then(|c| c.initial_metrics.iter().find(|(k, _)| k.as_str() == "economic_output").map(|(_, v)| *v))
+        })
+}
+
+/// Economy v2: the level `economic_output` is pulled toward — the authored base plus the
+/// levels the actor's tags give now. `None` when the actor has no authored base.
+pub fn eo_target(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    let base = eo_base(scenario, actor_id)?;
+    let levels: f64 = world.eo_tag_levels.get(actor_id).map(|m| m.values().sum()).unwrap_or(0.0);
+    Some(base + levels)
+}
+
+/// Economy v2 (Ц1 stage 2): `eo += r × (T − eo)` for every living actor, in id order.
+fn pull_economic_output_to_target(world: &mut WorldState, scenario: &Scenario) {
+    if !scenario.features.economy_v2 {
+        return;
+    }
+    let Some(r) = scenario.economy_v2_eo_pull else { return };
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    for id in ids {
+        let Some(target) = eo_target(world, scenario, &id) else { continue };
+        let Some(actor) = world.actors.get_mut(&id) else { continue };
+        let current = actor.get_metric("economic_output");
+        let delta = r * (target - current);
+        actor.metrics.insert("economic_output".to_string(), current + delta);
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "eo pull".to_string());
+            census::metric_write(std::panic::Location::caller(), &id, "economic_output", delta, current, current + delta);
+            census::clear_write_source();
+        }
+    }
 }
 
 // ============================================================================
@@ -2194,6 +2250,7 @@ mod tests {
             global_metric_weights: HashMap::new(),
             features: crate::core::ScenarioFeatures::default(),
             economy_v2_income_coefficient: None,
+            economy_v2_eo_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2456,6 +2513,30 @@ mod tests {
         assert_eq!(left, 0, "the level of a removed tag is forgotten");
         let (v1, _) = run(false);
         assert_eq!(v1, vec![(52.0, 51.0), (54.0, 52.0), (56.0, 53.0), (56.0, 53.0), (56.0, 53.0)], "v1: every tick");
+    }
+
+    /// Economy v2 (Ц1 stage 2): `economic_output` is pulled toward `T` = the authored base + its
+    /// tags' levels, `eo += r × (T − eo)`. Both ways: with v2 off, or with no `r`, nothing pulls.
+    #[test]
+    fn economy_v2_pulls_economic_output_toward_its_target() {
+        let run = |v2: bool, r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_eo_pull = r;
+            // the authored base: 50 (as `vassalage_actor` sets it)
+            scenario.actors.push(vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("economic_output", 10.0);
+            world.actors.insert("city".into(), a);
+            world.eo_tag_levels.insert("city".into(), std::collections::BTreeMap::from([("trade".to_string(), 4.0)]));
+            pull_economic_output_to_target(&mut world, &scenario);
+            world.actors["city"].get_metric("economic_output")
+        };
+        // T = 50 + 4 = 54; 10 + 0.1 × (54 − 10) = 14.4
+        assert!((run(true, Some(0.1)) - 14.4).abs() < 1e-9, "pulled a tenth of the way to T");
+        assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
+        assert_eq!(run(true, None), 10.0, "no r, no pull");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,

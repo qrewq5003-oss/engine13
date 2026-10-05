@@ -209,8 +209,12 @@ pub fn load_milan_1477() -> Scenario {
             patron_actions: true,
             economy_v2: false,
         },
-        // Economy v2 (Ц1): income coefficient refitted for tags-as-level, A46 stage 4 (д′).
+        // Economy v2 (Ц1): income coefficient (д′) of A46 stage 4; with the pull r = 0.03 income stays
+        // within ±5 % of v1 (×1.047), so it was kept, not refitted (stage 2).
         economy_v2_income_coefficient: Some(0.001516),
+        // Economy v2 (Ц1 stage 2): the pull of economic_output toward its target — the smallest r
+        // passing the owner's pre-commitment (`c1s2_probe`, docs/investigation_economy_c1.md §2).
+        economy_v2_eo_pull: Some(0.03),
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),

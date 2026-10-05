@@ -222,8 +222,12 @@ pub fn load_constantinople_1430() -> Scenario {
             patron_actions: true,
             economy_v2: false,
         },
-        // Economy v2 (Ц1): income coefficient refitted for tags-as-level, A46 stage 4 (д′).
-        economy_v2_income_coefficient: Some(0.001399),
+        // Economy v2 (Ц1): income coefficient refitted so a game's median total income matches v1
+        // (A46 method). Stage 1 used (д′); refitted for the pull r = 0.03 in stage 2 (`c1s2_probe refit`).
+        economy_v2_income_coefficient: Some(0.001538),
+        // Economy v2 (Ц1 stage 2): the pull of economic_output toward its target — the smallest r
+        // passing the owner's pre-commitment (`c1s2_probe`, docs/investigation_economy_c1.md §2).
+        economy_v2_eo_pull: Some(0.03),
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
