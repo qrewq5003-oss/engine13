@@ -323,6 +323,13 @@ pub struct Scenario {
     /// `economic_output` + the levels its tags give now. `None` = no pull.
     #[serde(default)]
     pub economy_v2_eo_pull: Option<f64>,
+    /// Economy v2 only (Ц2): after this many consecutive ticks with the treasury below zero the
+    /// army shrinks every tick until the treasury is back at zero or above. `None` = no rule.
+    #[serde(default)]
+    pub economy_v2_debt_ticks: Option<u32>,
+    /// Economy v2 only (Ц2): the share of the army lost per tick of that debt (0.1 = −10 %).
+    #[serde(default)]
+    pub economy_v2_debt_cut: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

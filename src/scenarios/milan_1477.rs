@@ -215,6 +215,9 @@ pub fn load_milan_1477() -> Scenario {
         // Economy v2 (Ц1 stage 2): the pull of economic_output toward its target — the smallest r
         // passing the owner's pre-commitment (`c1s2_probe`, docs/investigation_economy_c1.md §2).
         economy_v2_eo_pull: Some(0.03),
+        // Economy v2 (Ц2): debt — owner's N = 4 ticks (2 years); the cut is chosen in stage 1.
+        economy_v2_debt_ticks: Some(4),
+        economy_v2_debt_cut: None,
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),

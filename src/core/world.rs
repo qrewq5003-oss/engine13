@@ -171,6 +171,10 @@ pub struct WorldState {
     /// then not written to a save, so a v1 save is byte-identical.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub eo_tag_levels: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
+    /// Economy v2 (Ц2): consecutive ticks each actor's treasury has been below zero. Empty
+    /// with v2 off and then not written to a save.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub debt_ticks: std::collections::BTreeMap<String, u32>,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -222,6 +226,7 @@ impl WorldState {
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             eo_tag_levels: Default::default(),
+            debt_ticks: Default::default(),
         }
     }
 
@@ -265,6 +270,7 @@ impl WorldState {
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             eo_tag_levels: Default::default(),
+            debt_ticks: Default::default(),
         }
     }
 
