@@ -578,6 +578,48 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     // levels — so the pull answers this tick's deviation toward a target that is already
     // current — and before the clamp, which keeps the result on 0..100.
     pull_economic_output_to_target(world, scenario);
+    // Economy v2 (Ц6): pressure pulled toward the real threat, same place and reason.
+    pull_pressure_to_threat(world, scenario);
+}
+
+/// Economy v2 (Ц6): the threat an actor faces — `100 × N / (N + own army)`, N = the armies of
+/// its living neighbours at distance 1 (the neighbour graph of the scenario). 0 with no armed
+/// neighbour; 100 with an armed neighbour and no army of one's own.
+pub fn pressure_threat(world: &WorldState, actor_id: &str) -> Option<f64> {
+    let actor = world.actors.get(actor_id)?;
+    let n: f64 = actor
+        .neighbors
+        .iter()
+        .filter(|nb| nb.distance == 1 && !world.dead_actor_ids.contains(&nb.id))
+        .filter_map(|nb| world.actors.get(&nb.id))
+        .map(|a| a.get_metric("military_size").max(0.0))
+        .sum();
+    let own = actor.get_metric("military_size").max(0.0);
+    Some(if n <= 0.0 { 0.0 } else { 100.0 * n / (n + own) })
+}
+
+/// Economy v2 (Ц6): `ep += r × (T_p − ep)` for every living actor, in id order. Targets are read
+/// before any is moved, so the order does not matter.
+fn pull_pressure_to_threat(world: &mut WorldState, scenario: &Scenario) {
+    if !scenario.features.economy_v2 {
+        return;
+    }
+    let Some(r) = scenario.economy_v2_pressure_pull else { return };
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    let targets: Vec<(String, f64)> = ids.iter().filter_map(|id| pressure_threat(world, id).map(|t| (id.clone(), t))).collect();
+    for (id, target) in targets {
+        let Some(actor) = world.actors.get_mut(&id) else { continue };
+        let current = actor.get_metric("external_pressure");
+        let delta = r * (target - current);
+        actor.metrics.insert("external_pressure".to_string(), current + delta);
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "pressure pull".to_string());
+            census::metric_write(std::panic::Location::caller(), &id, "external_pressure", delta, current, current + delta);
+            census::clear_write_source();
+        }
+    }
 }
 
 /// The authored starting `economic_output` of an actor: a starting actor's or a successor
@@ -882,6 +924,8 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     // Economy v2 (Ц1, brief §9.6): a tag's `economic_output` modifier is a level — given
     // once when the tag appears, taken back when it leaves — instead of a rate every tick.
     let eo_as_level = scenario.features.economy_v2;
+    // Economy v2 (Ц6): the same for `external_pressure`, when the scenario asks for it.
+    let ep_as_level = scenario.features.economy_v2 && scenario.economy_v2_pressure_tags_as_level;
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
     for actor_id in actor_ids {
@@ -903,6 +947,13 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
                 let add = census::tag_modifier_for(&actor.id, _tag, metric, modifier as f64);
                 if eo_as_level && metric == "economic_output" {
                     let levels = world.eo_tag_levels.entry(actor_id.clone()).or_default();
+                    if levels.contains_key(_tag) {
+                        continue; // already given
+                    }
+                    levels.insert(_tag.to_string(), add);
+                }
+                if ep_as_level && metric == "external_pressure" {
+                    let levels = world.ep_tag_levels.entry(actor_id.clone()).or_default();
                     if levels.contains_key(_tag) {
                         continue; // already given
                     }
@@ -933,6 +984,23 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
                     }
                 }
             }
+            // Economy v2 (Ц6): take back the pressure level of tags the actor no longer carries.
+            if ep_as_level {
+                if let Some(levels) = world.ep_tag_levels.get_mut(&actor_id) {
+                    let gone: Vec<String> = levels.keys().filter(|t| !actor.actor_tags.contains_key(*t)).cloned().collect();
+                    for tag in gone {
+                        let level = levels.remove(&tag).unwrap_or(0.0);
+                        let current = actor.metrics.get("external_pressure").copied().unwrap_or(0.0);
+                        actor.metrics.insert("external_pressure".to_string(), current - level);
+                        #[cfg(feature = "census")]
+                        {
+                            census::write_source(|| "tag level removal".to_string());
+                            census::metric_write(std::panic::Location::caller(), &actor.id, "external_pressure", -level, current, current - level);
+                            census::clear_write_source();
+                        }
+                    }
+                }
+            }
             // A46 stage 4 (д): under the tag-level counterfactual, take back the level of tags
             // the actor no longer carries.
             #[cfg(feature = "census")]
@@ -952,6 +1020,10 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     if eo_as_level {
         let actors = &world.actors;
         world.eo_tag_levels.retain(|id, _| actors.contains_key(id));
+    }
+    if ep_as_level {
+        let actors = &world.actors;
+        world.ep_tag_levels.retain(|id, _| actors.contains_key(id));
     }
 }
 
@@ -2343,6 +2415,8 @@ mod tests {
             economy_v2_debt_ticks: None,
             economy_v2_debt_cut: None,
             economy_v2_depopulation_ticks: None,
+            economy_v2_pressure_tags_as_level: false,
+            economy_v2_pressure_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2768,6 +2842,65 @@ mod tests {
         assert_eq!(run(true, 0.0), vec![true, false, false], "v2: dies on the second tick without people");
         assert_eq!(run(false, 0.0), vec![true, true, true], "v1: an empty state goes on living");
         assert_eq!(run(true, 50.0), vec![true, true, true], "v2: a populated state lives");
+    }
+
+    /// Economy v2 (Ц6): the threat is `100 × N / (N + own army)` over living neighbours at
+    /// distance 1, and pressure is pulled toward it. Both ways: a dead or distant neighbour is no
+    /// threat, and without v2 or without `r` nothing pulls.
+    #[test]
+    fn economy_v2_pulls_pressure_toward_the_threat() {
+        let world_with = |dead_near: bool| {
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut city = vassalage_actor("city", 50.0, 10.0, 50.0, 50.0, &["near", "far"]);
+            city.neighbors.iter_mut().find(|n| n.id == "far").unwrap().distance = 2;
+            world.actors.insert("city".into(), city);
+            world.actors.insert("near".into(), vassalage_actor("near", 150.0, 50.0, 50.0, 50.0, &[]));
+            world.actors.insert("far".into(), vassalage_actor("far", 1000.0, 50.0, 50.0, 50.0, &[]));
+            if dead_near { world.dead_actor_ids.insert("near".into()); }
+            world
+        };
+        // N = 150 (the distant 1000 does not count), own 50 → 75
+        assert_eq!(pressure_threat(&world_with(false), "city"), Some(75.0));
+        assert_eq!(pressure_threat(&world_with(true), "city"), Some(0.0), "a dead neighbour is no threat");
+        let pulled = |v2: bool, r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_pressure_pull = r;
+            let mut world = world_with(false);
+            pull_pressure_to_threat(&mut world, &scenario);
+            world.actors["city"].get_metric("external_pressure")
+        };
+        // 10 + 0.1 × (75 − 10) = 16.5
+        assert!((pulled(true, Some(0.1)) - 16.5).abs() < 1e-9);
+        assert_eq!(pulled(false, Some(0.1)), 10.0, "v1 does not pull");
+        assert_eq!(pulled(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц6): tags' `external_pressure` modifiers as a level — given once, taken back
+    /// when the tag leaves. Both ways: with the switch off the tag adds every tick.
+    #[test]
+    fn economy_v2_gives_pressure_tags_as_a_level() {
+        let run = |level: bool| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_pressure_tags_as_level = level;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.actor_tags.insert("frontier".into(), crate::core::ActorTag {
+                metrics_modifier: HashMap::from([(crate::core::MetricName::new("external_pressure").unwrap(), 2)]),
+                spreads_via: vec![],
+            });
+            world.actors.insert("city".into(), a);
+            let mut seen = Vec::new();
+            for t in 0..4 {
+                if t == 2 { world.actors.get_mut("city").unwrap().actor_tags.remove("frontier"); }
+                apply_actor_tags(&mut world, &scenario);
+                seen.push(world.actors["city"].get_metric("external_pressure"));
+            }
+            seen
+        };
+        assert_eq!(run(true), vec![52.0, 52.0, 50.0, 50.0], "level: +2 once, back on removal");
+        assert_eq!(run(false), vec![52.0, 54.0, 54.0, 54.0], "rate: every tick while carried");
     }
 
     /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,

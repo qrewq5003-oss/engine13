@@ -91,3 +91,7 @@ name = "c2s3_probe"
 [[bin]]
 name = "chain_probe"
 required-features = ["census"]
+
+[[bin]]
+name = "c6_probe"
+required-features = ["census"]

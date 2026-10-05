@@ -179,6 +179,10 @@ pub struct WorldState {
     /// Empty with v2 off and then not written to a save.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub depop_ticks: std::collections::BTreeMap<String, u32>,
+    /// Economy v2 (Ц6): the `external_pressure` modifier each tag has given each actor as a
+    /// level, like `eo_tag_levels`. Empty with the rule off and then not written to a save.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ep_tag_levels: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -232,6 +236,7 @@ impl WorldState {
             eo_tag_levels: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
+            ep_tag_levels: Default::default(),
         }
     }
 
@@ -277,6 +282,7 @@ impl WorldState {
             eo_tag_levels: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
+            ep_tag_levels: Default::default(),
         }
     }
 
