@@ -647,6 +647,12 @@ pub struct MilestoneEvent {
     /// Validated at load: each id is a starting actor.
     #[serde(default)]
     pub requires_alive: Vec<String>,
+    /// One-time metric deltas applied on the tick the milestone fires (B54), keyed like an
+    /// action's effects (`"actor:ottomans.military_quality" = -15`) and applied through
+    /// `MetricRef::apply`. Replaces the engine's branch on the name `mehmed_accelerates`.
+    /// Validated at load: an actor written to is a starting actor or in `requires_alive`.
+    #[serde(default)]
+    pub effects: HashMap<MetricRef, f64>,
 }
 
 /// Configuration for spawning a new actor via milestone event

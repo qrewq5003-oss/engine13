@@ -42,6 +42,12 @@ triggers_collapse = false
 # B46: over a fallen city it fired in 22 of 22 no-player games.
 requires_alive = ["byzantium"]
 llm_context_shift = "Мехмед форсирует подготовку. Федерация работает — османы торопятся."
+# B54: the Ottoman all-in acceleration, formerly a branch on this milestone's name in the
+# engine. Applied once, on the tick it fires.
+[milestone_events.effects]
+"actor:ottomans.military_quality" = -15.0
+"actor:ottomans.treasury" = -200.0
+"actor:ottomans.cohesion" = -10.0
 [milestone_events.condition]
 type = "metric"
 metric = "global:federation_progress"

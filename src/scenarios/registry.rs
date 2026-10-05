@@ -204,6 +204,18 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A milestone's `effects` write to a starting actor or to one in its `requires_alive` (B54).
+    for m in &scenario.milestone_events {
+        for key in m.effects.keys() {
+            if let crate::core::MetricRef::Actor { actor_id, .. } = key {
+                let starting = scenario.actors.iter().any(|a| a.id == actor_id.as_str() && !a.is_successor_template);
+                if !starting && !m.requires_alive.iter().any(|id| id == actor_id.as_str()) {
+                    errors.push(format!("milestone '{}': effects write to '{actor_id}', which is not a starting actor nor in requires_alive", m.id));
+                }
+            }
+        }
+    }
+
     // A tag's `ends_with` names a milestone of the same scenario (A4).
     for t in &scenario.tag_definitions {
         if let Some(m) = &t.ends_with {
@@ -509,6 +521,20 @@ mod tests {
         s.tag_definitions.iter_mut().find(|t| t.id == "ottoman_frontier").unwrap().requires_alive = vec!["wallachia".into()];
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("tag 'ottoman_frontier': requires_alive 'wallachia'")), "{e:?}");
+    }
+
+    /// B54: a milestone's `effects` write to a starting actor (or one in its `requires_alive`).
+    /// Both ways: constantinople as authored (`mehmed_accelerates` writes to `ottomans`)
+    /// validates; an effect on `wallachia`, which only spawns, does not.
+    #[test]
+    fn validate_checks_milestone_effects_target() {
+        let base = crate::scenarios::constantinople_1430::load_constantinople_1430;
+        assert!(validate_scenario(&base()).is_ok(), "{:?}", validate_scenario(&base()));
+        let mut s = base();
+        s.milestone_events.iter_mut().find(|m| m.id == "church_union").unwrap()
+            .effects.insert(crate::core::MetricRef::literal("actor:wallachia.cohesion"), -5.0);
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("milestone 'church_union': effects write to 'wallachia'")), "{e:?}");
     }
 
     /// A4: a tag's `ends_with` must name a milestone of the same scenario. Both ways: milan

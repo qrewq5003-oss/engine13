@@ -1049,8 +1049,8 @@ fn check_milestone_events(
         if should_trigger {
             world.milestone_events_fired.push(milestone.id.clone());
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
-            // Apply one-time effects for specific milestones
-            apply_milestone_effects(world, &milestone.id);
+            // One-time effects, authored on the milestone (B54)
+            apply_milestone_effects(world, milestone);
 
             // Spawn actor if configured
             if let Some(cfg) = &milestone.spawn_actor {
@@ -1166,17 +1166,16 @@ fn link_spawn_back(world: &mut WorldState, spawn_id: &str, edges: &[crate::core:
 }
 
 /// Apply one-time effects for specific milestone events
-fn apply_milestone_effects(world: &mut WorldState, milestone_id: &str) {
-    if milestone_id == "mehmed_accelerates" {
-        // Ottoman response: all-in acceleration
-        // military_quality -15, treasury -200, cohesion -10
-        if let Some(ottomans) = world.actors.get_mut("ottomans") {
-            let mil_q = ottomans.get_metric("military_quality");
-            ottomans.set_metric("military_quality", (mil_q - 15.0).max(0.0));
-            ottomans.add_metric("treasury", -200.0);
-            let coh = ottomans.get_metric("cohesion");
-            ottomans.set_metric("cohesion", (coh - 10.0).max(0.0));
-        }
+/// A milestone's authored `effects`, applied once on its tick (B54). Sorted by key: the
+/// `HashMap` order is per process, and a fixed order keeps any future overlapping keys
+/// deterministic. An absent actor is skipped (`MetricRef::apply`).
+fn apply_milestone_effects(world: &mut WorldState, milestone: &crate::core::MilestoneEvent) {
+    let mut effects: Vec<(&crate::core::MetricRef, &f64)> = milestone.effects.iter().collect();
+    effects.sort_by_key(|(k, _)| k.to_string());
+    for (key, delta) in effects {
+        census::write_source(|| format!("milestone {}", milestone.id));
+        key.apply(world, *delta);
+        census::clear_write_source();
     }
 }
 
@@ -2324,6 +2323,7 @@ mod tests {
             after: None,
             group: group.map(str::to_string),
             requires_alive: requires_alive.iter().map(|s| s.to_string()).collect(),
+            effects: Default::default(),
         }
     }
 
@@ -2381,6 +2381,42 @@ mod tests {
         let mut world = WorldState::with_seed("test".into(), 1430, 0);
         world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
         assert_eq!(fired_after_one_check(&scenario, &mut world), vec!["m".to_string()]);
+    }
+
+    /// B54: a milestone's `effects` apply on the tick it fires and only then. Dated tick 3,
+    /// checked on ticks 0–6: the city's metrics move once, on tick 3, through
+    /// `MetricRef::apply` (cohesion clamped at 0, treasury unbounded). Both ways: without
+    /// the `effects` the same firing moves nothing.
+    #[test]
+    fn milestone_effects_apply_once_on_the_firing_tick() {
+        let run = |with_effects: bool| {
+            let mut scenario = empty_scenario();
+            let mut m = dated_milestone("m", None, &["city"]);
+            m.condition.condition_type = EventConditionType::Tick { tick: 3 };
+            if with_effects {
+                m.effects = HashMap::from([
+                    (crate::core::MetricRef::literal("actor:city.cohesion"), -60.0),
+                    (crate::core::MetricRef::literal("actor:city.treasury"), -200.0),
+                ]);
+            }
+            scenario.milestone_events = vec![m];
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
+            world.actors.get_mut("city").unwrap().set_metric("treasury", 100.0);
+            let mut seen = Vec::new();
+            for t in 0..7 {
+                world.tick = t;
+                let mut log = EventLog::new();
+                check_milestone_events(&mut world, &scenario, &mut log);
+                let c = &world.actors["city"];
+                seen.push((c.get_metric("cohesion"), c.get_metric("treasury")));
+            }
+            seen
+        };
+        let with = run(true);
+        assert_eq!(&with[..3], &[(50.0, 100.0); 3], "nothing moves before the firing tick");
+        assert_eq!(&with[3..], &[(0.0, -100.0); 4], "applied once on tick 3: cohesion clamped at 0, treasury unbounded");
+        assert_eq!(run(false), vec![(50.0, 100.0); 7], "without effects the firing moves nothing");
     }
 
     // ------------------------------------------------------------------
@@ -2929,6 +2965,7 @@ mod tests {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         }];
         let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
@@ -3011,6 +3048,7 @@ mod tests {
             after: None,
             group: None,
             requires_alive: vec![],
+            effects: Default::default(),
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);
