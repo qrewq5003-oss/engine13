@@ -334,6 +334,14 @@ pub struct Scenario {
     /// collapses by the usual path (heirs or absorption). `None` = no such rule.
     #[serde(default)]
     pub economy_v2_depopulation_ticks: Option<u32>,
+    /// Economy v2 only (Ц6): tags' `external_pressure` modifiers as a level, not a rate.
+    #[serde(default)]
+    pub economy_v2_pressure_tags_as_level: bool,
+    /// Economy v2 only (Ц6): the rate at which `external_pressure` is pulled toward the threat
+    /// `T_p = 100 × N / (N + own army)`, N = the armies of living neighbours at distance 1.
+    /// `None` = no pull.
+    #[serde(default)]
+    pub economy_v2_pressure_pull: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

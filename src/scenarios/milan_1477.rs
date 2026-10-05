@@ -220,6 +220,9 @@ pub fn load_milan_1477() -> Scenario {
         economy_v2_debt_cut: None,
         // Economy v2 (Ц2 stage 3): depopulation as collapse — set by the stage's pre-commitment.
         economy_v2_depopulation_ticks: None,
+        // Economy v2 (Ц6): pressure from a real threat — measured, not yet adopted.
+        economy_v2_pressure_tags_as_level: false,
+        economy_v2_pressure_pull: None,
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),
