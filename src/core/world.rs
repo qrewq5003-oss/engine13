@@ -71,7 +71,9 @@ pub struct Vassalage {
 pub enum GameMode {
     Scenario,
     Consequences,
-    Free,
+    // `Free` removed (B43): only `cmd_set_game_mode` could enter it, and no frontend called
+    // that command — a dead path, like `universal_actions` in B42. After a victory the game
+    // continues anyway (task 31 (E)). A save could not carry it: the transition was unreachable.
     Ended,
 }
 
