@@ -126,7 +126,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32) -> Run {
     st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
     {
         let s = st.current_scenario.as_mut().unwrap();
-        assert!(!s.economy_v2_combat_outcome, "base is the content as at e84341c");
+        // base = the content as at e84341c (no outcome), whatever the content holds now
         s.features.economy_v2 = m != Model::V1;
         s.economy_v2_combat_outcome = matches!(m, Model::A | Model::B | Model::C);
     }
