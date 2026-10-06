@@ -138,6 +138,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, detail: bool) -> 
         s.features.economy_v2 = true;
         // base = the content as at fa54353 (no legitimacy pull), whatever the content holds now
         s.economy_v2_legitimacy_pull = m.map(|x| x.0);
+        s.economy_v2_combat_outcome = false; // the world of stage 2, before Ц4
         if m.is_some_and(|x| !x.1) {
             let before = s.dependencies.len();
             s.dependencies.retain(|d| d.id != RALLY);

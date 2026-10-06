@@ -56,6 +56,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32) -> ((u64, u64, u6
         s.economy_v2_pressure_tags_as_level = c6;
         s.economy_v2_pressure_pull = if c6 { Some(0.10) } else { None };
         s.economy_v2_legitimacy_pull = if m == Model::C5a { Some(0.03) } else { None };
+        s.economy_v2_combat_outcome = false; // the worlds of PR #228, before Ц4
     }
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
     let mut acc = (0, 0, 0);
@@ -127,5 +128,5 @@ fn main() {
             }
         }
     }
-    println!("\n## Content check\n\nv2 as in the content against variant (a): {same} of {total} runs identical, every actor metric every tick.");
+    println!("\n## Content check (PR #228)\n\nv2 as in the content against variant (a): {same} of {total} runs identical, every actor metric every tick. After PR #234 the content also carries the battle outcome (Ц4), so this check no longer matches by construction; the Ц4 content check is `c4s2_probe content`.");
 }
