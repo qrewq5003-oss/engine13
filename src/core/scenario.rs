@@ -348,6 +348,12 @@ pub struct Scenario {
     /// legitimacy are measured against `T_L` (`threshold × T_L / 100`). `None` = none of it.
     #[serde(default)]
     pub economy_v2_legitimacy_pull: Option<f64>,
+    /// Economy v2 only (Ц4): a battle has a winner. A side's strength is `army × quality / 100`;
+    /// the attacker wins with probability `S_a / (S_a + S_d)`; the loser loses 15–30 % of its army
+    /// and 10–20 cohesion, the winner 5–15 % × min(1, S_loser / S_winner). Off: the attacker always
+    /// loses 5–15 %, the defender 15–30 % and the cohesion.
+    #[serde(default)]
+    pub economy_v2_combat_outcome: bool,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

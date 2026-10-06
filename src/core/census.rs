@@ -104,6 +104,9 @@ mod imp {
         static FLOOR_LOSS: RefCell<Option<Vec<(String, String, f64)>>> = const { RefCell::new(None) };
         static PAY_OFF: Cell<bool> = const { Cell::new(false) };
         static THREAT_ITEMS: Cell<u8> = const { Cell::new(3) };
+        static COMBAT_QUALITY: Cell<bool> = const { Cell::new(true) };
+        static COMBAT_LOSS_SCALED: Cell<bool> = const { Cell::new(true) };
+        static BATTLES: RefCell<Option<Vec<crate::core::census::Battle>>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     }
 
@@ -211,6 +214,41 @@ mod imp {
 
     pub fn threat_items() -> u8 {
         THREAT_ITEMS.with(|x| x.get())
+    }
+
+    /// Counterfactual (Ц4 stage 1): a side's strength without quality (`S = army`), variant (б).
+    pub fn set_combat_quality(on: bool) {
+        COMBAT_QUALITY.with(|x| x.set(on));
+    }
+
+    pub fn combat_quality() -> bool {
+        COMBAT_QUALITY.with(|x| x.get())
+    }
+
+    /// Counterfactual (Ц4 stage 1): the winner's loss not scaled by the strength ratio, variant (в).
+    pub fn set_combat_loss_scaled(on: bool) {
+        COMBAT_LOSS_SCALED.with(|x| x.set(on));
+    }
+
+    pub fn combat_loss_scaled() -> bool {
+        COMBAT_LOSS_SCALED.with(|x| x.get())
+    }
+
+    /// Start recording the protocol of every battle with an outcome (Ц4).
+    pub fn enable_battles() {
+        BATTLES.with(|b| *b.borrow_mut() = Some(Vec::new()));
+    }
+
+    pub fn take_battles() -> Vec<crate::core::census::Battle> {
+        BATTLES.with(|b| b.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+
+    pub fn battle(record: impl FnOnce() -> crate::core::census::Battle) {
+        BATTLES.with(|b| {
+            if let Some(rows) = b.borrow_mut().as_mut() {
+                rows.push(record());
+            }
+        });
     }
 
     /// Counterfactual (Ц2 stage 2): v2 as before the stage — no zero floor, recruiting in debt.
@@ -420,6 +458,46 @@ mod imp {
 
 #[cfg(feature = "census")]
 pub use imp::*;
+
+/// The protocol of one battle with an outcome (economy v2, Ц4): the sides, their armies and
+/// qualities before the battle, the strengths the outcome was drawn from, the winner and the
+/// losses. Recorded only with the feature and [`enable_battles`]; the type exists without it so
+/// the engine names it in one place.
+#[derive(Debug, Clone)]
+pub struct Battle {
+    pub tick: u32,
+    pub attacker: String,
+    pub defender: String,
+    pub army_attacker: f64,
+    pub army_defender: f64,
+    pub quality_attacker: f64,
+    pub quality_defender: f64,
+    pub strength_attacker: f64,
+    pub strength_defender: f64,
+    pub attacker_won: bool,
+    /// share of the winner's army lost
+    pub winner_loss: f64,
+    /// share of the loser's army lost
+    pub loser_loss: f64,
+}
+
+/// The battle protocol (Ц4); no-op without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn battle(_record: impl FnOnce() -> Battle) {}
+
+/// Ц4 stage 1 counterfactual switches; the full model without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn combat_quality() -> bool {
+    true
+}
+
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn combat_loss_scaled() -> bool {
+    true
+}
 
 /// Name the source of the next metric writes (A37). No-op without the feature.
 #[cfg(not(feature = "census"))]
