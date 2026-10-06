@@ -201,6 +201,97 @@ pub fn resolve_battle(attacker: &crate::core::Actor, defender: &crate::core::Act
     BattleOutcome { strength_attacker: s_a, strength_defender: s_d, attacker_wins, winner_scale }
 }
 
+/// The five draws of a battle with an outcome, in the order they are drawn: the outcome, then
+/// by role the winner's 5–15 % loss before scaling, the loser's 15–30 %, the loser's cohesion
+/// and its pressure.
+#[derive(Debug, Clone, Copy)]
+pub struct BattleDraws {
+    pub win: f64,
+    pub winner_loss: f64,
+    pub loser_loss: f64,
+    pub cohesion_loss: f64,
+    pub pressure_gain: f64,
+}
+
+impl BattleDraws {
+    /// Draw them from the stream, in that order.
+    pub fn draw(rng: &mut ChaCha8Rng) -> Self {
+        let win = rng.gen::<f64>();
+        BattleDraws {
+            win,
+            winner_loss: 0.05 + rng.gen::<f64>() * 0.10,
+            loser_loss: 0.15 + rng.gen::<f64>() * 0.15,
+            cohesion_loss: 10.0 + rng.gen::<f64>() * 10.0,
+            pressure_gain: 15.0 + rng.gen::<f64>() * 10.0,
+        }
+    }
+}
+
+/// Economy v2 (Ц4, Ц7): resolve and apply a battle with an outcome — losses to the winner and
+/// the loser, the protocol, and the war's streaks. `false` if a side is gone.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_battle_outcome(world: &mut WorldState, scenario: &Scenario, attacker_id: &str, defender_id: &str, draws: BattleDraws, current_tick: u32, current_year: i32, event_log: &mut EventLog) -> bool {
+    let (Some(a), Some(d)) = (world.actors.get(attacker_id), world.actors.get(defender_id)) else { return false };
+    let battle = resolve_battle(a, d, draws.win, crate::core::census::combat_quality(), crate::core::census::combat_loss_scaled());
+    let (winner_id, loser_id) = if battle.attacker_wins { (attacker_id, defender_id) } else { (defender_id, attacker_id) };
+    let winner_loss = draws.winner_loss * battle.winner_scale;
+    crate::core::census::battle(|| crate::core::census::Battle {
+        tick: current_tick,
+        attacker: attacker_id.to_string(),
+        defender: defender_id.to_string(),
+        army_attacker: a.get_metric("military_size"),
+        army_defender: d.get_metric("military_size"),
+        quality_attacker: a.get_metric("military_quality"),
+        quality_defender: d.get_metric("military_quality"),
+        strength_attacker: battle.strength_attacker,
+        strength_defender: battle.strength_defender,
+        attacker_won: battle.attacker_wins,
+        winner_loss,
+        loser_loss: draws.loser_loss,
+    });
+    if let Some(winner) = world.actors.get_mut(winner_id) {
+        let mil = winner.get_metric("military_size");
+        winner.set_metric("military_size", mil * (1.0 - winner_loss));
+    }
+    let threat_model = threat_model_on(scenario);
+    if let Some(loser) = world.actors.get_mut(loser_id) {
+        let mil = loser.get_metric("military_size");
+        loser.set_metric("military_size", mil * (1.0 - draws.loser_loss));
+        let coh = loser.get_metric("cohesion");
+        loser.set_metric("cohesion", (coh - draws.cohesion_loss).max(0.0));
+        if !threat_model {
+            loser.add_metric("external_pressure", draws.pressure_gain);
+        }
+    }
+    if let Some(k2) = scenario.economy_v2_conquest_k2.filter(|_| conquest_on(scenario)) {
+        let (s_w, s_l) = if battle.attacker_wins { (battle.strength_attacker, battle.strength_defender) } else { (battle.strength_defender, battle.strength_attacker) };
+        record_war_result(world, winner_id, loser_id, s_w, s_l, k2, current_tick, current_year, event_log);
+    }
+    true
+}
+
+/// Economy v2 (Ц7): the assault a milestone's `begins_conquest` opens with — one battle between
+/// the conqueror and the target on the milestone's tick, without the roll for an attack.
+pub fn assault(world: &mut WorldState, scenario: &Scenario, attacker_id: &str, target_id: &str, event_log: &mut EventLog, rng: &mut ChaCha8Rng) {
+    if !world.actors.contains_key(attacker_id) || !world.actors.contains_key(target_id)
+        || world.dead_actor_ids.contains(attacker_id) || world.dead_actor_ids.contains(target_id) {
+        return;
+    }
+    let (tick, year) = (world.tick, world.year);
+    let draws = BattleDraws::draw(rng);
+    if apply_battle_outcome(world, scenario, attacker_id, target_id, draws, tick, year, event_log) {
+        event_log.add(Event::new(
+            format!("assault_{}_{}", attacker_id, target_id),
+            tick,
+            year,
+            attacker_id.to_string(),
+            EventType::War,
+            true,
+            format!("Штурм: {} против {}", attacker_id, target_id),
+        ));
+    }
+}
+
 /// Effective military strength accounting for force projection through neighbors
 pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
     let active_neighbors = neighbors.len().max(1);
@@ -641,44 +732,9 @@ fn calculate_military_interaction(
     let pressure_gain = 15.0 + rng.gen::<f64>() * 10.0;  // 15-25
 
     if let Some(win_draw) = win_draw {
-        // The same four draws, by role: the 5–15 % draw is the winner's loss before scaling, the
-        // 15–30 % draw the loser's, then the loser's cohesion and pressure.
-        let (Some(a), Some(d)) = (world.actors.get(&attacker_id), world.actors.get(&defender_id)) else { return };
-        let battle = resolve_battle(a, d, win_draw, crate::core::census::combat_quality(), crate::core::census::combat_loss_scaled());
-        let (winner_id, loser_id) = if battle.attacker_wins { (&attacker_id, &defender_id) } else { (&defender_id, &attacker_id) };
-        let winner_loss = attacker_loss * battle.winner_scale;
-        crate::core::census::battle(|| crate::core::census::Battle {
-            tick: current_tick,
-            attacker: attacker_id.clone(),
-            defender: defender_id.clone(),
-            army_attacker: a.get_metric("military_size"),
-            army_defender: d.get_metric("military_size"),
-            quality_attacker: a.get_metric("military_quality"),
-            quality_defender: d.get_metric("military_quality"),
-            strength_attacker: battle.strength_attacker,
-            strength_defender: battle.strength_defender,
-            attacker_won: battle.attacker_wins,
-            winner_loss,
-            loser_loss: defender_loss,
-        });
-        if let Some(winner) = world.actors.get_mut(winner_id) {
-            let mil = winner.get_metric("military_size");
-            winner.set_metric("military_size", mil * (1.0 - winner_loss));
-        }
-        let threat_model = threat_model_on(scenario);
-        if let Some(loser) = world.actors.get_mut(loser_id) {
-            let mil = loser.get_metric("military_size");
-            loser.set_metric("military_size", mil * (1.0 - defender_loss));
-            let coh = loser.get_metric("cohesion");
-            loser.set_metric("cohesion", (coh - cohesion_loss).max(0.0));
-            if !threat_model {
-                loser.add_metric("external_pressure", pressure_gain);
-            }
-        }
-        if let Some(k2) = scenario.economy_v2_conquest_k2.filter(|_| conquest_on(scenario)) {
-            let (s_w, s_l) = if battle.attacker_wins { (battle.strength_attacker, battle.strength_defender) } else { (battle.strength_defender, battle.strength_attacker) };
-            let (w, l) = (winner_id.clone(), loser_id.clone());
-            record_war_result(world, &w, &l, s_w, s_l, k2, current_tick, current_year, event_log);
+        let draws = BattleDraws { win: win_draw, winner_loss: attacker_loss, loser_loss: defender_loss, cohesion_loss, pressure_gain };
+        if !apply_battle_outcome(world, scenario, &attacker_id, &defender_id, draws, current_tick, current_year, event_log) {
+            return;
         }
     } else {
     if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
@@ -1241,6 +1297,7 @@ pub fn calculate_vassalage_interaction(
     world: &mut WorldState,
     event_log: &mut EventLog,
     rng: &mut ChaCha8Rng,
+    treasury_floor: bool,
 ) {
     let current_tick = world.tick;
     let current_year = world.year;
@@ -1263,6 +1320,18 @@ pub fn calculate_vassalage_interaction(
         let rate = 0.03 + rng.gen::<f64>() * 0.02; // 3–5%
         let tribute = econ * rate;
 
+        // Economy v2 (Ц2 stage 2, applied to tribute in Ц7): a debt is unpaid soldiers' pay —
+        // tribute is paid only out of a non-negative treasury, the overlord gets what was paid and
+        // the shortfall is recorded as lost at the floor.
+        let tribute = if treasury_floor {
+            let current = world.actors.get(&vassal_id).map(|a| a.get_metric("treasury")).unwrap_or(0.0);
+            crate::core::census::write_source(|| "vassal tribute".to_string());
+            let paid = -crate::engine::treasury_delta_at_floor(&vassal_id, current, -tribute);
+            crate::core::census::clear_write_source();
+            paid
+        } else {
+            tribute
+        };
         if let Some(vassal) = world.actors.get_mut(&vassal_id) {
             vassal.add_metric("treasury", -tribute);
         }

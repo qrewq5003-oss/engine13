@@ -263,7 +263,7 @@ pub fn tick(
     phase_clamp(world);
 
     // Phase 6: Events (thresholds, ranks, milestones, game mode, relevance)
-    phase_events(world, scenario, event_log);
+    phase_events(world, scenario, event_log, rng);
 
     // Phase 7: Actor collapses
     phase_collapses(world, scenario, event_log);
@@ -424,7 +424,7 @@ fn phase_interactions(world: &mut WorldState, scenario: &Scenario, event_log: &m
     // based, so applied once here rather than inside calculate_interactions).
     // Rolls RNG only when a vassalage exists, keeping vassalage-free scenarios
     // byte-identical.
-    interactions::calculate_vassalage_interaction(world, event_log, rng);
+    interactions::calculate_vassalage_interaction(world, event_log, rng, scenario.features.economy_v2 && census::debt_as_pay() && census::tribute_floor());
 }
 
 // ============================================================================
@@ -809,10 +809,10 @@ fn phase_clamp(world: &mut WorldState) {
 // Phase 5: Events (thresholds, ranks, milestones, game mode, relevance)
 // ============================================================================
 
-fn phase_events(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+fn phase_events(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog, rng: &mut rand_chacha::ChaCha8Rng) {
     check_threshold_effects(world, scenario, event_log);
     check_rank_conditions(world, scenario, event_log);
-    check_milestone_events(world, scenario, event_log);
+    check_milestone_events(world, scenario, event_log, rng);
     check_game_mode_transitions(world, scenario, event_log);
     check_relevance_thresholds(world, scenario, event_log);
     check_victory_condition(world, scenario);
@@ -928,7 +928,7 @@ fn phase_advance(world: &mut WorldState, scenario: &Scenario) {
 /// treasury formula) takes a treasury below zero; every other loss stops at zero — a storm
 /// cannot take money that is not there. Returns the part of `delta` that applies to a
 /// treasury at `current`; the rest is recorded as lost at the floor.
-fn treasury_delta_at_floor(actor_id: &str, current: f64, delta: f64) -> f64 {
+pub(crate) fn treasury_delta_at_floor(actor_id: &str, current: f64, delta: f64) -> f64 {
     if delta >= 0.0 {
         return delta;
     }
@@ -1257,6 +1257,7 @@ fn check_milestone_events(
     world: &mut WorldState,
     scenario: &Scenario,
     event_log: &mut EventLog,
+    rng: &mut rand_chacha::ChaCha8Rng,
 ) {
     let current_tick = world.tick;
     let current_year = world.year;
@@ -1335,6 +1336,8 @@ fn check_milestone_events(
                 world.vassalages.retain(|v| !((v.vassal_id == bc.target && v.overlord_id == bc.attacker) || (v.vassal_id == bc.attacker && v.overlord_id == bc.target)));
                 world.conquests.insert((bc.attacker.clone(), bc.target.clone()));
                 world.war_streaks.remove(&bc.target);
+                // the war opens with the assault: one battle on this tick, without the roll for an attack
+                interactions::assault(world, scenario, &bc.attacker, &bc.target, event_log, rng);
             }
 
             // Spawn actor if configured
@@ -2146,6 +2149,14 @@ fn check_collapses(
                 && besieged
         };
 
+        // Economy v2 (Ц7): a conquest kills on the tick it is completed — the streak of lost
+        // battles was the duration; the three-tick hold is for the state-based paths 1–2.
+        if conquest_collapse && interactions::conquest_on(scenario) {
+            to_collapse.push((actor_id.clone(), actor.on_collapse.clone()));
+            world.collapse_warning_ticks.remove(actor_id);
+            continue;
+        }
+
         let in_danger = classic_collapse || internal_collapse || conquest_collapse;
 
         if in_danger {
@@ -2653,7 +2664,7 @@ mod tests {
 
     fn fired_after_one_check(scenario: &Scenario, world: &mut WorldState) -> Vec<String> {
         let mut log = EventLog::new();
-        check_milestone_events(world, scenario, &mut log);
+        check_milestone_events(world, scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
         world.milestone_events_fired.clone()
     }
 
@@ -2833,7 +2844,7 @@ mod tests {
             world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "great".into(), formed_tick: 0 });
             world.tick = 2;
             let mut log = EventLog::new();
-            check_milestone_events(&mut world, &scenario, &mut log);
+            check_milestone_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
             let bond_after_milestone = !world.vassalages.is_empty();
             fight(&mut world, &scenario, 3..40);
             let rebound = !world.vassalages.is_empty();
@@ -2848,6 +2859,51 @@ mod tests {
         assert_eq!(run(Some(1)), (false, false, Some("great".to_string()), true), "broken, not rebound, conquered, dead");
         let (bond, _, conquered, dead) = run(None);
         assert!(bond && conquered.is_none() && !dead, "without the rule: the bond stays, nobody is conquered");
+    }
+
+    /// Economy v2 (Ц7): `begins_conquest` opens with the assault — one battle on the milestone's
+    /// tick, without the roll for an attack; with K₂ = 1 an overwhelming conqueror takes the city
+    /// that tick. Both ways: a milestone without `begins_conquest` fights nothing.
+    #[test]
+    fn economy_v2_declared_conquest_opens_with_an_assault() {
+        let run = |declare: bool| {
+            let (mut scenario, mut world) = war_world(Some(1));
+            scenario.military_conflict_probability = 0.0; // no ordinary battle can happen
+            let mut m = dated_milestone("assault", None, &[]);
+            m.condition.condition_type = EventConditionType::Tick { tick: 5 };
+            if declare { m.begins_conquest = Some(crate::core::BeginsConquest { attacker: "great".into(), target: "small".into() }); }
+            scenario.milestone_events = vec![m];
+            world.tick = 5;
+            let mut log = EventLog::new();
+            check_milestone_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(3));
+            check_collapses(&mut world, &scenario, &mut log);
+            (world.actors.get("small").map(|a| a.get_metric("military_size")), world.dead_actor_ids.contains("small"))
+        };
+        let (_, dead) = run(true);
+        assert!(dead, "the assault on the milestone's tick: S 1000 against 10, K₂ = 1 — the city falls that tick");
+        assert_eq!(run(false), (Some(20.0), false), "without begins_conquest: no battle");
+    }
+
+    /// Economy v2 (Ц7): tribute is paid only out of a non-negative treasury — the overlord gets
+    /// what was paid. Both ways: without the floor the vassal's treasury goes below zero.
+    #[test]
+    fn economy_v2_tribute_stops_at_the_treasury_floor() {
+        let run = |floor: bool| {
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut v = vassalage_actor("vassal", 10.0, 0.0, 50.0, 50.0, &[]);
+            v.set_metric("treasury", 0.5);
+            world.actors.insert("vassal".into(), v);
+            world.actors.insert("lord".into(), vassalage_actor("lord", 100.0, 0.0, 50.0, 50.0, &[]));
+            world.vassalages.push(crate::core::Vassalage { vassal_id: "vassal".into(), overlord_id: "lord".into(), formed_tick: 0 });
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+            interactions::calculate_vassalage_interaction(&mut world, &mut log, &mut rng, floor);
+            (world.actors["vassal"].get_metric("treasury"), world.actors["lord"].get_metric("treasury"))
+        };
+        // economic_output 50 → tribute 1.5–2.5, more than the vassal's 0.5
+        assert_eq!(run(true), (0.0, 100.5), "floor: 0.5 paid, the rest lost at the floor");
+        let (v, l) = run(false);
+        assert!(v < 0.0 && l > 100.5 && (v + l - 100.5).abs() < 1e-9, "no floor: the vassal goes into debt for it");
     }
 
     /// Economy v2 (Ц4): the battle's outcome. Over a uniform grid of draws the attacker wins the
@@ -3269,7 +3325,7 @@ mod tests {
             for t in 0..7 {
                 world.tick = t;
                 let mut log = EventLog::new();
-                check_milestone_events(&mut world, &scenario, &mut log);
+                check_milestone_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
                 let c = &world.actors["city"];
                 seen.push((c.get_metric("cohesion"), c.get_metric("treasury")));
             }
@@ -3473,7 +3529,7 @@ mod tests {
         let vassal_before = world.actors.get("small").unwrap().get_metric("treasury");
         let overlord_before = world.actors.get("big").unwrap().get_metric("treasury");
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
-        interactions::calculate_vassalage_interaction(&mut world, &mut log, &mut rng);
+        interactions::calculate_vassalage_interaction(&mut world, &mut log, &mut rng, false);
         let paid = vassal_before - world.actors.get("small").unwrap().get_metric("treasury");
         let received = world.actors.get("big").unwrap().get_metric("treasury") - overlord_before;
         assert!((paid - received).abs() < 1e-9, "tribute must be symmetric");

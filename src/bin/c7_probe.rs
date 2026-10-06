@@ -85,6 +85,11 @@ struct Run {
     revolts: u32,
     dead: BTreeMap<String, u32>,
     conquered_by: BTreeMap<String, String>,
+    /// (violator, source) -> economic_output written
+    eo_sources: BTreeMap<(String, String), f64>,
+    unpaid_tribute: f64,
+    /// treasury of rome and ottomans on ticks 150 and 299
+    lord_treasury: BTreeMap<(String, u32), f64>,
     deaths: u32,
     win: Option<u32>,
     split40: bool,
@@ -94,16 +99,18 @@ struct Run {
     deep: bool,
 }
 
-/// None = base; Some((k2, with quality))
-type Model = Option<(u32, bool)>;
+/// None = base; Some((k2, with quality, tribute stops at the treasury floor))
+type Model = Option<(u32, bool, bool)>;
 
 fn label(m: Model) -> String {
     match m {
         None => "base".into(),
-        Some((k, true)) => format!("K₂ = {k}"),
-        Some((k, false)) => format!("K₂ = {k}, no quality"),
+        Some((k, q, f)) => format!("K₂ = {k}{}{}", if f { "" } else { ", tribute as before" }, if q { "" } else { ", no quality" }),
     }
 }
+
+/// The new violators of Ц1 under PR #236, whose economic_output writes are decomposed.
+const VIOLATORS: [&str; 4] = ["burgundians", "alamanni", "ostrogoths", "sicily"];
 
 fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: bool) -> Run {
     let db = engine13::db::Db::open_in_memory().unwrap();
@@ -116,7 +123,8 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
         assert!(s.economy_v2_combat_outcome, "the content as at 12a757f has the battle outcome");
         s.economy_v2_conquest_k2 = m.map(|x| x.0);
     }
-    census::set_combat_quality(match m { None => !base_no_quality, Some((_, q)) => q });
+    census::set_combat_quality(match m { None => !base_no_quality, Some((_, q, _)) => q });
+    census::set_tribute_floor(m.is_none_or(|x| x.2));
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
     let mut r = Run::default();
     let mut prev_tp: BTreeMap<String, f64> = BTreeMap::new();
@@ -125,6 +133,8 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
     type Open = (String, u32, f64, f64, bool, f64, f64, bool);
     let mut open: Vec<Open> = Vec::new();
     let _ = census::take_battles();
+    let _ = census::take_writes();
+    let _ = census::take_floor_losses();
     for _ in 0..ticks {
         let before: BTreeSet<String> = st.world_state.as_ref().unwrap().dead_actor_ids.iter().cloned().collect();
         match &strategy {
@@ -136,8 +146,22 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
             }
         }
         r.battles.extend(census::take_battles());
+        for w in census::take_writes() {
+            if w.metric == "economic_output" && VIOLATORS.contains(&w.actor.as_str()) {
+                let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file(), w.location.line()));
+                *r.eo_sources.entry((w.actor.clone(), src)).or_default() += w.applied;
+            }
+        }
+        for (_, src, x) in census::take_floor_losses() {
+            if src == "vassal tribute" { r.unpaid_tribute += x; }
+        }
         let ws = st.world_state.as_ref().unwrap();
         let t = ws.tick - 1;
+        if t == 150 || t == ticks - 1 {
+            for lord in ["rome", "ottomans"] {
+                if let Some(a) = ws.actors.get(lord).filter(|_| !ws.dead_actor_ids.contains(lord)) { r.lord_treasury.insert((lord.to_string(), t), a.get_metric("treasury")); }
+            }
+        }
         for d in ws.dead_actor_ids.iter().filter(|d| !before.contains(*d)) {
             r.dead.insert(d.clone(), t);
             if d == "byzantium" && ws.milestone_events_fired.iter().any(|mm| mm == "outcome_survived_alone") { r.held_then_fell = true; }
@@ -194,6 +218,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
         if t == 40 && ws.milestone_events_fired.iter().any(|mm| mm == "rome_splits") { r.split40 = true; }
     }
     census::set_combat_quality(true);
+    census::set_tribute_floor(true);
     let ws = st.world_state.as_ref().unwrap();
     r.deaths = ws.dead_actors.len() as u32;
     r.conquered_by = ws.conquered_by.clone();
@@ -246,9 +271,14 @@ fn main() {
     let seeds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30);
     let ticks: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(300);
     census::enable_battles();
+    census::enable_writes();
+    census::watch_all_metrics(true);
+    census::enable_floor_losses();
     if args.get(4).map(String::as_str) == Some("c1") { c1_detail(first, seeds, ticks); return; }
     println!("# Ц7 — death and submission by war, seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
-    let models: [Model; 3] = [None, Some((1, true)), Some((2, true))];
+    let models: [Model; 3] = [None, Some((1, true, false)), Some((1, true, true))];
+    let mut eo_rows = Vec::new();
+    let mut tribute_rows = Vec::new();
     let mut pools: BTreeMap<String, Pool> = BTreeMap::new();
     let mut c7_rows = Vec::new();
     let mut c7_verdict: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
@@ -262,7 +292,7 @@ fn main() {
             for m in models {
                 let fresh: Vec<Run>;
                 let runs: &[Run] = if m.is_none() { &base } else { fresh = (first..first + seeds).map(|s| run(sc, world, m, s, ticks, false)).collect(); &fresh };
-                let nq: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m.map(|x| (x.0, false)), s, ticks, true)).collect();
+                let nq: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m.map(|x| (x.0, false, x.2)), s, ticks, true)).collect();
                 let lab = label(m);
                 // ---- stop-rule measures
                 let p = pools.entry(lab.clone()).or_default();
@@ -307,7 +337,8 @@ fn main() {
                         let ft: Vec<f64> = runs.iter().filter_map(|rr| rr.dead.get("byzantium").map(|t| *t as f64)).collect();
                         let sub: Vec<f64> = runs.iter().filter_map(|rr| rr.vassal.get(&("byzantium".to_string(), "ottomans".to_string())).map(|x| x.0 as f64)).collect();
                         let htf = runs.iter().filter(|rr| rr.held_then_fell).count();
-                        c7_rows.push(format!("| {sc} | {world} | {lab} | Byzantium falls in {} @ {}; Ottoman vassal in {} @ {}; «held, then fell» (B46) {htf} |", ft.len(), q(&ft), sub.len(), q(&sub)));
+                        let at46 = ft.iter().filter(|t| **t == 46.0).count();
+                        c7_rows.push(format!("| {sc} | {world} | {lab} | Byzantium falls in {} @ {}, on tick 46 in {at46}; Ottoman vassal in {} @ {}; «held, then fell» (B46) {htf} |", ft.len(), q(&ft), sub.len(), q(&sub)));
                         if m.is_some() && *world == "none" {
                             c7_verdict.entry(lab.clone()).or_default().push(("(2) Byzantium none".into(), ft.len() >= 20 && (40.0..=59.0).contains(&pct(&ft, 0.5))));
                         }
@@ -318,6 +349,22 @@ fn main() {
                         c7_rows.push(format!("| {sc} | {world} | {lab} | dies or submits: Milan {mi}, papacy {pa}, Venice {ve} |"));
                         if m.is_some() { c7_verdict.entry(lab.clone()).or_default().push((format!("(3) milan {world}"), mi <= 1 && pa <= 3 && ve <= 3)); }
                     }
+                }
+                // ---- the Ц1 violators' economic_output by source, unpaid tribute, overlords' treasury
+                if m.is_some() {
+                    for v in VIOLATORS {
+                        let mut src: BTreeMap<String, f64> = BTreeMap::new();
+                        for rr in runs { for ((a, k), x) in &rr.eo_sources { if a == v { *src.entry(k.clone()).or_default() += x / seeds as f64; } } }
+                        if src.is_empty() { continue; }
+                        let mut vv: Vec<(String, f64)> = src.into_iter().filter(|x| x.1.abs() >= 1.0).collect();
+                        vv.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                        let eo_floor = runs.iter().flat_map(|rr| rr.eo.get(v).into_iter().flatten()).filter(|x| **x <= 1.0).count() as f64
+                            / runs.iter().flat_map(|rr| rr.eo.get(v).into_iter().flatten()).count().max(1) as f64 * 100.0;
+                        eo_rows.push(format!("| {sc} | {world} | {v} | {lab} | {eo_floor:.0} % | {} |", vv.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; ")));
+                    }
+                    let unpaid = runs.iter().map(|rr| rr.unpaid_tribute).sum::<f64>() / seeds as f64;
+                    let lt = |lord: &str, tk: u32| -> Vec<f64> { runs.iter().filter_map(|rr| rr.lord_treasury.get(&(lord.to_string(), tk)).copied()).collect() };
+                    tribute_rows.push(format!("| {sc} | {world} | {lab} | {unpaid:.0} | rome {} → {} | ottomans {} → {} |", q(&lt("rome", 150)), q(&lt("rome", ticks - 1)), q(&lt("ottomans", 150)), q(&lt("ottomans", ticks - 1))));
                 }
                 // ---- (4) protocol and paths
                 let war_deaths: usize = runs.iter().map(|rr| rr.dead.keys().filter(|d| rr.conquered_by.contains_key(*d)).count()).sum();
@@ -388,6 +435,14 @@ fn main() {
         println!("| {} | {} / {} / {} of {n} | {} / {} of {n} | {} / {} of {n} | {dec:.1} % of {} | {:.1} % vs {:.1} % {} | {:+.1} vs {:.1} {} |", label(m), p.c1[0], p.c1[1], p.c1[2], p.c5[0], p.c5[1], p.c6[0], p.c6[1], p.decline.0,
             100.0 * pa, 100.0 * (promise - 2.0 * se), if pa >= promise - 2.0 * se { "yes" } else { "**no**" }, 100.0 * (pa - pb), 200.0 * se_d, if pa - pb >= 2.0 * se_d { "yes" } else { "**no**" });
     }
+    println!("\n## 2a. The Ц1 violators of PR #236: share of life at the economic_output floor, and its writes by source (mean per game; |x| ≥ 1)\n");
+    println!("| scenario | world | actor | model | at the floor | writes by source |");
+    println!("|---|---|---|---|---|---|");
+    for r in eo_rows { println!("{r}"); }
+    println!("\n## 2b. Tribute unpaid at the floor (mean per game), and the overlords' treasury p10/50/90 on tick 150 → 299\n");
+    println!("| scenario | world | model | unpaid tribute | rome | ottomans |");
+    println!("|---|---|---|---|---|---|");
+    for r in tribute_rows { println!("{r}"); }
     println!("\n## 3. Vassals: revolts, and pairs (games, mean ticks bound)\n");
     println!("| scenario | world | model | revolts | vassal → overlord |");
     println!("|---|---|---|---|---|");
@@ -410,7 +465,7 @@ fn c1_detail(first: u64, seeds: u64, ticks: u32) {
     println!("|---|---|---|---|---|");
     for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
         for world in worlds(sc) {
-            for m in [None, Some((1, true))] {
+            for m in [None, Some((1, true, true))] {
                 let runs: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m, s, ticks, false)).collect();
                 let mut eo: BTreeMap<String, Vec<f64>> = BTreeMap::new();
                 for rr in &runs { for (k, v) in &rr.eo { eo.entry(k.clone()).or_default().extend(v); } }
