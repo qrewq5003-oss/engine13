@@ -236,7 +236,7 @@ pub fn load_constantinople_1430() -> Scenario {
         // Economy v2 (Ц6): pressure from a real threat — measured, not yet adopted.
         economy_v2_pressure_tags_as_level: true,
         economy_v2_pressure_pull: Some(0.10),
-        economy_v2_legitimacy_pull: None,
+        economy_v2_legitimacy_pull: Some(0.03),
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),

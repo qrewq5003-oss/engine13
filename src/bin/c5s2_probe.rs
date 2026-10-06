@@ -136,7 +136,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, detail: bool) -> 
     {
         let s = st.current_scenario.as_mut().unwrap();
         s.features.economy_v2 = true;
-        assert_eq!(s.economy_v2_legitimacy_pull, None, "base is the content as at fa54353");
+        // base = the content as at fa54353 (no legitimacy pull), whatever the content holds now
         s.economy_v2_legitimacy_pull = m.map(|x| x.0);
         if m.is_some_and(|x| !x.1) {
             let before = s.dependencies.len();
