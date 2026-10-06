@@ -13,7 +13,10 @@
 //! pre-commitment — how often an actor under full threat (`T_p` ≥ 90) fights and loses, and how
 //! many actors reach K lost battles in a row under full threat, and on which tick.
 //!
-//! Usage: cargo run --release --features census --bin c4s2_probe -- [measure|c7] [seeds] [ticks]
+//! **vassal** (seeds 0–29, model (a)): Ц7 with submission — who would become a vassal at the first
+//! streak of K₁ losses in a row to one winner with `S_w ≥ R × S_l`, of whom, and when.
+//!
+//! Usage: cargo run --release --features census --bin c4s2_probe -- [measure|c7|c7b|vassal|content|decline] [seeds] [ticks]
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
 use engine13::core::census;
@@ -216,6 +219,7 @@ fn main() {
     if mode == "decline" { decline(seeds, ticks); return; }
     if mode == "content" { content(seeds, ticks); return; }
     if mode == "c7b" { c7b(seeds, ticks); return; }
+    if mode == "vassal" { vassal(seeds, ticks); return; }
     let first = 100;
     println!("# Ц4 closed — the corrected measure on held-out seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     let mut tot: BTreeMap<(&str, &str), (u64, u64, f64, f64)> = BTreeMap::new();
@@ -479,6 +483,72 @@ fn c7b(seeds: u64, ticks: u32) {
             println!("| scenario | world | actors |");
             println!("|---|---|---|");
             for row in &who[&(ri, ki)] { println!("{row}"); }
+        }
+    }
+}
+
+/// Ц7 with submission (owner's grid R ∈ {3, 5, 10} × K₁ ∈ {2, 3}): the same streak as `c7b`, but
+/// its first completion makes the loser a vassal of that winner. Only the first submission per
+/// actor and game is counted; the world after it (overlord and vassal stop fighting) is not
+/// modelled, so neither death at K₂ nor the breaking of the bond can be read from these protocols.
+fn vassal(seeds: u64, ticks: u32) {
+    const RS: [f64; 3] = [3.0, 5.0, 10.0];
+    const KS: [usize; 2] = [2, 3];
+    const WATCH: [&str; 13] = ["byzantium", "serbia", "wallachia", "armenia", "sicily", "ostrogoths",
+        "alamanni", "vandals", "visigoths", "burgundians", "franks", "papacy", "venice"];
+    println!("# Ц7 with submission — the first streak of K₁ losses in a row to one winner with S_w ≥ R × S_l makes the loser its vassal\n");
+    println!("Protocols of (a), seeds 0–{}, {ticks} ticks. Cells: games of {seeds} @ median tick of submission (the overlord most often).\n", seeds - 1);
+    let mut rows: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for world in worlds(sc) {
+            let runs: Vec<Run> = (0..seeds).map(|s| run(sc, world, Model::A, s, ticks)).collect();
+            for (ri, r) in RS.iter().enumerate() {
+                for (ki, k) in KS.iter().enumerate() {
+                    let mut subs: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                    let mut lords: BTreeMap<String, BTreeMap<String, u32>> = BTreeMap::new();
+                    for run in &runs {
+                        let mut streak: BTreeMap<String, (String, usize)> = BTreeMap::new();
+                        let mut bound: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                        for b in &run.battles {
+                            let (w, l, s_w, s_l) = if b.attacker_won { (&b.attacker, &b.defender, b.strength_attacker, b.strength_defender) } else { (&b.defender, &b.attacker, b.strength_defender, b.strength_attacker) };
+                            streak.remove(w);
+                            if bound.contains(l) { continue; }
+                            let e = streak.entry(l.clone()).or_insert((w.clone(), 0));
+                            if s_w >= r * s_l {
+                                if &e.0 == w { e.1 += 1; } else { *e = (w.clone(), 1); }
+                            } else {
+                                *e = (w.clone(), 0);
+                            }
+                            if e.1 >= *k {
+                                bound.insert(l.clone());
+                                subs.entry(l.clone()).or_default().push(b.tick as f64);
+                                *lords.entry(l.clone()).or_default().entry(w.clone()).or_default() += 1;
+                            }
+                        }
+                    }
+                    let cell = |id: &str| -> Option<String> {
+                        let v = subs.get(id)?;
+                        let lord = lords.get(id).and_then(|c| c.iter().max_by_key(|x| x.1)).map(|(w, _)| w.clone()).unwrap_or_default();
+                        Some(format!("{id} {} @{:.0} ({lord})", v.len(), pct(v, 0.5)))
+                    };
+                    let watched: Vec<String> = WATCH.iter().filter_map(|id| cell(id)).collect();
+                    let milan = if sc == "milan_1477" { cell("milan").unwrap_or_else(|| "0".into()) } else { "—".into() };
+                    let mut all: Vec<(&String, usize)> = subs.iter().map(|(id, v)| (id, v.len())).collect();
+                    all.sort_by(|a, b| b.1.cmp(&a.1));
+                    let others: Vec<String> = all.iter().filter(|(id, _)| !WATCH.contains(&id.as_str()) && id.as_str() != "milan").filter_map(|(id, _)| cell(id)).collect();
+                    rows.entry((ri, ki)).or_default().push(format!("| {sc} | {world} | {} | {milan} | {} |",
+                        if watched.is_empty() { "—".into() } else { watched.join(", ") }, if others.is_empty() { "—".into() } else { others.join(", ") }));
+                }
+            }
+        }
+    }
+    for (ri, r) in RS.iter().enumerate() {
+        for (ki, k) in KS.iter().enumerate() {
+            println!("## R = {r}, K₁ = {k}\n");
+            println!("| scenario | world | watched actors | Milan | others who submit |");
+            println!("|---|---|---|---|---|");
+            for row in &rows[&(ri, ki)] { println!("{row}"); }
+            println!();
         }
     }
 }
