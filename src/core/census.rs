@@ -105,6 +105,7 @@ mod imp {
         static PAY_OFF: Cell<bool> = const { Cell::new(false) };
         static THREAT_ITEMS: Cell<u8> = const { Cell::new(3) };
         static COMBAT_QUALITY: Cell<bool> = const { Cell::new(true) };
+        static TRIBUTE_FLOOR: Cell<bool> = const { Cell::new(true) };
         static COMBAT_LOSS_SCALED: Cell<bool> = const { Cell::new(true) };
         static BATTLES: RefCell<Option<Vec<crate::core::census::Battle>>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
@@ -214,6 +215,15 @@ mod imp {
 
     pub fn threat_items() -> u8 {
         THREAT_ITEMS.with(|x| x.get())
+    }
+
+    /// Counterfactual (Ц7): v2 tribute as before the fix — written past the treasury's zero floor.
+    pub fn set_tribute_floor(on: bool) {
+        TRIBUTE_FLOOR.with(|x| x.set(on));
+    }
+
+    pub fn tribute_floor() -> bool {
+        TRIBUTE_FLOOR.with(|x| x.get())
     }
 
     /// Counterfactual (Ц4 stage 1): a side's strength without quality (`S = army`), variant (б).
@@ -485,6 +495,13 @@ pub struct Battle {
 #[cfg(not(feature = "census"))]
 #[inline(always)]
 pub fn battle(_record: impl FnOnce() -> Battle) {}
+
+/// Ц7 counterfactual switch; tribute stops at the floor without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn tribute_floor() -> bool {
+    true
+}
 
 /// Ц4 stage 1 counterfactual switches; the full model without the feature.
 #[cfg(not(feature = "census"))]
