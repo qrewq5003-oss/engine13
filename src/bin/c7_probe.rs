@@ -18,6 +18,8 @@
 //!
 //! Usage: cargo run --release --features census --bin c7_probe -- [first_seed] [seeds] [ticks] [c1]
 //! (`c1`: only Ц1's measure per world and the failing actors, base against K₂ = 1.)
+//! (`src`: the Ц1 violators in rome none and milan none — economic_output at the floor, its writes by
+//! source, mean army and cohesion — base against K₂ = 1, to see what differs.)
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
 use engine13::core::census;
@@ -87,6 +89,13 @@ struct Run {
     conquered_by: BTreeMap<String, String>,
     /// (violator, source) -> economic_output written
     eo_sources: BTreeMap<(String, String), f64>,
+    /// (violator, source) -> cohesion written
+    coh_sources: BTreeMap<(String, String), f64>,
+    /// violators: pressure per living tick
+    pressure: BTreeMap<String, Vec<f64>>,
+    /// violators: army and cohesion per living tick
+    army: BTreeMap<String, Vec<f64>>,
+    cohesion: BTreeMap<String, Vec<f64>>,
     unpaid_tribute: f64,
     /// treasury of rome and ottomans on ticks 150 and 299
     lord_treasury: BTreeMap<(String, u32), f64>,
@@ -147,9 +156,10 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
         }
         r.battles.extend(census::take_battles());
         for w in census::take_writes() {
-            if w.metric == "economic_output" && VIOLATORS.contains(&w.actor.as_str()) {
+            if (w.metric == "economic_output" || w.metric == "cohesion") && VIOLATORS.contains(&w.actor.as_str()) {
                 let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file(), w.location.line()));
-                *r.eo_sources.entry((w.actor.clone(), src)).or_default() += w.applied;
+                let map = if w.metric == "cohesion" { &mut r.coh_sources } else { &mut r.eo_sources };
+                *map.entry((w.actor.clone(), src)).or_default() += w.applied;
             }
         }
         for (_, src, x) in census::take_floor_losses() {
@@ -203,6 +213,11 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
                 if l >= 99.0 { e.2 += 1; }
             }
             r.legit.entry(id.clone()).or_default().push(l);
+            if VIOLATORS.contains(&id.as_str()) {
+                r.army.entry(id.clone()).or_default().push(a.get_metric("military_size"));
+                r.cohesion.entry(id.clone()).or_default().push(a.get_metric("cohesion"));
+                r.pressure.entry(id.clone()).or_default().push(a.get_metric("external_pressure"));
+            }
             r.eo.entry(id.clone()).or_default().push(a.get_metric("economic_output"));
             if let Some(tp) = tp {
                 r.corr[0] += 1.0; r.corr[1] += ep; r.corr[2] += tp; r.corr[3] += ep * ep; r.corr[4] += tp * tp; r.corr[5] += ep * tp;
@@ -275,6 +290,7 @@ fn main() {
     census::watch_all_metrics(true);
     census::enable_floor_losses();
     if args.get(4).map(String::as_str) == Some("c1") { c1_detail(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("src") { c1_sources(first, seeds, ticks); return; }
     println!("# Ц7 — death and submission by war, seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     let models: [Model; 3] = [None, Some((1, true, false)), Some((1, true, true))];
     let mut eo_rows = Vec::new();
@@ -475,6 +491,39 @@ fn c1_detail(first: u64, seeds: u64, ticks: u32) {
                 let pass = eo.len() - failing.len();
                 println!("| {sc} | {world} | {} | {pass} / {} ({:.0} %){} | {} |", label(m), eo.len(), 100.0 * pass as f64 / eo.len().max(1) as f64,
                     if 100 * pass >= 80 * eo.len() { "" } else { " **fails**" }, if failing.is_empty() { "—".into() } else { failing.join(", ") });
+            }
+        }
+    }
+}
+
+/// The Ц1 violators, base against K₂ = 1, in the two worlds where Ц1 failed: share of life with
+/// economic_output at the floor, its writes by source, and the mean army and cohesion.
+fn c1_sources(first: u64, seeds: u64, ticks: u32) {
+    println!("# The Ц1 violators: base against K₂ = 1, seeds {first}–{}\n", first + seeds - 1);
+    println!("| world | actor | model | eo at the floor | mean army | mean cohesion | mean pressure | vassal ticks (mean) | economic_output writes by source (mean per game, |x| ≥ 2) | cohesion writes by source (|x| ≥ 20) |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
+    for (sc, world, actors) in [("rome_375", "none", &["burgundians", "alamanni", "ostrogoths"][..]), ("milan_1477", "none", &["sicily"][..])] {
+        let base: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, None, s, ticks, false)).collect();
+        let k1: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, Some((1, true, true)), s, ticks, false)).collect();
+        for a in actors {
+            for (lab, runs) in [("base", &base), ("K₂ = 1", &k1)] {
+                let eo: Vec<f64> = runs.iter().flat_map(|rr| rr.eo.get(*a).into_iter().flatten().copied()).collect();
+                let floor = 100.0 * eo.iter().filter(|x| **x <= 1.0).count() as f64 / eo.len().max(1) as f64;
+                let army: Vec<f64> = runs.iter().flat_map(|rr| rr.army.get(*a).into_iter().flatten().copied()).collect();
+                let coh: Vec<f64> = runs.iter().flat_map(|rr| rr.cohesion.get(*a).into_iter().flatten().copied()).collect();
+                let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+                let vt = runs.iter().map(|rr| rr.vassal.iter().filter(|((v, _), _)| v == *a).map(|(_, x)| x.1 as f64).sum::<f64>()).sum::<f64>() / seeds as f64;
+                let mut src: BTreeMap<String, f64> = BTreeMap::new();
+                for rr in runs.iter() { for ((x, k), y) in &rr.eo_sources { if x == *a { *src.entry(k.clone()).or_default() += y / seeds as f64; } } }
+                let mut v: Vec<(String, f64)> = src.into_iter().filter(|x| x.1.abs() >= 2.0).collect();
+                v.sort_by(|p, q| p.1.partial_cmp(&q.1).unwrap());
+                let pr: Vec<f64> = runs.iter().flat_map(|rr| rr.pressure.get(*a).into_iter().flatten().copied()).collect();
+                let mut cs: BTreeMap<String, f64> = BTreeMap::new();
+                for rr in runs.iter() { for ((x, k), y) in &rr.coh_sources { if x == *a { *cs.entry(k.clone()).or_default() += y / seeds as f64; } } }
+                let mut cv: Vec<(String, f64)> = cs.into_iter().filter(|x| x.1.abs() >= 20.0).collect();
+                cv.sort_by(|p, q| p.1.partial_cmp(&q.1).unwrap());
+                println!("| {sc} {world} | {a} | {lab} | {floor:.0} % | {:.1} | {:.1} | {:.0} | {vt:.0} | {} | {} |", mean(&army), mean(&coh), mean(&pr), v.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; "),
+                    cv.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; "));
             }
         }
     }
