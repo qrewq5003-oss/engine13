@@ -18,6 +18,8 @@
 //!
 //! Usage: cargo run --release --features census --bin c7_probe -- [first_seed] [seeds] [ticks] [c1]
 //! (`c1`: only Ц1's measure per world and the failing actors, base against K₂ = 1.)
+//! (`papacy`: milan, K₂ = 1, with and without the Ц8 cohesion pull — Naples and the papacy side by side.)
+//! (`content`: v2 as the content stands against K₂ = 1 set here, bit for bit.)
 //! (`src`: the Ц1 violators in rome none and milan none — economic_output at the floor, its writes by
 //! source, mean army and cohesion — base against K₂ = 1, to see what differs.)
 
@@ -99,6 +101,7 @@ struct Run {
     unpaid_tribute: f64,
     /// treasury of rome and ottomans on ticks 150 and 299
     lord_treasury: BTreeMap<(String, u32), f64>,
+    fingerprint: u64,
     deaths: u32,
     win: Option<u32>,
     split40: bool,
@@ -130,7 +133,8 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
         let s = st.current_scenario.as_mut().unwrap();
         s.features.economy_v2 = true;
         assert!(s.economy_v2_combat_outcome, "the content as at 12a757f has the battle outcome");
-        s.economy_v2_conquest_k2 = m.map(|x| x.0);
+        // k2 = u32::MAX: the content as it stands (the content check)
+        if m.is_none_or(|x| x.0 != u32::MAX) { s.economy_v2_conquest_k2 = m.map(|x| x.0); }
     }
     census::set_combat_quality(match m { None => !base_no_quality, Some((_, q, _)) => q });
     census::set_tribute_floor(m.is_none_or(|x| x.2));
@@ -144,6 +148,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
     let _ = census::take_battles();
     let _ = census::take_writes();
     let _ = census::take_floor_losses();
+    let mut fp = std::collections::hash_map::DefaultHasher::new();
     for _ in 0..ticks {
         let before: BTreeSet<String> = st.world_state.as_ref().unwrap().dead_actor_ids.iter().cloned().collect();
         match &strategy {
@@ -198,6 +203,9 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
         let mut ids: Vec<&String> = ws.actors.keys().collect();
         ids.sort();
         for id in ids {
+            let mut ms: Vec<(&String, &f64)> = ws.actors[id].metrics.iter().collect();
+            ms.sort_by(|x, y| x.0.cmp(y.0));
+            for (k, v) in ms { std::hash::Hash::hash(&(id, k, v.to_bits()), &mut fp); }
             if ws.dead_actor_ids.contains(id) { continue; }
             let a = &ws.actors[id];
             let l = a.get_metric("legitimacy");
@@ -237,6 +245,7 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32, base_no_quality: 
     let ws = st.world_state.as_ref().unwrap();
     r.deaths = ws.dead_actors.len() as u32;
     r.conquered_by = ws.conquered_by.clone();
+    r.fingerprint = std::hash::Hasher::finish(&fp);
     r.outcomes = ws.milestone_events_fired.iter().filter(|mm| mm.starts_with("outcome_")).cloned().collect();
     r.stab = ws.milestone_events_fired.iter().any(|mm| mm == "milan_regency_stabilizes");
     r.deep = ws.milestone_events_fired.iter().any(|mm| mm == "milan_regency_crisis_deepens");
@@ -291,6 +300,20 @@ fn main() {
     census::enable_floor_losses();
     if args.get(4).map(String::as_str) == Some("c1") { c1_detail(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("src") { c1_sources(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("papacy") { papacy_pair(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("content") {
+        let (mut same, mut total) = (0, 0);
+        for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+            for world in worlds(sc) {
+                for seed in first..first + seeds {
+                    total += 1;
+                    if run(sc, world, Some((u32::MAX, true, true)), seed, ticks, false).fingerprint == run(sc, world, Some((1, true, true)), seed, ticks, false).fingerprint { same += 1; }
+                }
+            }
+        }
+        println!("Ц7 content check: v2 as in the content against K₂ = 1 set here, seeds {first}–{}: {same} of {total} runs identical, every actor metric every tick.", first + seeds - 1);
+        return;
+    }
     println!("# Ц7 — death and submission by war, seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     let models: [Model; 3] = [None, Some((1, true, false)), Some((1, true, true))];
     let mut eo_rows = Vec::new();
@@ -524,6 +547,63 @@ fn c1_sources(first: u64, seeds: u64, ticks: u32) {
                 cv.sort_by(|p, q| p.1.partial_cmp(&q.1).unwrap());
                 println!("| {sc} {world} | {a} | {lab} | {floor:.0} % | {:.1} | {:.1} | {:.0} | {vt:.0} | {} | {} |", mean(&army), mean(&coh), mean(&pr), v.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; "),
                     cv.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; "));
+            }
+        }
+    }
+}
+
+/// Why the papacy submits to Naples more often under Ц8: milan, K₂ = 1, the cohesion pull on and
+/// off; mean army, quality, cohesion, economic output and population of both, their strength
+/// ratio, and the games in which the papacy submits.
+fn papacy_pair(first: u64, seeds: u64, ticks: u32) {
+    println!("# Naples and the papacy, milan, K₂ = 1, seeds {first}–{}: Ц8's cohesion pull on / off\n", first + seeds - 1);
+    println!("| world | cohesion pull | actor | army | quality | cohesion | economic output | population | S Naples / S papacy (mean of ticks) | papacy submits (games) |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
+    for world in ["none", "aggressive"] {
+        for pull in [None, Some(0.12)] {
+            let mut acc: BTreeMap<&str, [f64; 5]> = BTreeMap::new();
+            let mut n = 0.0;
+            let (mut ratio, mut rn): (f64, f64) = (0.0, 0.0);
+            let mut submits = 0;
+            for seed in first..first + seeds {
+                let db = engine13::db::Db::open_in_memory().unwrap();
+                let mut st = engine13::AppState::default();
+                engine13::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+                st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+                {
+                    let s = st.current_scenario.as_mut().unwrap();
+                    s.features.economy_v2 = true;
+                    s.economy_v2_conquest_k2 = Some(1);
+                    s.economy_v2_cohesion_pull = pull;
+                }
+                let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, "milan_1477"));
+                let mut sub = false;
+                for _ in 0..ticks {
+                    match &strategy {
+                        Some(s) => { play_scripted_tick(&mut st, s); }
+                        None => {
+                            let ws = st.world_state.as_mut().unwrap();
+                            let scn = st.current_scenario.as_ref().unwrap();
+                            engine13::engine::tick(ws, scn, &mut st.event_log, st.rng.as_mut().unwrap());
+                        }
+                    }
+                    let ws = st.world_state.as_ref().unwrap();
+                    if ws.vassalages.iter().any(|v| v.vassal_id == "papacy" && v.overlord_id == "naples") { sub = true; }
+                    let (Some(na), Some(pa)) = (ws.actors.get("naples"), ws.actors.get("papacy")) else { continue };
+                    n += 1.0;
+                    for (id, a) in [("naples", na), ("papacy", pa)] {
+                        let e = acc.entry(id).or_default();
+                        for (i, m) in ["military_size", "military_quality", "cohesion", "economic_output", "population"].iter().enumerate() { e[i] += a.get_metric(m); }
+                    }
+                    let s = |a: &engine13::core::Actor| a.get_metric("military_size") * a.get_metric("military_quality") / 100.0;
+                    if s(pa) > 0.0 { ratio += s(na) / s(pa); rn += 1.0; }
+                }
+                if sub { submits += 1; }
+            }
+            for id in ["naples", "papacy"] {
+                let e = acc[id];
+                println!("| {world} | {} | {id} | {:.1} | {:.1} | {:.1} | {:.1} | {:.0} | {} | {} |", pull.map_or("off".into(), |r| format!("{r}")), e[0] / n, e[1] / n, e[2] / n, e[3] / n, e[4] / n,
+                    if id == "naples" { format!("{:.2}", ratio / rn.max(1.0)) } else { String::new() }, if id == "naples" { submits.to_string() } else { String::new() });
             }
         }
     }

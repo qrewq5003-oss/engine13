@@ -226,6 +226,7 @@ pub fn load_milan_1477() -> Scenario {
         economy_v2_legitimacy_pull: Some(0.03),
         economy_v2_combat_outcome: true,
         economy_v2_conquest_k2: None,
+        economy_v2_cohesion_pull: Some(0.12),
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),

@@ -362,6 +362,13 @@ pub struct Scenario {
     /// replacing v1's legitimacy < 10). `None` = none of it.
     #[serde(default)]
     pub economy_v2_conquest_k2: Option<u32>,
+    /// Economy v2 only (Ц8): the rate at which `cohesion` is pulled toward its norm `T_C` = the
+    /// authored starting cohesion + the levels the actor's tags give. With it, tags' `cohesion`
+    /// modifiers are levels, the cohesion-to-cohesion decay rule is not applied (the pull is its
+    /// two-sided successor), and the thresholds of rules reading cohesion are measured against `T_C`
+    /// (`threshold × T_C / 100`). The thresholds of the collapse paths stay absolute. `None` = none.
+    #[serde(default)]
+    pub economy_v2_cohesion_pull: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
