@@ -165,12 +165,14 @@ pub struct WorldState {
     /// Tag spread cooldowns - key: "tag_{id}_{sorted_pair}", value: last tick
     #[serde(default)]
     pub tag_spread_cooldowns: HashMap<String, u32>,
-    /// Economy v2 (`ScenarioFeatures::economy_v2`, brief §9.6): the `economic_output`
-    /// modifier each tag has given each actor as a **level** — added once when the tag
-    /// appears, taken back when it leaves (Ц1, variant (д) of A46). Empty with v2 off and
-    /// then not written to a save, so a v1 save is byte-identical.
+    /// Economy v2 (`ScenarioFeatures::economy_v2`, brief §9.6): the modifier each tag has given
+    /// each actor as a **level** — added once when the tag appears, taken back when it leaves —
+    /// keyed metric → actor → tag. The metrics are those the scenario makes levels
+    /// (`engine::level_metrics`: `economic_output` in Ц1, `external_pressure` in Ц6,
+    /// `legitimacy` in Ц5). Empty with v2 off and then not written to a save, so a v1 save is
+    /// byte-identical.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub eo_tag_levels: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
+    pub tag_levels: std::collections::BTreeMap<String, std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>>,
     /// Economy v2 (Ц2): consecutive ticks each actor's treasury has been below zero. Empty
     /// with v2 off and then not written to a save.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -179,10 +181,6 @@ pub struct WorldState {
     /// Empty with v2 off and then not written to a save.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub depop_ticks: std::collections::BTreeMap<String, u32>,
-    /// Economy v2 (Ц6): the `external_pressure` modifier each tag has given each actor as a
-    /// level, like `eo_tag_levels`. Empty with the rule off and then not written to a save.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub ep_tag_levels: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -233,10 +231,9 @@ impl WorldState {
             actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
-            eo_tag_levels: Default::default(),
+            tag_levels: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
-            ep_tag_levels: Default::default(),
         }
     }
 
@@ -279,10 +276,9 @@ impl WorldState {
             actions_per_tick: 0,
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
-            eo_tag_levels: Default::default(),
+            tag_levels: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
-            ep_tag_levels: Default::default(),
         }
     }
 
