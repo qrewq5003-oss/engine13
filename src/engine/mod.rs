@@ -270,7 +270,7 @@ pub fn tick(
 
     // Phase 7b: Vassalage formation / dissolution (parallel to collapses).
     // Runs after collapses so dead actors are already pruned and never vassalized.
-    phase_vassalage(world, event_log);
+    phase_vassalage(world, scenario, event_log);
 
     // Phase 8: Record changes and generation mechanics
     phase_record(world, scenario, event_log);
@@ -894,8 +894,8 @@ fn strip_tags_of_absent_actors(world: &mut WorldState, scenario: &Scenario) {
 // Phase 7b: Vassalage (formation / dissolution)
 // ============================================================================
 
-fn phase_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
-    interactions::check_vassalage(world, event_log);
+fn phase_vassalage(world: &mut WorldState, scenario: &Scenario, event_log: &mut EventLog) {
+    interactions::check_vassalage(world, event_log, !interactions::conquest_on(scenario));
 }
 
 // ============================================================================
@@ -1329,6 +1329,13 @@ fn check_milestone_events(
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
             // One-time effects, authored on the milestone (B54)
             apply_milestone_effects(world, milestone, scenario.features.economy_v2 && census::debt_as_pay());
+            // Economy v2 (Ц7): an authored war of conquest — the pair's vassalage is broken, it may
+            // not bind again, and the target's streak starts anew against the attacker.
+            if let Some(bc) = milestone.begins_conquest.as_ref().filter(|_| interactions::conquest_on(scenario)) {
+                world.vassalages.retain(|v| !((v.vassal_id == bc.target && v.overlord_id == bc.attacker) || (v.vassal_id == bc.attacker && v.overlord_id == bc.target)));
+                world.conquests.insert((bc.attacker.clone(), bc.target.clone()));
+                world.war_streaks.remove(&bc.target);
+            }
 
             // Spawn actor if configured
             if let Some(cfg) = &milestone.spawn_actor {
@@ -2128,11 +2135,16 @@ fn check_collapses(
                     })
                     .unwrap_or(false)
         });
-        let conquest_collapse =
+        // Economy v2 (Ц7): the conquest path reads the war — a target beaten `K₂` times in a row by
+        // the attacker of a declared war of conquest — not legitimacy, which stays with paths 1–2.
+        let conquest_collapse = if interactions::conquest_on(scenario) {
+            world.conquered_by.contains_key(actor_id)
+        } else {
             actor.get_metric("military_size") < crate::engine::interactions::MIN_DEFENSIBLE_MILITARY
-            && actor.get_metric("legitimacy") < 10.0
-            && actor.get_metric("external_pressure") > 85.0
-            && besieged;
+                && actor.get_metric("legitimacy") < 10.0
+                && actor.get_metric("external_pressure") > 85.0
+                && besieged
+        };
 
         let in_danger = classic_collapse || internal_collapse || conquest_collapse;
 
@@ -2466,6 +2478,7 @@ mod tests {
             economy_v2_pressure_pull: None,
             economy_v2_legitimacy_pull: None,
             economy_v2_combat_outcome: false,
+            economy_v2_conquest_k2: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2634,6 +2647,7 @@ mod tests {
             group: group.map(str::to_string),
             requires_alive: requires_alive.iter().map(|s| s.to_string()).collect(),
             effects: Default::default(),
+            begins_conquest: None,
         }
     }
 
@@ -2752,6 +2766,88 @@ mod tests {
         assert!((run(true, Some(0.1)) - 14.4).abs() < 1e-9, "pulled a tenth of the way to T");
         assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(run(true, None), 10.0, "no r, no pull");
+    }
+
+    /// A world of two neighbours for the war tests: a great power and a small one, with battles
+    /// on every allowed tick (the conquest rule on when `k2` is given).
+    fn war_world(k2: Option<u32>) -> (Scenario, WorldState) {
+        let mut scenario = empty_scenario();
+        scenario.features.economy_v2 = true;
+        scenario.economy_v2_combat_outcome = true;
+        scenario.economy_v2_conquest_k2 = k2;
+        scenario.military_conflict_probability = 1.0;
+        scenario.actors.push(vassalage_actor("great", 1000.0, 0.0, 50.0, 50.0, &["small"]));
+        scenario.actors.push(vassalage_actor("small", 20.0, 0.0, 50.0, 50.0, &["great"]));
+        let mut world = WorldState::with_seed("test".into(), 1430, 0);
+        let mut great = vassalage_actor("great", 1000.0, 0.0, 50.0, 50.0, &["small"]);
+        great.set_metric("military_quality", 100.0);
+        world.actors.insert("great".into(), great);
+        world.actors.insert("small".into(), vassalage_actor("small", 20.0, 0.0, 50.0, 50.0, &["great"]));
+        (scenario, world)
+    }
+
+    fn fight(world: &mut WorldState, scenario: &Scenario, ticks: std::ops::Range<u32>) {
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
+        let mut log = EventLog::new();
+        for t in ticks {
+            world.tick = t;
+            interactions::calculate_interactions(world, scenario, &mut log, &mut rng);
+        }
+    }
+
+    /// Economy v2 (Ц7): three battles lost in a row to an overwhelming winner make the loser its
+    /// vassal. Both ways: without the conquest rule nobody submits.
+    #[test]
+    fn economy_v2_lost_battles_make_a_vassal() {
+        for (k2, expect) in [(Some(1), true), (None, false)] {
+            let (scenario, mut world) = war_world(k2);
+            fight(&mut world, &scenario, 3..40);
+            let bound = world.vassalages.iter().any(|v| v.vassal_id == "small" && v.overlord_id == "great");
+            assert_eq!(bound, expect, "conquest rule {k2:?}");
+        }
+    }
+
+    /// Economy v2 (Ц7): overlord and vassal do not fight. Both ways: without the rule the same
+    /// bound pair does.
+    #[test]
+    fn economy_v2_vassal_and_overlord_do_not_fight() {
+        for (k2, peace) in [(Some(1), true), (None, false)] {
+            let (scenario, mut world) = war_world(k2);
+            world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "great".into(), formed_tick: 0 });
+            fight(&mut world, &scenario, 3..40);
+            assert_eq!(world.actors["small"].get_metric("military_size") == 20.0, peace, "conquest rule {k2:?}");
+        }
+    }
+
+    /// Economy v2 (Ц7): `begins_conquest` breaks the pair's vassalage and forbids it again; then
+    /// K₂ lost battles kill the target by the conquest path. Both ways: without the rule the
+    /// milestone leaves the vassalage, and the conquest path keeps reading legitimacy.
+    #[test]
+    fn economy_v2_declared_conquest_breaks_the_bond_and_kills() {
+        let run = |k2: Option<u32>| {
+            let (mut scenario, mut world) = war_world(k2);
+            let mut m = dated_milestone("assault", None, &[]);
+            m.condition.condition_type = EventConditionType::Tick { tick: 2 };
+            m.begins_conquest = Some(crate::core::BeginsConquest { attacker: "great".into(), target: "small".into() });
+            scenario.milestone_events = vec![m];
+            world.vassalages.push(crate::core::Vassalage { vassal_id: "small".into(), overlord_id: "great".into(), formed_tick: 0 });
+            world.tick = 2;
+            let mut log = EventLog::new();
+            check_milestone_events(&mut world, &scenario, &mut log);
+            let bond_after_milestone = !world.vassalages.is_empty();
+            fight(&mut world, &scenario, 3..40);
+            let rebound = !world.vassalages.is_empty();
+            let conquered = world.conquered_by.get("small").cloned();
+            // the conquest path: in danger while conquered, dead after its three ticks
+            for t in 40..44 {
+                world.tick = t;
+                check_collapses(&mut world, &scenario, &mut log);
+            }
+            (bond_after_milestone, rebound, conquered, world.dead_actor_ids.contains("small"))
+        };
+        assert_eq!(run(Some(1)), (false, false, Some("great".to_string()), true), "broken, not rebound, conquered, dead");
+        let (bond, _, conquered, dead) = run(None);
+        assert!(bond && conquered.is_none() && !dead, "without the rule: the bond stays, nobody is conquered");
     }
 
     /// Economy v2 (Ц4): the battle's outcome. Over a uniform grid of draws the attacker wins the
@@ -3360,11 +3456,11 @@ mod tests {
         let mut log = EventLog::new();
 
         // Needs 3 consecutive ticks in band before forming.
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert!(world.vassalages.is_empty(), "must not form before 3 ticks");
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert!(world.vassalages.is_empty(), "must not form before 3 ticks");
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
 
         assert_eq!(world.vassalages.len(), 1);
         let v = &world.vassalages[0];
@@ -3399,7 +3495,7 @@ mod tests {
         let mut log = EventLog::new();
 
         for _ in 0..3 {
-            interactions::check_vassalage(&mut world, &mut log);
+            interactions::check_vassalage(&mut world, &mut log, true);
         }
 
         // "small" submits — but to "free", not to the stronger vassal "v".
@@ -3418,12 +3514,12 @@ mod tests {
         let mut log = EventLog::new();
 
         // Stable: vassal weak (10 < 80% of 20) and overlord healthy.
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert_eq!(world.vassalages.len(), 1, "must stay bound while weak");
 
         // Revolt path 1: vassal's military catches up (>= 80% of overlord).
         world.actors.get_mut("small").unwrap().set_metric("military_size", 16.0); // 16 >= 20*0.8
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert!(world.vassalages.is_empty(), "vassal must revolt once strong enough");
 
         // Revolt path 2: overlord itself enters the FULL vassalage band (all three
@@ -3433,13 +3529,13 @@ mod tests {
         // Only external_pressure in band — legitimacy/cohesion still healthy: must NOT revolt.
         let big = world.actors.get_mut("big").unwrap();
         big.set_metric("external_pressure", 75.0);
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert_eq!(world.vassalages.len(), 1, "single slipped metric must not free the vassal");
         // Now drive legitimacy and cohesion into band too → full band → revolt.
         let big = world.actors.get_mut("big").unwrap();
         big.set_metric("legitimacy", 18.0);
         big.set_metric("cohesion", 22.0);
-        interactions::check_vassalage(&mut world, &mut log);
+        interactions::check_vassalage(&mut world, &mut log, true);
         assert!(world.vassalages.is_empty(), "vassal must break free from a fully-weakened overlord");
     }
 
@@ -3732,6 +3828,7 @@ mod tests {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         }];
         let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
@@ -3815,6 +3912,7 @@ mod tests {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);

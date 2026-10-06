@@ -181,6 +181,19 @@ pub struct WorldState {
     /// Empty with v2 off and then not written to a save.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub depop_ticks: std::collections::BTreeMap<String, u32>,
+    /// Economy v2 (Ц7): each actor's running streak of battles lost — (the winner, the count) —
+    /// counting only losses to one winner at three times its strength or more. Empty without
+    /// the conquest rule and then not written to a save.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub war_streaks: std::collections::BTreeMap<String, (String, u32)>,
+    /// Economy v2 (Ц7): wars of conquest declared by milestones, (attacker, target). Such a pair
+    /// may not bind as vassals again.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub conquests: std::collections::BTreeSet<(String, String)>,
+    /// Economy v2 (Ц7): actors conquered in war -> their conqueror (the conquest path reads it;
+    /// the record stays after the death).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub conquered_by: std::collections::BTreeMap<String, String>,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -232,6 +245,9 @@ impl WorldState {
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             tag_levels: Default::default(),
+            war_streaks: Default::default(),
+            conquests: Default::default(),
+            conquered_by: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }
@@ -277,6 +293,9 @@ impl WorldState {
             generation_mechanics: None,
             tag_spread_cooldowns: HashMap::new(),
             tag_levels: Default::default(),
+            war_streaks: Default::default(),
+            conquests: Default::default(),
+            conquered_by: Default::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }

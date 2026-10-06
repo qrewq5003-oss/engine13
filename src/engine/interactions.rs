@@ -336,6 +336,68 @@ pub fn threat_model_on(scenario: &Scenario) -> bool {
     scenario.features.economy_v2 && scenario.economy_v2_pressure_pull.is_some() && crate::core::census::threat_items() >= 1
 }
 
+/// Economy v2 (Ц7): war decides submission and conquest (needs the battle outcome).
+pub fn conquest_on(scenario: &Scenario) -> bool {
+    scenario.features.economy_v2 && scenario.economy_v2_combat_outcome && scenario.economy_v2_conquest_k2.is_some()
+}
+
+/// Economy v2 (Ц7): a winner at least this many times the loser's strength overwhelms it.
+pub const CONQUEST_RATIO: f64 = 3.0;
+/// Economy v2 (Ц7): battles lost in a row to one overwhelming winner that make the loser its vassal.
+pub const SUBMISSION_STREAK: u32 = 3;
+
+/// The two actors are bound by vassalage, either way.
+pub fn bound_by_vassalage(world: &WorldState, a: &str, b: &str) -> bool {
+    world.vassalages.iter().any(|v| (v.vassal_id == a && v.overlord_id == b) || (v.vassal_id == b && v.overlord_id == a))
+}
+
+/// Economy v2 (Ц7): what a battle with an outcome does to the war between the two. The winner's
+/// own streak ends. The loser's streak counts losses in a row to one winner at `CONQUEST_RATIO`
+/// times its strength or more; any other battle of the loser starts it again. Under a declared
+/// war of conquest (`world.conquests`) the streak reaching `k2` marks the loser conquered (the
+/// conquest path kills it); otherwise reaching `SUBMISSION_STREAK` makes it the winner's vassal,
+/// if the hierarchy allows (a vassal is never an overlord, and nobody is two lords' vassal).
+#[allow(clippy::too_many_arguments)]
+fn record_war_result(world: &mut WorldState, winner: &str, loser: &str, s_w: f64, s_l: f64, k2: u32, current_tick: u32, current_year: i32, event_log: &mut EventLog) {
+    world.war_streaks.remove(winner);
+    if world.conquered_by.contains_key(loser) {
+        return;
+    }
+    let qualifies = s_w >= CONQUEST_RATIO * s_l;
+    let streak = world.war_streaks.entry(loser.to_string()).or_insert((winner.to_string(), 0));
+    if qualifies {
+        if streak.0 == winner { streak.1 += 1; } else { *streak = (winner.to_string(), 1); }
+    } else {
+        *streak = (winner.to_string(), 0);
+    }
+    let count = streak.1;
+    if world.conquests.contains(&(winner.to_string(), loser.to_string())) {
+        if count >= k2 {
+            world.conquered_by.insert(loser.to_string(), winner.to_string());
+        }
+        return;
+    }
+    if count < SUBMISSION_STREAK {
+        return;
+    }
+    let is_vassal = |id: &str| world.vassalages.iter().any(|v| v.vassal_id == id);
+    let is_overlord = |id: &str| world.vassalages.iter().any(|v| v.overlord_id == id);
+    if is_vassal(loser) || is_overlord(loser) || is_vassal(winner) {
+        return;
+    }
+    world.vassalages.push(crate::core::Vassalage { vassal_id: loser.to_string(), overlord_id: winner.to_string(), formed_tick: current_tick });
+    world.war_streaks.remove(loser);
+    event_log.add(Event::new(
+        format!("vassalage_{}_{}", winner, loser),
+        current_tick,
+        current_year,
+        loser.to_string(),
+        EventType::Diplomatic,
+        true,
+        format!("{} подчинился {} после поражений", loser, winner),
+    ));
+}
+
 /// Calculate all interactions between neighboring actors
 pub fn calculate_interactions(
     world: &mut WorldState,
@@ -485,6 +547,12 @@ fn calculate_military_interaction(
         return;
     }
 
+    // Economy v2 (Ц7): vassalage is a peace bought with tribute — overlord and vassal do not fight.
+    // Checked before any draw, so the pair simply has no battle.
+    if conquest_on(scenario) && bound_by_vassalage(world, actor_a_id, actor_b_id) {
+        return;
+    }
+
     // Get all neighbors for force projection calculation
     let actor_a_neighbors: Vec<&crate::core::Actor> = actor_a.neighbors.iter()
         .filter_map(|n| world.actors.get(&n.id))
@@ -606,6 +674,11 @@ fn calculate_military_interaction(
             if !threat_model {
                 loser.add_metric("external_pressure", pressure_gain);
             }
+        }
+        if let Some(k2) = scenario.economy_v2_conquest_k2.filter(|_| conquest_on(scenario)) {
+            let (s_w, s_l) = if battle.attacker_wins { (battle.strength_attacker, battle.strength_defender) } else { (battle.strength_defender, battle.strength_attacker) };
+            let (w, l) = (winner_id.clone(), loser_id.clone());
+            record_war_result(world, &w, &l, s_w, s_l, k2, current_tick, current_year, event_log);
         }
     } else {
     if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
@@ -1007,7 +1080,7 @@ fn in_vassalage_band(actor: &crate::core::Actor) -> bool {
 ///
 /// Consumes no RNG — formation and revolt are fully deterministic — so scenarios
 /// that never form a vassalage see an unchanged simulation.
-pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
+pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog, band_formation: bool) {
     let current_tick = world.tick;
     let current_year = world.year;
 
@@ -1057,6 +1130,10 @@ pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog) {
     }
 
     // --- 3. Formation ------------------------------------------------------
+    // Economy v2 (Ц7): submission comes from war (`record_war_result`); the band stays in v1.
+    if !band_formation {
+        return;
+    }
     // Hierarchy guard sets: an actor bound as a vassal can never be an overlord and
     // vice versa. Kept mutable so relationships formed earlier in this same tick are
     // respected by later candidates.

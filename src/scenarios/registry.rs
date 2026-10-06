@@ -216,6 +216,20 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A milestone's `begins_conquest` names two starting actors (Ц7).
+    for m in &scenario.milestone_events {
+        if let Some(bc) = &m.begins_conquest {
+            for id in [&bc.attacker, &bc.target] {
+                if !scenario.actors.iter().any(|a| &a.id == id && !a.is_successor_template) {
+                    errors.push(format!("milestone '{}': begins_conquest names '{id}', which is not a starting actor", m.id));
+                }
+            }
+            if bc.attacker == bc.target {
+                errors.push(format!("milestone '{}': begins_conquest names the same actor twice", m.id));
+            }
+        }
+    }
+
     // A tag's `ends_with` names a milestone of the same scenario (A4).
     for t in &scenario.tag_definitions {
         if let Some(m) = &t.ends_with {

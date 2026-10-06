@@ -354,6 +354,14 @@ pub struct Scenario {
     /// loses 5–15 %, the defender 15–30 % and the cohesion.
     #[serde(default)]
     pub economy_v2_combat_outcome: bool,
+    /// Economy v2 only (Ц7), with the battle outcome: war decides submission and conquest. Three
+    /// battles lost in a row to one winner at three times its strength or more make the loser
+    /// that winner's vassal (the old band of legitimacy 10–25 etc. stays in v1 only); overlord and
+    /// vassal do not fight each other; after a milestone's `begins_conquest` this many losses in
+    /// a row to the attacker at three times its strength kill the target (the conquest path,
+    /// replacing v1's legitimacy < 10). `None` = none of it.
+    #[serde(default)]
+    pub economy_v2_conquest_k2: Option<u32>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
@@ -700,6 +708,20 @@ pub struct MilestoneEvent {
     /// Validated at load: an actor written to is a starting actor or in `requires_alive`.
     #[serde(default)]
     pub effects: HashMap<MetricRef, f64>,
+    /// Economy v2 only (Ц7): the authored start of a war of conquest. On the tick the milestone
+    /// fires the vassalage of the pair (either way) is broken, the pair may not bind again, and
+    /// from then on `K₂` battles lost in a row to the attacker at three times its strength or
+    /// more kill the target by the conquest path. Validated at load: both are starting actors.
+    #[serde(default)]
+    pub begins_conquest: Option<BeginsConquest>,
+}
+
+/// The pair of a war of conquest declared by a milestone (Ц7).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BeginsConquest {
+    pub attacker: String,
+    pub target: String,
 }
 
 /// Configuration for spawning a new actor via milestone event

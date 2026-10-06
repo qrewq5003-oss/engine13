@@ -205,6 +205,7 @@ pub fn load_rome_375() -> Scenario {
         economy_v2_pressure_pull: Some(0.10),
         economy_v2_legitimacy_pull: Some(0.03),
         economy_v2_combat_outcome: true,
+        economy_v2_conquest_k2: None,
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),
@@ -1494,6 +1495,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1525,6 +1527,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1547,6 +1550,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1568,6 +1572,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1591,6 +1596,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             group: None,
             requires_alive: vec![],
             effects: Default::default(),
+            begins_conquest: None,
         },
     ]
 }
