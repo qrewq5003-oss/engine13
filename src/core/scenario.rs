@@ -342,11 +342,6 @@ pub struct Scenario {
     /// `None` = no pull.
     #[serde(default)]
     pub economy_v2_pressure_pull: Option<f64>,
-    /// Economy v2 only (Ц6 stage 3): authored auto-deltas that write `external_pressure` are not
-    /// applied — the threat `T_p` takes their role (they were written as a stand-in for it). Their
-    /// conditions and noise are still evaluated, so the random stream is the same.
-    #[serde(default)]
-    pub economy_v2_pressure_auto_deltas_off: bool,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

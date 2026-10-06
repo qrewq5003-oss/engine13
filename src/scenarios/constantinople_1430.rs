@@ -234,9 +234,8 @@ pub fn load_constantinople_1430() -> Scenario {
         // Economy v2 (Ц2 stage 3): depopulation as collapse — set by the stage's pre-commitment.
         economy_v2_depopulation_ticks: None,
         // Economy v2 (Ц6): pressure from a real threat — measured, not yet adopted.
-        economy_v2_pressure_tags_as_level: false,
-        economy_v2_pressure_pull: None,
-        economy_v2_pressure_auto_deltas_off: false,
+        economy_v2_pressure_tags_as_level: true,
+        economy_v2_pressure_pull: Some(0.10),
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
