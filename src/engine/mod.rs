@@ -2465,6 +2465,7 @@ mod tests {
             economy_v2_pressure_tags_as_level: false,
             economy_v2_pressure_pull: None,
             economy_v2_legitimacy_pull: None,
+            economy_v2_combat_outcome: false,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2751,6 +2752,70 @@ mod tests {
         assert!((run(true, Some(0.1)) - 14.4).abs() < 1e-9, "pulled a tenth of the way to T");
         assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(run(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц4): the battle's outcome. Over a uniform grid of draws the attacker wins the
+    /// share `S_a / (S_a + S_d)`, `S = army × quality / 100`. Both ways: with equal armies the side
+    /// of higher quality wins more often, and swapping the qualities swaps the outcome; with equal
+    /// qualities numbers decide; without quality (variant (б)) equal armies win half each.
+    #[test]
+    fn economy_v2_battle_outcome_reads_strength() {
+        let side = |army: f64, quality: f64| {
+            let mut a = vassalage_actor("x", army, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("military_quality", quality);
+            a
+        };
+        let share = |a: &crate::core::Actor, d: &crate::core::Actor, with_quality: bool| {
+            let n = 10_000;
+            (0..n).filter(|i| interactions::resolve_battle(a, d, (*i as f64 + 0.5) / n as f64, with_quality, true).attacker_wins).count() as f64 / n as f64
+        };
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-3;
+        assert!(close(share(&side(100.0, 80.0), &side(100.0, 40.0), true), 2.0 / 3.0), "higher quality wins two in three");
+        assert!(close(share(&side(100.0, 40.0), &side(100.0, 80.0), true), 1.0 / 3.0), "swapped qualities, swapped outcome");
+        assert!(close(share(&side(100.0, 60.0), &side(50.0, 60.0), true), 2.0 / 3.0), "equal quality: numbers decide");
+        assert!(close(share(&side(100.0, 80.0), &side(100.0, 40.0), false), 0.5), "without quality equal armies are even");
+        // a victory over the weak is nearly free: S 80 against S 5 scales the winner's loss by 5 / 80
+        let b = interactions::resolve_battle(&side(100.0, 80.0), &side(10.0, 50.0), 0.0, true, true);
+        assert!(b.attacker_wins && (b.winner_scale - 5.0 / 80.0).abs() < 1e-12);
+        assert_eq!(interactions::resolve_battle(&side(100.0, 80.0), &side(10.0, 50.0), 0.0, true, false).winner_scale, 1.0, "unscaled (variant (в))");
+    }
+
+    /// Economy v2 (Ц4): with the outcome on, the loser — whichever side — takes the 15–30 % army
+    /// loss and the cohesion loss, the winner a scaled 5–15 %. Both ways: off, the defender always
+    /// takes them and the attacker always loses 5–15 %.
+    #[test]
+    fn economy_v2_battle_loser_takes_the_losses() {
+        let run = |outcome: bool, seed: u64| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_combat_outcome = outcome;
+            scenario.military_conflict_probability = 1.0;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.tick = 5;
+            // the bigger army attacks; its quality is so low that it is the weaker side
+            let mut a = vassalage_actor("a", 1000.0, 0.0, 50.0, 50.0, &["b"]);
+            a.set_metric("military_quality", 1.0);
+            let mut b = vassalage_actor("b", 100.0, 0.0, 50.0, 50.0, &["a"]);
+            b.set_metric("military_quality", 100.0);
+            world.actors.insert("a".into(), a);
+            world.actors.insert("b".into(), b);
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+            interactions::calculate_interactions(&mut world, &scenario, &mut log, &mut rng);
+            let g = |id: &str, m: &str| world.actors[id].get_metric(m);
+            (g("a", "military_size") / 1000.0, g("a", "cohesion"), g("b", "military_size") / 100.0, g("b", "cohesion"))
+        };
+        let fought = |r: (f64, f64, f64, f64)| r.0 < 1.0 || r.2 < 1.0;
+        let seed = (0..200).find(|s| fought(run(false, *s))).expect("a battle in 200 seeds");
+        let off = run(false, seed);
+        assert!(off.1 > 45.0 && off.3 <= 40.0, "off: the defender loses cohesion");
+        assert!((0.85..=0.95).contains(&off.0), "off: the attacker loses 5–15 %");
+        // on: S_a = 10, S_d = 100 — the defender wins in ten of eleven; find a battle it won
+        let seed = (0..200).find(|s| { let r = run(true, *s); fought(r) && r.1 <= 40.0 }).expect("a defender's win in 200 seeds");
+        let on = run(true, seed);
+        assert!((0.70..=0.85).contains(&on.0) && on.1 <= 40.0, "on: the losing attacker takes 15–30 % and the cohesion");
+        // the winner's 5–15 % scaled by S_loser / S_winner = 10 / 100
+        assert!((0.985..=0.995).contains(&on.2) && on.3 > 45.0, "on: the winner's loss is scaled, its cohesion kept");
     }
 
     /// Economy v2 (Ц5): legitimacy is pulled toward `T_L` = the authored start + the tags' levels.

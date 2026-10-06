@@ -174,6 +174,33 @@ pub fn strong_attacker_bonus(military_mod: f64, friction: f64) -> f64 {
     military_mod * (0.5 + friction * 0.5)
 }
 
+/// The outcome of a battle (economy v2, Ц4), before anything is written.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BattleOutcome {
+    pub strength_attacker: f64,
+    pub strength_defender: f64,
+    pub attacker_wins: bool,
+    /// the factor on the winner's 5–15 % loss: min(1, S_loser / S_winner), or 1 unscaled
+    pub winner_scale: f64,
+}
+
+/// Resolve a battle from one uniform draw in `[0, 1)`: a side's strength is
+/// `army × quality / 100` (`army` alone when `with_quality` is false), and the attacker wins
+/// when the draw falls below `S_a / (S_a + S_d)` (one half if both are zero). The winner's loss is
+/// scaled by `min(1, S_loser / S_winner)` when `scaled` — a victory over the weak is nearly free.
+pub fn resolve_battle(attacker: &crate::core::Actor, defender: &crate::core::Actor, win_draw: f64, with_quality: bool, scaled: bool) -> BattleOutcome {
+    let strength = |a: &crate::core::Actor| {
+        let army = a.get_metric("military_size").max(0.0);
+        if with_quality { army * a.get_metric("military_quality").clamp(0.0, 100.0) / 100.0 } else { army }
+    };
+    let (s_a, s_d) = (strength(attacker), strength(defender));
+    let p = if s_a + s_d > 0.0 { s_a / (s_a + s_d) } else { 0.5 };
+    let attacker_wins = win_draw < p;
+    let (s_w, s_l) = if attacker_wins { (s_a, s_d) } else { (s_d, s_a) };
+    let winner_scale = if !scaled || s_w <= 0.0 { 1.0 } else { (s_l / s_w).min(1.0) };
+    BattleOutcome { strength_attacker: s_a, strength_defender: s_d, attacker_wins, winner_scale }
+}
+
 /// Effective military strength accounting for force projection through neighbors
 pub fn effective_military(actor: &crate::core::Actor, neighbors: Vec<&crate::core::Actor>) -> f64 {
     let active_neighbors = neighbors.len().max(1);
@@ -534,12 +561,53 @@ fn calculate_military_interaction(
         return;
     }
 
+    // Economy v2 (Ц4): the battle has a winner. Its draw comes right after the roll and before
+    // the four loss draws below, from the same stream; with the switch off it is not drawn and
+    // the stream is unchanged.
+    let win_draw: Option<f64> = (scenario.features.economy_v2 && scenario.economy_v2_combat_outcome).then(|| rng.gen());
+
     // Apply losses
     let attacker_loss = 0.05 + rng.gen::<f64>() * 0.10; // 5-15%
     let defender_loss = 0.15 + rng.gen::<f64>() * 0.15;   // 15-30%
     let cohesion_loss = 10.0 + rng.gen::<f64>() * 10.0;  // 10-20
     let pressure_gain = 15.0 + rng.gen::<f64>() * 10.0;  // 15-25
 
+    if let Some(win_draw) = win_draw {
+        // The same four draws, by role: the 5–15 % draw is the winner's loss before scaling, the
+        // 15–30 % draw the loser's, then the loser's cohesion and pressure.
+        let (Some(a), Some(d)) = (world.actors.get(&attacker_id), world.actors.get(&defender_id)) else { return };
+        let battle = resolve_battle(a, d, win_draw, crate::core::census::combat_quality(), crate::core::census::combat_loss_scaled());
+        let (winner_id, loser_id) = if battle.attacker_wins { (&attacker_id, &defender_id) } else { (&defender_id, &attacker_id) };
+        let winner_loss = attacker_loss * battle.winner_scale;
+        crate::core::census::battle(|| crate::core::census::Battle {
+            tick: current_tick,
+            attacker: attacker_id.clone(),
+            defender: defender_id.clone(),
+            army_attacker: a.get_metric("military_size"),
+            army_defender: d.get_metric("military_size"),
+            quality_attacker: a.get_metric("military_quality"),
+            quality_defender: d.get_metric("military_quality"),
+            strength_attacker: battle.strength_attacker,
+            strength_defender: battle.strength_defender,
+            attacker_won: battle.attacker_wins,
+            winner_loss,
+            loser_loss: defender_loss,
+        });
+        if let Some(winner) = world.actors.get_mut(winner_id) {
+            let mil = winner.get_metric("military_size");
+            winner.set_metric("military_size", mil * (1.0 - winner_loss));
+        }
+        let threat_model = threat_model_on(scenario);
+        if let Some(loser) = world.actors.get_mut(loser_id) {
+            let mil = loser.get_metric("military_size");
+            loser.set_metric("military_size", mil * (1.0 - defender_loss));
+            let coh = loser.get_metric("cohesion");
+            loser.set_metric("cohesion", (coh - cohesion_loss).max(0.0));
+            if !threat_model {
+                loser.add_metric("external_pressure", pressure_gain);
+            }
+        }
+    } else {
     if let Some(attacker_actor) = world.actors.get_mut(&attacker_id) {
         let mil = attacker_actor.get_metric("military_size");
         attacker_actor.set_metric("military_size", mil * (1.0 - attacker_loss));
@@ -555,6 +623,7 @@ fn calculate_military_interaction(
         if !threat_model_on(scenario) {
             defender_actor.add_metric("external_pressure", pressure_gain);
         }
+    }
     }
 
     // Set cooldown
