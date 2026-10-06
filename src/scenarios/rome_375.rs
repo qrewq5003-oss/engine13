@@ -204,7 +204,7 @@ pub fn load_rome_375() -> Scenario {
         economy_v2_pressure_tags_as_level: true,
         economy_v2_pressure_pull: Some(0.10),
         economy_v2_legitimacy_pull: Some(0.03),
-        economy_v2_combat_outcome: false,
+        economy_v2_combat_outcome: true,
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),

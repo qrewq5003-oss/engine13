@@ -52,7 +52,7 @@ fn tiers(sc: &str) -> Vec<Vec<&'static str>> {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Model { A, B, Content }
+enum Model { A, B, Content, NoOutcome }
 
 const KMAX: usize = 8;
 
@@ -84,7 +84,11 @@ fn run(sc: &str, world: &str, m: Model, seed: u64, ticks: u32) -> Run {
     {
         let s = st.current_scenario.as_mut().unwrap();
         s.features.economy_v2 = true;
-        if m != Model::Content { s.economy_v2_combat_outcome = true; }
+        match m {
+            Model::A | Model::B => s.economy_v2_combat_outcome = true,
+            Model::Content => {}
+            Model::NoOutcome => s.economy_v2_combat_outcome = false,
+        }
     }
     census::set_combat_quality(m != Model::B);
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
@@ -210,6 +214,8 @@ fn main() {
     census::enable_battles();
     if mode == "c7" { c7(seeds, ticks); return; }
     if mode == "decline" { decline(seeds, ticks); return; }
+    if mode == "content" { content(seeds, ticks); return; }
+    if mode == "c7b" { c7b(seeds, ticks); return; }
     let first = 100;
     println!("# Ц4 closed — the corrected measure on held-out seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     let mut tot: BTreeMap<(&str, &str), (u64, u64, f64, f64)> = BTreeMap::new();
@@ -338,7 +344,7 @@ fn decline(seeds: u64, ticks: u32) {
     for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
         for world in worlds(sc) {
             let mut cells = Vec::new();
-            for (i, m) in [Model::Content, Model::A].into_iter().enumerate() {
+            for (i, m) in [Model::NoOutcome, Model::A].into_iter().enumerate() {
                 let mut c = (0u64, 0u64);
                 for seed in 100..100 + seeds {
                     for d in run(sc, world, m, seed, ticks).declines.iter().filter(|d| d.1 == 2) { c.0 += 1; c.1 += d.0 as u64; }
@@ -350,4 +356,129 @@ fn decline(seeds: u64, ticks: u32) {
         }
     }
     println!("| **all** | | **{}: {:.1} %** | **{}: {:.1} %** |", tot[0].0, share(tot[0].1, tot[0].0), tot[1].0, share(tot[1].1, tot[1].0));
+}
+
+/// The Ц4 content check: v2 as the content stands against (a) set here, held-out seeds.
+fn content(seeds: u64, ticks: u32) {
+    let (mut same, mut total) = (0, 0);
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for world in worlds(sc) {
+            for seed in 100..100 + seeds {
+                total += 1;
+                if run(sc, world, Model::Content, seed, ticks).fingerprint == run(sc, world, Model::A, seed, ticks).fingerprint { same += 1; }
+            }
+        }
+    }
+    println!("# Ц4 content check\n\nv2 as in the content against (a) set here, seeds 100–{}: {same} of {total} runs identical, every actor metric every tick.", 99 + seeds);
+}
+
+/// Ц7, the conqueror arithmetic (owner's grid): a streak is K battles lost in a row to the same
+/// winner whose strength is at least R times the loser's (`S_w ≥ R × S_l`). Any other battle of
+/// the actor — a win, a loss to someone else, a loss to a winner below R times — ends the streak;
+/// a qualifying loss to a new winner starts a new one at 1. The actor is counted as falling on its
+/// first streak of length K. From the protocols of (a), stage 1 seeds 0–29; nothing new is run
+/// beyond those games, and deaths' second-order effects are not modelled.
+fn c7b(seeds: u64, ticks: u32) {
+    const RS: [f64; 3] = [3.0, 5.0, 10.0];
+    const KS: [usize; 2] = [3, 5];
+    const PEOPLES: [&str; 5] = ["alamanni", "vandals", "visigoths", "burgundians", "franks"];
+    const WATCH: [&str; 7] = ["rome", "byzantium", "papacy", "venice", "savoy", "mantua", "ferrara"];
+    println!("# Ц7 — one conqueror of overwhelming strength: K losses in a row to the same winner with S_w ≥ R × S_l\n");
+    println!("Protocols of (a), seeds 0–{}, {ticks} ticks. An actor counts as falling on its first such streak (tick = the K-th loss).\n", seeds - 1);
+    // (cell) -> rows
+    let mut rows: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+    let mut verdict: BTreeMap<(usize, usize), Vec<(String, bool)>> = BTreeMap::new();
+    let mut who: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for world in worlds(sc) {
+            let runs: Vec<Run> = (0..seeds).map(|s| run(sc, world, Model::A, s, ticks)).collect();
+            for (ri, r) in RS.iter().enumerate() {
+                for (ki, k) in KS.iter().enumerate() {
+                    // actor -> first ticks over games
+                    let mut falls: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                    let mut conquerors: BTreeMap<String, BTreeMap<String, u32>> = BTreeMap::new();
+                    for run in &runs {
+                        let mut streak: BTreeMap<String, (String, usize)> = BTreeMap::new();
+                        let mut fallen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                        for b in &run.battles {
+                            let (w, l, s_w, s_l) = if b.attacker_won { (&b.attacker, &b.defender, b.strength_attacker, b.strength_defender) } else { (&b.defender, &b.attacker, b.strength_defender, b.strength_attacker) };
+                            // the winner's own streak ends
+                            streak.remove(w);
+                            if fallen.contains(l) { continue; }
+                            let qualifies = s_w >= r * s_l;
+                            let e = streak.entry(l.clone()).or_insert((w.clone(), 0));
+                            if qualifies {
+                                if &e.0 == w { e.1 += 1; } else { *e = (w.clone(), 1); }
+                            } else {
+                                *e = (w.clone(), 0);
+                            }
+                            if e.1 >= *k {
+                                fallen.insert(l.clone());
+                                falls.entry(l.clone()).or_default().push(b.tick as f64);
+                                *conquerors.entry(l.clone()).or_default().entry(w.clone()).or_default() += 1;
+                            }
+                        }
+                    }
+                    let games = |id: &str| falls.get(id).map_or(0, |v| v.len());
+                    let med = |id: &str| falls.get(id).map_or("—".to_string(), |v| format!("{:.0}", pct(v, 0.5)));
+                    let mut cells = Vec::new();
+                    match sc {
+                        "rome_375" => {
+                            let per_game = PEOPLES.iter().map(|p| games(p)).sum::<usize>() as f64 / seeds as f64;
+                            cells.push(format!("five peoples: {per_game:.1} a game ({})", PEOPLES.iter().map(|p| format!("{p} {} @{}", games(p), med(p))).collect::<Vec<_>>().join(", ")));
+                            cells.push(format!("rome {} @{}", games("rome"), med("rome")));
+                            verdict.entry((ri, ki)).or_default().push((format!("rome {world}: ≥ 3 of 5 a game"), per_game >= 3.0));
+                        }
+                        "constantinople_1430" => {
+                            cells.push(format!("byzantium {} @{}", games("byzantium"), med("byzantium")));
+                            if *world == "none" {
+                                let m = falls.get("byzantium").map(|v| pct(v, 0.5)).unwrap_or(f64::NAN);
+                                verdict.entry((ri, ki)).or_default().push(("constantinople none: Byzantium ≥ 20 / 30, median 40–59".into(), games("byzantium") >= 20 && (40.0..=59.0).contains(&m)));
+                            }
+                        }
+                        _ => {
+                            cells.push(format!("milan {} @{}", games("milan"), med("milan")));
+                            verdict.entry((ri, ki)).or_default().push((format!("milan {world}: Milan ≤ 1, papacy ≤ 3, Venice ≤ 3"), games("milan") <= 1 && games("papacy") <= 3 && games("venice") <= 3));
+                        }
+                    }
+                    for wch in WATCH.iter().filter(|w| !matches!(**w, "rome" | "byzantium") && sc == "milan_1477") {
+                        cells.push(format!("{wch} {} @{}", games(wch), med(wch)));
+                    }
+                    let mut all: Vec<(String, usize)> = falls.iter().map(|(id, v)| (id.clone(), v.len())).collect();
+                    all.sort_by(|a, b| b.1.cmp(&a.1));
+                    let by: Vec<String> = all.iter().take(12).map(|(id, n)| {
+                        let top = conquerors.get(id).and_then(|c| c.iter().max_by_key(|x| x.1)).map(|(w, _)| w.clone()).unwrap_or_default();
+                        format!("{id} {n} (by {top})")
+                    }).collect();
+                    rows.entry((ri, ki)).or_default().push(format!("| {sc} | {world} | {} |", cells.join("; ")));
+                    who.entry((ri, ki)).or_default().push(format!("| {sc} | {world} | {} |", if by.is_empty() { "—".into() } else { by.join(", ") }));
+                }
+            }
+        }
+    }
+    println!("## Summary: does a cell pass items 1–3 of the Ц7 measure?\n");
+    println!("| R | K | rome: ≥ 3 of 5 peoples a game, worlds | Byzantium none ≥ 20 / 30 at median 40–59 | milan: Milan ≤ 1, papacy ≤ 3, Venice ≤ 3, worlds | all |");
+    println!("|---|---|---|---|---|---|");
+    for (ri, r) in RS.iter().enumerate() {
+        for (ki, k) in KS.iter().enumerate() {
+            let v = &verdict[&(ri, ki)];
+            let cnt = |p: &str| (v.iter().filter(|x| x.0.starts_with(p) && x.1).count(), v.iter().filter(|x| x.0.starts_with(p)).count());
+            let (a, an) = cnt("rome");
+            let (b, bn) = cnt("constantinople");
+            let (c, cn) = cnt("milan");
+            println!("| {r} | {k} | {a} / {an} | {} | {c} / {cn} | {} |", if b == bn { "yes" } else { "no" }, if a == an && b == bn && c == cn { "**yes**" } else { "no" });
+        }
+    }
+    for (ri, r) in RS.iter().enumerate() {
+        for (ki, k) in KS.iter().enumerate() {
+            println!("\n## R = {r}, K = {k}\n");
+            println!("| scenario | world | games of {seeds} @ median first tick |");
+            println!("|---|---|---|");
+            for row in &rows[&(ri, ki)] { println!("{row}"); }
+            println!("\nWho falls (games, the most frequent conqueror):\n");
+            println!("| scenario | world | actors |");
+            println!("|---|---|---|");
+            for row in &who[&(ri, ki)] { println!("{row}"); }
+        }
+    }
 }
