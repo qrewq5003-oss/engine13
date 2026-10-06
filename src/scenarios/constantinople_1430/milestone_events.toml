@@ -83,6 +83,11 @@ triggers_collapse = false
 # trigger, and it duplicated `outcome_survived_alone` in the opposite tone.
 requires_alive = ["byzantium"]
 llm_context_shift = "Финальный штурм Константинополя начался."
+# Ц7 (owner's decision): Mehmed's decision of 1453 — the war of conquest begins. Economy v2 only
+# (`economy_v2_conquest_k2`): breaks the Ottoman vassalage of Byzantium and lets the war decide.
+[milestone_events.begins_conquest]
+attacker = "ottomans"
+target = "byzantium"
 [milestone_events.condition]
 type = "tick"
 tick = 46

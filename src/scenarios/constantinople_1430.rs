@@ -238,6 +238,7 @@ pub fn load_constantinople_1430() -> Scenario {
         economy_v2_pressure_pull: Some(0.10),
         economy_v2_legitimacy_pull: Some(0.03),
         economy_v2_combat_outcome: true,
+        economy_v2_conquest_k2: None,
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
