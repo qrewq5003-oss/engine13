@@ -183,13 +183,23 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
     // Economy v2 (Ц5): the same for a rule whose source is `legitimacy`, against `T_L`.
     let legitimacy_targets: std::collections::HashMap<String, f64> =
         world.actors.keys().filter_map(|id| legitimacy_target(world, scenario, id).map(|t| (id.clone(), t))).collect();
+    // Economy v2 (Ц8): the same for a rule whose source is `cohesion`, against `T_C`; and the
+    // cohesion-to-cohesion decay rule gives way to the pull (census can keep it, variant (б)).
+    let cohesion_targets: std::collections::HashMap<String, f64> =
+        world.actors.keys().filter_map(|id| cohesion_target(world, scenario, id).map(|t| (id.clone(), t))).collect();
+    let skip_cohesion_decay = scenario.features.economy_v2 && scenario.economy_v2_cohesion_pull.is_some() && !census::keep_cohesion_decay();
     for actor in world.actors.values_mut() {
         let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         let legitimacy_scale = legitimacy_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
+        let cohesion_scale = cohesion_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         for rule in &scenario.dependencies {
+            if skip_cohesion_decay && rule.from.as_str() == "cohesion" && rule.to.as_str() == "cohesion" {
+                continue;
+            }
             let scale = match rule.from.as_str() {
                 "economic_output" => eo_scale,
                 "legitimacy" => legitimacy_scale,
+                "cohesion" => cohesion_scale,
                 _ => 1.0,
             };
             apply_dependency_rule(actor, rule, tick, scale, scenario.features.economy_v2 && census::debt_as_pay());
@@ -590,6 +600,8 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     pull_pressure_to_threat(world, scenario);
     // Economy v2 (Ц5): legitimacy pulled toward its norm, same place and reason.
     pull_legitimacy_to_target(world, scenario);
+    // Economy v2 (Ц8): cohesion pulled toward its norm, same place and reason.
+    pull_cohesion_to_target(world, scenario);
 }
 
 /// Economy v2 (Ц6): the threat an actor faces — `100 × N / (N + own army)`, N = the armies of
@@ -685,10 +697,14 @@ pub fn legitimacy_target(world: &WorldState, scenario: &Scenario, actor_id: &str
 }
 
 /// Economy v2: the metrics whose tag modifiers are levels in this scenario, in name order —
-/// `economic_output` (Ц1), `external_pressure` (Ц6, when asked), `legitimacy` (Ц5, with its pull).
+/// `cohesion` (Ц8, with its pull), `economic_output` (Ц1), `external_pressure` (Ц6, when asked),
+/// `legitimacy` (Ц5, with its pull).
 pub fn level_metrics(scenario: &Scenario) -> Vec<&'static str> {
     let mut metrics = Vec::new();
     if scenario.features.economy_v2 {
+        if scenario.economy_v2_cohesion_pull.is_some() {
+            metrics.push("cohesion");
+        }
         metrics.push("economic_output");
         if scenario.economy_v2_pressure_tags_as_level {
             metrics.push("external_pressure");
@@ -698,6 +714,38 @@ pub fn level_metrics(scenario: &Scenario) -> Vec<&'static str> {
         }
     }
     metrics
+}
+
+/// Economy v2 (Ц8): the cohesion norm `T_C`, when the scenario pulls cohesion.
+pub fn cohesion_target(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    if !scenario.features.economy_v2 || scenario.economy_v2_cohesion_pull.is_none() {
+        return None;
+    }
+    metric_target(world, scenario, actor_id, "cohesion")
+}
+
+/// Economy v2 (Ц8): `C += r × (T_C − C)` for every living actor, in id order — the two-sided
+/// successor of the one-sided cohesion decay rule, which is not applied with it.
+fn pull_cohesion_to_target(world: &mut WorldState, scenario: &Scenario) {
+    if !scenario.features.economy_v2 {
+        return;
+    }
+    let Some(r) = scenario.economy_v2_cohesion_pull else { return };
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    for id in ids {
+        let Some(target) = metric_target(world, scenario, &id, "cohesion") else { continue };
+        let Some(actor) = world.actors.get_mut(&id) else { continue };
+        let current = actor.get_metric("cohesion");
+        let delta = r * (target - current);
+        actor.metrics.insert("cohesion".to_string(), current + delta);
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "cohesion pull".to_string());
+            census::metric_write(std::panic::Location::caller(), &id, "cohesion", delta, current, current + delta);
+            census::clear_write_source();
+        }
+    }
 }
 
 /// Economy v2 (Ц5): `L += r × (T_L − L)` for every living actor, in id order — the same pull as
@@ -2490,6 +2538,7 @@ mod tests {
             economy_v2_legitimacy_pull: None,
             economy_v2_combat_outcome: false,
             economy_v2_conquest_k2: None,
+            economy_v2_cohesion_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2968,6 +3017,90 @@ mod tests {
         assert!((0.70..=0.85).contains(&on.0) && on.1 <= 40.0, "on: the losing attacker takes 15–30 % and the cohesion");
         // the winner's 5–15 % scaled by S_loser / S_winner = 10 / 100
         assert!((0.985..=0.995).contains(&on.2) && on.3 > 45.0, "on: the winner's loss is scaled, its cohesion kept");
+    }
+
+    /// Economy v2 (Ц8): cohesion is pulled toward `T_C` = the authored start + the tags' levels, from
+    /// below as from above. Both ways: v1, or no r, leaves it alone.
+    #[test]
+    fn economy_v2_pulls_cohesion_toward_its_norm() {
+        let run = |v2: bool, r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_cohesion_pull = r;
+            scenario.actors.push(vassalage_actor("city", 50.0, 50.0, 50.0, 60.0, &[]));
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 20.0, &[]));
+            world.tag_levels.entry("cohesion".into()).or_default().insert("city".into(), std::collections::BTreeMap::from([("faction".to_string(), -10.0)]));
+            pull_cohesion_to_target(&mut world, &scenario);
+            world.actors["city"].get_metric("cohesion")
+        };
+        // T_C = 60 − 10 = 50; 20 + 0.12 × (50 − 20) = 23.6 — pulled up, which the decay rule never did
+        assert!((run(true, Some(0.12)) - 23.6).abs() < 1e-9);
+        assert_eq!(run(false, Some(0.12)), 20.0, "v1 does not pull");
+        assert_eq!(run(true, None), 20.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц8): with the cohesion pull, tags' `cohesion` modifiers are a level. Both ways:
+    /// without it the tag adds every tick.
+    #[test]
+    fn economy_v2_gives_cohesion_tags_as_a_level() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_cohesion_pull = r;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.actor_tags.insert("faction".into(), crate::core::ActorTag {
+                metrics_modifier: HashMap::from([(crate::core::MetricName::new("cohesion").unwrap(), -2)]),
+                spreads_via: vec![],
+            });
+            world.actors.insert("city".into(), a);
+            let mut seen = Vec::new();
+            for t in 0..4 {
+                if t == 2 { world.actors.get_mut("city").unwrap().actor_tags.remove("faction"); }
+                apply_actor_tags(&mut world, &scenario);
+                seen.push(world.actors["city"].get_metric("cohesion"));
+            }
+            seen
+        };
+        assert_eq!(run(Some(0.12)), vec![48.0, 48.0, 50.0, 50.0], "level: −2 once, back on removal");
+        assert_eq!(run(None), vec![48.0, 46.0, 46.0, 46.0], "rate: every tick while carried");
+    }
+
+    /// Economy v2 (Ц8): a rule reading cohesion measures against `T_C`, and the cohesion decay rule
+    /// gives way to the pull. Both ways: without the pull both act as authored.
+    #[test]
+    fn economy_v2_measures_cohesion_readers_against_the_norm() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_cohesion_pull = r;
+            let dep = |id: &str, to: &str, coefficient: f64, mode: crate::core::DependencyMode| crate::core::DependencyRule {
+                id: id.into(),
+                from: crate::core::MetricName::new("cohesion").unwrap(),
+                to: crate::core::MetricName::new(to).unwrap(),
+                coefficient,
+                threshold: Some(50.0),
+                mode,
+            };
+            scenario.dependencies.push(dep("cohesion_to_legitimacy", "legitimacy", 0.02, crate::core::DependencyMode::Deficit));
+            scenario.dependencies.push(dep("cohesion_natural_decay", "cohesion", 0.12, crate::core::DependencyMode::Excess));
+            // T_C = 40: the reader's threshold becomes 20, and cohesion 30 is above it
+            scenario.actors.push(vassalage_actor("city", 50.0, 50.0, 50.0, 40.0, &[]));
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 30.0, &[]);
+            a.set_metric("legitimacy", 50.0);
+            world.actors.insert("city".into(), a);
+            phase_apply_dependencies(&mut world, &scenario);
+            let first = world.actors["city"].get_metric("legitimacy");
+            world.actors.get_mut("city").unwrap().set_metric("cohesion", 80.0);
+            phase_apply_dependencies(&mut world, &scenario);
+            (first, world.actors["city"].get_metric("cohesion"))
+        };
+        assert_eq!(run(Some(0.12)), (50.0, 80.0), "30 is above 50 × 40 / 100; the decay rule is not applied");
+        let (l, c) = run(None);
+        // −(50 − 30) × 0.02 = −0.4; decay −(80 − 50) × 0.12 = −3.6
+        assert!((l - 49.6).abs() < 1e-9 && (c - 76.4).abs() < 1e-9, "absolute threshold, decay applied: {l} {c}");
     }
 
     /// Economy v2 (Ц5): legitimacy is pulled toward `T_L` = the authored start + the tags' levels.

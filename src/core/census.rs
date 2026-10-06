@@ -106,6 +106,7 @@ mod imp {
         static THREAT_ITEMS: Cell<u8> = const { Cell::new(3) };
         static COMBAT_QUALITY: Cell<bool> = const { Cell::new(true) };
         static TRIBUTE_FLOOR: Cell<bool> = const { Cell::new(true) };
+        static KEEP_COHESION_DECAY: Cell<bool> = const { Cell::new(false) };
         static COMBAT_LOSS_SCALED: Cell<bool> = const { Cell::new(true) };
         static BATTLES: RefCell<Option<Vec<crate::core::census::Battle>>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
@@ -215,6 +216,15 @@ mod imp {
 
     pub fn threat_items() -> u8 {
         THREAT_ITEMS.with(|x| x.get())
+    }
+
+    /// Counterfactual (Ц8, variant (б)): keep the cohesion-to-cohesion decay rule under the pull.
+    pub fn set_keep_cohesion_decay(on: bool) {
+        KEEP_COHESION_DECAY.with(|x| x.set(on));
+    }
+
+    pub fn keep_cohesion_decay() -> bool {
+        KEEP_COHESION_DECAY.with(|x| x.get())
     }
 
     /// Counterfactual (Ц7): v2 tribute as before the fix — written past the treasury's zero floor.
@@ -495,6 +505,13 @@ pub struct Battle {
 #[cfg(not(feature = "census"))]
 #[inline(always)]
 pub fn battle(_record: impl FnOnce() -> Battle) {}
+
+/// Ц8 counterfactual switch; the decay rule gives way to the pull without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn keep_cohesion_decay() -> bool {
+    false
+}
 
 /// Ц7 counterfactual switch; tribute stops at the floor without the feature.
 #[cfg(not(feature = "census"))]
