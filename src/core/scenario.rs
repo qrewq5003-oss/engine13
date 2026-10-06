@@ -342,6 +342,12 @@ pub struct Scenario {
     /// `None` = no pull.
     #[serde(default)]
     pub economy_v2_pressure_pull: Option<f64>,
+    /// Economy v2 only (Ц5): the rate at which `legitimacy` is pulled toward its norm
+    /// `T_L` = the authored starting legitimacy + the levels the actor's tags give. With it, tags'
+    /// `legitimacy` modifiers are levels and the thresholds of dependency rules reading
+    /// legitimacy are measured against `T_L` (`threshold × T_L / 100`). `None` = none of it.
+    #[serde(default)]
+    pub economy_v2_legitimacy_pull: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

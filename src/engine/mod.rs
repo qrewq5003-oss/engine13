@@ -180,10 +180,18 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
     } else {
         std::collections::HashMap::new()
     };
+    // Economy v2 (Ц5): the same for a rule whose source is `legitimacy`, against `T_L`.
+    let legitimacy_targets: std::collections::HashMap<String, f64> =
+        world.actors.keys().filter_map(|id| legitimacy_target(world, scenario, id).map(|t| (id.clone(), t))).collect();
     for actor in world.actors.values_mut() {
         let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
+        let legitimacy_scale = legitimacy_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         for rule in &scenario.dependencies {
-            let scale = if rule.from.as_str() == "economic_output" { eo_scale } else { 1.0 };
+            let scale = match rule.from.as_str() {
+                "economic_output" => eo_scale,
+                "legitimacy" => legitimacy_scale,
+                _ => 1.0,
+            };
             apply_dependency_rule(actor, rule, tick, scale, scenario.features.economy_v2 && census::debt_as_pay());
         }
     }
@@ -580,6 +588,8 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     pull_economic_output_to_target(world, scenario);
     // Economy v2 (Ц6): pressure pulled toward the real threat, same place and reason.
     pull_pressure_to_threat(world, scenario);
+    // Economy v2 (Ц5): legitimacy pulled toward its norm, same place and reason.
+    pull_legitimacy_to_target(world, scenario);
 }
 
 /// Economy v2 (Ц6): the threat an actor faces — `100 × N / (N + own army)`, N = the armies of
@@ -633,32 +643,86 @@ fn pull_pressure_to_threat(world: &mut WorldState, scenario: &Scenario) {
     }
 }
 
-/// The authored starting `economic_output` of an actor: a starting actor's or a successor
-/// template's own value, or a spawn's initial value (Ц1 stage 2). Read from the scenario, so
-/// heirs and spawns are covered by construction and nothing new is saved. A seat-keeping heir
-/// keeps its parent's id and therefore its parent's base.
-pub fn eo_base(scenario: &Scenario, actor_id: &str) -> Option<f64> {
+/// The authored starting value of a metric for an actor: a starting actor's or a successor
+/// template's own value, or a spawn's initial value (Ц1 stage 2, generalised in Ц5). Read from
+/// the scenario, so heirs and spawns are covered by construction and nothing new is saved. A
+/// seat-keeping heir keeps its parent's id and therefore its parent's base.
+pub fn metric_base(scenario: &Scenario, actor_id: &str, metric: &str) -> Option<f64> {
     scenario
         .actors
         .iter()
         .find(|a| a.id == actor_id)
-        .and_then(|a| a.metrics.get("economic_output").copied())
+        .and_then(|a| a.metrics.get(metric).copied())
         .or_else(|| {
             scenario
                 .milestone_events
                 .iter()
                 .filter_map(|m| m.spawn_actor.as_ref())
                 .find(|c| c.actor_id == actor_id)
-                .and_then(|c| c.initial_metrics.iter().find(|(k, _)| k.as_str() == "economic_output").map(|(_, v)| *v))
+                .and_then(|c| c.initial_metrics.iter().find(|(k, _)| k.as_str() == metric).map(|(_, v)| *v))
         })
 }
 
-/// Economy v2: the level `economic_output` is pulled toward — the authored base plus the
-/// levels the actor's tags give now. `None` when the actor has no authored base.
-pub fn eo_target(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
-    let base = eo_base(scenario, actor_id)?;
-    let levels: f64 = world.eo_tag_levels.get(actor_id).map(|m| m.values().sum()).unwrap_or(0.0);
+/// Economy v2: the norm a metric is pulled toward — the authored base plus the levels the
+/// actor's tags give now. `None` when the actor has no authored base.
+pub fn metric_target(world: &WorldState, scenario: &Scenario, actor_id: &str, metric: &str) -> Option<f64> {
+    let base = metric_base(scenario, actor_id, metric)?;
+    let levels: f64 = world.tag_levels.get(metric).and_then(|m| m.get(actor_id)).map(|m| m.values().sum()).unwrap_or(0.0);
     Some(base + levels)
+}
+
+/// Economy v2 (Ц1): the `economic_output` norm T.
+pub fn eo_target(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    metric_target(world, scenario, actor_id, "economic_output")
+}
+
+/// Economy v2 (Ц5): the legitimacy norm `T_L`, when the scenario pulls legitimacy.
+pub fn legitimacy_target(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    if !scenario.features.economy_v2 || scenario.economy_v2_legitimacy_pull.is_none() {
+        return None;
+    }
+    metric_target(world, scenario, actor_id, "legitimacy")
+}
+
+/// Economy v2: the metrics whose tag modifiers are levels in this scenario, in name order —
+/// `economic_output` (Ц1), `external_pressure` (Ц6, when asked), `legitimacy` (Ц5, with its pull).
+pub fn level_metrics(scenario: &Scenario) -> Vec<&'static str> {
+    let mut metrics = Vec::new();
+    if scenario.features.economy_v2 {
+        metrics.push("economic_output");
+        if scenario.economy_v2_pressure_tags_as_level {
+            metrics.push("external_pressure");
+        }
+        if scenario.economy_v2_legitimacy_pull.is_some() {
+            metrics.push("legitimacy");
+        }
+    }
+    metrics
+}
+
+/// Economy v2 (Ц5): `L += r × (T_L − L)` for every living actor, in id order — the same pull as
+/// `economic_output`'s. Every other writer stays; under the pull a rate b becomes a shift of the
+/// norm by b / r (brief §9.7).
+fn pull_legitimacy_to_target(world: &mut WorldState, scenario: &Scenario) {
+    if !scenario.features.economy_v2 {
+        return;
+    }
+    let Some(r) = scenario.economy_v2_legitimacy_pull else { return };
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    for id in ids {
+        let Some(target) = metric_target(world, scenario, &id, "legitimacy") else { continue };
+        let Some(actor) = world.actors.get_mut(&id) else { continue };
+        let current = actor.get_metric("legitimacy");
+        let delta = r * (target - current);
+        actor.metrics.insert("legitimacy".to_string(), current + delta);
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "legitimacy pull".to_string());
+            census::metric_write(std::panic::Location::caller(), &id, "legitimacy", delta, current, current + delta);
+            census::clear_write_source();
+        }
+    }
 }
 
 /// Economy v2 (Ц1 stage 2): `eo += r × (T − eo)` for every living actor, in id order.
@@ -932,11 +996,9 @@ fn apply_treasury(world: &mut WorldState, scenario: &Scenario) {
 // ============================================================================
 
 fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
-    // Economy v2 (Ц1, brief §9.6): a tag's `economic_output` modifier is a level — given
-    // once when the tag appears, taken back when it leaves — instead of a rate every tick.
-    let eo_as_level = scenario.features.economy_v2;
-    // Economy v2 (Ц6): the same for `external_pressure`, when the scenario asks for it.
-    let ep_as_level = scenario.features.economy_v2 && scenario.economy_v2_pressure_tags_as_level;
+    // Economy v2 (brief §9.6): a tag's modifier of these metrics is a level — given once when
+    // the tag appears, taken back when it leaves — instead of a rate every tick.
+    let as_level = level_metrics(scenario);
     let actor_ids: Vec<String> = world.actors.keys().cloned().collect();
 
     for actor_id in actor_ids {
@@ -956,15 +1018,8 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
             for (_tag, metric, modifier) in modifiers {
                 let current = actor.metrics.get(metric).copied().unwrap_or(0.0);
                 let add = census::tag_modifier_for(&actor.id, _tag, metric, modifier as f64);
-                if eo_as_level && metric == "economic_output" {
-                    let levels = world.eo_tag_levels.entry(actor_id.clone()).or_default();
-                    if levels.contains_key(_tag) {
-                        continue; // already given
-                    }
-                    levels.insert(_tag.to_string(), add);
-                }
-                if ep_as_level && metric == "external_pressure" {
-                    let levels = world.ep_tag_levels.entry(actor_id.clone()).or_default();
+                if as_level.contains(&metric) {
+                    let levels = world.tag_levels.entry(metric.to_string()).or_default().entry(actor_id.clone()).or_default();
                     if levels.contains_key(_tag) {
                         continue; // already given
                     }
@@ -978,37 +1033,20 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
                     census::clear_write_source();
                 }
             }
-            // Economy v2: take back the level of tags the actor no longer carries.
-            if eo_as_level {
-                if let Some(levels) = world.eo_tag_levels.get_mut(&actor_id) {
-                    let gone: Vec<String> = levels.keys().filter(|t| !actor.actor_tags.contains_key(*t)).cloned().collect();
-                    for tag in gone {
-                        let level = levels.remove(&tag).unwrap_or(0.0);
-                        let current = actor.metrics.get("economic_output").copied().unwrap_or(0.0);
-                        actor.metrics.insert("economic_output".to_string(), current - level);
-                        #[cfg(feature = "census")]
-                        {
-                            census::write_source(|| "tag level removal".to_string());
-                            census::metric_write(std::panic::Location::caller(), &actor.id, "economic_output", -level, current, current - level);
-                            census::clear_write_source();
-                        }
-                    }
-                }
-            }
-            // Economy v2 (Ц6): take back the pressure level of tags the actor no longer carries.
-            if ep_as_level {
-                if let Some(levels) = world.ep_tag_levels.get_mut(&actor_id) {
-                    let gone: Vec<String> = levels.keys().filter(|t| !actor.actor_tags.contains_key(*t)).cloned().collect();
-                    for tag in gone {
-                        let level = levels.remove(&tag).unwrap_or(0.0);
-                        let current = actor.metrics.get("external_pressure").copied().unwrap_or(0.0);
-                        actor.metrics.insert("external_pressure".to_string(), current - level);
-                        #[cfg(feature = "census")]
-                        {
-                            census::write_source(|| "tag level removal".to_string());
-                            census::metric_write(std::panic::Location::caller(), &actor.id, "external_pressure", -level, current, current - level);
-                            census::clear_write_source();
-                        }
+            // Economy v2: take back the level of tags the actor no longer carries, metric by
+            // metric in name order.
+            for metric in &as_level {
+                let Some(levels) = world.tag_levels.get_mut(*metric).and_then(|m| m.get_mut(&actor_id)) else { continue };
+                let gone: Vec<String> = levels.keys().filter(|t| !actor.actor_tags.contains_key(*t)).cloned().collect();
+                for tag in gone {
+                    let level = levels.remove(&tag).unwrap_or(0.0);
+                    let current = actor.metrics.get(*metric).copied().unwrap_or(0.0);
+                    actor.metrics.insert(metric.to_string(), current - level);
+                    #[cfg(feature = "census")]
+                    {
+                        census::write_source(|| "tag level removal".to_string());
+                        census::metric_write(std::panic::Location::caller(), &actor.id, metric, -level, current, current - level);
+                        census::clear_write_source();
                     }
                 }
             }
@@ -1028,13 +1066,11 @@ fn apply_actor_tags(world: &mut WorldState, scenario: &Scenario) {
             // Note: No clamping here - clamp_metrics is called on step 5
         }
     }
-    if eo_as_level {
-        let actors = &world.actors;
-        world.eo_tag_levels.retain(|id, _| actors.contains_key(id));
-    }
-    if ep_as_level {
-        let actors = &world.actors;
-        world.ep_tag_levels.retain(|id, _| actors.contains_key(id));
+    let actors = &world.actors;
+    for metric in &as_level {
+        if let Some(per_actor) = world.tag_levels.get_mut(*metric) {
+            per_actor.retain(|id, _| actors.contains_key(id));
+        }
     }
 }
 
@@ -2428,6 +2464,7 @@ mod tests {
             economy_v2_depopulation_ticks: None,
             economy_v2_pressure_tags_as_level: false,
             economy_v2_pressure_pull: None,
+            economy_v2_legitimacy_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -2682,7 +2719,7 @@ mod tests {
                 let c = &world.actors["city"];
                 seen.push((c.get_metric("economic_output"), c.get_metric("cohesion")));
             }
-            (seen, world.eo_tag_levels.get("city").map(|m| m.len()).unwrap_or(0))
+            (seen, world.tag_levels.get("economic_output").and_then(|m| m.get("city")).map(|m| m.len()).unwrap_or(0))
         };
         let (v2, left) = run(true);
         assert_eq!(v2, vec![(52.0, 51.0), (52.0, 52.0), (52.0, 53.0), (50.0, 53.0), (50.0, 53.0)],
@@ -2706,7 +2743,7 @@ mod tests {
             let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
             a.set_metric("economic_output", 10.0);
             world.actors.insert("city".into(), a);
-            world.eo_tag_levels.insert("city".into(), std::collections::BTreeMap::from([("trade".to_string(), 4.0)]));
+            world.tag_levels.entry("economic_output".into()).or_default().insert("city".into(), std::collections::BTreeMap::from([("trade".to_string(), 4.0)]));
             pull_economic_output_to_target(&mut world, &scenario);
             world.actors["city"].get_metric("economic_output")
         };
@@ -2714,6 +2751,82 @@ mod tests {
         assert!((run(true, Some(0.1)) - 14.4).abs() < 1e-9, "pulled a tenth of the way to T");
         assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
         assert_eq!(run(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц5): legitimacy is pulled toward `T_L` = the authored start + the tags' levels.
+    /// Both ways: v1, or no r, leaves it alone.
+    #[test]
+    fn economy_v2_pulls_legitimacy_toward_its_norm() {
+        let run = |v2: bool, r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_legitimacy_pull = r;
+            scenario.actors.push(vassalage_actor("city", 50.0, 50.0, 40.0, 50.0, &[]));
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 10.0, 50.0, &[]));
+            world.tag_levels.entry("legitimacy".into()).or_default().insert("city".into(), std::collections::BTreeMap::from([("court".to_string(), 4.0)]));
+            pull_legitimacy_to_target(&mut world, &scenario);
+            world.actors["city"].get_metric("legitimacy")
+        };
+        // T_L = 40 + 4 = 44; 10 + 0.1 × (44 − 10) = 13.4
+        assert!((run(true, Some(0.1)) - 13.4).abs() < 1e-9, "pulled a tenth of the way to T_L");
+        assert_eq!(run(false, Some(0.1)), 10.0, "v1 does not pull");
+        assert_eq!(run(true, None), 10.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц5): with the legitimacy pull, tags' `legitimacy` modifiers are a level —
+    /// given once, taken back when the tag leaves. Both ways: without it the tag adds every tick.
+    #[test]
+    fn economy_v2_gives_legitimacy_tags_as_a_level() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_legitimacy_pull = r;
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.actor_tags.insert("court".into(), crate::core::ActorTag {
+                metrics_modifier: HashMap::from([(crate::core::MetricName::new("legitimacy").unwrap(), 2)]),
+                spreads_via: vec![],
+            });
+            world.actors.insert("city".into(), a);
+            let mut seen = Vec::new();
+            for t in 0..4 {
+                if t == 2 { world.actors.get_mut("city").unwrap().actor_tags.remove("court"); }
+                apply_actor_tags(&mut world, &scenario);
+                seen.push(world.actors["city"].get_metric("legitimacy"));
+            }
+            seen
+        };
+        assert_eq!(run(Some(0.05)), vec![52.0, 52.0, 50.0, 50.0], "level: +2 once, back on removal");
+        assert_eq!(run(None), vec![52.0, 54.0, 54.0, 54.0], "rate: every tick while carried");
+    }
+
+    /// Economy v2 (Ц5): a dependency rule reading legitimacy measures a fall below the actor's
+    /// norm — threshold × `T_L` / 100. Both ways: without the pull the absolute threshold holds.
+    #[test]
+    fn economy_v2_measures_legitimacy_readers_against_the_norm() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_legitimacy_pull = r;
+            scenario.dependencies.push(crate::core::DependencyRule {
+                id: "legitimacy_to_cohesion".into(),
+                from: crate::core::MetricName::new("legitimacy").unwrap(),
+                to: crate::core::MetricName::new("cohesion").unwrap(),
+                coefficient: 0.03,
+                threshold: Some(50.0),
+                mode: crate::core::DependencyMode::Deficit,
+            });
+            // the norm T_L = 40: the threshold becomes 20, and legitimacy 30 is above it
+            scenario.actors.push(vassalage_actor("city", 50.0, 50.0, 40.0, 50.0, &[]));
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 30.0, 50.0, &[]));
+            phase_apply_dependencies(&mut world, &scenario);
+            world.actors["city"].get_metric("cohesion")
+        };
+        assert_eq!(run(Some(0.05)), 50.0, "30 is above 50 × 40 / 100 = 20");
+        // −(50 − 30) × 0.03 = −0.6
+        assert!((run(None) - 49.4).abs() < 1e-9, "absolute threshold 50");
     }
 
     /// Economy v2 (Ц2): a treasury below zero `n` ticks in a row costs the army `cut` of itself

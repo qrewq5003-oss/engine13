@@ -18,7 +18,7 @@
 //! the player plays through `application::scripted::play_scripted_tick` (A29) — the
 //! same policy as `sim`, not a copy.
 //!
-//! Usage: cargo run --release --bin drift_probe -- <scenario> <seed> <ticks> [strategy|none]
+//! Usage: [ECONOMY_V2=1] cargo run --release --bin drift_probe -- <scenario> <seed> <ticks> [strategy|none]
 
 use engine13::db::Db;
 use engine13::engine::trace;
@@ -39,6 +39,11 @@ fn main() {
     let db = Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
     engine13::load_scenario(&mut st, &db, scenario.clone()).expect("scenario");
+    // ECONOMY_V2=1: the same world with economy v2 on (brief §9.6) — the byte check of a v2
+    // refactor. Unset, nothing changes.
+    if std::env::var("ECONOMY_V2").is_ok_and(|v| v == "1") {
+        st.current_scenario.as_mut().unwrap().features.economy_v2 = true;
+    }
     st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
     trace::enable();
 
