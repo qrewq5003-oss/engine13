@@ -18,6 +18,7 @@
 //!
 //! Usage: cargo run --release --features census --bin c7_probe -- [first_seed] [seeds] [ticks] [c1]
 //! (`c1`: only Ц1's measure per world and the failing actors, base against K₂ = 1.)
+//! (`deter`: the balance-of-power arithmetic over the protocols of PR #240 — see `deterrence`.)
 //! (`papacy`: milan, K₂ = 1, with and without the Ц8 cohesion pull — Naples and the papacy side by side.)
 //! (`content`: v2 as the content stands against K₂ = 1 set here, bit for bit.)
 //! (`src`: the Ц1 violators in rome none and milan none — economic_output at the floor, its writes by
@@ -301,6 +302,7 @@ fn main() {
     if args.get(4).map(String::as_str) == Some("c1") { c1_detail(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("src") { c1_sources(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("papacy") { papacy_pair(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("deter") { deterrence(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("content") {
         let (mut same, mut total) = (0, 0);
         for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
@@ -607,4 +609,196 @@ fn papacy_pair(first: u64, seeds: u64, ticks: u32) {
             }
         }
     }
+}
+
+/// One battle with what the balance-of-power rule needs: the loser's neighbours other than the
+/// winner and free of a vassal bond with it, their strength summed at distance 1 and at ≤ 2 (state
+/// at the start of the battle's tick).
+struct DeterBattle {
+    tick: u32,
+    winner: String,
+    loser: String,
+    s_w: f64,
+    s_l: f64,
+    sum_d1: f64,
+    sum_d2: f64,
+}
+
+/// The world's battles under one model, with the neighbour sums; and papacy's population writes.
+/// (battles, papacy's population writes by source, papacy's (tick, population, army))
+type DeterOut = (Vec<DeterBattle>, BTreeMap<String, f64>, Vec<(u32, f64, f64)>);
+
+fn deter_run(sc: &str, world: &str, k2: Option<u32>, seed: u64, ticks: u32) -> DeterOut {
+    let db = engine13::db::Db::open_in_memory().unwrap();
+    let mut st = engine13::AppState::default();
+    engine13::load_scenario(&mut st, &db, sc.to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+    {
+        let s = st.current_scenario.as_mut().unwrap();
+        s.features.economy_v2 = true;
+        s.economy_v2_conquest_k2 = k2;
+    }
+    let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
+    let strength = |a: &engine13::core::Actor| a.get_metric("military_size").max(0.0) * a.get_metric("military_quality").clamp(0.0, 100.0) / 100.0;
+    let mut out = Vec::new();
+    let mut pop_src: BTreeMap<String, f64> = BTreeMap::new();
+    let mut papacy: Vec<(u32, f64, f64)> = Vec::new();
+    let _ = census::take_battles();
+    let _ = census::take_writes();
+    for _ in 0..ticks {
+        // the state at the start of the tick: every actor's neighbours (id, distance, S), and bonds
+        let ws = st.world_state.as_ref().unwrap();
+        let mut nbs: BTreeMap<String, Vec<(String, u32, f64)>> = BTreeMap::new();
+        for (id, a) in &ws.actors {
+            if ws.dead_actor_ids.contains(id) { continue; }
+            let v: Vec<(String, u32, f64)> = a.neighbors.iter().filter(|n| n.distance <= 2 && !ws.dead_actor_ids.contains(&n.id))
+                .filter_map(|n| ws.actors.get(&n.id).map(|b| (n.id.clone(), n.distance, strength(b)))).collect();
+            nbs.insert(id.clone(), v);
+        }
+        let bonds: Vec<(String, String)> = ws.vassalages.iter().map(|v| (v.vassal_id.clone(), v.overlord_id.clone())).collect();
+        match &strategy {
+            Some(s) => { play_scripted_tick(&mut st, s); }
+            None => {
+                let ws = st.world_state.as_mut().unwrap();
+                let scn = st.current_scenario.as_ref().unwrap();
+                engine13::engine::tick(ws, scn, &mut st.event_log, st.rng.as_mut().unwrap());
+            }
+        }
+        for w in census::take_writes() {
+            if w.actor == "papacy" && w.metric == "population" {
+                let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file(), w.location.line()));
+                *pop_src.entry(src).or_default() += w.applied;
+            }
+        }
+        for b in census::take_battles() {
+            let (w, l, s_w, s_l) = if b.attacker_won { (b.attacker.clone(), b.defender.clone(), b.strength_attacker, b.strength_defender) } else { (b.defender.clone(), b.attacker.clone(), b.strength_defender, b.strength_attacker) };
+            let bound = |n: &str| bonds.iter().any(|(v, o)| (v == n && o == &w) || (o == n && v == &w));
+            let (mut d1, mut d2) = (0.0, 0.0);
+            for (n, d, s) in nbs.get(&l).into_iter().flatten() {
+                if n == &w || bound(n) { continue; }
+                d2 += s;
+                if *d == 1 { d1 += s; }
+            }
+            out.push(DeterBattle { tick: b.tick, winner: w, loser: l, s_w, s_l, sum_d1: d1, sum_d2: d2 });
+        }
+        let ws = st.world_state.as_ref().unwrap();
+        if let Some(a) = ws.actors.get("papacy").filter(|_| !ws.dead_actor_ids.contains("papacy")) {
+            papacy.push((ws.tick - 1, a.get_metric("population"), a.get_metric("military_size")));
+        }
+    }
+    (out, pop_src, papacy)
+}
+
+/// The balance-of-power arithmetic (owner's grid): a loss counts toward the streak only if
+/// `S_w ≥ 3 × (S_l + Σ S_n)` — the loser's neighbours other than the winner and free of a vassal
+/// bond with it, at distance 1 or ≤ 2. Submission (K₁ = 3) is replayed over the protocols of the
+/// base world of PR #240 (v2 with Ц8, no Ц7 — every battle still fought); the 1453 assault over the
+/// protocols of the K₂ = 1 world. The rule applies to submission only, or to submission and the
+/// declared conquest. Arithmetic, not a model: the world after a submission is not replayed.
+fn deterrence(first: u64, seeds: u64, ticks: u32) {
+    const PEOPLES: [&str; 5] = ["alamanni", "vandals", "visigoths", "burgundians", "franks"];
+    const PAIRS: [(&str, &str, &str); 8] = [
+        ("milan_1477", "naples", "papacy"), ("milan_1477", "florence", "siena"), ("milan_1477", "naples", "sicily"),
+        ("constantinople_1430", "ottomans", "serbia"), ("constantinople_1430", "ottomans", "byzantium"),
+        ("rome_375", "sassanids", "armenia"), ("rome_375", "huns", "ostrogoths"), ("milan_1477", "naples", "venice"),
+    ];
+    println!("# Ц7 deterrence — the balance-of-power rule over the protocols of PR #240, seeds {first}–{}\n", first + seeds - 1);
+    println!("A loss counts only if S_w ≥ 3 × (S_l + Σ S_n), Σ over the loser's neighbours other than the winner and free of a vassal bond with it. Submission: K₁ = 3 over the base world's protocols (every battle fought); the assault: the K₂ = 1 world's battle on tick 46.\n");
+    // cell: 0 = no rule, 1 = d1, 2 = d≤2
+    let scopes = ["no rule (PR #240)", "distance 1", "distance ≤ 2"];
+    let mut sub: BTreeMap<(usize, String, String, String), u32> = BTreeMap::new(); // (scope, world, vassal, lord) -> games
+    let mut sub_tick: BTreeMap<(usize, String, String, String), Vec<f64>> = BTreeMap::new();
+    let mut assault: BTreeMap<(usize, String), (u32, u32)> = BTreeMap::new(); // (scope, world) -> (falls on the assault, games with an assault)
+    let mut pop_rows = Vec::new();
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for world in worlds(sc) {
+            for seed in first..first + seeds {
+                let (battles, pop_src, papacy) = deter_run(sc, world, None, seed, ticks);
+                for (si, _) in scopes.iter().enumerate() {
+                    let mut streak: BTreeMap<String, (String, u32)> = BTreeMap::new();
+                    let mut done: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                    for b in &battles {
+                        streak.remove(&b.winner);
+                        if done.contains(&b.loser) { continue; }
+                        let extra = match si { 0 => 0.0, 1 => b.sum_d1, _ => b.sum_d2 };
+                        let qualifies = b.s_w >= 3.0 * (b.s_l + extra);
+                        let e = streak.entry(b.loser.clone()).or_insert((b.winner.clone(), 0));
+                        if qualifies { if e.0 == b.winner { e.1 += 1; } else { *e = (b.winner.clone(), 1); } } else { *e = (b.winner.clone(), 0); }
+                        if e.1 >= 3 {
+                            done.insert(b.loser.clone());
+                            let key = (si, format!("{sc}/{world}"), b.loser.clone(), b.winner.clone());
+                            *sub.entry(key.clone()).or_default() += 1;
+                            sub_tick.entry(key).or_default().push(b.tick as f64);
+                        }
+                    }
+                }
+                if sc == "milan_1477" && seed == first {
+                    let mut v: Vec<(String, f64)> = pop_src.into_iter().filter(|x| x.1.abs() >= 1.0).collect();
+                    v.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                    let at = |t: u32| papacy.iter().find(|x| x.0 == t).map(|x| format!("{:.0} / {:.1}", x.1, x.2)).unwrap_or("—".into());
+                    pop_rows.push(format!("| {world} (seed {first}) | {} | {} | {} | {} | {} |", at(0), at(10), at(50), at(299), v.iter().map(|(k, x)| format!("{k} {x:+.0}")).collect::<Vec<_>>().join("; ")));
+                }
+                if sc == "constantinople_1430" {
+                    let (cb, _, _) = deter_run(sc, world, Some(1), seed, ticks);
+                    if let Some(b) = cb.iter().find(|b| b.tick == 46 && ((b.winner == "ottomans" && b.loser == "byzantium") || (b.winner == "byzantium" && b.loser == "ottomans"))) {
+                        for (si, _) in scopes.iter().enumerate() {
+                            let extra = match si { 0 => 0.0, 1 => b.sum_d1, _ => b.sum_d2 };
+                            let falls = b.winner == "ottomans" && b.s_w >= 3.0 * (b.s_l + extra);
+                            let e = assault.entry((si, world.to_string())).or_default();
+                            e.0 += falls as u32;
+                            e.1 += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let games = |si: usize, w: &str, v: &str, l: &str| sub.get(&(si, w.to_string(), v.to_string(), l.to_string())).copied().unwrap_or(0);
+    let med = |si: usize, w: &str, v: &str, l: &str| sub_tick.get(&(si, w.to_string(), v.to_string(), l.to_string())).map(|x| format!("{:.0}", pct(x, 0.5))).unwrap_or("—".into());
+    println!("## 1. Pairs: games of {seeds} in which the vassal submits (median tick)\n");
+    print!("| pair | world |");
+    for s in &scopes { print!(" {s} |"); }
+    println!();
+    println!("|---|---|---|---|---|");
+    for (sc, lord, v) in PAIRS {
+        for world in worlds(sc) {
+            let w = format!("{sc}/{world}");
+            print!("| {lord} → {v} | {world} |");
+            for si in 0..3 { print!(" {} @{} |", games(si, &w, v, lord), med(si, &w, v, lord)); }
+            println!();
+        }
+    }
+    for world in worlds("rome_375") {
+        let w = format!("rome_375/{world}");
+        print!("| rome → five peoples (a game) | {world} |");
+        for si in 0..3 { print!(" {:.1} |", PEOPLES.iter().map(|p| games(si, &w, p, "rome")).sum::<u32>() as f64 / seeds as f64); }
+        println!();
+    }
+    println!("\n## 2. The 1453 assault (K₂ = 1 world): Byzantium falls on the assault, of the games with an assault\n");
+    println!("| world | rule only on submission | rule also on conquest: distance 1 | distance ≤ 2 |");
+    println!("|---|---|---|---|");
+    for world in worlds("constantinople_1430") {
+        let a = |si: usize| assault.get(&(si, world.to_string())).map(|x| format!("{} of {}", x.0, x.1)).unwrap_or("—".into());
+        println!("| {world} | {} | {} | {} |", a(0), a(1), a(2));
+    }
+    println!("\n## 3. Ц7's items 1–3 per cell\n");
+    println!("| neighbours | rule on | (1) rome: ≥ 3 of 5 peoples, worlds | (2) Byzantium none: falls ≥ 20 / 30 on the assault | (3) milan: papacy ≤ 3, Venice ≤ 3, Milan ≤ 1, worlds |");
+    println!("|---|---|---|---|---|");
+    for (si, scope) in scopes.iter().enumerate().skip(1) {
+        for on_conquest in [false, true] {
+            let r1 = worlds("rome_375").iter().filter(|w| PEOPLES.iter().map(|p| games(si, &format!("rome_375/{w}"), p, "rome")).sum::<u32>() as f64 / seeds as f64 >= 3.0).count();
+            let ai = if on_conquest { si } else { 0 };
+            let (f, n) = assault.get(&(ai, "none".to_string())).copied().unwrap_or((0, 0));
+            let r3 = worlds("milan_1477").iter().filter(|w| {
+                let wk = format!("milan_1477/{w}");
+                let any = |v: &str| sub.iter().filter(|((s, ww, vv, _), _)| *s == si && ww == &wk && vv == v).map(|(_, g)| *g).sum::<u32>();
+                any("papacy") <= 3 && any("venice") <= 3 && any("milan") <= 1
+            }).count();
+            println!("| {scope} | {} | {r1} / 4 | {f} of {n} — {} | {r3} / 2 |", if on_conquest { "submission and conquest" } else { "submission only" }, if f >= 20 { "yes" } else { "no" });
+        }
+    }
+    println!("\n## 4. Why the papacy loses its people (milan, base world, one game): population / army on ticks 0, 10, 50, 299, and population writes by source\n");
+    println!("| world | tick 0 | tick 10 | tick 50 | tick 299 | population writes by source (|x| ≥ 1) |");
+    println!("|---|---|---|---|---|---|");
+    for r in pop_rows { println!("{r}"); }
 }
