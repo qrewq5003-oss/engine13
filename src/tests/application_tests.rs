@@ -557,3 +557,79 @@ fn rome_never_carries_a_border_with_itself() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// The game's book of chronicles
+// ---------------------------------------------------------------------------
+
+fn stamp_of(state: &AppState) -> crate::llm::ChronicleStamp {
+    let world = state.world_state.as_ref().unwrap();
+    let scenario = state.current_scenario.as_ref().unwrap();
+    let snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
+    crate::llm::ChronicleStamp::of(world, &snapshot)
+}
+
+/// A chronicle enters the book only once its stream finished, for the run and tick it was
+/// written for; a broken stream (`None`) or an empty text writes nothing; regenerating the same
+/// tick replaces the entry. Both ways on each condition.
+#[test]
+fn chronicle_book_keeps_finished_chronicles_of_their_own_run_and_tick() {
+    let mut state = setup_rome_state();
+    let stamp = stamp_of(&state);
+    let world = state.world_state.as_mut().unwrap();
+    assert!(!crate::llm::record_chronicle(world, &stamp, None), "a broken stream is not kept");
+    assert!(!crate::llm::record_chronicle(world, &stamp, Some("  ".into())), "an empty text is not kept");
+    let mut other_run = stamp.clone();
+    other_run.run_id = "another-run".into();
+    assert!(!crate::llm::record_chronicle(world, &other_run, Some("чужая".into())), "another run's chronicle is not kept");
+    let mut other_tick = stamp.clone();
+    other_tick.tick += 1;
+    assert!(!crate::llm::record_chronicle(world, &other_tick, Some("чужой тик".into())), "another tick's chronicle is not kept");
+    assert!(world.chronicle_book.is_empty());
+    assert!(crate::llm::record_chronicle(world, &stamp, Some("Первая хроника.".into())));
+    assert!(crate::llm::record_chronicle(world, &stamp, Some("Переписанная хроника.".into())));
+    assert_eq!(world.chronicle_book.len(), 1, "one entry per tick");
+    assert_eq!(world.chronicle_book[0].text, "Переписанная хроника.");
+    assert_eq!((world.chronicle_book[0].tick, world.chronicle_book[0].year), (stamp.tick, stamp.year));
+}
+
+/// Invariant: a saved chronicle never reaches the prompt — not through the snapshot, not
+/// through the prompt text. Both ways: the marker is in the book, and absent from both.
+#[test]
+fn chronicle_book_never_reaches_the_prompt() {
+    let mut state = setup_rome_state();
+    let db = setup_test_db();
+    let marker = "МАРКЕР-КНИГИ-ПАРТИИ-7f3a";
+    let stamp = stamp_of(&state);
+    assert!(crate::llm::record_chronicle(state.world_state.as_mut().unwrap(), &stamp, Some(format!("Хроника с {marker}."))));
+    advance_tick(&mut state, None).expect("tick");
+    let world = state.world_state.as_ref().unwrap();
+    assert!(world.chronicle_book.iter().any(|e| e.text.contains(marker)), "the book holds the chronicle");
+    let scenario = state.current_scenario.as_ref().unwrap();
+    let snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
+    assert!(!format!("{snapshot:?}").contains(marker), "the snapshot carries nothing of the book");
+    let prompt = crate::llm::generate_narrative_prompt(&snapshot, scenario, &db);
+    assert!(!prompt.contains(marker), "the prompt carries nothing of the book");
+}
+
+/// The book travels with the save; a save written without one (older saves) loads with an
+/// empty book, and a world without chronicles serialises without the field.
+#[test]
+fn chronicle_book_rides_with_the_save_and_old_saves_load() {
+    let mut state = setup_rome_state();
+    let db = setup_test_db();
+    let empty_json = serde_json::to_string(state.world_state.as_ref().unwrap()).unwrap();
+    assert!(!empty_json.contains("chronicle_book"), "no chronicles, no field: a save without them is unchanged");
+    let old: crate::core::WorldState = serde_json::from_str(&empty_json).expect("an older save loads");
+    assert!(old.chronicle_book.is_empty());
+    let stamp = stamp_of(&state);
+    assert!(crate::llm::record_chronicle(state.world_state.as_mut().unwrap(), &stamp, Some("Хроника для сейва.".into())));
+    let book = state.world_state.as_ref().unwrap().chronicle_book.clone();
+    let saved = save_game(&mut state, &db, None).expect("save");
+    let id = saved.save_id.expect("save id");
+    let mut loaded = AppState::default();
+    crate::application::load_game(&mut loaded, &db, id).expect("load");
+    use rand::SeedableRng;
+    loaded.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
+    assert_eq!(loaded.world_state.as_ref().unwrap().chronicle_book, book, "the book rides with the save");
+}

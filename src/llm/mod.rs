@@ -549,17 +549,20 @@ fn system_prompt() -> &'static str {
 /// This function reads ONLY from the NarrativeWorldSnapshot.
 /// It does NOT read WorldState or Scenario directly.
 ///
-/// Prompt structure (optimized for model performance):
+/// Prompt structure, as the sections below are numbered:
 /// 1. Identity / role of narrative voice
 /// 2. Hard factual rules (anti-hallucination)
-/// 3. Previous narrative memory (soft anti-repetition guard)
-/// 4. Scenario framing from tone_tags / narrative_axes (as instructions)
-/// 5. Current world snapshot
-/// 6. Key metrics
-/// 7. Key milestones
-/// 8. Recent important events (top 5, as evidence)
-/// 9. Recent player actions (as narrative causes)
-/// 10. Output instructions (2-4 paragraphs, world-first)
+/// 3. Scenario framing from tone_tags / narrative_axes (as instructions)
+/// 4. Scenario context (by game mode)
+/// 5. World snapshot — key metrics
+/// 6. Key milestones fired
+/// 7. Recent important events (top 5, as evidence)
+/// 8. Recent player actions (as narrative causes)
+/// 9. Output instructions (2-4 paragraphs, world-first)
+///
+/// There is no "previous narrative memory": it was deleted (the gist rule panicked on a byte
+/// slice of Cyrillic), and the game's book of chronicles (`WorldState::chronicle_book`) never
+/// enters a prompt — the snapshot carries nothing of it.
 pub fn generate_narrative_prompt(
     snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
@@ -891,12 +894,15 @@ pub fn generate_narrative_prompt(
 }
 
 /// Stream narrative from Anthropic API
+/// Stream a chronicle from the Anthropic API to the frontend. Returns the full text only when the
+/// stream finished (`message_stop`); a broken stream, or the placeholder on a failed connection,
+/// returns `None` — the game's book keeps finished chronicles only.
 pub async fn stream_narrative_anthropic(
     prompt: String,
     placeholder: String,
     config: LlmConfig,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
@@ -951,7 +957,7 @@ pub async fn stream_narrative_anthropic(
             eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
             let _ = app.emit("narrative_chunk", placeholder.clone());
             let _ = app.emit("narrative_done", "");
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -963,12 +969,15 @@ pub async fn stream_narrative_anthropic(
 
     let mut stream = res.bytes_stream();
     use futures_util::StreamExt;
+    let mut full = String::new();
+    let mut finished = false;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk: bytes::Bytes = match chunk_result {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[NARRATIVE] Stream error: {}", e);
+                finished = false;
                 break;
             }
         };
@@ -983,8 +992,12 @@ pub async fn stream_narrative_anthropic(
                         // Anthropic streaming: content_block_delta with delta.text
                         if json["type"] == "content_block_delta" {
                             if let Some(content) = json["delta"]["text"].as_str() {
+                                full.push_str(content);
                                 let _ = app.emit("narrative_chunk", content.to_string());
                             }
+                        }
+                        if json["type"] == "message_stop" {
+                            finished = true;
                         }
                     }
                 }
@@ -992,18 +1005,20 @@ pub async fn stream_narrative_anthropic(
         }
     }
 
-    eprintln!("[NARRATIVE] Streaming complete");
+    eprintln!("[NARRATIVE] Streaming complete (finished: {finished})");
     let _ = app.emit("narrative_done", "");
-    Ok(())
+    Ok(finished.then_some(full))
 }
 
 /// Stream narrative from OpenAI-compatible API
+/// Stream a chronicle from an OpenAI-compatible API. Returns the full text only when the stream
+/// finished (`[DONE]` or a `finish_reason`); otherwise `None` (see `stream_narrative_anthropic`).
 pub async fn stream_narrative_openai(
     prompt: String,
     placeholder: String,
     config: LlmConfig,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
@@ -1042,7 +1057,7 @@ pub async fn stream_narrative_openai(
             eprintln!("[NARRATIVE] Connection failed, emitting placeholder");
             let _ = app.emit("narrative_chunk", placeholder.clone());
             let _ = app.emit("narrative_done", "");
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -1054,12 +1069,15 @@ pub async fn stream_narrative_openai(
 
     let mut stream = res.bytes_stream();
     use futures_util::StreamExt;
+    let mut full = String::new();
+    let mut finished = false;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk: bytes::Bytes = match chunk_result {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[NARRATIVE] Stream error: {}", e);
+                finished = false;
                 break;
             }
         };
@@ -1068,11 +1086,16 @@ pub async fn stream_narrative_openai(
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
+                        finished = true;
                         break;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                         if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                            full.push_str(content);
                             let _ = app.emit("narrative_chunk", content.to_string());
+                        }
+                        if json["choices"][0]["finish_reason"].is_string() {
+                            finished = true;
                         }
                     }
                 }
@@ -1080,9 +1103,39 @@ pub async fn stream_narrative_openai(
         }
     }
 
-    eprintln!("[NARRATIVE] Streaming complete");
+    eprintln!("[NARRATIVE] Streaming complete (finished: {finished})");
     let _ = app.emit("narrative_done", "");
-    Ok(())
+    Ok(finished.then_some(full))
+}
+
+/// Where a chronicle belongs: the run and tick its prompt was built from, and its date.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChronicleStamp {
+    pub run_id: String,
+    pub tick: u32,
+    pub year: i32,
+    pub half_year: String,
+}
+
+impl ChronicleStamp {
+    pub fn of(world: &WorldState, snapshot: &NarrativeWorldSnapshot) -> Self {
+        ChronicleStamp { run_id: world.run_id.clone(), tick: world.tick, year: snapshot.year, half_year: snapshot.half_year.display_name().to_string() }
+    }
+}
+
+/// Put a finished chronicle into the game's book. Nothing is written for a broken stream
+/// (`None`), for an empty text, or when the world is no longer the one the prompt was built from
+/// (another run, or another tick) — a chronicle belongs to its half-year of its run. One entry per
+/// tick: a chronicle regenerated for the same tick replaces the earlier one. Returns whether it
+/// was written.
+pub fn record_chronicle(world: &mut WorldState, stamp: &ChronicleStamp, text: Option<String>) -> bool {
+    let Some(text) = text.filter(|t| !t.trim().is_empty()) else { return false };
+    if world.run_id != stamp.run_id || world.tick != stamp.tick {
+        return false;
+    }
+    world.chronicle_book.retain(|e| e.tick != stamp.tick);
+    world.chronicle_book.push(crate::core::ChronicleEntry { tick: stamp.tick, year: stamp.year, half_year: stamp.half_year.clone(), text });
+    true
 }
 
 /// Generate a narrative headlessly, without a Tauri app handle, and return the text.

@@ -75,6 +75,14 @@ export interface SuccessorWeight {
   weight: number;
 }
 
+/// One chronicle of the game's book — kept only once its stream finished; never sent to a prompt.
+export interface ChronicleEntry {
+  tick: number;
+  year: number;
+  half_year: string;
+  text: string;
+}
+
 export interface Alliance {
   actor_ids: string[];
   common_enemy: string | null;
@@ -90,6 +98,8 @@ export interface WorldState {
   actors: Record<string, Actor>;
   dead_actors: DeadActor[];
   alliances: Alliance[];
+  /// The game's book of chronicles, oldest first. Absent in a world without chronicles.
+  chronicle_book?: ChronicleEntry[];
   milestone_events_fired: string[];
   /// Global scenario metrics (e.g. federation_progress). Family metrics are in family_state.
   global_metrics: Record<string, number>;
