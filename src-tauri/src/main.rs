@@ -230,7 +230,7 @@ async fn cmd_get_narrative(
     eprintln!("[RUST] cmd_get_narrative - acquiring locks");
 
     // Clone AppState and generate prompt before await (releases locks)
-    let (prompt, placeholder, config, year) = {
+    let (prompt, placeholder, config, year, stamp) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let db_guard = db.lock().map_err(|e| e.to_string())?;
         let world_state = s.world_state.as_ref().ok_or("No active world state")?;
@@ -239,12 +239,13 @@ async fn cmd_get_narrative(
         // Build snapshot from state (includes half_year)
         let snapshot = engine13::llm::build_snapshot(world_state, scenario, &s.event_log);
         
-        // Generate prompt using snapshot and narrative memory
+        // The prompt reads the snapshot only; the game's book never enters it
         let prompt = engine13::llm::generate_narrative_prompt(&snapshot, scenario, &db_guard);
+        let stamp = engine13::llm::ChronicleStamp::of(world_state, &snapshot);
         let placeholder = format!("{} {} года. Хроника продолжается.", snapshot.half_year.display_name(), snapshot.year);
         let config = engine13::llm::get_llm_config();
         let year = snapshot.year;
-        (prompt, placeholder, config, year)
+        (prompt, placeholder, config, year, stamp)
     }; // All locks released here
 
     // Now do the async HTTP requests without holding any locks
@@ -258,7 +259,15 @@ async fn cmd_get_narrative(
     };
 
     eprintln!("[RUST] cmd_get_narrative - result: {:?}", result.is_ok());
-    result
+    // The game's book keeps a chronicle only once its stream finished, and only for the run and
+    // tick it was written for (`llm::record_chronicle`).
+    let text = result?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(world_state) = s.world_state.as_mut() {
+        let written = engine13::llm::record_chronicle(world_state, &stamp, text);
+        eprintln!("[NARRATIVE] chronicle written to the book: {written}");
+    }
+    Ok(())
 }
 
 #[tauri::command]

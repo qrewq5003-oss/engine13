@@ -46,6 +46,18 @@ pub struct SuccessorWeight {
     pub weight: f64,
 }
 
+/// One chronicle of the game's book: the text the chronicler produced for a half-year, kept
+/// only once its stream finished. It travels with the save and is shown in the «Летопись»
+/// panel; it never reaches a prompt (the chronicler reads `NarrativeWorldSnapshot` only).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChronicleEntry {
+    pub tick: u32,
+    pub year: i32,
+    /// "первая половина" / "вторая половина" — as the chronicle was dated
+    pub half_year: String,
+    pub text: String,
+}
+
 /// Alliance between actors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alliance {
@@ -194,6 +206,11 @@ pub struct WorldState {
     /// the record stays after the death).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub conquered_by: std::collections::BTreeMap<String, String>,
+    /// The game's book of chronicles, oldest first (`ChronicleEntry`). Empty until a chronicle
+    /// finishes, and then not written to a save, so a save without chronicles is unchanged and an
+    /// older save loads as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chronicle_book: Vec<ChronicleEntry>,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -248,6 +265,7 @@ impl WorldState {
             war_streaks: Default::default(),
             conquests: Default::default(),
             conquered_by: Default::default(),
+            chronicle_book: Vec::new(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }
@@ -296,6 +314,7 @@ impl WorldState {
             war_streaks: Default::default(),
             conquests: Default::default(),
             conquered_by: Default::default(),
+            chronicle_book: Vec::new(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }

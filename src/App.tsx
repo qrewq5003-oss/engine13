@@ -6,6 +6,7 @@ import { StatusPanel } from './components/StatusPanel';
 import { ActionHistory } from './components/ActionHistory';
 import { ControlPanel } from './components/ControlPanel';
 import { NarrativePanel } from './components/NarrativePanel';
+import { ChroniclePanel } from './components/ChroniclePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { DebugPanel } from './components/DebugPanel';
 import { ScenarioSelectScreen } from './components/ScenarioSelectScreen';
@@ -450,6 +451,10 @@ const App: React.FC = () => {
           <NarrativePanel
             narrative={narrative}
             isLoading={narrativeLoading}
+          />
+          <ChroniclePanel
+            entries={worldState.chronicle_book ?? []}
+            currentTick={worldState.tick}
           />
           {worldState.features?.family_panel && (
             <FamilyPanel
