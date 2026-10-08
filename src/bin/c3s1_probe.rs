@@ -105,6 +105,23 @@ fn replay(r: &Run, new_cap: &dyn Fn(&Row) -> f64) -> Vec<(u32, f64)> {
     }).collect()
 }
 
+/// The army with a one-off step `x` on tick `t0` (after the tick's battles), replayed over the
+/// protocol: the step shrinks with the tick's share of losses and, below capacity, with the
+/// recovery it displaces (the capacity is unchanged).
+fn replay_step(r: &Run, t0: u32, x: f64) -> Vec<(u32, f64)> {
+    let mut delta = 0.0;
+    r.rows.iter().map(|row| {
+        let (t, army, pop, _, share, before) = *row;
+        let c = cap(pop);
+        let rec0 = if before < c { (c - before) * MILITARY_RECOVERY_RATE } else { 0.0 };
+        let b1 = before + delta;
+        let rec1 = if b1 < c { (c - b1) * MILITARY_RECOVERY_RATE } else { 0.0 };
+        delta = (delta + rec1 - rec0) * (1.0 - share);
+        if t == t0 { delta += x; }
+        (t, army + delta)
+    }).collect()
+}
+
 fn window(v: &[(u32, f64)], a: u32, b: u32) -> Option<f64> {
     let x: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect();
     (!x.is_empty()).then(|| x.iter().sum::<f64>() / x.len() as f64)
@@ -146,6 +163,21 @@ fn main() {
     let ticks: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(300);
     census::enable_writes();
     census::watch_all_metrics(true);
+    if args.get(4).map(String::as_str) == Some("step") {
+        println!("# Ц3: the owner's step — +60 Ottoman army on tick 42 (`mehmed_rises`), replayed over the protocols, seeds {first}–{}\n", first + seeds - 1);
+        println!("| world | candidate | mean m₄₀ / m₁₀ | d = m₄₀ − 1.25 m₁₀ (t), passes | living ticks > 220 | games with a tick > 220 @ first tick |");
+        println!("|---|---|---|---|---|---|");
+        for world in WORLDS {
+            let runs: Vec<Run> = (first..first + seeds).map(|s| run(world, s, ticks)).collect();
+            let protocol: Vec<Vec<(u32, f64)>> = runs.iter().map(|r| r.rows.iter().map(|x| (x.0, x.1)).collect()).collect();
+            println!("| {world} | protocol | {}", measure(&protocol));
+            let kept: Vec<Vec<(u32, f64)>> = protocol.iter().map(|v| v.iter().map(|p| (p.0, p.1 + if p.0 >= 42 { 60.0 } else { 0.0 })).collect()).collect();
+            println!("| {world} | +60 from tick 42, kept whole (upper bound) | {}", measure(&kept));
+            let step: Vec<Vec<(u32, f64)>> = runs.iter().map(|r| replay_step(r, 42, 60.0)).collect();
+            println!("| {world} | +60 on tick 42, replayed | {}", measure(&step));
+        }
+        return;
+    }
     println!("# Ц3 stage 1 — arithmetic over the protocols, constantinople v2 as in the content (Ц7, Ц9 on), seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
     let mut pop_rows = Vec::new();
     let mut vassal_rows = Vec::new();

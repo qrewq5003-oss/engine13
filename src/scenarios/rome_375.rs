@@ -1501,6 +1501,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
             id: "rome_splits".to_string(),
@@ -1533,6 +1534,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
             id: "adrianople".to_string(),
@@ -1556,6 +1558,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
             id: "huns_visible".to_string(),
@@ -1578,6 +1581,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
             id: "family_falls".to_string(),
@@ -1602,6 +1606,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         },
     ]
 }

@@ -1386,7 +1386,7 @@ fn check_milestone_events(
             world.milestone_events_fired.push(milestone.id.clone());
             world.milestone_cooldowns.insert(milestone.id.clone(), current_tick);
             // One-time effects, authored on the milestone (B54)
-            apply_milestone_effects(world, milestone, scenario.features.economy_v2 && census::debt_as_pay());
+            apply_milestone_effects(world, milestone, scenario.features.economy_v2, scenario.features.economy_v2 && census::debt_as_pay());
             // Economy v2 (Ц7): an authored war of conquest — the pair's vassalage is broken, it may
             // not bind again, and the target's streak starts anew against the attacker.
             if let Some(bc) = milestone.begins_conquest.as_ref().filter(|_| interactions::conquest_on(scenario)) {
@@ -1513,10 +1513,16 @@ fn link_spawn_back(world: &mut WorldState, spawn_id: &str, edges: &[crate::core:
 /// Apply one-time effects for specific milestone events
 /// A milestone's authored `effects`, applied once on its tick (B54). Sorted by key: the
 /// `HashMap` order is per process, and a fixed order keeps any future overlapping keys
-/// deterministic. An absent actor is skipped (`MetricRef::apply`).
-fn apply_milestone_effects(world: &mut WorldState, milestone: &crate::core::MilestoneEvent, treasury_floor: bool) {
+/// deterministic. An absent actor is skipped (`MetricRef::apply`). Economy v2 (Ц3): with v2 on,
+/// the milestone's `economy_v2_effects` follow, the same way.
+fn apply_milestone_effects(world: &mut WorldState, milestone: &crate::core::MilestoneEvent, v2: bool, treasury_floor: bool) {
     let mut effects: Vec<(&crate::core::MetricRef, &f64)> = milestone.effects.iter().collect();
     effects.sort_by_key(|(k, _)| k.to_string());
+    if v2 {
+        let mut more: Vec<(&crate::core::MetricRef, &f64)> = milestone.economy_v2_effects.iter().collect();
+        more.sort_by_key(|(k, _)| k.to_string());
+        effects.extend(more);
+    }
     for (key, delta) in effects {
         census::write_source(|| format!("milestone {}", milestone.id));
         let mut delta = *delta;
@@ -2719,6 +2725,7 @@ mod tests {
             requires_alive: requires_alive.iter().map(|s| s.to_string()).collect(),
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         }
     }
 
@@ -3579,6 +3586,32 @@ mod tests {
         assert_eq!(run(false), vec![(50.0, 100.0); 7], "without effects the firing moves nothing");
     }
 
+    /// Economy v2 (Ц3): a milestone's `economy_v2_effects` apply once on its tick, only with v2
+    /// on. Both ways: with v2 off the same firing leaves the army.
+    #[test]
+    fn milestone_v2_effects_apply_only_under_v2() {
+        let run = |v2: bool| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            let mut m = dated_milestone("m", None, &["city"]);
+            m.condition.condition_type = EventConditionType::Tick { tick: 3 };
+            m.economy_v2_effects = HashMap::from([(crate::core::MetricRef::literal("actor:city.military_size"), 60.0)]);
+            scenario.milestone_events = vec![m];
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]));
+            let mut seen = Vec::new();
+            for t in 0..6 {
+                world.tick = t;
+                let mut log = EventLog::new();
+                check_milestone_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
+                seen.push(world.actors["city"].get_metric("military_size"));
+            }
+            seen
+        };
+        assert_eq!(run(true), vec![50.0, 50.0, 50.0, 110.0, 110.0, 110.0], "v2: +60 once on tick 3");
+        assert_eq!(run(false), vec![50.0; 6], "v1: the firing moves nothing");
+    }
+
     // ------------------------------------------------------------------
     // B44 stage 2: an absent actor in auto-deltas. It reads as 0.0; a ratio over a zero
     // denominator is a limit (±∞), 0 / 0 is skipped; a single condition keeps 0.0.
@@ -4127,6 +4160,7 @@ mod tests {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         }];
         let mut world = WorldState::with_seed("test".into(), 375, 0);
         world.actors.insert("parent".into(), parent);
@@ -4211,6 +4245,7 @@ mod tests {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            economy_v2_effects: Default::default(),
         }];
         // Milan already names France on its own terms — that entry must survive as is.
         let mut milan_lists_france = vassalage_actor("milan", 50.0, 30.0, 60.0, 60.0, &["savoy"]);
