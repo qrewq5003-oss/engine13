@@ -90,7 +90,11 @@ tar czf ~/engine13-claude-memory.tgz -C ~/.claude/projects/-home-deck-Downloads-
    ставить руками не надо: `rust-toolchain.toml` закрепляет `1.93.1`, rustup подтянет её при
    первом `cargo` в папке проекта. Если `cargo clippy` скажет, что компонента нет:
    `rustup component add clippy --toolchain 1.93.1`.
-4. **Node.js 20** (как в CI, на Deck `v20.20.0`) — установщик с nodejs.org или nvm-windows.
+4. **Node.js 20.x, любой патч** (сейчас последний 20.20.2; на Deck стоит 20.20.0 — разница в
+   третьей цифре только исправления, брать 20.20.2) — установщик с nodejs.org или nvm-windows.
+   Почему 20, а не новее: CI собирает фронтенд на `node-version: 20`, и локально стоит держать
+   то же, чтобы «у меня собралось» значило «соберётся в CI». Переход на 22/24 возможен, но
+   делать его отдельной правкой — одновременно в `.github/workflows/ci.yml` и локально.
 5. **Git for Windows** — и сразу, **до клона**:
    ```powershell
    git config --global core.autocrlf false
