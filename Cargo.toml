@@ -143,3 +143,7 @@ required-features = ["census"]
 [[bin]]
 name = "c3s1_probe"
 required-features = ["census"]
+
+[[bin]]
+name = "c2d_probe"
+required-features = ["census"]
