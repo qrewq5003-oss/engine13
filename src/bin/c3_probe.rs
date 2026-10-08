@@ -37,6 +37,7 @@ fn run(world: &str, seed: u64, ticks: u32) -> Run {
         s.features.economy_v2 = true;
         s.economy_v2_conquest_k2 = None;
         s.economy_v2_alliances = false;
+        s.economy_v2_population_pull = None;
     }
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, "constantinople_1430"));
     let mut r = Run::default();

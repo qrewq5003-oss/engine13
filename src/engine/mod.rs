@@ -562,6 +562,13 @@ fn phase_random_events(
             for (metric, delta) in event.effects.iter().filter(|_| !census::event_muted(&event.id)) {
                 let key = metric.resolve(target_id).expect("event target actor id");
                 let mut delta = *delta;
+                // Economy v2 (Ц10): under the population pull the blow to the target's people is a
+                // share of them, not a number.
+                if let Some(share) = event.economy_v2_population_share.filter(|_| population_pull_on(scenario)) {
+                    if matches!(&key, crate::core::MetricRef::Actor { actor_id, metric } if actor_id.as_str() == target_id.as_str() && metric.as_str() == "population") {
+                        delta = -share * world.actors.get(target_id.as_str()).map_or(0.0, |a| a.get_metric("population").max(0.0));
+                    }
+                }
                 if scenario.features.economy_v2 && census::debt_as_pay() {
                     if let Some(id) = is_treasury(&key) {
                         let current = world.actors.get(id).map_or(0.0, |a| a.get_metric("treasury"));
@@ -3096,6 +3103,7 @@ mod tests {
                 llm_context: String::new(),
                 one_time: true,
                 leaves_alliance_as_enemy: Some("great".into()),
+                economy_v2_population_share: None,
             }];
             let mut log = EventLog::new();
             phase_random_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
@@ -3241,6 +3249,38 @@ mod tests {
         assert!((run(true, Some(0.1)) - 410.0).abs() < 1e-9);
         assert_eq!(run(false, Some(0.1)), 400.0, "v1 does not pull");
         assert_eq!(run(true, None), 400.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц10): under the population pull an event's population blow is its share of the
+    /// people. Both ways: without the pull the authored number.
+    #[test]
+    fn economy_v2_population_events_take_a_share_under_the_pull() {
+        let run = |r: Option<f64>, pop: f64| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_population_pull = r;
+            scenario.random_events = vec![crate::core::RandomEvent {
+                id: "famine".into(),
+                probability: 1.0,
+                target: crate::core::EventTarget::Actor("city".into()),
+                conditions: vec![],
+                effects: HashMap::from([(crate::core::RelativeMetricRef::literal("self.population"), -20.0)]),
+                llm_context: String::new(),
+                one_time: false,
+                leaves_alliance_as_enemy: None,
+                economy_v2_population_share: Some(0.05),
+            }];
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("population", pop);
+            world.actors.insert("city".into(), a);
+            let mut log = EventLog::new();
+            phase_random_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
+            world.actors["city"].get_metric("population")
+        };
+        assert!((run(Some(0.01), 40.0) - 38.0).abs() < 1e-9, "the pull: 5 % of 40");
+        assert!((run(Some(0.01), 8000.0) - 7600.0).abs() < 1e-9, "the pull: 5 % of 8000");
+        assert_eq!(run(None, 40.0), 20.0, "no pull: the authored −20");
     }
 
     /// Economy v2 (Ц10): under the population pull the economy-to-population deficit rule is not

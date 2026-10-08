@@ -244,7 +244,8 @@ pub fn load_constantinople_1430() -> Scenario {
         economy_v2_alliances: true,
         starting_alliances: vec![],
         economy_v2_cohesion_pull: Some(0.12),
-        economy_v2_population_pull: None,
+        // Economy v2 (Ц10): population pulled to its norm P₀ × eo / T (owner, docs/investigation_economy_c10.md).
+        economy_v2_population_pull: Some(0.01),
         military_conflict_probability: 0.35,
         naval_conflict_probability: 0.20,
         random_events: create_random_events(),
@@ -940,6 +941,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Смерть кардинала сорвала переговоры о федерации".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "ottoman_embassy".to_string(),
@@ -955,6 +957,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Османское посольство потребовало унизительной дани".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "genoese_bankers".to_string(),
@@ -968,6 +971,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Генуэзские банкиры выделили займ на укрепление союза".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "greek_scholars_flee".to_string(),
@@ -984,6 +988,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Греческие учёные и философы бегут на Запад, унося с собой знания".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "ottoman_spy_caught".to_string(),
@@ -998,6 +1003,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Пойманный османский шпион доказал угрозу — союзники насторожились".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "crusade_call".to_string(),
@@ -1014,6 +1020,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Папа призвал к новому крестовому походу против турок".to_string(),
             one_time: true,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "venetian_fleet_storm".to_string(),
@@ -1028,6 +1035,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Буря разметала венецианский флот в Эгейском море".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "mehmed_threatens".to_string(),
@@ -1044,6 +1052,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Открытые угрозы Мехмеда в адрес Константинополя встревожили Европу".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
     ]
 }

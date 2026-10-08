@@ -117,6 +117,12 @@ struct Run {
     pop_src: BTreeMap<(String, String), (f64, f64)>,
     /// Ц10: Rome's eo / T on tick 100
     rome_eo100: Option<f64>,
+    /// Ц10: (event, actor) -> firings of `flood`, `famine`, `plague`
+    ev: BTreeMap<(String, String), u32>,
+    /// Ц10: eo / T on every living tick, per actor
+    eo_rel: BTreeMap<String, Vec<f64>>,
+    /// economic_output written, (actor, source) -> sum
+    eo_src: BTreeMap<(String, String), f64>,
 }
 
 /// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands, 4 = the content and Ц3 set here,
@@ -142,6 +148,8 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
         // model 5: the content and Ц10 (а) set here — population pulled to P₀ × eo / T, r = 0.01;
         // model 6: Ц10 (б) — pulled to the constant P₀, the deficit rules kept (census)
         if model == 5 || model == 6 { s.economy_v2_population_pull = Some(0.01); }
+        // models 0–4 are the worlds before Ц10 (it is in the content since its write)
+        if model <= 4 { s.economy_v2_population_pull = None; }
     }
     census::set_population_constant_norm(model == 6);
     census::set_combat_quality(quality);
@@ -166,8 +174,9 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             }
         }
         r.battles.extend(census::take_battles());
-        for w in census::take_writes().into_iter().filter(|w| w.metric == "population") {
+        for w in census::take_writes().into_iter().filter(|w| w.metric == "population" || w.metric == "economic_output") {
             let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file().rsplit('/').next().unwrap_or(""), w.location.line()));
+            if w.metric == "economic_output" { *r.eo_src.entry((w.actor.clone(), src)).or_default() += w.applied; continue; }
             let e = r.pop_src.entry((w.actor.clone(), src)).or_default();
             if w.applied < 0.0 { e.0 += w.applied; } else { e.1 += w.applied; }
         }
@@ -214,6 +223,7 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
                 } else if a.get_metric("treasury") < 0.0 { c[4] += 1; }
                 if engine13::engine::population_base(ws, scn, id).is_some_and(|b| pop < 0.25 * b) { c[2] += 1; }
                 if tt.is_some_and(|tt| eo < tt / 4.0) { c[3] += 1; }
+                if let Some(tt) = tt { r.eo_rel.entry(id.clone()).or_default().push(eo / tt); }
                 if t % 10 == 0 && t <= 150 { r.tr_steps.entry(id.clone()).or_default().push(a.get_metric("treasury")); }
             }
             let l = a.get_metric("legitimacy");
@@ -250,6 +260,9 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
     r.fingerprint = std::hash::Hasher::finish(&fp);
     let ws = st.world_state.as_ref().unwrap();
     r.deaths = ws.dead_actors.len() as u32;
+    for e in st.event_log.events.iter().filter(|e| ["flood", "famine", "plague"].contains(&e.id.as_str())) {
+        *r.ev.entry((e.id.clone(), e.actor_id.clone())).or_default() += 1;
+    }
     r.conquered_by = ws.conquered_by.clone();
     r.outcomes = ws.milestone_events_fired.iter().filter(|mm| mm.starts_with("outcome_")).cloned().collect();
     r.stab = ws.milestone_events_fired.iter().any(|mm| mm == "milan_regency_stabilizes");
@@ -334,7 +347,22 @@ fn main() {
     if args.get(4).map(String::as_str) == Some("c3") { c3_run(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10pre") { c10_pre(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10") { c10_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c10ev") { c10_events(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("eolow") { census::watch_all_metrics(true); eo_low(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10why") { census::watch_all_metrics(true); c10_why(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c10content") {
+        let (mut same, mut total) = (0, 0);
+        for sc in SCENARIOS {
+            for world in worlds(sc) {
+                for s in first..first + seeds {
+                    total += 1;
+                    if run_content(sc, world, s, ticks) == run(sc, world, 5, true, s, ticks).fingerprint { same += 1; }
+                }
+            }
+        }
+        println!("Ц10 content check, seeds {first}–{}: {same} of {total} runs identical (content against Ц10 (а) set here).", first + seeds - 1);
+        return;
+    }
     if args.get(4).map(String::as_str) == Some("c3content") {
         let (mut same, mut total) = (0, 0);
         for world in worlds("constantinople_1430") {
@@ -713,11 +741,19 @@ fn c10_run(first: u64, seeds: u64, ticks: u32) {
                 let runs = &all[&m];
                 let (z, low, _) = c10_shares(runs);
                 let rome: Vec<(f64, f64)> = runs.iter().filter_map(|r| r.rome100).collect();
-                let rome_ok = sc != "rome_375" || rome.iter().all(|(p, b)| *p <= *b);
+                // condition 3 (corrected after PR #252): Rome's base after the split is the seat's share × 8000
+                // in every game; population above it is allowed (eo / T > 1). Base: no pull, no scaled base.
+                let seat = {
+                    let scn = engine13::scenarios::registry::load_by_id("rome_375").unwrap();
+                    let r0 = scn.actors.iter().find(|a| a.id == "rome").unwrap();
+                    let total: f64 = r0.on_collapse.iter().map(|h| h.weight).sum();
+                    r0.on_collapse.iter().find(|h| h.keeps_seat).map_or(1.0, |h| h.weight / total) * 8000.0
+                };
+                let rome_ok = sc != "rome_375" || (rome.len() == runs.len() && rome.iter().all(|(_, b)| (*b - seat).abs() < 1e-6));
                 let ok = z < 1.0 && low < 10.0 && rome_ok;
                 let e = c10_ok.entry(m).or_default();
                 e.1 += 1; e.0 += ok as usize;
-                let rome_cell = if sc == "rome_375" { format!("{} of {} games ≤ base; pop p50 {:.0}, base {:.0}", rome.iter().filter(|(p, b)| p <= b).count(), rome.len(), pct(&rome.iter().map(|x| x.0).collect::<Vec<_>>(), 0.5), rome.first().map_or(f64::NAN, |x| x.1)) } else { "—".into() };
+                let rome_cell = if sc == "rome_375" { format!("base = {seat:.0} in {} of {} games; pop p50 {:.0} (p90 {:.0})", rome.iter().filter(|(_, b)| (*b - seat).abs() < 1e-6).count(), runs.len(), pct(&rome.iter().map(|x| x.0).collect::<Vec<_>>(), 0.5), pct(&rome.iter().map(|x| x.0).collect::<Vec<_>>(), 0.9)) } else { "—".into() };
                 c10_rows.push(format!("| {sc} | {world} | {} | {z:.2} % | {low:.1} % | {rome_cell} | {} |", labels(m), if ok { "**yes**" } else { "no" }));
             }
             let base = &all[&3];
@@ -850,4 +886,124 @@ fn c10_why(first: u64, seeds: u64, ticks: u32) {
             }
         }
     }
+}
+
+/// The owner's shares of the three population events under the pull (Ц10): `flood` 1 %, `famine` 5 %,
+/// `plague` 10 %.
+const EVENT_SHARES: [(&str, f64); 3] = [("flood", 0.01), ("famine", 0.05), ("plague", 0.10)];
+
+/// Ц10, before building relative events (§9.7): on the protocols of (а) (r = 0.01, the events still
+/// absolute — their firing does not depend on the size of the blow), each event's rate p per living
+/// actor-tick and P*/N = r / (r + p × f); per actor P*/P₀ = median(eo / T) × r / (r + Σ p_actor × f),
+/// and the arithmetic of Ц10's conditions 1 and 2 from it.
+fn c10_events(first: u64, seeds: u64, ticks: u32) {
+    const R: f64 = 0.01;
+    println!("# Ц10 — relative population events, arithmetic before the build, seeds {first}–{}\n", first + seeds - 1);
+    let mut ev_rows = Vec::new();
+    let mut actor_rows = Vec::new();
+    let mut verdict_rows = Vec::new();
+    for sc in SCENARIOS {
+        let scn = engine13::scenarios::registry::load_by_id(sc).unwrap();
+        for world in worlds(sc) {
+            let runs: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 5, true, s, ticks)).collect();
+            let mut living: BTreeMap<String, u64> = BTreeMap::new();
+            let mut eo: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+            let mut fires: BTreeMap<(String, String), u32> = BTreeMap::new();
+            for r in &runs {
+                for (k, v) in &r.popc { *living.entry(k.clone()).or_default() += v[0]; }
+                for (k, v) in &r.eo_rel { eo.entry(k.clone()).or_default().extend(v); }
+                for (k, v) in &r.ev { *fires.entry(k.clone()).or_default() += v; }
+            }
+            let total: u64 = living.values().sum();
+            for (e, f) in EVENT_SHARES {
+                let n: u32 = fires.iter().filter(|((x, _), _)| x == e).map(|(_, v)| v).sum();
+                let p = n as f64 / total.max(1) as f64;
+                ev_rows.push(format!("| {sc} | {world} | {e} | {:.0} % | {p:.4} | {:.0} % |", 100.0 * f, 100.0 * R / (R + p * f)));
+            }
+            // per actor
+            let (mut low_ticks, mut zombie_ticks) = (0u64, 0u64);
+            let mut lows = Vec::new();
+            for (id, lt) in &living {
+                let Some(p0) = engine13::engine::metric_base(&scn, id, "population") else { continue };
+                let load: f64 = EVENT_SHARES.iter().map(|(e, f)| fires.get(&(e.to_string(), id.clone())).copied().unwrap_or(0) as f64 / (*lt).max(1) as f64 * f).sum();
+                let rel = eo.get(id).map_or(1.0, |v| pct(v, 0.5));
+                let ps = rel * R / (R + load);
+                if ps < 0.25 { low_ticks += lt; lows.push(id.clone()); }
+                if ps * p0 <= 1.0 { zombie_ticks += lt; }
+                if sc == "milan_1477" || ["saxons", "mantua", "urbino"].contains(&id.as_str()) {
+                    actor_rows.push(format!("| {sc} | {world} | {id} | {p0:.0} | {:.0} % | {load:.4} | {:.0} % | {:.1} | {} |", 100.0 * rel, 100.0 * ps, ps * p0,
+                        if ps * p0 <= 1.0 { "**≤ 1**" } else if ps < 0.25 { "**< P₀/4**" } else { "ok" }));
+                }
+            }
+            let (z, l) = (share(zombie_ticks, total), share(low_ticks, total));
+            verdict_rows.push(format!("| {sc} | {world} | {z:.1} % | {l:.1} % ({}) | {} |", if lows.is_empty() { "—".into() } else { lows.join(", ") }, if z < 1.0 && l < 10.0 { "yes" } else { "**no**" }));
+        }
+    }
+    println!("## Events: rate per living actor-tick and the equilibrium each alone allows\n");
+    println!("| scenario | world | event | share f | p | P*/N = r / (r + p f) |");
+    println!("|---|---|---|---|---|---|");
+    for r in ev_rows { println!("{r}"); }
+    println!("\n## Actors (milan, and saxons): median eo / T, the events' load Σ p f, P*/P₀, P*\n");
+    println!("| scenario | world | actor | P₀ | eo / T | Σ p f | P*/P₀ | P* | |");
+    println!("|---|---|---|---|---|---|---|---|---|");
+    for r in actor_rows { println!("{r}"); }
+    println!("\n## Arithmetic of Ц10's conditions 1–2 (an actor whose P* is ≤ 1 or below P₀/4 counts all its living ticks)\n");
+    println!("| scenario | world | (1) zombies | (2) below P₀/4 (who) | both pass |");
+    println!("|---|---|---|---|---|");
+    for r in verdict_rows { println!("{r}"); }
+}
+
+/// Which actors hold eo < T / 4 for 20 % of their life or more under Ц10 (а), and why: their
+/// economic_output writes by source (mean a game, |x| ≥ 5), the first world of each scenario.
+fn eo_low(first: u64, seeds: u64, ticks: u32) {
+    println!("# eo < T / 4 under Ц10 (а), seeds {first}–{}\n", first + seeds - 1);
+    println!("| scenario | world | actor | share of life with eo < T/4 | eo / T p10/50/90 (%) | economic_output writes by source (mean a game) |");
+    println!("|---|---|---|---|---|---|");
+    for sc in SCENARIOS {
+        let world = worlds(sc)[0];
+        let runs: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 5, true, s, ticks)).collect();
+        let mut c: BTreeMap<String, [u64; 5]> = BTreeMap::new();
+        let mut rel: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        for r in &runs {
+            for (k, v) in &r.popc { let e = c.entry(k.clone()).or_default(); for i in 0..5 { e[i] += v[i]; } }
+            for (k, v) in &r.eo_rel { rel.entry(k.clone()).or_default().extend(v.iter().map(|x| 100.0 * x)); }
+        }
+        for (k, v) in c.iter().filter(|(_, v)| share(v[3], v[0]) >= 20.0) {
+            let mut src: BTreeMap<String, f64> = BTreeMap::new();
+            for r in &runs { for ((a, s2), x) in &r.eo_src { if a == k { *src.entry(s2.clone()).or_default() += x / seeds as f64; } } }
+            let mut sv: Vec<(String, f64)> = src.into_iter().filter(|x| x.1.abs() >= 5.0).collect();
+            sv.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            println!("| {sc} | {world} | {k} | {:.0} % | {} | {} |", share(v[3], v[0]), q(rel.get(k).map_or(&[][..], |x| &x[..])), sv.iter().map(|(s2, x)| format!("{s2} {x:+.0}")).collect::<Vec<_>>().join("; "));
+        }
+    }
+}
+
+/// The fingerprint of v2 exactly as in the content (nothing overridden), for the Ц10 content check.
+fn run_content(sc: &str, world: &str, seed: u64, ticks: u32) -> u64 {
+    let db = engine13::db::Db::open_in_memory().unwrap();
+    let mut st = engine13::AppState::default();
+    engine13::load_scenario(&mut st, &db, sc.to_string()).unwrap();
+    st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+    st.current_scenario.as_mut().unwrap().features.economy_v2 = true;
+    let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
+    let mut fp = std::collections::hash_map::DefaultHasher::new();
+    for _ in 0..ticks {
+        match &strategy {
+            Some(s) => { play_scripted_tick(&mut st, s); }
+            None => {
+                let ws = st.world_state.as_mut().unwrap();
+                let scn = st.current_scenario.as_ref().unwrap();
+                engine13::engine::tick(ws, scn, &mut st.event_log, st.rng.as_mut().unwrap());
+            }
+        }
+        let ws = st.world_state.as_ref().unwrap();
+        let mut ids: Vec<&String> = ws.actors.keys().collect();
+        ids.sort();
+        for id in ids {
+            let mut ms: Vec<(&String, &f64)> = ws.actors[id].metrics.iter().collect();
+            ms.sort_by(|x, y| x.0.cmp(y.0));
+            for (k, v) in ms { std::hash::Hash::hash(&(id, k, v.to_bits()), &mut fp); }
+        }
+    }
+    std::hash::Hasher::finish(&fp)
 }

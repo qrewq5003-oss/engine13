@@ -801,6 +801,7 @@ fn event_addressing_check_catches_a_new_violator() {
         llm_context: String::new(),
         one_time: false,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     };
 
     // clean: both slots on the target, in either spelling
