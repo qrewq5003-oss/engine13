@@ -96,9 +96,13 @@ struct Run {
     outcomes: Vec<String>,
     stab: bool,
     deep: bool,
+    /// every actor metric every tick, bit for bit
+    fingerprint: u64,
+    /// Milan's army on ticks 0 and 1 (the state after them)
+    milan_army: Vec<f64>,
 }
 
-/// model: 0 = base, 1 = Ц7, 2 = Ц9
+/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands
 fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32) -> Run {
     let db = engine13::db::Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
@@ -107,9 +111,11 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
     {
         let s = st.current_scenario.as_mut().unwrap();
         s.features.economy_v2 = true;
-        assert!(s.economy_v2_conquest_k2.is_none() && !s.economy_v2_alliances, "Ц7 and Ц9 are off in the content");
-        if model >= 1 { s.economy_v2_conquest_k2 = Some(1); }
-        s.economy_v2_alliances = model == 2;
+        // model 3: the content as it stands (Ц7 and Ц9 written) — the content check
+        if model < 3 {
+            s.economy_v2_conquest_k2 = (model >= 1).then_some(1);
+            s.economy_v2_alliances = model == 2;
+        }
     }
     census::set_combat_quality(quality);
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
@@ -120,6 +126,8 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
     let mut open: Vec<Open> = Vec::new();
     let _ = census::take_battles();
     let _ = census::take_writes();
+    let mut fp = std::collections::hash_map::DefaultHasher::new();
+    if let Some(m) = st.world_state.as_ref().unwrap().actors.get("milan") { r.milan_army.push(m.get_metric("military_size")); }
     for _ in 0..ticks {
         let before: BTreeSet<String> = st.world_state.as_ref().unwrap().dead_actor_ids.iter().cloned().collect();
         match &strategy {
@@ -146,6 +154,14 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             r.declines.push((*reached, if *below { 0 } else if *tp_max >= *tp_new + *drop / 2.0 { 1 } else { 2 }));
             false
         });
+        if t <= 1 { if let Some(m) = ws.actors.get("milan") { r.milan_army.push(m.get_metric("military_size")); } }
+        let mut all_ids: Vec<&String> = ws.actors.keys().collect();
+        all_ids.sort();
+        for id in all_ids {
+            let mut ms: Vec<(&String, &f64)> = ws.actors[id].metrics.iter().collect();
+            ms.sort_by(|x, y| x.0.cmp(y.0));
+            for (k, v) in ms { std::hash::Hash::hash(&(id, k, v.to_bits()), &mut fp); }
+        }
         let mut ids: Vec<&String> = ws.actors.keys().filter(|id| !ws.dead_actor_ids.contains(*id)).collect();
         ids.sort();
         for id in ids {
@@ -178,6 +194,7 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
         if r.win.is_none() && ws.victory_achieved { r.win = Some(t); }
     }
     census::set_combat_quality(true);
+    r.fingerprint = std::hash::Hasher::finish(&fp);
     let ws = st.world_state.as_ref().unwrap();
     r.deaths = ws.dead_actors.len() as u32;
     r.conquered_by = ws.conquered_by.clone();
@@ -260,6 +277,7 @@ fn main() {
     census::enable_battles();
     census::enable_writes();
     if args.get(4).map(String::as_str) == Some("c4") { c4_split(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("content") { content_check(first, seeds, ticks); return; }
     println!("# Ц9 with Ц7 — seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     const MEASURES: [&str; 9] = ["Ц1 actors", "Ц1 tiers", "Ц1 spread", "Ц5 actors", "Ц5 spread", "Ц6 ceiling", "Ц6 corr", "Ц8 extremes", "Ц8 spread"];
     let mut c7_rows = Vec::new();
@@ -432,4 +450,33 @@ fn c4_row(name: &str, scope: &str, ((n, w, sp, spq), (nb, wb)): C4Pool) -> Strin
     let pb = wb as f64 / nb.max(1) as f64;
     let se_d = (pa * (1.0 - pa) / n.max(1) as f64 + pb * (1.0 - pb) / nb.max(1) as f64).sqrt();
     format!("| {name} | {scope} | {n} / {nb} | {:.1} % vs {:.1} % | {:+.1} vs {:.1} {} |", 100.0 * pa, 100.0 * (promise - 2.0 * se), 100.0 * (pa - pb), 200.0 * se_d, if pa - pb >= 2.0 * se_d { "yes" } else { "**no**" })
+}
+
+/// The content check after the write: v2 as the content stands against Ц9 set by the probe, every
+/// actor metric every tick; and in milan, Milan's army on ticks 0–1 and the tick the league turns.
+fn content_check(first: u64, seeds: u64, ticks: u32) {
+    let (mut same, mut total) = (0, 0);
+    let mut rows = Vec::new();
+    for sc in SCENARIOS {
+        for world in worlds(sc) {
+            let mut lt = Vec::new();
+            let mut army: Vec<Vec<f64>> = Vec::new();
+            for s in first..first + seeds {
+                let a = run(sc, world, 3, true, s, ticks);
+                let b = run(sc, world, 2, true, s, ticks);
+                total += 1;
+                if a.fingerprint == b.fingerprint { same += 1; }
+                if let Some(t) = a.league_turns { lt.push(t as f64); }
+                army.push(a.milan_army.clone());
+            }
+            if sc == "milan_1477" {
+                let at = |i: usize| q(&army.iter().filter_map(|v| v.get(i).copied()).collect::<Vec<f64>>());
+                rows.push(format!("| {world} | {} / {} / {} | {} @ {} |", at(0), at(1), at(2), lt.len(), q(&lt)));
+            }
+        }
+    }
+    println!("Content check, seeds {first}–{}: {same} of {total} runs identical (content against Ц9 set here), every actor metric every tick.\n", first + seeds - 1);
+    println!("| milan world | Milan's army p10/50/90: start / after tick 0 / after tick 1 | league turns on Milan: games @ tick p10/50/90 |");
+    println!("|---|---|---|");
+    for r in rows { println!("{r}"); }
 }
