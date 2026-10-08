@@ -230,6 +230,32 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // Ц9: a starting alliance and an action's `forms_alliance` name two or more distinct starting
+    // actors; an event's `leaves_alliance_as_enemy` names a starting actor an authored alliance names.
+    let starting = |id: &str| scenario.actors.iter().any(|a| a.id == id && !a.is_successor_template);
+    let mut alliance_lists: Vec<(String, &Vec<String>)> = scenario.starting_alliances.iter().enumerate().map(|(i, a)| (format!("starting alliance {i}"), &a.actors)).collect();
+    for action in scenario.patron_actions.iter().chain(&scenario.universal_actions).filter(|a| !a.forms_alliance.is_empty()) {
+        alliance_lists.push((format!("action '{}': forms_alliance", action.id), &action.forms_alliance));
+    }
+    for (what, ids) in &alliance_lists {
+        let distinct: HashSet<&String> = ids.iter().collect();
+        if distinct.len() != ids.len() || ids.len() < 2 {
+            errors.push(format!("{what}: needs two or more distinct actors, has {ids:?}"));
+        }
+        for id in ids.iter().filter(|id| !starting(id)) {
+            errors.push(format!("{what}: '{id}' is not a starting actor"));
+        }
+    }
+    for e in &scenario.random_events {
+        if let Some(id) = &e.leaves_alliance_as_enemy {
+            if !starting(id) {
+                errors.push(format!("event '{}': leaves_alliance_as_enemy '{id}' is not a starting actor", e.id));
+            } else if !alliance_lists.iter().any(|(_, ids)| ids.contains(id)) {
+                errors.push(format!("event '{}': leaves_alliance_as_enemy '{id}' is in no authored alliance", e.id));
+            }
+        }
+    }
+
     // A tag's `ends_with` names a milestone of the same scenario (A4).
     for t in &scenario.tag_definitions {
         if let Some(m) = &t.ends_with {
@@ -415,6 +441,33 @@ mod tests {
             let scenario = (entry.loader)();
             assert!(validate_scenario(&scenario).is_ok(), "{}: {:?}", entry.id, validate_scenario(&scenario));
         }
+    }
+
+    /// Ц9: the alliance fields are validated at load, and an action's unknown key is a load error.
+    #[test]
+    fn validate_checks_the_alliance_fields() {
+        let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
+        scenario.starting_alliances[0].actors.push("ghost".to_string());
+        scenario.starting_alliances.push(crate::core::StartingAlliance { actors: vec!["milan".to_string()] });
+        scenario.patron_actions.iter_mut().find(|a| a.id == "milan_savoy_alliance").unwrap().forms_alliance = vec!["milan".to_string(), "milan".to_string()];
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("starting alliance 0") && e.contains("'ghost'")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("starting alliance 1") && e.contains("two or more")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("milan_savoy_alliance") && e.contains("two or more")), "{errors:?}");
+
+        let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
+        scenario.random_events.iter_mut().find(|e| e.id == "italian_league_against_milan").unwrap().leaves_alliance_as_enemy = Some("mantua".to_string());
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("italian_league_against_milan") && e.contains("no authored alliance")), "{errors:?}");
+
+        let bad = "[[patron_actions]]\nid = \"x\"\nname = \"x\"\nform_alliance = [\"a\", \"b\"]\n[patron_actions.available_if]\ntype = \"always\"\n[patron_actions.effects]\n\"actor:a.legitimacy\" = 1.0\n[patron_actions.cost]\n";
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct F { patron_actions: Vec<crate::core::PatronAction> }
+        let err = toml::from_str::<F>(bad).err().expect("a misspelt key is a load error");
+        assert!(err.to_string().contains("form_alliance"), "{err}");
+        let good = bad.replace("form_alliance", "forms_alliance");
+        assert_eq!(toml::from_str::<F>(&good).unwrap().patron_actions[0].forms_alliance, vec!["a", "b"]);
     }
 
     #[test]

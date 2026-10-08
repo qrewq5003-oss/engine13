@@ -264,7 +264,11 @@ pub fn apply_battle_outcome(world: &mut WorldState, scenario: &Scenario, attacke
         }
     }
     if let Some(k2) = scenario.economy_v2_conquest_k2.filter(|_| conquest_on(scenario)) {
-        let (s_w, s_l) = if battle.attacker_wins { (battle.strength_attacker, battle.strength_defender) } else { (battle.strength_defender, battle.strength_attacker) };
+        let (s_w, mut s_l) = if battle.attacker_wins { (battle.strength_attacker, battle.strength_defender) } else { (battle.strength_defender, battle.strength_attacker) };
+        // Ц9: the loser's allies stand behind it — their strength joins its side of the ratio.
+        if alliances_on(scenario) {
+            s_l += allies_strength(world, loser_id, winner_id);
+        }
         record_war_result(world, winner_id, loser_id, s_w, s_l, k2, current_tick, current_year, event_log);
     }
     true
@@ -436,6 +440,66 @@ pub fn conquest_on(scenario: &Scenario) -> bool {
 pub const CONQUEST_RATIO: f64 = 3.0;
 /// Economy v2 (Ц7): battles lost in a row to one overwhelming winner that make the loser its vassal.
 pub const SUBMISSION_STREAK: u32 = 3;
+
+/// Economy v2 (Ц9): authored alliances act.
+pub fn alliances_on(scenario: &Scenario) -> bool {
+    scenario.features.economy_v2 && scenario.economy_v2_alliances
+}
+
+/// The two actors stand in one alliance.
+pub fn allied(world: &WorldState, a: &str, b: &str) -> bool {
+    a != b && world.alliances.iter().any(|x| x.actor_ids.iter().any(|m| m == a) && x.actor_ids.iter().any(|m| m == b))
+}
+
+/// Economy v2 (Ц9): the summed battle strength of `id`'s living allies, `except` one actor (the
+/// winner it lost to). Each ally counts once, however many alliances it shares with `id`.
+pub fn allies_strength(world: &WorldState, id: &str, except: &str) -> f64 {
+    let mut allies: Vec<&String> = world.alliances.iter()
+        .filter(|x| x.actor_ids.iter().any(|m| m == id))
+        .flat_map(|x| x.actor_ids.iter())
+        .filter(|m| m.as_str() != id && m.as_str() != except && !world.dead_actor_ids.contains(*m))
+        .collect();
+    allies.sort();
+    allies.dedup();
+    let with_quality = crate::core::census::combat_quality();
+    allies.iter().filter_map(|m| world.actors.get(*m)).map(|a| {
+        let army = a.get_metric("military_size").max(0.0);
+        if with_quality { army * a.get_metric("military_quality").clamp(0.0, 100.0) / 100.0 } else { army }
+    }).sum()
+}
+
+/// Economy v2 (Ц9): the scenario's starting alliances enter the world (on its first tick).
+pub fn seed_starting_alliances(world: &mut WorldState, scenario: &Scenario) {
+    for a in &scenario.starting_alliances {
+        world.alliances.push(crate::core::Alliance { actor_ids: a.actors.clone(), common_enemy: None, trade_benefit: false, formed_tick: world.tick });
+    }
+}
+
+/// Economy v2 (Ц9): an action's `forms_alliance` — one alliance of the living members named,
+/// unless the same members already stand in one; nothing if fewer than two are alive.
+pub fn form_alliance(world: &mut WorldState, members: &[String]) {
+    let mut ids: Vec<String> = members.iter().filter(|m| world.actors.contains_key(*m) && !world.dead_actor_ids.contains(*m)).cloned().collect();
+    ids.sort();
+    ids.dedup();
+    if ids.len() < 2 {
+        return;
+    }
+    let same = |x: &crate::core::Alliance| { let mut v = x.actor_ids.clone(); v.sort(); v == ids };
+    if world.alliances.iter().any(same) {
+        return;
+    }
+    world.alliances.push(crate::core::Alliance { actor_ids: ids, common_enemy: None, trade_benefit: false, formed_tick: world.tick });
+}
+
+/// Economy v2 (Ц9): an event's `leaves_alliance_as_enemy` — the actor leaves every alliance it is
+/// in and becomes its common enemy; an alliance left with fewer than two members ends.
+pub fn leave_alliances_as_enemy(world: &mut WorldState, id: &str) {
+    for a in world.alliances.iter_mut().filter(|a| a.actor_ids.iter().any(|m| m == id)) {
+        a.actor_ids.retain(|m| m != id);
+        a.common_enemy = Some(id.to_string());
+    }
+    world.alliances.retain(|a| a.actor_ids.len() >= 2);
+}
 
 /// The two actors are bound by vassalage, either way.
 pub fn bound_by_vassalage(world: &WorldState, a: &str, b: &str) -> bool {
@@ -641,6 +705,10 @@ fn calculate_military_interaction(
     // Economy v2 (Ц7): vassalage is a peace bought with tribute — overlord and vassal do not fight.
     // Checked before any draw, so the pair simply has no battle.
     if conquest_on(scenario) && bound_by_vassalage(world, actor_a_id, actor_b_id) {
+        return;
+    }
+    // Economy v2 (Ц9): allies do not fight each other — the same place and reason.
+    if alliances_on(scenario) && allied(world, actor_a_id, actor_b_id) {
         return;
     }
 

@@ -800,6 +800,7 @@ fn event_addressing_check_catches_a_new_violator() {
         effects: HashMap::from([(RelativeMetricRef::literal(effect), -1.0)]),
         llm_context: String::new(),
         one_time: false,
+        leaves_alliance_as_enemy: None,
     };
 
     // clean: both slots on the target, in either spelling

@@ -179,6 +179,8 @@ value = 90.0
 id = "milan_savoy_alliance"
 name = "Союз с Савойей"
 source_actor_id = "milan"
+# Economy v2 (Ц9): the alliance of the name, not only its metrics.
+forms_alliance = ["milan", "savoy"]
 
 [patron_actions.available_if]
 type = "always"

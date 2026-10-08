@@ -633,3 +633,32 @@ fn chronicle_book_rides_with_the_save_and_old_saves_load() {
     loaded.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(42));
     assert_eq!(loaded.world_state.as_ref().unwrap().chronicle_book, book, "the book rides with the save");
 }
+
+/// Economy v2 (Ц9, authored content): in milan the Italian League stands from the first tick and
+/// `milan_savoy_alliance` makes Milan and Savoy allies. Both ways: with the switch off the action
+/// writes its metrics and no alliance exists.
+#[test]
+fn milan_league_and_the_savoy_alliance_exist_only_under_the_switch() {
+    use rand::SeedableRng;
+    use crate::engine::interactions::allied;
+    for on in [true, false] {
+        let db = setup_test_db();
+        let mut state = AppState::default();
+        crate::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+        state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+        {
+            let s = state.current_scenario.as_mut().unwrap();
+            s.features.economy_v2 = true;
+            s.economy_v2_alliances = on;
+        }
+        crate::commands::advance_tick_silent(&mut state).unwrap();
+        let ws = state.world_state.as_ref().unwrap();
+        let league = ["venice", "florence", "naples", "sicily", "papacy"].iter().all(|m| allied(ws, "milan", m)) && allied(ws, "naples", "papacy");
+        assert_eq!(league, on, "the league, switch {on}");
+        let savoy_before = state.world_state.as_ref().unwrap().actors["savoy"].get_metric("external_pressure");
+        apply_player_action(&mut state, &PlayerActionInput { action_id: "milan_savoy_alliance".into(), target_actor_id: None }).unwrap();
+        let ws = state.world_state.as_ref().unwrap();
+        assert_eq!(allied(ws, "milan", "savoy"), on, "the Savoy alliance, switch {on}");
+        assert!(ws.actors["savoy"].get_metric("external_pressure") < savoy_before || savoy_before == 0.0, "the action's metrics are written either way");
+    }
+}
