@@ -235,7 +235,8 @@ pub fn load_milan_1477() -> Scenario {
             actors: ["milan", "venice", "florence", "naples", "sicily", "papacy"].iter().map(|s| s.to_string()).collect(),
         }],
         economy_v2_cohesion_pull: Some(0.12),
-        economy_v2_population_pull: None,
+        // Economy v2 (Ц10): population pulled to its norm P₀ × eo / T (owner, docs/investigation_economy_c10.md).
+        economy_v2_population_pull: Some(0.01),
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),
@@ -1105,6 +1106,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: llm_context.to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         });
     }
 
@@ -1121,6 +1123,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         llm_context: "Донато Браманте прибывает в Милан — начало новой архитектурной школы при дворе Сфорца".to_string(),
         one_time: true,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     });
 
     events.push(RandomEvent {
@@ -1135,6 +1138,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         llm_context: "Марсилио Фичино и Платоновская академия расцветают под покровительством Медичи".to_string(),
         one_time: true,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     });
 
     events.push(RandomEvent {
@@ -1149,6 +1153,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         llm_context: "Андреа Мантенья завершает фрески Camera degli Sposi для Гонзага — небольшой двор Мантуи прославлен по всей Италии".to_string(),
         one_time: true,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     });
 
     events.push(RandomEvent {
@@ -1163,6 +1168,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         llm_context: "Феррарский университет и двор Эсте привлекают гуманистов со всей Италии — Эрколе I укрепляет культурный престиж герцогства".to_string(),
         one_time: true,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     });
 
     events.push(RandomEvent {
@@ -1178,6 +1184,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         llm_context: "Федерико да Монтефельтро завершает урбинский студиоло и собирает одну из богатейших библиотек Италии — кондотьер, ставший образцом гуманистического государя".to_string(),
         one_time: true,
         leaves_alliance_as_enemy: None,
+        economy_v2_population_share: None,
     });
 
     // --- Task D: coalition against Milan ---
@@ -1240,6 +1247,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
         one_time: true,
         // Economy v2 (Ц9): the league of 1454 turns on Milan — it leaves and becomes the common enemy.
         leaves_alliance_as_enemy: Some("milan".to_string()),
+        economy_v2_population_share: None,
     });
 
     events

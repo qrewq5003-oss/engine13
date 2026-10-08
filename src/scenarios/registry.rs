@@ -246,6 +246,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
             errors.push(format!("{what}: '{id}' is not a starting actor"));
         }
     }
+    // Ц10: an event's `economy_v2_population_share` is a share in (0, 1] of a population it writes
+    // (the scenario's events and the common pool the engine adds to them).
+    let common = crate::events::common_events();
+    for e in scenario.random_events.iter().chain(common.iter()) {
+        if let Some(share) = e.economy_v2_population_share {
+            if !(share > 0.0 && share <= 1.0) {
+                errors.push(format!("event '{}': economy_v2_population_share {share} is not in (0, 1]", e.id));
+            }
+            if !e.effects.keys().any(|k| k.to_string().ends_with("population")) {
+                errors.push(format!("event '{}': economy_v2_population_share without a population effect", e.id));
+            }
+        }
+    }
     for e in &scenario.random_events {
         if let Some(id) = &e.leaves_alliance_as_enemy {
             if !starting(id) {
@@ -468,6 +481,17 @@ mod tests {
         assert!(err.to_string().contains("form_alliance"), "{err}");
         let good = bad.replace("form_alliance", "forms_alliance");
         assert_eq!(toml::from_str::<F>(&good).unwrap().patron_actions[0].forms_alliance, vec!["a", "b"]);
+    }
+
+    /// Ц10: an event's population share is validated at load.
+    #[test]
+    fn validate_checks_the_population_share() {
+        assert!(crate::events::common_events().iter().filter(|e| e.economy_v2_population_share.is_some()).count() == 3, "flood, famine, plague");
+        let mut scenario = crate::scenarios::milan_1477::load_milan_1477();
+        scenario.random_events.iter_mut().find(|e| e.id == "italian_league_against_milan").unwrap().economy_v2_population_share = Some(1.5);
+        let errors = validate_scenario(&scenario).unwrap_err();
+        assert!(errors.iter().any(|x| x.contains("economy_v2_population_share") && x.contains("(0, 1]")), "{errors:?}");
+        assert!(errors.iter().any(|x| x.contains("without a population effect")), "{errors:?}");
     }
 
     #[test]

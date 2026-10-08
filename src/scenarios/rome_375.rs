@@ -211,7 +211,8 @@ pub fn load_rome_375() -> Scenario {
         economy_v2_alliances: true,
         starting_alliances: vec![],
         economy_v2_cohesion_pull: Some(0.12),
-        economy_v2_population_pull: None,
+        // Economy v2 (Ц10): population pulled to its norm P₀ × eo / T (owner, docs/investigation_economy_c10.md).
+        economy_v2_population_pull: Some(0.01),
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),
@@ -1915,6 +1916,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Предательство легата ослабило позиции семьи при дворе".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "barbarian_raid".to_string(),
@@ -1931,6 +1933,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Варварский набег разорил приграничные провинции".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "oracle_revelation".to_string(),
@@ -1944,6 +1947,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Пророчество оракула укрепило авторитет власти".to_string(),
             one_time: true,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "senator_bribe".to_string(),
@@ -1963,6 +1967,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Подкуп сенаторов укрепил позиции семьи в Риме".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "gladiator_revolt".to_string(),
@@ -1979,6 +1984,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Восстание гладиаторов обнажило слабость императорской власти".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "silk_road_caravan".to_string(),
@@ -1995,6 +2001,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Богатый торговый караван с Востока принёс редкие товары и новые связи".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "army_mutiny".to_string(),
@@ -2012,6 +2019,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Мятеж легионов потряс Рим — солдаты требуют жалования".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "divine_omen".to_string(),
@@ -2026,6 +2034,7 @@ fn create_random_events() -> Vec<crate::core::RandomEvent> {
             llm_context: "Знамение богов укрепило веру народа в предназначение Рима".to_string(),
             one_time: true,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
     ]
 }

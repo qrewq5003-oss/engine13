@@ -20,6 +20,8 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Эпидемия чумы опустошила регион".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            // Economy v2 (Ц10, owner's shares): the blow is 10 % of the people under the population pull.
+            economy_v2_population_share: Some(0.10),
         },
         RandomEvent {
             id: "famine".to_string(),
@@ -36,6 +38,8 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Неурожай вызвал голод и волнения".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            // Economy v2 (Ц10, owner's shares): the blow is 5 % of the people under the population pull.
+            economy_v2_population_share: Some(0.05),
         },
         RandomEvent {
             id: "earthquake".to_string(),
@@ -49,6 +53,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Землетрясение разрушило часть города".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "court_conspiracy".to_string(),
@@ -64,6 +69,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Заговор при дворе ослабил власть правителя".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "desertion".to_string(),
@@ -80,6 +86,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Солдаты дезертировали из-за нехватки жалования".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "piracy".to_string(),
@@ -93,6 +100,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Пираты нарушили торговые пути".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "mercenary_influx".to_string(),
@@ -108,6 +116,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Отряд наёмников предложил услуги за золото".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "trade_boom".to_string(),
@@ -123,6 +132,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Торговый подъём наполнил казну".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "popular_uprising".to_string(),
@@ -140,6 +150,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Народное восстание потрясло столицу".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
         RandomEvent {
             id: "flood".to_string(),
@@ -154,6 +165,8 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Наводнение уничтожило урожай и разрушило дороги".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            // Economy v2 (Ц10, owner's shares): the blow is 1 % of the people under the population pull.
+            economy_v2_population_share: Some(0.01),
         },
         RandomEvent {
             id: "charismatic_preacher".to_string(),
@@ -169,6 +182,7 @@ pub fn common_events() -> Vec<RandomEvent> {
             llm_context: "Харизматичный проповедник сплотил народ вокруг правителя".to_string(),
             one_time: false,
             leaves_alliance_as_enemy: None,
+            economy_v2_population_share: None,
         },
     ]
 }

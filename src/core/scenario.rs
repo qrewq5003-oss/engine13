@@ -537,6 +537,11 @@ pub struct RandomEvent {
     /// Validated at load: a starting actor that an authored alliance names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaves_alliance_as_enemy: Option<String>,
+    /// Economy v2 only (Ц10), with the population pull: the event's blow to its target's
+    /// population is this share of the people, not the authored number — the same in meaning for
+    /// Rome and for Urbino. Validated at load: in (0, 1], and the event writes `self.population`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub economy_v2_population_share: Option<f64>,
 }
 
 /// An alliance standing at the start of the scenario (Ц9).
