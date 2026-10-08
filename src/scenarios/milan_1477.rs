@@ -235,6 +235,7 @@ pub fn load_milan_1477() -> Scenario {
             actors: ["milan", "venice", "florence", "naples", "sicily", "papacy"].iter().map(|s| s.to_string()).collect(),
         }],
         economy_v2_cohesion_pull: Some(0.12),
+        economy_v2_population_pull: None,
         military_conflict_probability: 0.20,
         naval_conflict_probability: 0.12,
         random_events: create_random_events(),

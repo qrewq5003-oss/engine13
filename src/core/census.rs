@@ -107,6 +107,7 @@ mod imp {
         static COMBAT_QUALITY: Cell<bool> = const { Cell::new(true) };
         static TRIBUTE_FLOOR: Cell<bool> = const { Cell::new(true) };
         static KEEP_COHESION_DECAY: Cell<bool> = const { Cell::new(false) };
+        static POPULATION_CONSTANT_NORM: Cell<bool> = const { Cell::new(false) };
         static COMBAT_LOSS_SCALED: Cell<bool> = const { Cell::new(true) };
         static BATTLES: RefCell<Option<Vec<crate::core::census::Battle>>> = const { RefCell::new(None) };
         static TAG_APPLIED: RefCell<std::collections::BTreeMap<(String, String), f64>> = const { RefCell::new(std::collections::BTreeMap::new()) };
@@ -225,6 +226,16 @@ mod imp {
 
     pub fn keep_cohesion_decay() -> bool {
         KEEP_COHESION_DECAY.with(|x| x.get())
+    }
+
+    /// Counterfactual (Ц10, variant (б)): pull population to the constant base P₀ and keep the
+    /// economic-output-to-population deficit rules.
+    pub fn set_population_constant_norm(on: bool) {
+        POPULATION_CONSTANT_NORM.with(|x| x.set(on));
+    }
+
+    pub fn population_constant_norm() -> bool {
+        POPULATION_CONSTANT_NORM.with(|x| x.get())
     }
 
     /// Counterfactual (Ц7): v2 tribute as before the fix — written past the treasury's zero floor.
@@ -510,6 +521,13 @@ pub fn battle(_record: impl FnOnce() -> Battle) {}
 #[cfg(not(feature = "census"))]
 #[inline(always)]
 pub fn keep_cohesion_decay() -> bool {
+    false
+}
+
+/// Ц10 counterfactual switch; the norm follows the economy without the feature.
+#[cfg(not(feature = "census"))]
+#[inline(always)]
+pub fn population_constant_norm() -> bool {
     false
 }
 

@@ -193,6 +193,10 @@ pub struct WorldState {
     /// Empty with v2 off and then not written to a save.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub depop_ticks: std::collections::BTreeMap<String, u32>,
+    /// Economy v2 (Ц10): the share of its authored population base a seat kept at a split
+    /// (absent = 1). Written only with the population pull; empty otherwise and then not saved.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub population_base_scale: std::collections::BTreeMap<String, f64>,
     /// Economy v2 (Ц7): each actor's running streak of battles lost — (the winner, the count) —
     /// counting only losses to one winner at three times its strength or more. Empty without
     /// the conquest rule and then not written to a save.
@@ -235,6 +239,7 @@ impl WorldState {
             dead_actors: Vec::new(),
             dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
+            population_base_scale: Default::default(),
             vassalages: Vec::new(),
             vassalage_warning_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),
@@ -284,6 +289,7 @@ impl WorldState {
             dead_actors: Vec::new(),
             dead_actor_ids: HashSet::new(),
             alliances: Vec::new(),
+            population_base_scale: Default::default(),
             vassalages: Vec::new(),
             vassalage_warning_ticks: HashMap::new(),
             milestone_events_fired: Vec::new(),

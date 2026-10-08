@@ -211,6 +211,7 @@ pub fn load_rome_375() -> Scenario {
         economy_v2_alliances: true,
         starting_alliances: vec![],
         economy_v2_cohesion_pull: Some(0.12),
+        economy_v2_population_pull: None,
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),
