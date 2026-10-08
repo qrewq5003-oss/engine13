@@ -206,7 +206,7 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
 
     // A milestone's `effects` write to a starting actor or to one in its `requires_alive` (B54).
     for m in &scenario.milestone_events {
-        for key in m.effects.keys() {
+        for key in m.effects.keys().chain(m.economy_v2_effects.keys()) {
             if let crate::core::MetricRef::Actor { actor_id, .. } = key {
                 let starting = scenario.actors.iter().any(|a| a.id == actor_id.as_str() && !a.is_successor_template);
                 if !starting && !m.requires_alive.iter().any(|id| id == actor_id.as_str()) {

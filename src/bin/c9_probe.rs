@@ -100,9 +100,13 @@ struct Run {
     fingerprint: u64,
     /// Milan's army on ticks 0 and 1 (the state after them)
     milan_army: Vec<f64>,
+    /// the Ottoman army on its living ticks
+    ott: Vec<(u32, f64)>,
+    /// the tick `mehmed_accelerates` fired
+    accel: Option<u32>,
 }
 
-/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands
+/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands, 4 = the content and Ц3 set here
 fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32) -> Run {
     let db = engine13::db::Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
@@ -111,7 +115,12 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
     {
         let s = st.current_scenario.as_mut().unwrap();
         s.features.economy_v2 = true;
-        // model 3: the content as it stands (Ц7 and Ц9 written) — the content check
+        // model 3: the content as it stands (Ц7 and Ц9 written) — the content check;
+        // model 4: the content and Ц3 set here — `mehmed_rises` gives the Ottoman army +60 (v2)
+        if model == 4 {
+            let m = s.milestone_events.iter_mut().find(|m| m.id == "mehmed_rises");
+            if let Some(m) = m { m.economy_v2_effects.insert(engine13::core::MetricRef::literal("actor:ottomans.military_size"), 60.0); }
+        }
         if model < 3 {
             s.economy_v2_conquest_k2 = (model >= 1).then_some(1);
             s.economy_v2_alliances = model == 2;
@@ -192,6 +201,8 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             prev_ep.insert(id.clone(), ep);
         }
         if r.win.is_none() && ws.victory_achieved { r.win = Some(t); }
+        if let Some(o) = ws.actors.get("ottomans").filter(|_| !ws.dead_actor_ids.contains("ottomans")) { r.ott.push((t, o.get_metric("military_size"))); }
+        if r.accel.is_none() && ws.milestone_events_fired.iter().any(|m| m == "mehmed_accelerates") { r.accel = Some(t); }
     }
     census::set_combat_quality(true);
     r.fingerprint = std::hash::Hasher::finish(&fp);
@@ -278,6 +289,18 @@ fn main() {
     census::enable_writes();
     if args.get(4).map(String::as_str) == Some("c4") { c4_split(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("content") { content_check(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c3") { c3_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c3content") {
+        let (mut same, mut total) = (0, 0);
+        for world in worlds("constantinople_1430") {
+            for s in first..first + seeds {
+                total += 1;
+                if run("constantinople_1430", world, 3, true, s, ticks).fingerprint == run("constantinople_1430", world, 4, true, s, ticks).fingerprint { same += 1; }
+            }
+        }
+        println!("Ц3 content check, constantinople, seeds {first}–{}: {same} of {total} runs identical (content against Ц3 set here).", first + seeds - 1);
+        return;
+    }
     println!("# Ц9 with Ц7 — seeds {first}–{}, {ticks} ticks per world\n", first + seeds - 1);
     const MEASURES: [&str; 9] = ["Ц1 actors", "Ц1 tiers", "Ц1 spread", "Ц5 actors", "Ц5 spread", "Ц6 ceiling", "Ц6 corr", "Ц8 extremes", "Ц8 spread"];
     let mut c7_rows = Vec::new();
@@ -479,4 +502,101 @@ fn content_check(first: u64, seeds: u64, ticks: u32) {
     println!("| milan world | Milan's army p10/50/90: start / after tick 0 / after tick 1 | league turns on Milan: games @ tick p10/50/90 |");
     println!("|---|---|---|");
     for r in rows { println!("{r}"); }
+}
+
+fn window(v: &[(u32, f64)], a: u32, b: u32) -> Option<f64> {
+    let x: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect();
+    (!x.is_empty()).then(|| x.iter().sum::<f64>() / x.len() as f64)
+}
+
+/// Ц3 (owner's model): `mehmed_rises` (tick 42) gives the Ottoman army +60 under v2. constantinople
+/// only — the milestone is there; rome and milan have nothing it touches. Base = v2 as in the
+/// content (Ц1, Ц4–Ц9), the variant = the same with the step. Ц3's measure, the stop rule (Ц1, Ц4,
+/// Ц5, Ц6, Ц7 item 2, Ц8; Ц9's measure is milan's), and for information A10, wins, Ottoman battles
+/// around `mehmed_accelerates`, the assault, new submissions to the Ottomans after tick 42.
+fn c3_run(first: u64, seeds: u64, ticks: u32) {
+    let sc = "constantinople_1430";
+    println!("# Ц3 — +60 Ottoman army on `mehmed_rises` (tick 42), constantinople, seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
+    let mut rows = Vec::new();
+    let mut stop_rows = Vec::new();
+    let mut stops: Vec<String> = Vec::new();
+    let mut info = Vec::new();
+    let mut c4p: BTreeMap<usize, C4Pool> = BTreeMap::new();
+    let mut c3_all = true;
+    for world in worlds(sc) {
+        let base: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 3, true, s, ticks)).collect();
+        let var: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 4, true, s, ticks)).collect();
+        for (m, runs) in [(3usize, &base), (4, &var)] {
+            let nq: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m, false, s, ticks)).collect();
+            let e = c4p.entry(m).or_default();
+            for rr in runs.iter() { let x = c4(&rr.battles); e.0 .0 += x.0; e.0 .1 += x.1; e.0 .2 += x.2; e.0 .3 += x.3; }
+            for rr in &nq { let x = c4(&rr.battles); e.1 .0 += x.0; e.1 .1 += x.1; }
+            // Ц3's measure
+            let pairs: Vec<(f64, f64)> = runs.iter().filter_map(|r| Some((window(&r.ott, 10, 20)?, window(&r.ott, 40, 50)?))).collect();
+            let d: Vec<f64> = pairs.iter().map(|(a, b)| b - 1.25 * a).collect();
+            let n = d.len() as f64;
+            let mean = d.iter().sum::<f64>() / n.max(1.0);
+            let sd = (d.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+            let t = if sd > 0.0 { mean / (sd / n.sqrt()) } else { 0.0 };
+            let ok = mean > 0.0 && t >= 2.0;
+            if m == 4 && !ok { c3_all = false; }
+            let ratio = pairs.iter().map(|(a, b)| b / a).sum::<f64>() / n.max(1.0);
+            let label = if m == 3 { "base" } else { "Ц3" };
+            rows.push(format!("| {world} | {label} | {} | {ratio:.3} | {mean:+.1} (t {t:+.1}) | {} |", pairs.len(), if ok { "**yes**" } else { "no" }));
+            // information
+            let living: usize = runs.iter().map(|r| r.ott.len()).sum();
+            let above: usize = runs.iter().map(|r| r.ott.iter().filter(|p| p.1 > 220.0).count()).sum();
+            let wins: Vec<f64> = runs.iter().filter_map(|r| r.win.map(|t| t as f64)).collect();
+            let byz: Vec<f64> = runs.iter().filter_map(|r| r.dead.get("byzantium").map(|t| *t as f64)).collect();
+            let at46 = byz.iter().filter(|t| **t == 46.0).count();
+            let (mut bw, mut bn, mut aw, mut an) = (0, 0, 0, 0);
+            for r in runs.iter() {
+                let Some(ac) = r.accel else { continue };
+                for b in r.battles.iter().filter(|b| b.attacker == "ottomans" || b.defender == "ottomans") {
+                    let won = (b.attacker == "ottomans") == b.attacker_won;
+                    if b.tick < ac { bn += 1; bw += won as u32; } else { an += 1; aw += won as u32; }
+                }
+            }
+            let accel = runs.iter().filter(|r| r.accel.is_some()).count();
+            let mut subs: BTreeMap<String, u32> = BTreeMap::new();
+            for r in runs.iter() { for ((v, l), t0) in &r.vassal { if l == "ottomans" && *t0 >= 42 { *subs.entry(v.clone()).or_default() += 1; } } }
+            info.push(format!("| {world} | {label} | {:.0} % | {} @ {} | {} @ {} (tick 46: {at46}) | {accel}: {bw}/{bn} → {aw}/{an} | {} |",
+                100.0 * above as f64 / living.max(1) as f64, wins.len(), q(&wins), byz.len(), q(&byz),
+                if subs.is_empty() { "—".into() } else { subs.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(", ") }));
+        }
+        // stop rule, world-level, and Ц7 item 2 (none)
+        let (ok_b, det_b) = world_measures(sc, &base);
+        let (ok_v, det_v) = world_measures(sc, &var);
+        const MEASURES: [&str; 9] = ["Ц1 actors", "Ц1 tiers", "Ц1 spread", "Ц5 actors", "Ц5 spread", "Ц6 ceiling", "Ц6 corr", "Ц8 extremes", "Ц8 spread"];
+        for (i, name) in MEASURES.iter().enumerate() { if ok_b[i] && !ok_v[i] { stops.push(format!("{world}: {name}")); } }
+        if *world == "none" {
+            let ok7 = |runs: &[Run]| { let ft: Vec<f64> = runs.iter().filter_map(|r| r.dead.get("byzantium").map(|t| *t as f64)).collect(); ft.len() >= 20 && (40.0..=59.0).contains(&pct(&ft, 0.5)) };
+            if ok7(&base) && !ok7(&var) { stops.push("Ц7 item 2".into()); }
+        }
+        stop_rows.push(format!("| {world} | {det_b} | {det_v} |"));
+    }
+    println!("## 1. Ц3's measure: m₄₀ ≥ 1.25 × m₁₀, d = m₄₀ − 1.25 m₁₀ paired, t ≥ 2\n");
+    println!("| world | model | games | mean m₄₀/m₁₀ | d (t) | passes |");
+    println!("|---|---|---|---|---|---|");
+    for r in rows { println!("{r}"); }
+    println!("\nЦ3 passes in every world: {}", if c3_all { "**yes**" } else { "**no**" });
+    println!("\n## 2. Stop rule against base on the same seeds\n");
+    println!("| world | base | Ц3 |");
+    println!("|---|---|---|");
+    for r in stop_rows { println!("{r}"); }
+    for m in [3usize, 4] {
+        let ((n, w, sp, spq), (nb, wb)) = c4p[&m];
+        let pa = w as f64 / n.max(1) as f64;
+        let promise = sp / n.max(1) as f64;
+        let se = spq.sqrt() / n.max(1) as f64;
+        let pb = wb as f64 / nb.max(1) as f64;
+        let se_d = (pa * (1.0 - pa) / n.max(1) as f64 + pb * (1.0 - pb) / nb.max(1) as f64).sqrt();
+        println!("- {}: Ц4 (1) {:.1} % vs {:.1} % — {}; Ц4 (2) {:+.1} vs 2 SE {:.1} — {} ({n} battles)", if m == 3 { "base" } else { "Ц3" }, 100.0 * pa, 100.0 * (promise - 2.0 * se),
+            if pa >= promise - 2.0 * se { "yes" } else { "no" }, 100.0 * (pa - pb), 200.0 * se_d, if pa - pb >= 2.0 * se_d { "yes" } else { "no" });
+    }
+    println!("\nStops (base passes, Ц3 does not; Ц4 read above): {}", if stops.is_empty() { "none".into() } else { stops.join("; ") });
+    println!("\n## 3. For information\n");
+    println!("| world | model | Ottoman army > 220, living ticks | wins @ tick p10/50/90 | Byzantium dies @ tick | games with `mehmed_accelerates`: Ottoman battles won/fought before → after it | submit to the Ottomans on tick ≥ 42 (games) |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in info { println!("{r}"); }
 }

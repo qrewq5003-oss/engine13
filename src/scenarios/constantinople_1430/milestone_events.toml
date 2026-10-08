@@ -62,10 +62,17 @@ triggers_collapse = false
 # A8 (owner's decision): a historical date — Mehmed II's accession, 1451, tick 42. Same
 # precedent as `church_union` (A9) and `huns_visible` (A3). The old gate, `ottomans.military_size
 # > 250` for 5 ticks, was unreachable for anyone while the city stands: the Ottoman army peaks
-# at its start (~183) and its mobilisation capacity is 193 (A8 stage 1, `a8_probe`). Text only,
-# no mechanics; `requires_alive` keeps it from firing over a fallen city.
+# at its start (~183) and its mobilisation capacity is 193 (A8 stage 1, `a8_probe`).
+# `requires_alive` keeps it from firing over a fallen city.
 requires_alive = ["byzantium"]
 llm_context_shift = "Мехмед II восходит на трон. Молодой амбициозный султан."
+# Ц3 (owner's decision, economy v2 only): the Ottoman growth came from beyond the map — the
+# Anatolian beyliks, the Balkans, Mehmed's mobilisation — so it is authored, like the assault of
+# 1453. Murad II's usual field army ~60 thousand, Mehmed's of 1453 ~80 thousand: a third more,
+# +60 on the starting 180. Nothing pulls an army above capacity down but losses, so it holds until
+# battles eat it. docs/investigation_economy_c3s2.md.
+[milestone_events.economy_v2_effects]
+"actor:ottomans.military_size" = 60.0
 [milestone_events.condition]
 type = "tick"
 tick = 42

@@ -750,6 +750,11 @@ pub struct MilestoneEvent {
     /// more kill the target by the conquest path. Validated at load: both are starting actors.
     #[serde(default)]
     pub begins_conquest: Option<BeginsConquest>,
+    /// Economy v2 only (Ц3): one-time metric deltas like `effects`, applied only when v2 is on —
+    /// the authored growth from beyond the map (constantinople's `mehmed_rises`: the Ottoman army
+    /// of 1451). Validated at load like `effects`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub economy_v2_effects: HashMap<MetricRef, f64>,
 }
 
 /// The pair of a war of conquest declared by a milestone (Ц7).
