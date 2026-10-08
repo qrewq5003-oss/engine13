@@ -188,12 +188,18 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
     let cohesion_targets: std::collections::HashMap<String, f64> =
         world.actors.keys().filter_map(|id| cohesion_target(world, scenario, id).map(|t| (id.clone(), t))).collect();
     let skip_cohesion_decay = scenario.features.economy_v2 && scenario.economy_v2_cohesion_pull.is_some() && !census::keep_cohesion_decay();
+    // Economy v2 (Ц10): under the population pull the economy-to-population deficit rules give way —
+    // their meaning is in the norm `P₀ × eo / T` (census keeps them for variant (б)).
+    let skip_population_rules = population_pull_on(scenario) && !census::population_constant_norm();
     for actor in world.actors.values_mut() {
         let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         let legitimacy_scale = legitimacy_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         let cohesion_scale = cohesion_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         for rule in &scenario.dependencies {
             if skip_cohesion_decay && rule.from.as_str() == "cohesion" && rule.to.as_str() == "cohesion" {
+                continue;
+            }
+            if skip_population_rules && rule.from.as_str() == "economic_output" && rule.to.as_str() == "population" {
                 continue;
             }
             let scale = match rule.from.as_str() {
@@ -611,6 +617,8 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
     pull_legitimacy_to_target(world, scenario);
     // Economy v2 (Ц8): cohesion pulled toward its norm, same place and reason.
     pull_cohesion_to_target(world, scenario);
+    // Economy v2 (Ц10): population pulled toward its norm, after the economy it reads has settled.
+    pull_population_to_norm(world, scenario);
 }
 
 /// Economy v2 (Ц6): the threat an actor faces — `100 × N / (N + own army)`, N = the armies of
@@ -731,6 +739,54 @@ pub fn cohesion_target(world: &WorldState, scenario: &Scenario, actor_id: &str) 
         return None;
     }
     metric_target(world, scenario, actor_id, "cohesion")
+}
+
+/// Economy v2 (Ц10): the population pull is on.
+pub fn population_pull_on(scenario: &Scenario) -> bool {
+    scenario.features.economy_v2 && scenario.economy_v2_population_pull.is_some()
+}
+
+/// Economy v2 (Ц10): the authored population base P₀ of an actor, scaled by the share of it a
+/// split left the seat (`world.population_base_scale`).
+pub fn population_base(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    let base = metric_base(scenario, actor_id, "population")?;
+    Some(base * world.population_base_scale.get(actor_id).copied().unwrap_or(1.0))
+}
+
+/// Economy v2 (Ц10): the population norm `N = P₀ × eo / T` — the land feeds fewer people when the
+/// economy is below its own norm. (Census variant (б): the constant P₀.)
+pub fn population_norm(world: &WorldState, scenario: &Scenario, actor_id: &str) -> Option<f64> {
+    let p0 = population_base(world, scenario, actor_id)?;
+    if census::population_constant_norm() {
+        return Some(p0);
+    }
+    let t = eo_target(world, scenario, actor_id).filter(|t| *t > 0.0)?;
+    let eo = world.actors.get(actor_id)?.get_metric("economic_output").max(0.0);
+    Some(p0 * eo / t)
+}
+
+/// Economy v2 (Ц10): `P += r × (N − P)` for every living actor, in id order. Norms are read before
+/// any population moves (a norm reads only the actor's own economy, so the order does not matter).
+fn pull_population_to_norm(world: &mut WorldState, scenario: &Scenario) {
+    if !population_pull_on(scenario) {
+        return;
+    }
+    let Some(r) = scenario.economy_v2_population_pull else { return };
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    let norms: Vec<(String, f64)> = ids.into_iter().filter_map(|id| population_norm(world, scenario, &id).map(|n| (id, n))).collect();
+    for (id, norm) in norms {
+        let Some(actor) = world.actors.get_mut(&id) else { continue };
+        let current = actor.get_metric("population");
+        let delta = r * (norm - current);
+        actor.metrics.insert("population".to_string(), current + delta);
+        #[cfg(feature = "census")]
+        {
+            census::write_source(|| "population pull".to_string());
+            census::metric_write(std::panic::Location::caller(), &id, "population", delta, current, current + delta);
+            census::clear_write_source();
+        }
+    }
 }
 
 /// Economy v2 (Ц8): `C += r × (T_C − C)` for every living actor, in id order — the two-sided
@@ -1631,6 +1687,12 @@ fn apply_seat_split(
         .iter()
         .find(|a| a.id == seat.id)
         .map(|t| (t.name.clone(), t.name_short.clone(), t.on_collapse.clone()));
+    // Economy v2 (Ц10): the seat keeps only its share of the people — and of its population base,
+    // or the pull would regrow the undivided empire beside its living heirs.
+    if population_pull_on(scenario) {
+        let scale = world.population_base_scale.entry(actor_id.clone()).or_insert(1.0);
+        *scale *= seat.weight / total;
+    }
     if let Some(p) = world.actors.get_mut(&actor_id) {
         p.metrics = cut(&parent_metrics, seat.weight / total, false);
         // A46: the split rewrites the seat's metrics wholesale — record it for the census.
@@ -2556,6 +2618,7 @@ mod tests {
             economy_v2_alliances: false,
             starting_alliances: vec![],
             economy_v2_cohesion_pull: None,
+            economy_v2_population_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -3154,6 +3217,89 @@ mod tests {
         assert!((run(true, Some(0.12)) - 23.6).abs() < 1e-9);
         assert_eq!(run(false, Some(0.12)), 20.0, "v1 does not pull");
         assert_eq!(run(true, None), 20.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц10): population is pulled toward `P₀ × eo / T`. Both ways: v1 and no r leave it.
+    #[test]
+    fn economy_v2_pulls_population_toward_its_norm() {
+        let run = |v2: bool, r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = v2;
+            scenario.economy_v2_population_pull = r;
+            let mut base = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            base.set_metric("population", 1000.0);
+            scenario.actors.push(base); // P₀ = 1000, T = 50
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("population", 400.0);
+            a.set_metric("economic_output", 25.0);
+            world.actors.insert("city".into(), a);
+            pull_population_to_norm(&mut world, &scenario);
+            world.actors["city"].get_metric("population")
+        };
+        // N = 1000 × 25 / 50 = 500; 400 + 0.1 × (500 − 400) = 410
+        assert!((run(true, Some(0.1)) - 410.0).abs() < 1e-9);
+        assert_eq!(run(false, Some(0.1)), 400.0, "v1 does not pull");
+        assert_eq!(run(true, None), 400.0, "no r, no pull");
+    }
+
+    /// Economy v2 (Ц10): under the population pull the economy-to-population deficit rule is not
+    /// applied. Both ways: without the pull it takes people.
+    #[test]
+    fn economy_v2_population_pull_replaces_the_deficit_rules() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_population_pull = r;
+            scenario.dependencies.push(crate::core::DependencyRule {
+                id: "economic_output_to_population".into(),
+                from: crate::core::MetricName::new("economic_output").unwrap(),
+                to: crate::core::MetricName::new("population").unwrap(),
+                coefficient: 0.125,
+                threshold: Some(50.0),
+                mode: crate::core::DependencyMode::DeficitProportional,
+            });
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            let mut a = vassalage_actor("city", 50.0, 50.0, 50.0, 50.0, &[]);
+            a.set_metric("population", 1000.0);
+            a.set_metric("economic_output", 0.0);
+            world.actors.insert("city".into(), a);
+            phase_apply_dependencies(&mut world, &scenario);
+            world.actors["city"].get_metric("population")
+        };
+        assert_eq!(run(Some(0.01)), 1000.0, "the pull: the rule gives way");
+        assert!(run(None) < 1000.0, "no pull: the rule takes people");
+    }
+
+    /// Economy v2 (Ц10): a split scales the seat's population base by the share it kept. Both ways:
+    /// without the pull nothing is recorded.
+    #[test]
+    fn economy_v2_split_scales_the_population_base() {
+        let run = |r: Option<f64>| {
+            let mut scenario = empty_scenario();
+            scenario.features.economy_v2 = true;
+            scenario.economy_v2_population_pull = r;
+            let mut parent = vassalage_actor("empire", 50.0, 50.0, 50.0, 50.0, &[]);
+            parent.set_metric("population", 1000.0);
+            parent.on_collapse = vec![
+                crate::core::Successor { id: "empire".into(), weight: 0.45, keeps_seat: true },
+                crate::core::Successor { id: "east".into(), weight: 0.55, keeps_seat: false },
+            ];
+            scenario.actors.push(parent.clone());
+            let mut east = vassalage_actor("east", 50.0, 50.0, 50.0, 50.0, &[]);
+            east.is_successor_template = true;
+            scenario.actors.push(east);
+            let mut m = dated_milestone("split", None, &[]);
+            m.splits_actor = Some("empire".into());
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("empire".into(), parent);
+            let mut log = EventLog::new();
+            apply_seat_split(&mut world, &scenario, &m, &mut log);
+            (world.population_base_scale.get("empire").copied(), population_base(&world, &scenario, "empire"))
+        };
+        let (scale, base) = run(Some(0.01));
+        assert!((scale.unwrap() - 0.45).abs() < 1e-9 && (base.unwrap() - 450.0).abs() < 1e-9, "the seat keeps 45 % of P₀");
+        assert_eq!(run(None).0, None, "no pull: nothing recorded");
     }
 
     /// Economy v2 (Ц8): with the cohesion pull, tags' `cohesion` modifiers are a level. Both ways:

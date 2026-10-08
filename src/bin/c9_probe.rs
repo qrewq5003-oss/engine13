@@ -104,9 +104,23 @@ struct Run {
     ott: Vec<(u32, f64)>,
     /// the tick `mehmed_accelerates` fired
     accel: Option<u32>,
+    /// Ц10, per actor: (living ticks, zombie ticks (population ≤ 1), ticks below a quarter of P₀,
+    /// ticks with eo < T / 4, ticks in debt among the non-zombie)
+    popc: BTreeMap<String, [u64; 5]>,
+    /// Ц10: eo / T on each zombie tick, per actor
+    zombie_eo: BTreeMap<String, Vec<f64>>,
+    /// Ц10: Rome's population and its (scaled) base on tick 100
+    rome100: Option<(f64, f64)>,
+    /// Ц2: treasury on ticks 0, 10, …, 150, per actor
+    tr_steps: BTreeMap<String, Vec<f64>>,
+    /// Ц10: population written, (actor, source) -> (taken, added)
+    pop_src: BTreeMap<(String, String), (f64, f64)>,
+    /// Ц10: Rome's eo / T on tick 100
+    rome_eo100: Option<f64>,
 }
 
-/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands, 4 = the content and Ц3 set here
+/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands, 4 = the content and Ц3 set here,
+/// 5 = the content and Ц10 (а), 6 = Ц10 (б)
 fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32) -> Run {
     let db = engine13::db::Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
@@ -125,7 +139,11 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             s.economy_v2_conquest_k2 = (model >= 1).then_some(1);
             s.economy_v2_alliances = model == 2;
         }
+        // model 5: the content and Ц10 (а) set here — population pulled to P₀ × eo / T, r = 0.01;
+        // model 6: Ц10 (б) — pulled to the constant P₀, the deficit rules kept (census)
+        if model == 5 || model == 6 { s.economy_v2_population_pull = Some(0.01); }
     }
+    census::set_population_constant_norm(model == 6);
     census::set_combat_quality(quality);
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, sc));
     let mut r = Run::default();
@@ -148,7 +166,11 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             }
         }
         r.battles.extend(census::take_battles());
-        let _ = census::take_writes();
+        for w in census::take_writes().into_iter().filter(|w| w.metric == "population") {
+            let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file().rsplit('/').next().unwrap_or(""), w.location.line()));
+            let e = r.pop_src.entry((w.actor.clone(), src)).or_default();
+            if w.applied < 0.0 { e.0 += w.applied; } else { e.1 += w.applied; }
+        }
         let ws = st.world_state.as_ref().unwrap();
         let t = ws.tick - 1;
         for d in ws.dead_actor_ids.iter().filter(|d| !before.contains(*d)) { r.dead.insert(d.clone(), t); }
@@ -173,8 +195,27 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
         }
         let mut ids: Vec<&String> = ws.actors.keys().filter(|id| !ws.dead_actor_ids.contains(*id)).collect();
         ids.sort();
+        let scn = st.current_scenario.as_ref().unwrap();
+        if t == 100 {
+            if let (Some(a), Some(b)) = (ws.actors.get("rome").filter(|_| !ws.dead_actor_ids.contains("rome")), engine13::engine::population_base(ws, scn, "rome")) { r.rome100 = Some((a.get_metric("population"), b)); }
+            if let (Some(a), Some(tt)) = (ws.actors.get("rome"), engine13::engine::eo_target(ws, scn, "rome")) { r.rome_eo100 = Some(a.get_metric("economic_output") / tt); }
+        }
         for id in ids {
             let a = &ws.actors[id];
+            {
+                let pop = a.get_metric("population");
+                let eo = a.get_metric("economic_output");
+                let c = r.popc.entry(id.clone()).or_default();
+                c[0] += 1;
+                let tt = engine13::engine::eo_target(ws, scn, id).filter(|x| *x > 0.0);
+                if pop <= 1.0 {
+                    c[1] += 1;
+                    if let Some(tt) = tt { r.zombie_eo.entry(id.clone()).or_default().push(eo / tt); }
+                } else if a.get_metric("treasury") < 0.0 { c[4] += 1; }
+                if engine13::engine::population_base(ws, scn, id).is_some_and(|b| pop < 0.25 * b) { c[2] += 1; }
+                if tt.is_some_and(|tt| eo < tt / 4.0) { c[3] += 1; }
+                if t % 10 == 0 && t <= 150 { r.tr_steps.entry(id.clone()).or_default().push(a.get_metric("treasury")); }
+            }
             let l = a.get_metric("legitimacy");
             let ep = a.get_metric("external_pressure");
             let tp = engine13::engine::pressure_threat(ws, id);
@@ -205,6 +246,7 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
         if r.accel.is_none() && ws.milestone_events_fired.iter().any(|m| m == "mehmed_accelerates") { r.accel = Some(t); }
     }
     census::set_combat_quality(true);
+    census::set_population_constant_norm(false);
     r.fingerprint = std::hash::Hasher::finish(&fp);
     let ws = st.world_state.as_ref().unwrap();
     r.deaths = ws.dead_actors.len() as u32;
@@ -290,6 +332,9 @@ fn main() {
     if args.get(4).map(String::as_str) == Some("c4") { c4_split(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("content") { content_check(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c3") { c3_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c10pre") { c10_pre(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c10") { c10_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c10why") { census::watch_all_metrics(true); c10_why(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c3content") {
         let (mut same, mut total) = (0, 0);
         for world in worlds("constantinople_1430") {
@@ -599,4 +644,210 @@ fn c3_run(first: u64, seeds: u64, ticks: u32) {
     println!("| world | model | Ottoman army > 220, living ticks | wins @ tick p10/50/90 | Byzantium dies @ tick | games with `mehmed_accelerates`: Ottoman battles won/fought before → after it | submit to the Ottomans on tick ≥ 42 (games) |");
     println!("|---|---|---|---|---|---|---|");
     for r in info { println!("{r}"); }
+}
+
+/// Ц10's measure over a world's runs: (zombie share, share below a quarter of P₀, eo < T/4 share)
+fn c10_shares(runs: &[Run]) -> (f64, f64, f64) {
+    let mut c = [0u64; 5];
+    for r in runs { for v in r.popc.values() { for i in 0..5 { c[i] += v[i]; } } }
+    (share(c[1], c[0]), share(c[2], c[0]), share(c[3], c[0]))
+}
+
+/// Ц10 before the run (§9.7), on the protocols of v2 as in the content: per world the share of
+/// living actor-ticks with eo < T / 4 (about where the norm would stand below a quarter of P₀), the
+/// zombie and below-a-quarter shares now; the zombies' starting population and eo / T on their
+/// zombie ticks (do they leave zero if eo is off the floor).
+fn c10_pre(first: u64, seeds: u64, ticks: u32) {
+    println!("# Ц10 before the run — v2 as in the content, seeds {first}–{}\n", first + seeds - 1);
+    println!("| scenario | world | eo < T/4, living actor-ticks | zombies now | below a quarter of P₀ now |");
+    println!("|---|---|---|---|---|");
+    let mut zrows = Vec::new();
+    for sc in SCENARIOS {
+        let scn = engine13::scenarios::registry::load_by_id(sc).unwrap();
+        for world in worlds(sc) {
+            let runs: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 3, true, s, ticks)).collect();
+            let (z, low, eq) = c10_shares(&runs);
+            println!("| {sc} | {world} | {eq:.1} % | {z:.1} % | {low:.1} % |");
+            let mut ze: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+            for r in &runs { for (k, v) in &r.zombie_eo { ze.entry(k.clone()).or_default().extend(v); } }
+            for (k, v) in ze.iter().filter(|(_, v)| v.len() as u64 >= seeds * 10) {
+                let p0 = engine13::engine::metric_base(&scn, k, "population").unwrap_or(f64::NAN);
+                let frac = |v: &[f64]| { let x: Vec<f64> = v.iter().map(|y| y * 100.0).collect(); q(&x) };
+                zrows.push(format!("| {sc} | {world} | {k} | {p0:.0} | {} | {} % | {:.0} |", v.len(), frac(v), p0 * pct(v, 0.5)));
+            }
+        }
+    }
+    println!("\n### Zombies now (≥ 10 zombie ticks a game on average): P₀, zombie ticks, eo / T on them (p10/50/90, %), the norm P₀ × eo / T at the median\n");
+    println!("| scenario | world | actor | P₀ | zombie ticks | eo / T | norm at the median |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in zrows { println!("{r}"); }
+}
+
+/// Ц10: base (v2 as in the content) against (а) the model and (б) the constant norm with the
+/// deficit rules kept. Ц10's measure; the stop rule (Ц1, Ц3–Ц9 against base); for information
+/// Ц2's measures (debt, accumulation), deaths paired, the pairs of Ц7.
+fn c10_run(first: u64, seeds: u64, ticks: u32) {
+    println!("# Ц10 — population pulled to its norm, seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
+    const MEASURES: [&str; 9] = ["Ц1 actors", "Ц1 tiers", "Ц1 spread", "Ц5 actors", "Ц5 spread", "Ц6 ceiling", "Ц6 corr", "Ц8 extremes", "Ц8 spread"];
+    let labels = |m: usize| match m { 3 => "base", 5 => "(а)", _ => "(б)" };
+    let mut c10_rows = Vec::new();
+    let mut c10_ok: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    let mut stops: Vec<String> = Vec::new();
+    let mut stop_rows = Vec::new();
+    let mut c7_rows = Vec::new();
+    let mut c3_rows = Vec::new();
+    let mut c4p: BTreeMap<usize, C4Pool> = BTreeMap::new();
+    let mut info = Vec::new();
+    let mut pair_rows = Vec::new();
+    for sc in SCENARIOS {
+        for world in worlds(sc) {
+            let all: BTreeMap<usize, Vec<Run>> = [3usize, 5, 6].iter().map(|m| (*m, (first..first + seeds).map(|s| run(sc, world, *m, true, s, ticks)).collect())).collect();
+            for m in [3usize, 5] {
+                let nq: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m, false, s, ticks)).collect();
+                let e = c4p.entry(m).or_default();
+                for rr in &all[&m] { let x = c4(&rr.battles); e.0 .0 += x.0; e.0 .1 += x.1; e.0 .2 += x.2; e.0 .3 += x.3; }
+                for rr in &nq { let x = c4(&rr.battles); e.1 .0 += x.0; e.1 .1 += x.1; }
+            }
+            // ---- Ц10's measure
+            for m in [3usize, 5, 6] {
+                let runs = &all[&m];
+                let (z, low, _) = c10_shares(runs);
+                let rome: Vec<(f64, f64)> = runs.iter().filter_map(|r| r.rome100).collect();
+                let rome_ok = sc != "rome_375" || rome.iter().all(|(p, b)| *p <= *b);
+                let ok = z < 1.0 && low < 10.0 && rome_ok;
+                let e = c10_ok.entry(m).or_default();
+                e.1 += 1; e.0 += ok as usize;
+                let rome_cell = if sc == "rome_375" { format!("{} of {} games ≤ base; pop p50 {:.0}, base {:.0}", rome.iter().filter(|(p, b)| p <= b).count(), rome.len(), pct(&rome.iter().map(|x| x.0).collect::<Vec<_>>(), 0.5), rome.first().map_or(f64::NAN, |x| x.1)) } else { "—".into() };
+                c10_rows.push(format!("| {sc} | {world} | {} | {z:.2} % | {low:.1} % | {rome_cell} | {} |", labels(m), if ok { "**yes**" } else { "no" }));
+            }
+            let base = &all[&3];
+            let var = &all[&5];
+            // ---- stop rule
+            let (ok_b, det_b) = world_measures(sc, base);
+            let (ok_v, det_v) = world_measures(sc, var);
+            for (i, name) in MEASURES.iter().enumerate() { if ok_b[i] && !ok_v[i] { stops.push(format!("{sc} {world}: {name}")); } }
+            stop_rows.push(format!("| {sc} | {world} | {det_b} | {det_v} |"));
+            let vassal_of = |rr: &Run, v: &str, lord: Option<&str>| rr.vassal.keys().any(|(a, b)| a == v && lord.is_none_or(|l| l == b));
+            for (m, runs) in [(3usize, base), (5, var)] {
+                let (cell, ok) = match sc {
+                    "rome_375" => { let pg = runs.iter().map(|rr| PEOPLES.iter().filter(|p| vassal_of(rr, p, Some("rome"))).count()).sum::<usize>() as f64 / seeds as f64; (format!("five peoples {pg:.1}"), pg >= 3.0) }
+                    "constantinople_1430" => { let ft: Vec<f64> = runs.iter().filter_map(|rr| rr.dead.get("byzantium").map(|t| *t as f64)).collect(); (format!("Byzantium falls {} @ {}", ft.len(), q(&ft)), *world != "none" || (ft.len() >= 20 && (40.0..=59.0).contains(&pct(&ft, 0.5)))) }
+                    _ => { let hit = |id: &str| runs.iter().filter(|rr| rr.dead.contains_key(id) || vassal_of(rr, id, None)).count(); (format!("Milan {}, papacy {}, Venice {}", hit("milan"), hit("papacy"), hit("venice")), hit("milan") <= 1 && hit("papacy") <= 3 && hit("venice") <= 3) }
+                };
+                if m == 5 && !ok && c7_rows.last().is_some_and(|l: &String| l.contains("| base |") && l.ends_with("yes |")) { stops.push(format!("{sc} {world}: Ц7")); }
+                c7_rows.push(format!("| {sc} | {world} | {} | {cell} | {} |", labels(m), if ok { "yes" } else { "no" }));
+                if sc == "constantinople_1430" {
+                    let pairs: Vec<(f64, f64)> = runs.iter().filter_map(|r| Some((window(&r.ott, 10, 20)?, window(&r.ott, 40, 50)?))).collect();
+                    let d: Vec<f64> = pairs.iter().map(|(a, b)| b - 1.25 * a).collect();
+                    let n = d.len() as f64;
+                    let mean = d.iter().sum::<f64>() / n.max(1.0);
+                    let sd = (d.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+                    let t = if sd > 0.0 { mean / (sd / n.sqrt()) } else { 0.0 };
+                    let ok3 = mean > 0.0 && t >= 2.0;
+                    if m == 5 && !ok3 { stops.push(format!("{world}: Ц3")); }
+                    c3_rows.push(format!("| {world} | {} | {mean:+.1} (t {t:+.1}) | {} |", labels(m), if ok3 { "yes" } else { "no" }));
+                }
+            }
+            // ---- information: Ц2 measures, deaths
+            for m in [3usize, 5] {
+                let runs = &all[&m];
+                let mut debt: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+                for r in runs { for (k, v) in &r.popc { let e = debt.entry(k.clone()).or_default(); e.0 += v[0] - v[1]; e.1 += v[4]; } }
+                let over: Vec<String> = debt.iter().filter(|(_, v)| share(v.1, v.0) > 20.0).map(|(k, v)| format!("{k} {:.0}", share(v.1, v.0))).collect();
+                let mut mono: BTreeMap<String, u32> = BTreeMap::new();
+                for r in runs { for (k, v) in &r.tr_steps { if v.len() == 16 && v.windows(2).all(|w| w[1] >= w[0]) && v[15] > v[0] { *mono.entry(k.clone()).or_default() += 1; } } }
+                let monos: Vec<String> = mono.iter().filter(|(_, n)| **n as u64 * 2 >= seeds).map(|(k, n)| format!("{k} {n}")).collect();
+                let deaths: u32 = runs.iter().map(|r| r.deaths).sum();
+                let keys: Vec<String> = ["rome", "byzantium", "ottomans", "milan", "papacy", "venice"].iter().filter(|k| runs[0].eo.contains_key(**k)).map(|k| format!("{k} {}", runs.iter().filter(|r| r.dead.contains_key(*k)).count())).collect();
+                info.push(format!("| {sc} | {world} | {} | {} | {} | {deaths} | {} |", labels(m), if over.is_empty() { "—".into() } else { over.join(", ") }, if monos.is_empty() { "—".into() } else { monos.join(", ") }, keys.join(", ")));
+            }
+            let pairs: Vec<(&str, &str)> = match sc {
+                "rome_375" => vec![("sassanids", "armenia"), ("huns", "ostrogoths")],
+                "constantinople_1430" => vec![("ottomans", "serbia"), ("ottomans", "byzantium")],
+                _ => vec![("florence", "siena"), ("naples", "papacy")],
+            };
+            for (lord, v) in pairs {
+                let c = |runs: &[Run]| runs.iter().filter(|r| r.vassal.contains_key(&(v.to_string(), lord.to_string()))).count();
+                pair_rows.push(format!("| {lord} → {v} | {sc} {world} | {} | {} |", c(base), c(var)));
+            }
+        }
+    }
+    println!("## 1. Ц10's measure: (1) zombies < 1 %, (2) below a quarter of P₀ < 10 % of living actor-ticks, (3) Rome on tick 100 ≤ its share of P₀\n");
+    println!("| scenario | world | model | zombies | below P₀ / 4 | Rome on tick 100 | passes |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in c10_rows { println!("{r}"); }
+    for m in [3usize, 5, 6] { let x = c10_ok[&m]; println!("\n{}: {} of {} worlds pass", labels(m), x.0, x.1); }
+    println!("\n## 2. Stop rule: base against (а) on the same seeds\n");
+    println!("| scenario | world | base | (а) |");
+    println!("|---|---|---|---|");
+    for r in stop_rows { println!("{r}"); }
+    for m in [3usize, 5] {
+        let ((n, w, sp, spq), (nb, wb)) = c4p[&m];
+        let pa = w as f64 / n.max(1) as f64;
+        let promise = sp / n.max(1) as f64;
+        let se = spq.sqrt() / n.max(1) as f64;
+        let pb = wb as f64 / nb.max(1) as f64;
+        let se_d = (pa * (1.0 - pa) / n.max(1) as f64 + pb * (1.0 - pb) / nb.max(1) as f64).sqrt();
+        let (o1, o2) = (pa >= promise - 2.0 * se, pa - pb >= 2.0 * se_d);
+        if m == 5 {
+            let ((bn, bw, bsp, bspq), (bnb, bwb)) = c4p[&3];
+            let bpa = bw as f64 / bn.max(1) as f64;
+            let bpb = bwb as f64 / bnb.max(1) as f64;
+            if bpa >= bsp / bn.max(1) as f64 - 2.0 * bspq.sqrt() / bn.max(1) as f64 && !o1 { stops.push("Ц4 (1)".into()); }
+            if bpa - bpb >= 2.0 * (bpa * (1.0 - bpa) / bn.max(1) as f64 + bpb * (1.0 - bpb) / bnb.max(1) as f64).sqrt() && !o2 { stops.push("Ц4 (2)".into()); }
+        }
+        println!("- {}: Ц4 (1) {:.1} % vs {:.1} % — {}; Ц4 (2) {:+.1} vs 2 SE {:.1} — {} ({n} battles)", labels(m), 100.0 * pa, 100.0 * (promise - 2.0 * se), if o1 { "yes" } else { "no" }, 100.0 * (pa - pb), 200.0 * se_d, if o2 { "yes" } else { "no" });
+    }
+    println!("\n### Ц7 items 1–3 (Ц9 is item 3)\n");
+    println!("| scenario | world | model | | passes |");
+    println!("|---|---|---|---|---|");
+    for r in c7_rows { println!("{r}"); }
+    println!("\n### Ц3 (constantinople): d = m₄₀ − 1.25 m₁₀ (t)\n");
+    println!("| world | model | d | passes |");
+    println!("|---|---|---|---|");
+    for r in c3_rows { println!("{r}"); }
+    println!("\nStops (base passes, (а) does not): {}", if stops.is_empty() { "none".into() } else { stops.join("; ") });
+    println!("\n## 3. For information: Ц2 (debt > 20 % of non-zombie ticks; treasury monotone to 150 in half the games), deaths\n");
+    println!("| scenario | world | model | in debt > 20 % | monotone treasury (games) | deaths | key actors dying (games) |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in info { println!("{r}"); }
+    println!("\n### Pairs of Ц7: games with the submission, base → (а)\n");
+    println!("| pair | world | base | (а) |");
+    println!("|---|---|---|---|");
+    for r in pair_rows { println!("{r}"); }
+}
+
+/// Why (а) fails Ц10: Rome on tick 100 (population against its scaled base, eo / T), and per actor
+/// in milan (and the rest) the zombie and below-a-quarter ticks with population writes by source.
+fn c10_why(first: u64, seeds: u64, ticks: u32) {
+    println!("# Ц10 (а): where the measure fails, seeds {first}–{}\n", first + seeds - 1);
+    println!("## Rome on tick 100\n");
+    println!("| world | population / base p10/50/90 (%) | eo / T p10/50/90 (%) |");
+    println!("|---|---|---|");
+    for world in worlds("rome_375") {
+        let runs: Vec<Run> = (first..first + seeds).map(|s| run("rome_375", world, 5, true, s, ticks)).collect();
+        let pb: Vec<f64> = runs.iter().filter_map(|r| r.rome100.map(|(p, b)| 100.0 * p / b)).collect();
+        let et: Vec<f64> = runs.iter().filter_map(|r| r.rome_eo100.map(|x| 100.0 * x)).collect();
+        println!("| {world} | {} | {} |", q(&pb), q(&et));
+    }
+    println!("\n## Actors with zombie or below-a-quarter ticks (≥ 5 a game on average): ticks a game, P₀, population writes by source (mean a game, taken / added; |x| ≥ 0.5)\n");
+    println!("| scenario | world | actor | P₀ | zombie / below P₀/4 ticks a game | population writes |");
+    println!("|---|---|---|---|---|---|");
+    for sc in SCENARIOS {
+        let scn = engine13::scenarios::registry::load_by_id(sc).unwrap();
+        for world in worlds(sc).iter().take(1) {
+            let runs: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, 5, true, s, ticks)).collect();
+            let mut c: BTreeMap<String, [u64; 5]> = BTreeMap::new();
+            for r in &runs { for (k, v) in &r.popc { let e = c.entry(k.clone()).or_default(); for i in 0..5 { e[i] += v[i]; } } }
+            for (k, v) in c.iter().filter(|(_, v)| v[2] >= 5 * seeds) {
+                let mut src: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+                for r in &runs { for ((a, s2), x) in &r.pop_src { if a == k { let e = src.entry(s2.clone()).or_default(); e.0 += x.0 / seeds as f64; e.1 += x.1 / seeds as f64; } } }
+                let mut sv: Vec<(String, (f64, f64))> = src.into_iter().filter(|x| x.1 .0.abs() >= 0.5 || x.1 .1 >= 0.5).collect();
+                sv.sort_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap());
+                let p0 = engine13::engine::metric_base(&scn, k, "population").unwrap_or(f64::NAN);
+                println!("| {sc} | {world} | {k} | {p0:.0} | {:.0} / {:.0} | {} |", v[1] as f64 / seeds as f64, v[2] as f64 / seeds as f64,
+                    sv.iter().map(|(s2, (m, p))| format!("{s2} {m:.1}/+{p:.1}")).collect::<Vec<_>>().join("; "));
+            }
+        }
+    }
 }

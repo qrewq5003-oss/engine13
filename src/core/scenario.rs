@@ -380,6 +380,12 @@ pub struct Scenario {
     /// (`threshold × T_C / 100`). The thresholds of the collapse paths stay absolute. `None` = none.
     #[serde(default)]
     pub economy_v2_cohesion_pull: Option<f64>,
+    /// Economy v2 only (Ц10): the rate at which `population` is pulled toward its norm
+    /// `N = P₀ × eo / T` — the authored base (scaled by the share a split left the seat) times the
+    /// economy against its own norm (Ц1). With it the economic-output-to-population deficit rules
+    /// are not applied (their meaning is in the norm). `None` = none of it.
+    #[serde(default)]
+    pub economy_v2_population_pull: Option<f64>,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)
