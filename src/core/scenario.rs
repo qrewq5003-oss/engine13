@@ -362,6 +362,17 @@ pub struct Scenario {
     /// replacing v1's legitimacy < 10). `None` = none of it.
     #[serde(default)]
     pub economy_v2_conquest_k2: Option<u32>,
+    /// Economy v2 only (Ц9): authored alliances. With it the scenario's `starting_alliances` enter
+    /// the world on its first tick, allies do not fight each other, an ally is no threat (Ц6), and
+    /// under Ц7 a loss counts toward a streak only if `S_w ≥ 3 × (S_l + Σ S` of the loser's living
+    /// allies`)`; an action's `forms_alliance` and an event's `leaves_alliance_as_enemy` act.
+    /// `false` = none of it.
+    #[serde(default)]
+    pub economy_v2_alliances: bool,
+    /// Economy v2 only (Ц9): the alliances standing at the start. Validated at load: each has two or
+    /// more distinct starting actors.
+    #[serde(default)]
+    pub starting_alliances: Vec<StartingAlliance>,
     /// Economy v2 only (Ц8): the rate at which `cohesion` is pulled toward its norm `T_C` = the
     /// authored starting cohesion + the levels the actor's tags give. With it, tags' `cohesion`
     /// modifiers are levels, the cohesion-to-cohesion decay rule is not applied (the pull is its
@@ -515,6 +526,18 @@ pub struct RandomEvent {
     pub effects: HashMap<RelativeMetricRef, f64>,
     pub llm_context: String,
     pub one_time: bool,
+    /// Economy v2 only (Ц9): the target of the event leaves every alliance it is in and becomes
+    /// that alliance's `common_enemy` (an alliance left with fewer than two members ends).
+    /// Validated at load: a starting actor that an authored alliance names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaves_alliance_as_enemy: Option<String>,
+}
+
+/// An alliance standing at the start of the scenario (Ц9).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StartingAlliance {
+    pub actors: Vec<String>,
 }
 
 /// Autonomous delta configuration for metrics.
@@ -652,8 +675,10 @@ impl ComparisonOperator {
     }
 }
 
-/// Player action definition
+/// Player action definition. Unknown keys are a load error (Ц9): an authored key with no field
+/// used to be skipped silently.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PatronAction {
     pub id: String,
     pub name: String,
@@ -661,6 +686,10 @@ pub struct PatronAction {
     pub available_if: ActionCondition,
     pub effects: HashMap<MetricRef, f64>,
     pub cost: HashMap<MetricRef, f64>,
+    /// Economy v2 only (Ц9): the action makes these actors allies (one alliance, unless the same
+    /// one already stands). Validated at load: two or more distinct starting actors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forms_alliance: Vec<String>,
 }
 
 /// Condition for action availability

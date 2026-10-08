@@ -245,6 +245,11 @@ pub fn tick(
     event_log: &mut EventLog,
     rng: &mut rand_chacha::ChaCha8Rng,
 ) {
+    // Economy v2 (Ц9): the scenario's starting alliances enter the world on its first tick.
+    if world.tick == 0 && world.alliances.is_empty() && interactions::alliances_on(scenario) {
+        interactions::seed_starting_alliances(world, scenario);
+    }
+
     // Phase 1: Auto-deltas via MetricRef
     phase_auto_deltas(world, scenario, rng);
 
@@ -560,6 +565,10 @@ fn phase_random_events(
                 key.apply(world, delta);
             }
             census::clear_write_source();
+            // Economy v2 (Ц9): the event turns an alliance against one of its members.
+            if let Some(id) = event.leaves_alliance_as_enemy.as_deref().filter(|_| interactions::alliances_on(scenario)) {
+                interactions::leave_alliances_as_enemy(world, id);
+            }
 
             // Record event
             let event_record = crate::core::Event::new(
@@ -610,7 +619,7 @@ fn phase_actor_tags(world: &mut WorldState, scenario: &Scenario) {
 pub fn pressure_threat(world: &WorldState, actor_id: &str) -> Option<f64> {
     let actor = world.actors.get(actor_id)?;
     // Ц6 stage 2: a sea neighbour weighs half, and an army bound to us by vassalage (either
-    // way) or an alliance is no threat. (`world.alliances` is declared but nothing forms one.)
+    // way) or an alliance is no threat. (Alliances exist only under Ц9's switch.)
     let refined = census::threat_items() >= 3;
     let bound = |other: &str| {
         world.vassalages.iter().any(|v| (v.vassal_id == actor_id && v.overlord_id == other) || (v.overlord_id == actor_id && v.vassal_id == other))
@@ -2538,6 +2547,8 @@ mod tests {
             economy_v2_legitimacy_pull: None,
             economy_v2_combat_outcome: false,
             economy_v2_conquest_k2: None,
+            economy_v2_alliances: false,
+            starting_alliances: vec![],
             economy_v2_cohesion_pull: None,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
@@ -2931,6 +2942,104 @@ mod tests {
         let (_, dead) = run(true);
         assert!(dead, "the assault on the milestone's tick: S 1000 against 10, K₂ = 1 — the city falls that tick");
         assert_eq!(run(false), (Some(20.0), false), "without begins_conquest: no battle");
+    }
+
+    /// Economy v2 (Ц9): allies do not fight each other. Both ways: with the switch off the same
+    /// allied pair does.
+    #[test]
+    fn economy_v2_allies_do_not_fight() {
+        for (on, peace) in [(true, true), (false, false)] {
+            let (mut scenario, mut world) = war_world(None);
+            scenario.economy_v2_alliances = on;
+            world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+            fight(&mut world, &scenario, 3..40);
+            assert_eq!(world.actors["small"].get_metric("military_size") == 20.0, peace, "alliances {on}");
+        }
+    }
+
+    /// Economy v2 (Ц6, Ц9): an ally's army is no threat. Both ways: without the alliance it is.
+    #[test]
+    fn economy_v2_an_ally_is_no_threat() {
+        for (allied, threat) in [(true, 0.0), (false, 100.0 * 1000.0 / 1020.0)] {
+            let (_, mut world) = war_world(None);
+            if allied {
+                world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+            }
+            let t = pressure_threat(&world, "small").unwrap();
+            assert!((t - threat).abs() < 1e-9, "allied {allied}: {t}");
+        }
+    }
+
+    /// Economy v2 (Ц7, Ц9): the loser's allies join its side of the ratio — S 1000 against the
+    /// small power's 10 overwhelms it, against 10 + an ally's 500 it does not, so no streak and no
+    /// submission. Both ways: with the switch off the ally is not counted and the small power
+    /// submits.
+    #[test]
+    fn economy_v2_allies_join_the_losers_side_of_the_ratio() {
+        for (on, submits) in [(true, false), (false, true)] {
+            let (mut scenario, mut world) = war_world(Some(1));
+            scenario.economy_v2_alliances = on;
+            world.actors.insert("ally".into(), vassalage_actor("ally", 1000.0, 0.0, 50.0, 50.0, &[]));
+            world.alliances.push(crate::core::Alliance { actor_ids: vec!["small".into(), "ally".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+            fight(&mut world, &scenario, 3..40);
+            let bound = world.vassalages.iter().any(|v| v.vassal_id == "small" && v.overlord_id == "great");
+            assert_eq!(bound, submits, "alliances {on}");
+        }
+    }
+
+    /// Economy v2 (Ц9): the scenario's starting alliances enter the world on its first tick, once.
+    /// Both ways: with the switch off the world has none.
+    #[test]
+    fn economy_v2_starting_alliances_enter_on_the_first_tick() {
+        for on in [true, false] {
+            let (mut scenario, mut world) = war_world(None);
+            scenario.economy_v2_alliances = on;
+            scenario.starting_alliances = vec![crate::core::StartingAlliance { actors: vec!["great".into(), "small".into()] }];
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
+            tick(&mut world, &scenario, &mut log, &mut rng);
+            tick(&mut world, &scenario, &mut log, &mut rng);
+            assert_eq!(world.alliances.len(), on as usize, "alliances {on}");
+            assert_eq!(interactions::allied(&world, "great", "small"), on);
+        }
+    }
+
+    /// Economy v2 (Ц9): an event's `leaves_alliance_as_enemy` — its target leaves every alliance
+    /// and becomes the common enemy; an alliance left with one member ends. Both ways: with the
+    /// switch off the event writes its metrics and the alliances stand.
+    #[test]
+    fn economy_v2_event_turns_an_alliance_against_a_member() {
+        for on in [true, false] {
+            let (mut scenario, mut world) = war_world(None);
+            scenario.economy_v2_alliances = on;
+            world.actors.insert("third".into(), vassalage_actor("third", 10.0, 0.0, 50.0, 50.0, &[]));
+            world.alliances = vec![
+                crate::core::Alliance { actor_ids: vec!["great".into(), "small".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 },
+                crate::core::Alliance { actor_ids: vec!["great".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 },
+            ];
+            scenario.random_events = vec![crate::core::RandomEvent {
+                id: "league_turns".into(),
+                probability: 1.0,
+                target: crate::core::EventTarget::Actor("great".into()),
+                conditions: vec![],
+                effects: HashMap::from([(crate::core::RelativeMetricRef::literal("actor:great.legitimacy"), -12.0)]),
+                llm_context: String::new(),
+                one_time: true,
+                leaves_alliance_as_enemy: Some("great".into()),
+            }];
+            let mut log = EventLog::new();
+            phase_random_events(&mut world, &scenario, &mut log, &mut rand_chacha::ChaCha8Rng::seed_from_u64(0));
+            assert_eq!(world.actors["great"].get_metric("legitimacy"), 38.0, "the metrics are written either way");
+            if on {
+                assert_eq!(world.alliances.len(), 1, "the pair great–third ends");
+                assert_eq!(world.alliances[0].actor_ids, vec!["small".to_string(), "third".to_string()]);
+                assert_eq!(world.alliances[0].common_enemy.as_deref(), Some("great"));
+                assert!(!interactions::allied(&world, "great", "small") && interactions::allied(&world, "small", "third"));
+            } else {
+                assert_eq!(world.alliances.len(), 2, "switch off: the alliances stand");
+                assert!(interactions::allied(&world, "great", "small"));
+            }
+        }
     }
 
     /// Economy v2 (Ц7): tribute is paid only out of a non-negative treasury — the overlord gets
