@@ -238,8 +238,10 @@ pub fn load_constantinople_1430() -> Scenario {
         economy_v2_pressure_pull: Some(0.10),
         economy_v2_legitimacy_pull: Some(0.03),
         economy_v2_combat_outcome: true,
-        economy_v2_conquest_k2: None,
-        economy_v2_alliances: false,
+        // Economy v2 (Ц7 + Ц9): war decides submission and conquest, authored alliances act — written
+        // together (owner's decision after PR #246, docs/investigation_economy_c9.md).
+        economy_v2_conquest_k2: Some(1),
+        economy_v2_alliances: true,
         starting_alliances: vec![],
         economy_v2_cohesion_pull: Some(0.12),
         military_conflict_probability: 0.35,

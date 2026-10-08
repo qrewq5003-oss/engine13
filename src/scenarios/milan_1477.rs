@@ -225,8 +225,10 @@ pub fn load_milan_1477() -> Scenario {
         economy_v2_pressure_pull: Some(0.10),
         economy_v2_legitimacy_pull: Some(0.03),
         economy_v2_combat_outcome: true,
-        economy_v2_conquest_k2: None,
-        economy_v2_alliances: false,
+        // Economy v2 (Ц7 + Ц9): war decides submission and conquest, authored alliances act — written
+        // together (owner's decision after PR #246, docs/investigation_economy_c9.md).
+        economy_v2_conquest_k2: Some(1),
+        economy_v2_alliances: true,
         // Economy v2 (Ц9, owner's authored content): the Italian League of Lodi (1454–1455, until
         // 1494) — the members of `italian_league_against_milan` plus Milan, which was one of them.
         starting_alliances: vec![crate::core::StartingAlliance {

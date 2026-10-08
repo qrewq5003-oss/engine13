@@ -31,8 +31,13 @@ fn run(world: &str, seed: u64, ticks: u32) -> Run {
     let mut st = engine13::AppState::default();
     engine13::load_scenario(&mut st, &db, "constantinople_1430".to_string()).unwrap();
     st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
-    st.current_scenario.as_mut().unwrap().features.economy_v2 = true;
-    assert!(st.current_scenario.as_ref().unwrap().economy_v2_conquest_k2.is_none(), "Ц7 is off in the content");
+    {
+        // the world of PR #242: Ц7 and Ц9 off (they are in the content since their write)
+        let s = st.current_scenario.as_mut().unwrap();
+        s.features.economy_v2 = true;
+        s.economy_v2_conquest_k2 = None;
+        s.economy_v2_alliances = false;
+    }
     let strategy = (world != "none").then(|| ScriptedStrategy::from_str(world, "constantinople_1430"));
     let mut r = Run::default();
     {
