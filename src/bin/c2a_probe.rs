@@ -62,6 +62,10 @@ struct Row {
     /// army and treasury at the end of the tick in the protocol
     army1: f64,
     treasury1: f64,
+    /// economic_output and its norm T at the end of the tick; population × the income coefficient
+    eo: f64,
+    teo: f64,
+    pc: f64,
     /// threat neighbours counted by the engine at the end of the tick: (id, weight)
     nb: Vec<(String, f64)>,
 }
@@ -69,6 +73,10 @@ struct Row {
 type Game = BTreeMap<String, Vec<Row>>;
 /// (tick, army at the end, treasury at the end, population), per actor
 type Replayed = BTreeMap<String, Vec<(u32, f64, f64, f64)>>;
+/// the same with the norm M on each tick
+type Replayed2 = BTreeMap<String, Vec<(u32, f64, f64, f64, f64)>>;
+/// per actor: Σ shift (absolute), Σ shift (relative), ticks, eo, T
+type Br = BTreeMap<String, (f64, f64, u64, Vec<f64>, Vec<f64>)>;
 
 fn recovery_line() -> u32 {
     let src = include_str!("../engine/interactions.rs");
@@ -126,6 +134,12 @@ fn play(sc: &str, world: &str, seed: u64, ticks: u32, rec_line: u32) -> Game {
             r.treasury0 = t0;
             r.army1 = a.get_metric("military_size");
             r.treasury1 = a.get_metric("treasury");
+            {
+                let scn = st.current_scenario.as_ref().unwrap();
+                r.eo = a.get_metric("economic_output");
+                r.teo = engine13::engine::eo_target(ws, scn, id).unwrap_or(f64::NAN);
+                r.pc = r.pop.max(0.0) * scn.economy_v2_income_coefficient.unwrap_or(0.001);
+            }
             let bound = |o: &str| ws.vassalages.iter().any(|v| (v.vassal_id == *id && v.overlord_id == o) || (v.overlord_id == *id && v.vassal_id == o))
                 || ws.alliances.iter().any(|al| al.actor_ids.iter().any(|x| x == id) && al.actor_ids.iter().any(|x| x == o));
             r.nb = a.neighbors.iter().filter(|n| n.distance == 1 && !ws.dead_actor_ids.contains(&n.id) && ws.actors.contains_key(&n.id) && !bound(&n.id))
@@ -137,17 +151,23 @@ fn play(sc: &str, world: &str, seed: u64, ticks: u32, rec_line: u32) -> Game {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Norm { Replay, A, B, V(f64), G }
+enum Norm { Replay, A, B, V(f64), G, Ap(f64) }
 #[derive(Clone, Copy, PartialEq)]
 enum Down { None, Always, Debt }
 
 fn cell_label(n: Norm, d: Down) -> String {
-    let n = match n { Norm::Replay => "replay (M = C)".to_string(), Norm::A => "(А) min(C, F)".into(), Norm::B => "(Б) F".into(), Norm::V(s) => format!("(В) C + {s} × (F − C)⁺"), Norm::G => "(Г) sink above 20 × income".into() };
+    let n = match n { Norm::Replay => "replay (M = C)".to_string(), Norm::A => "(А) min(C, F)".into(), Norm::B => "(Б) F".into(), Norm::V(s) => format!("(В) C + {s} × (F − C)⁺"), Norm::G => "(Г) sink above 20 × income".into(), Norm::Ap(al) => format!("(А′) min(C, {al} F)") };
     match d { Down::None => n, Down::Always => format!("{n}, down always"), Down::Debt => format!("{n}, down in debt") }
 }
 
 /// The replayed (tick, army at the end, treasury at the end, population) of one actor.
 fn replay(rows: &[Row], n: Norm, d: Down) -> Vec<(u32, f64, f64, f64)> {
+    replay2(rows, n, d, false, 0.0).into_iter().map(|x| (x.0, x.1, x.2, x.3)).collect()
+}
+
+/// The replay with the sink switchable apart from the norm, and the economy shifted by `eo_shift`
+/// (income = max(0, eo + shift) × population × c when the shift is not zero); returns also M.
+fn replay2(rows: &[Row], n: Norm, d: Down, sink: bool, eo_shift: f64) -> Vec<(u32, f64, f64, f64, f64)> {
     let Some(first) = rows.first() else { return vec![] };
     let (mut a, mut tr) = (first.army0, first.treasury0);
     let mut debt = 0u32;
@@ -157,19 +177,20 @@ fn replay(rows: &[Row], n: Norm, d: Down) -> Vec<(u32, f64, f64, f64)> {
         if r.tick != prev_tick + 1 && r.tick != first.tick { a = r.army0; tr = r.treasury0; }
         prev_tick = r.tick;
         // treasury formula, then the debt rule or the sink
-        tr += r.income - 0.8 * a;
+        let income = if eo_shift == 0.0 { r.income } else { (r.eo + eo_shift).clamp(0.0, 100.0) * r.pc };
+        tr += income - 0.8 * a;
         if d == Down::Debt {
             if tr < 0.0 { debt += 1; if debt >= 4 { a -= 0.05 * a; } } else { debt = 0; }
         }
-        if n == Norm::G {
-            let reserve = 20.0 * r.income.max(0.0);
+        if n == Norm::G || sink {
+            let reserve = 20.0 * income.max(0.0);
             if tr > reserve { tr -= 0.05 * (tr - reserve); }
         }
         // other gains, recovery toward M, down
         a += r.gain;
         let c = 0.767 * r.pop.max(0.0).powf(2.0 / 3.0);
-        let f = r.income.max(0.0) / 0.8;
-        let m = match n { Norm::Replay | Norm::G => c, Norm::A => c.min(f), Norm::B => f, Norm::V(s) => c + s * (f - c).max(0.0) };
+        let f = income.max(0.0) / 0.8;
+        let m = match n { Norm::Replay | Norm::G => c, Norm::A => c.min(f), Norm::B => f, Norm::V(s) => c + s * (f - c).max(0.0), Norm::Ap(al) => c.min(al * f) };
         if a < m && tr >= 0.0 { a += 0.05 * (m - a); }
         if d == Down::Always && a > m { a -= 0.05 * (a - m); }
         // the protocol's share of losses
@@ -180,7 +201,7 @@ fn replay(rows: &[Row], n: Norm, d: Down) -> Vec<(u32, f64, f64, f64)> {
         // other treasury writes; losses stop at zero
         tr += r.tr_gain;
         if r.tr_loss < 0.0 { tr += r.tr_loss.max(-tr.max(0.0)); }
-        out.push((r.tick, a, tr, r.pop));
+        out.push((r.tick, a, tr, r.pop, m));
     }
     out
 }
@@ -199,6 +220,7 @@ fn main() {
     census::watch_all_metrics(true);
     census::enable_treasury_parts();
     let rec_line = recovery_line();
+    if args.get(4).map(String::as_str) == Some("round2") { round2(first, seeds, ticks, rec_line); return; }
     let mut cells: Vec<(Norm, Down)> = vec![(Norm::Replay, Down::None)];
     for n in [Norm::A, Norm::B, Norm::V(0.25), Norm::V(0.5)] { for d in [Down::Always, Down::Debt] { cells.push((n, d)); } }
     cells.push((Norm::G, Down::None));
@@ -329,4 +351,166 @@ fn main() {
     println!("| scenario | world | cell | largest armies | T_p |");
     println!("|---|---|---|---|---|");
     for r in tp_rows { println!("{r}"); }
+}
+
+/// The p90 debt spell of one replayed actor (non-zombie ticks).
+fn p90_spell(v: &[(u32, f64, f64, f64, f64)]) -> (f64, u64, u64) {
+    let (mut n, mut d, mut spell) = (0u64, 0u64, 0u32);
+    let mut spells = Vec::new();
+    for x in v {
+        if x.3 <= 1.0 { continue; }
+        n += 1;
+        if x.2 < 0.0 { d += 1; spell += 1; } else if spell > 0 { spells.push(spell as f64); spell = 0; }
+    }
+    if spell > 0 { spells.push(spell as f64); }
+    (if spells.is_empty() { 0.0 } else { pct(&spells, 0.9) }, n, d)
+}
+
+/// Second round (owner's decision after PR #254): (А′) M = min(C, 0.75 F) with and without the
+/// sink (Г), both branches; the b/r of `military_size_to_economic_output` (k 0.01, deficit below 50,
+/// r = 0.03) with the absolute threshold and with the threshold 50 × M / 100; and the classes of the
+/// debtors that fail item 1 — held only by the economy at the floor from that rule (the replay with
+/// the economy shifted by the rule's change brings the p90 spell to ≤ 12) or anything else.
+fn round2(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
+    const K: f64 = 0.01;
+    const R: f64 = 0.03;
+    let shift = |army: f64, thr: f64| -K * (thr - army).max(0.0) / R;
+    let cells = [(Norm::Ap(0.75), Down::Always, true), (Norm::Ap(0.75), Down::Debt, true), (Norm::Ap(0.75), Down::Always, false), (Norm::Ap(0.75), Down::Debt, false)];
+    let lab = |n: Norm, d: Down, g: bool| format!("{}{}", cell_label(n, d), if g { " + (Г)" } else { "" });
+    println!("# Ц2, second round — (А′) M = min(C, 0.75 F), the sink, the small-army threshold from the norm; seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
+    let mut debt_rows = Vec::new();
+    let mut army_rows = Vec::new();
+    let mut c3_rows = Vec::new();
+    let mut br_rows = Vec::new();
+    let mut class_rows = Vec::new();
+    for sc in SCENARIOS {
+        for world in worlds(sc) {
+            let games: Vec<Game> = (first..first + seeds).map(|s| play(sc, world, s, ticks, rec_line)).collect();
+            for &(n, d, g) in &cells {
+                let label = lab(n, d, g);
+                let reps: Vec<Replayed2> = games.iter().map(|gm| gm.iter().map(|(k, v)| (k.clone(), replay2(v, n, d, g, 0.0))).collect()).collect();
+                // per actor: debt, b/r
+                let mut acc: BTreeMap<String, (u64, u64, Vec<f64>)> = BTreeMap::new();
+                let mut br: Br = BTreeMap::new();
+                for (gm, rep) in games.iter().zip(&reps) {
+                    for (id, v) in rep {
+                        let e = acc.entry(id.clone()).or_default();
+                        let mut spell = 0u32;
+                        for x in v {
+                            if x.3 <= 1.0 { continue; }
+                            e.0 += 1;
+                            if x.2 < 0.0 { e.1 += 1; spell += 1; } else if spell > 0 { e.2.push(spell as f64); spell = 0; }
+                        }
+                        if spell > 0 { e.2.push(spell as f64); }
+                        let b = br.entry(id.clone()).or_default();
+                        for (row, x) in gm[id].iter().zip(v) {
+                            b.0 += shift(row.army1, 50.0);
+                            b.1 += shift(x.1, 0.5 * x.4);
+                            b.2 += 1;
+                            b.3.push(row.eo);
+                            b.4.push(row.teo);
+                        }
+                    }
+                }
+                let p90 = acc.values().map(|x| if x.2.is_empty() { 0.0 } else { pct(&x.2, 0.9) }).fold(0.0, f64::max);
+                let over: Vec<String> = acc.iter().filter(|(_, x)| 100.0 * x.1 as f64 / x.0.max(1) as f64 > 20.0).map(|(k, x)| format!("{k} {:.0}", 100.0 * x.1 as f64 / x.0.max(1) as f64)).collect();
+                let played = *world != "none";
+                let mut mono: BTreeMap<String, u32> = BTreeMap::new();
+                for rep in &reps {
+                    for (id, v) in rep {
+                        let steps: Option<Vec<f64>> = (0..=15).map(|i| v.iter().find(|p| p.0 == i * 10).map(|p| p.2)).collect();
+                        if let Some(st) = steps { if st.windows(2).all(|w| w[1] >= w[0]) && st[15] > st[0] { *mono.entry(id.clone()).or_default() += 1; } }
+                    }
+                }
+                let monos: Vec<String> = mono.iter().filter(|(_, c)| **c as u64 * 2 >= seeds).map(|(k, c)| format!("{k} {c}")).collect();
+                // classes of the item-1 debtors: replay with the economy shifted by the rule's change
+                let mut class1 = Vec::new();
+                let mut class2: Vec<(String, f64)> = Vec::new();
+                for (id, x) in acc.iter().filter(|(_, x)| !x.2.is_empty() && pct(&x.2, 0.9) > 12.0) {
+                    let b = &br[id];
+                    let delta = (b.1 - b.0) / b.2.max(1) as f64;
+                    let mut spells_after = Vec::new();
+                    for gm in &games {
+                        if let Some(rows) = gm.get(id) {
+                            let v = replay2(rows, n, d, g, if delta == 0.0 { 1e-12 } else { delta });
+                            let (q90, _, _) = p90_spell(&v);
+                            spells_after.push(q90);
+                        }
+                    }
+                    let after = spells_after.iter().cloned().fold(0.0, f64::max);
+                    let before = pct(&x.2, 0.9);
+                    if after <= 12.0 { class1.push(format!("{id} {before:.0}→{after:.0}")); } else {
+                        // the deepest debt and the 25 % margin of income on the norm: ticks to repay
+                        let (mut deep, mut inc, mut ni, mut first_debt) = (Vec::new(), 0.0, 0u64, Vec::new());
+                        for (gm, rep) in games.iter().zip(&reps) {
+                            if let (Some(v), Some(rows)) = (rep.get(id), gm.get(id)) {
+                                deep.push(v.iter().map(|x| x.2).fold(0.0, f64::min));
+                                if let Some(t) = v.iter().find(|x| x.2 < 0.0 && x.3 > 1.0) { first_debt.push(t.0 as f64); }
+                                for r in rows { inc += r.income; ni += 1; }
+                            }
+                        }
+                        let mi = inc / ni.max(1) as f64;
+                        let dp = pct(&deep, 0.5);
+                        class2.push((format!("{id} {before:.0} [debt p50 {dp:.0}, from tick {:.0}, 25 % of income {:.2}/tick → {:.0} ticks]", pct(&first_debt, 0.5), 0.25 * mi, if mi > 0.0 { -dp / (0.25 * mi) } else { f64::INFINITY }), before));
+                    }
+                }
+                let worst2 = class2.iter().map(|x| x.1).fold(0.0, f64::max);
+                class_rows.push(format!("| {sc} | {world} | {label} | {p90:.0} | {} | {} | {} |", if class1.is_empty() { "—".into() } else { class1.join(", ") },
+                    if class2.is_empty() { "—".into() } else { class2.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>().join(", ") }, if worst2 <= 12.0 { "**yes**" } else { "no" }));
+                debt_rows.push(format!("| {sc} | {world} | {label} | {p90:.0} {} | {} | {} |", if p90 <= 12.0 { "yes" } else { "**no**" },
+                    if played { format!("(played) {}", if over.is_empty() { "—".into() } else { over.join(", ") }) } else if over.is_empty() { "yes".into() } else { format!("**no**: {}", over.join(", ")) },
+                    if monos.is_empty() { "—".to_string() } else { monos.join(", ") }));
+                // b/r rows (once per world: the «down in debt + (Г)» cell)
+                if d == Down::Debt && g {
+                    for (id, b) in &br {
+                        let nn = b.2.max(1) as f64;
+                        let (sa, sr) = (b.0 / nn, b.1 / nn);
+                        let (eo_m, t_m) = (pct(&b.3, 0.5), pct(&b.4, 0.5));
+                        let named = ["saxons", "urbino", "wallachia"].contains(&id.as_str());
+                        if sa < -10.0 || sr < -10.0 || named {
+                            let exp = ((eo_m - sa + sr).clamp(0.0, 100.0)) / t_m;
+                            br_rows.push(format!("| {sc} | {world} | {id} | {sa:+.1} | {sr:+.1} | {:.0} % | {:.0} % |", 100.0 * eo_m / t_m, 100.0 * exp));
+                        }
+                    }
+                }
+                // armies and Ц3
+                let mut cells_a = Vec::new();
+                for k in KEY {
+                    let w = |a: u32, b: u32| { let x: Vec<f64> = reps.iter().filter_map(|rep| rep.get(k).and_then(|v| { let y: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect(); (!y.is_empty()).then(|| y.iter().sum::<f64>() / y.len() as f64) })).collect(); if x.is_empty() { "—".to_string() } else { format!("{:.0}", pct(&x, 0.5)) } };
+                    if reps.iter().any(|rep| rep.contains_key(k)) { cells_a.push(format!("{k} {} / {} / {}", w(10, 20), w(40, 50), w(100, 100))); }
+                }
+                army_rows.push(format!("| {sc} | {world} | {label} | {} |", cells_a.join("; ")));
+                if sc == "constantinople_1430" {
+                    let win = |v: &Vec<(u32, f64, f64, f64, f64)>, a: u32, b: u32| { let y: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect(); (!y.is_empty()).then(|| y.iter().sum::<f64>() / y.len() as f64) };
+                    let dd: Vec<f64> = reps.iter().filter_map(|rep| { let v = rep.get("ottomans")?; Some(win(v, 40, 50)? - 1.25 * win(v, 10, 20)?) }).collect();
+                    let nn = dd.len() as f64;
+                    let mean = dd.iter().sum::<f64>() / nn.max(1.0);
+                    let sd = (dd.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (nn - 1.0).max(1.0)).sqrt();
+                    let tt = if sd > 0.0 { mean / (sd / nn.sqrt()) } else { 0.0 };
+                    let at = |t: u32| { let x: Vec<f64> = reps.iter().filter_map(|rep| rep.get("ottomans").and_then(|v| v.iter().find(|p| p.0 == t).map(|p| p.1))).collect(); pct(&x, 0.5) };
+                    c3_rows.push(format!("| {world} | {label} | {mean:+.1} (t {tt:+.1}) {} | {:.0} → {:.0} → {:.0} → {:.0} |", if mean > 0.0 && tt >= 2.0 { "yes" } else { "**no**" }, at(41), at(42), at(46), at(50)));
+                }
+            }
+        }
+    }
+    println!("## 1. Debt (items 1, 2; 3 printed) and accumulation\n");
+    println!("| scenario | world | cell | (1) worst p90 ≤ 12 | (2) / (3) | monotone (games) |");
+    println!("|---|---|---|---|---|---|");
+    for r in debt_rows { println!("{r}"); }
+    println!("\n## 2. Classes of the item-1 debtors (p90 spell > 12): class 1 — the replay with the economy shifted by the small-army rule's change (absolute → relative) brings it to ≤ 12 (before → after); class 2 — the rest. Item 1 without class 1\n");
+    println!("| scenario | world | cell | worst p90 | class 1 | class 2 (p90) | item 1 without class 1 |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in class_rows { println!("{r}"); }
+    println!("\n## 3. b/r of `military_size_to_economic_output` (k 0.01, r 0.03), «down in debt + (Г)» cell: mean shift of the eo target, absolute threshold 50 against 50 × M / 100; eo / T now and expected\n");
+    println!("| scenario | world | actor | shift, absolute | shift, relative | eo / T now (median) | expected eo / T |");
+    println!("|---|---|---|---|---|---|---|");
+    for r in br_rows { println!("{r}"); }
+    println!("\n## 4. Armies of key actors (mean on ticks 10–20 / 40–50 / tick 100, median)\n");
+    println!("| scenario | world | cell | armies |");
+    println!("|---|---|---|---|");
+    for r in army_rows { println!("{r}"); }
+    println!("\n## 5. Ц3 and the Ottoman army 41 → 42 → 46 → 50\n");
+    println!("| world | cell | d (t) | army |");
+    println!("|---|---|---|---|");
+    for r in c3_rows { println!("{r}"); }
 }
