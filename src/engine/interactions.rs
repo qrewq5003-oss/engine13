@@ -140,6 +140,49 @@ pub fn military_capacity(actor: &crate::core::Actor) -> f64 {
     MILITARY_CAPACITY_K * actor.get_metric("population").max(0.0).powf(MILITARY_CAPACITY_EXPONENT)
 }
 
+/// Economy v2 (Ц2): the army is paid out of the treasury (the owner's rule).
+pub fn army_pay_on(scenario: &Scenario) -> bool {
+    scenario.features.economy_v2 && scenario.economy_v2_army_pay
+}
+
+/// Economy v2 (Ц2): a people under arms — the actor carries a tag that declares itself `militia`
+/// (in rome `tribal_confederation` and `nomadic`) now — draws no pay from the treasury.
+pub fn is_militia(actor: &crate::core::Actor, scenario: &Scenario) -> bool {
+    actor.actor_tags.keys().any(|k| scenario.tag_definitions.iter().any(|d| d.militia && &d.id == k))
+}
+
+/// The treasury formula's income of an actor this tick (`eo × population × c`).
+pub fn tick_income(actor: &crate::core::Actor, scenario: &Scenario) -> f64 {
+    let coefficient = if scenario.features.economy_v2 { scenario.economy_v2_income_coefficient.unwrap_or(0.001) } else { 0.001 };
+    actor.get_metric("economic_output") * actor.get_metric("population") * crate::core::census::income_coefficient(coefficient)
+}
+
+/// Economy v2 (Ц2): the army norm M — C for the militia, min(C, 0.75 × income / 0.8) for a paid
+/// army (a quarter of the income stays to pay debts and the court).
+pub fn army_norm(actor: &crate::core::Actor, scenario: &Scenario) -> f64 {
+    let c = military_capacity(actor);
+    if is_militia(actor, scenario) { c } else { c.min(0.75 * tick_income(actor, scenario).max(0.0) / 0.8) }
+}
+
+/// Economy v2 (Ц2): recruiting toward the norm M, at the same 5 % of the gap, only below M and only
+/// with a non-negative treasury. Actors in id order, no RNG drawn.
+pub fn apply_military_recovery_to_norm(world: &mut WorldState, scenario: &Scenario) {
+    let mut ids: Vec<String> = world.actors.keys().cloned().collect();
+    ids.sort();
+    for id in ids {
+        if let Some(actor) = world.actors.get_mut(&id) {
+            if actor.get_metric("treasury") < 0.0 {
+                continue;
+            }
+            let norm = army_norm(actor, scenario);
+            let current = actor.get_metric("military_size");
+            if current < norm {
+                actor.set_metric("military_size", current + (norm - current) * MILITARY_RECOVERY_RATE);
+            }
+        }
+    }
+}
+
 /// Recover every actor's army toward its mobilisation capacity. Never above it, so a
 /// power that lost its population cannot re-raise the army it used to have — the
 /// capacity is read from the world, never from the scenario template (that read is

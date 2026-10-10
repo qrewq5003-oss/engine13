@@ -46,6 +46,8 @@ metrics_modifier = { military_quality = 1 }
 spreads_via = ["war", "migration"]
 spread_cooldown_ticks = 4
 spread_chance = 0.4
+# Ц2 (owner's decision): a people under arms, not a paid army — no pay from the treasury.
+militia = true
 
 [[tags]]
 id = "cavalry"
@@ -74,6 +76,8 @@ metrics_modifier = {}
 spreads_via = ["war", "migration"]
 spread_cooldown_ticks = 6
 spread_chance = 0.3
+# Ц2 (owner's decision): a people under arms, not a paid army — no pay from the treasury.
+militia = true
 
 [[tags]]
 id = "federati_potential"

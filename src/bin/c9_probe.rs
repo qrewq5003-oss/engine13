@@ -123,10 +123,16 @@ struct Run {
     eo_rel: BTreeMap<String, Vec<f64>>,
     /// economic_output written, (actor, source) -> sum
     eo_src: BTreeMap<(String, String), f64>,
+    /// Ц2: ticks the unpaid share of the army left, per actor
+    desert: BTreeMap<String, u32>,
+    /// Ц2: treasury / income on ticks 250–299, per actor
+    tr_inc: BTreeMap<String, Vec<f64>>,
+    /// the five peoples' armies (sum) on ticks 15, 45, 100
+    peoples: BTreeMap<u32, f64>,
 }
 
-/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content as it stands, 4 = the content and Ц3 set here,
-/// 5 = the content and Ц10 (а), 6 = Ц10 (б)
+/// model: 0 = base, 1 = Ц7, 2 = Ц9, 3 = the content before Ц10, 4 = that and Ц3 set here,
+/// 5 = the content and Ц10 (а), 6 = Ц10 (б), 7 = the content and Ц2, 8 = the content as it stands
 fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32) -> Run {
     let db = engine13::db::Db::open_in_memory().unwrap();
     let mut st = engine13::AppState::default();
@@ -148,7 +154,10 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
         // model 5: the content and Ц10 (а) set here — population pulled to P₀ × eo / T, r = 0.01;
         // model 6: Ц10 (б) — pulled to the constant P₀, the deficit rules kept (census)
         if model == 5 || model == 6 { s.economy_v2_population_pull = Some(0.01); }
-        // models 0–4 are the worlds before Ц10 (it is in the content since its write)
+        // model 7: the content and Ц2 (the army paid out of the treasury) set here
+        if model == 7 { s.economy_v2_army_pay = true; }
+        // models 0–4 are the worlds before Ц10 (it is in the content since its write); model 8 — the
+        // content exactly as it stands, nothing overridden (the base of Ц2)
         if model <= 4 { s.economy_v2_population_pull = None; }
     }
     census::set_population_constant_norm(model == 6);
@@ -174,7 +183,8 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             }
         }
         r.battles.extend(census::take_battles());
-        for w in census::take_writes().into_iter().filter(|w| w.metric == "population" || w.metric == "economic_output") {
+        for w in census::take_writes().into_iter().filter(|w| w.metric == "population" || w.metric == "economic_output" || (w.metric == "military_size" && w.source.as_deref() == Some("unpaid army"))) {
+            if w.metric == "military_size" { *r.desert.entry(w.actor.clone()).or_default() += 1; continue; }
             let src = w.source.clone().unwrap_or_else(|| format!("{}:{}", w.location.file().rsplit('/').next().unwrap_or(""), w.location.line()));
             if w.metric == "economic_output" { *r.eo_src.entry((w.actor.clone(), src)).or_default() += w.applied; continue; }
             let e = r.pop_src.entry((w.actor.clone(), src)).or_default();
@@ -224,6 +234,7 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
                 if engine13::engine::population_base(ws, scn, id).is_some_and(|b| pop < 0.25 * b) { c[2] += 1; }
                 if tt.is_some_and(|tt| eo < tt / 4.0) { c[3] += 1; }
                 if let Some(tt) = tt { r.eo_rel.entry(id.clone()).or_default().push(eo / tt); }
+                if t >= 250 { let inc = engine13::engine::interactions::tick_income(a, scn); if inc > 0.0 { r.tr_inc.entry(id.clone()).or_default().push(a.get_metric("treasury") / inc); } }
                 if t % 10 == 0 && t <= 150 { r.tr_steps.entry(id.clone()).or_default().push(a.get_metric("treasury")); }
             }
             let l = a.get_metric("legitimacy");
@@ -252,6 +263,7 @@ fn run(sc: &str, world: &str, model: usize, quality: bool, seed: u64, ticks: u32
             prev_ep.insert(id.clone(), ep);
         }
         if r.win.is_none() && ws.victory_achieved { r.win = Some(t); }
+        if [15, 45, 100].contains(&t) { r.peoples.insert(t, PEOPLES.iter().filter_map(|p| ws.actors.get(*p).filter(|_| !ws.dead_actor_ids.contains(*p))).map(|a| a.get_metric("military_size")).sum()); }
         if let Some(o) = ws.actors.get("ottomans").filter(|_| !ws.dead_actor_ids.contains("ottomans")) { r.ott.push((t, o.get_metric("military_size"))); }
         if r.accel.is_none() && ws.milestone_events_fired.iter().any(|m| m == "mehmed_accelerates") { r.accel = Some(t); }
     }
@@ -347,9 +359,40 @@ fn main() {
     if args.get(4).map(String::as_str) == Some("c3") { c3_run(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10pre") { c10_pre(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10") { c10_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c2") { census::watch_all_metrics(true); c2_run(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c2c4") {
+        println!("# Ц4 by scenario, base (content) against Ц2, seeds {first}–{}\n", first + seeds - 1);
+        println!("| model | scope | battles | (1) won by higher quality vs promise − 2 SE | (2) with − without quality vs 2 SE |");
+        println!("|---|---|---|---|---|");
+        for (m, name) in [(8usize, "base"), (7, "Ц2")] {
+            let mut all: C4Pool = Default::default();
+            for sc in SCENARIOS {
+                let mut p: C4Pool = Default::default();
+                for world in worlds(sc) {
+                    for sd in first..first + seeds {
+                        let x = c4(&run(sc, world, m, true, sd, ticks).battles); p.0 .0 += x.0; p.0 .1 += x.1; p.0 .2 += x.2; p.0 .3 += x.3;
+                        let y = c4(&run(sc, world, m, false, sd, ticks).battles); p.1 .0 += y.0; p.1 .1 += y.1;
+                    }
+                }
+                println!("{}", c4_row(name, sc, p));
+                all.0 .0 += p.0 .0; all.0 .1 += p.0 .1; all.0 .2 += p.0 .2; all.0 .3 += p.0 .3; all.1 .0 += p.1 .0; all.1 .1 += p.1 .1;
+            }
+            println!("{}", c4_row(name, "**all**", all));
+        }
+        return;
+    }
     if args.get(4).map(String::as_str) == Some("c10ev") { c10_events(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("eolow") { census::watch_all_metrics(true); eo_low(first, seeds, ticks); return; }
     if args.get(4).map(String::as_str) == Some("c10why") { census::watch_all_metrics(true); c10_why(first, seeds, ticks); return; }
+    if args.get(4).map(String::as_str) == Some("c2content") {
+        let (mut same, mut total) = (0, 0);
+        for sc in SCENARIOS { for world in worlds(sc) { for sd in first..first + seeds {
+            total += 1;
+            if run_content(sc, world, sd, ticks) == run(sc, world, 7, true, sd, ticks).fingerprint { same += 1; }
+        } } }
+        println!("Ц2 content check, seeds {first}–{}: {same} of {total} runs identical (content against Ц2 set here).", first + seeds - 1);
+        return;
+    }
     if args.get(4).map(String::as_str) == Some("c10content") {
         let (mut same, mut total) = (0, 0);
         for sc in SCENARIOS {
@@ -1006,4 +1049,138 @@ fn run_content(sc: &str, world: &str, seed: u64, ticks: u32) -> u64 {
         }
     }
     std::hash::Hasher::finish(&fp)
+}
+
+/// Ц2 (owner's rule, one build, one run): base (v2 as in the content) against the army paid out of
+/// the treasury. The only gate — the stop rule: Ц1, Ц3–Ц10 against base on the same seeds (§9.6).
+/// For information: treasury / income, desertion, the peoples' armies and Ц7's submissions, §9.2,
+/// deaths paired.
+fn c2_run(first: u64, seeds: u64, ticks: u32) {
+    const MEASURES: [&str; 9] = ["Ц1 actors", "Ц1 tiers", "Ц1 spread", "Ц5 actors", "Ц5 spread", "Ц6 ceiling", "Ц6 corr", "Ц8 extremes", "Ц8 spread"];
+    println!("# Ц2 — the army paid out of the treasury, seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
+    let lab = |m: usize| if m == 8 { "base" } else { "Ц2" };
+    let mut stops: Vec<String> = Vec::new();
+    let mut stop_rows = Vec::new();
+    let mut gate_rows = Vec::new();
+    let mut c4p: BTreeMap<usize, C4Pool> = BTreeMap::new();
+    let mut info = Vec::new();
+    let mut pair_rows = Vec::new();
+    let mut army_rows = Vec::new();
+    for sc in SCENARIOS {
+        for world in worlds(sc) {
+            let all: BTreeMap<usize, Vec<Run>> = [8usize, 7].iter().map(|m| (*m, (first..first + seeds).map(|s| run(sc, world, *m, true, s, ticks)).collect())).collect();
+            for m in [8usize, 7] {
+                let nq: Vec<Run> = (first..first + seeds).map(|s| run(sc, world, m, false, s, ticks)).collect();
+                let e = c4p.entry(m).or_default();
+                for rr in &all[&m] { let x = c4(&rr.battles); e.0 .0 += x.0; e.0 .1 += x.1; e.0 .2 += x.2; e.0 .3 += x.3; }
+                for rr in &nq { let x = c4(&rr.battles); e.1 .0 += x.0; e.1 .1 += x.1; }
+            }
+            let (base, var) = (&all[&8], &all[&7]);
+            let (ok_b, det_b) = world_measures(sc, base);
+            let (ok_v, det_v) = world_measures(sc, var);
+            for (i, name) in MEASURES.iter().enumerate() { if ok_b[i] && !ok_v[i] { stops.push(format!("{sc} {world}: {name}")); } }
+            stop_rows.push(format!("| {sc} | {world} | {det_b} | {det_v} |"));
+            // Ц7 items 1–3 (Ц9 = item 3), Ц3, Ц10
+            let vassal_of = |rr: &Run, v: &str, lord: Option<&str>| rr.vassal.keys().any(|(a, b)| a == v && lord.is_none_or(|l| l == b));
+            let mut cells = Vec::new();
+            for (m, runs) in [(8usize, base), (7, var)] {
+                let c7 = match sc {
+                    "rome_375" => { let pg = runs.iter().map(|rr| PEOPLES.iter().filter(|p| vassal_of(rr, p, Some("rome"))).count()).sum::<usize>() as f64 / seeds as f64; (format!("five peoples {pg:.1}"), pg >= 3.0) }
+                    "constantinople_1430" => { let ft: Vec<f64> = runs.iter().filter_map(|rr| rr.dead.get("byzantium").map(|t| *t as f64)).collect(); (format!("Byzantium falls {} @ {}", ft.len(), q(&ft)), *world != "none" || (ft.len() >= 20 && (40.0..=59.0).contains(&pct(&ft, 0.5)))) }
+                    _ => { let hit = |id: &str| runs.iter().filter(|rr| rr.dead.contains_key(id) || vassal_of(rr, id, None)).count(); (format!("Milan {}, papacy {}, Venice {}", hit("milan"), hit("papacy"), hit("venice")), hit("milan") <= 1 && hit("papacy") <= 3 && hit("venice") <= 3) }
+                };
+                let c3 = if sc == "constantinople_1430" {
+                    let pairs: Vec<(f64, f64)> = runs.iter().filter_map(|r| Some((window(&r.ott, 10, 20)?, window(&r.ott, 40, 50)?))).collect();
+                    let d: Vec<f64> = pairs.iter().map(|(a, b)| b - 1.25 * a).collect();
+                    let n = d.len() as f64;
+                    let mean = d.iter().sum::<f64>() / n.max(1.0);
+                    let sd = (d.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+                    let t = if sd > 0.0 { mean / (sd / n.sqrt()) } else { 0.0 };
+                    Some((format!("{mean:+.1} (t {t:+.1})"), mean > 0.0 && t >= 2.0))
+                } else { None };
+                let (z, low, _) = c10_shares(runs);
+                let rome_ok = sc != "rome_375" || runs.iter().filter_map(|r| r.rome100).all(|(_, b)| (b - 3600.0).abs() < 1e-6);
+                let c10 = (format!("zombies {z:.2} %, below P₀/4 {low:.1} %"), z < 1.0 && low < 10.0 && rome_ok);
+                cells.push((m, c7.clone(), c3.clone(), c10.clone()));
+            }
+            let (b, v) = (&cells[0], &cells[1]);
+            if b.1 .1 && !v.1 .1 { stops.push(format!("{sc} {world}: Ц7/Ц9")); }
+            if let (Some(bc), Some(vc)) = (&b.2, &v.2) { if bc.1 && !vc.1 { stops.push(format!("{world}: Ц3")); } }
+            if b.3 .1 && !v.3 .1 { stops.push(format!("{sc} {world}: Ц10")); }
+            gate_rows.push(format!("| {sc} | {world} | {} → {} | {} | {} → {} |", b.1 .0, v.1 .0, match (&b.2, &v.2) { (Some(x), Some(y)) => format!("{} → {}", x.0, y.0), _ => "—".into() }, b.3 .0, v.3 .0));
+            // information
+            for (m, runs) in [(8usize, base), (7, var)] {
+                let mut ratios: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                for r in runs.iter() { for (k, v) in &r.tr_inc { ratios.entry(k.clone()).or_default().extend(v); } }
+                let mut top: Vec<(String, f64)> = ratios.iter().map(|(k, v)| (k.clone(), pct(v, 0.5))).collect();
+                top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                let living: u64 = runs.iter().map(|r| r.popc.values().map(|v| v[0]).sum::<u64>()).sum();
+                let des: u64 = runs.iter().map(|r| r.desert.values().map(|x| *x as u64).sum::<u64>()).sum();
+                let mut desa: BTreeMap<String, u64> = BTreeMap::new();
+                for r in runs.iter() { for (k, v) in &r.desert { *desa.entry(k.clone()).or_default() += *v as u64; } }
+                let mut lv: BTreeMap<String, u64> = BTreeMap::new();
+                for r in runs.iter() { for (k, v) in &r.popc { *lv.entry(k.clone()).or_default() += v[0]; } }
+                let persistent: Vec<String> = desa.iter().filter(|(k, d)| **d * 5 > lv.get(*k).copied().unwrap_or(1)).map(|(k, d)| format!("{k} {:.0} %", 100.0 * *d as f64 / lv.get(k).copied().unwrap_or(1) as f64)).collect();
+                let deaths: u32 = runs.iter().map(|r| r.deaths).sum();
+                let keys: Vec<String> = ["rome", "byzantium", "ottomans", "milan", "papacy", "venice"].iter().filter(|k| runs[0].eo.contains_key(**k)).map(|k| format!("{k} {}", runs.iter().filter(|r| r.dead.contains_key(*k)).count())).collect();
+                info.push(format!("| {sc} | {world} | {} | {} | {:.1} % | {} | {deaths} | {} |", lab(m), top.iter().take(3).map(|(k, x)| format!("{k} {x:.0}")).collect::<Vec<_>>().join(", "),
+                    100.0 * des as f64 / living.max(1) as f64, if persistent.is_empty() { "—".into() } else { persistent.join(", ") }, keys.join(", ")));
+            }
+            if sc == "rome_375" {
+                let at = |runs: &[Run], t: u32| { let x: Vec<f64> = runs.iter().filter_map(|r| r.peoples.get(&t).copied()).collect(); format!("{:.0}", pct(&x, 0.5)) };
+                info.push(format!("| {sc} | {world} | five peoples' armies (sum) on ticks 15 / 45 / 100 | base {} / {} / {} | Ц2 {} / {} / {} | | | |", at(base, 15), at(base, 45), at(base, 100), at(var, 15), at(var, 45), at(var, 100)));
+            }
+            let pairs: Vec<(&str, &str)> = match sc {
+                "rome_375" => vec![("rome", "alamanni"), ("rome", "vandals"), ("rome", "visigoths"), ("rome", "burgundians"), ("rome", "franks"), ("sassanids", "armenia"), ("huns", "ostrogoths")],
+                "constantinople_1430" => vec![("ottomans", "serbia"), ("ottomans", "byzantium")],
+                _ => vec![("florence", "siena"), ("naples", "papacy")],
+            };
+            for (lord, v) in pairs {
+                let c = |runs: &[Run]| { let t: Vec<f64> = runs.iter().filter_map(|r| r.vassal.get(&(v.to_string(), lord.to_string())).map(|x| *x as f64)).collect(); format!("{} @ {}", t.len(), q(&t)) };
+                pair_rows.push(format!("| {lord} → {v} | {sc} {world} | {} | {} |", c(base), c(var)));
+            }
+            let dpair = |k: &str| { let a: Vec<f64> = base.iter().map(|r| r.dead.contains_key(k) as u8 as f64).collect(); let b: Vec<f64> = var.iter().map(|r| r.dead.contains_key(k) as u8 as f64).collect(); let d: Vec<f64> = a.iter().zip(&b).map(|(x, y)| y - x).collect(); let n = d.len() as f64; let mean = d.iter().sum::<f64>() / n; let sd = (d.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt(); if sd > 0.0 { mean / (sd / n.sqrt()) } else { 0.0 } };
+            let alld: Vec<f64> = base.iter().zip(var.iter()).map(|(a, b)| b.deaths as f64 - a.deaths as f64).collect();
+            let mean = alld.iter().sum::<f64>() / alld.len() as f64;
+            army_rows.push(format!("| {sc} | {world} | {:+.2} | {} |", mean, ["rome", "byzantium", "ottomans", "milan"].iter().filter(|k| base[0].eo.contains_key(**k)).map(|k| format!("{k} t {:+.1}", dpair(k))).collect::<Vec<_>>().join(", ")));
+        }
+    }
+    println!("## 1. The gate — the stop rule, base against Ц2 on the same seeds\n");
+    println!("| scenario | world | base | Ц2 |");
+    println!("|---|---|---|---|");
+    for r in stop_rows { println!("{r}"); }
+    for m in [8usize, 7] {
+        let ((n, w, sp, spq), (nb, wb)) = c4p[&m];
+        let pa = w as f64 / n.max(1) as f64;
+        let promise = sp / n.max(1) as f64;
+        let se = spq.sqrt() / n.max(1) as f64;
+        let pb = wb as f64 / nb.max(1) as f64;
+        let se_d = (pa * (1.0 - pa) / n.max(1) as f64 + pb * (1.0 - pb) / nb.max(1) as f64).sqrt();
+        let (o1, o2) = (pa >= promise - 2.0 * se, pa - pb >= 2.0 * se_d);
+        if m == 7 {
+            let ((bn, bw, bsp, bspq), (bnb, bwb)) = c4p[&8];
+            let bpa = bw as f64 / bn.max(1) as f64;
+            let bpb = bwb as f64 / bnb.max(1) as f64;
+            if bpa >= bsp / bn.max(1) as f64 - 2.0 * bspq.sqrt() / bn.max(1) as f64 && !o1 { stops.push("Ц4 (1)".into()); }
+            if bpa - bpb >= 2.0 * (bpa * (1.0 - bpa) / bn.max(1) as f64 + bpb * (1.0 - bpb) / bnb.max(1) as f64).sqrt() && !o2 { stops.push("Ц4 (2)".into()); }
+        }
+        println!("- {}: Ц4 (1) {:.1} % vs {:.1} % — {}; Ц4 (2) {:+.1} vs 2 SE {:.1} — {} ({n} battles)", lab(m), 100.0 * pa, 100.0 * (promise - 2.0 * se), if o1 { "yes" } else { "no" }, 100.0 * (pa - pb), 200.0 * se_d, if o2 { "yes" } else { "no" });
+    }
+    println!("\n### Ц7 items 1–3 (Ц9 = item 3), Ц3, Ц10: base → Ц2\n");
+    println!("| scenario | world | Ц7 | Ц3 d (t) | Ц10 |");
+    println!("|---|---|---|---|---|");
+    for r in gate_rows { println!("{r}"); }
+    println!("\nStops (base passes, Ц2 does not): {}", if stops.is_empty() { "none".into() } else { stops.join("; ") });
+    println!("\n## 2. For information: treasury / income on ticks 250–299 (median, top three), desertion, deaths\n");
+    println!("| scenario | world | model | treasury / income, top | desertion (living actor-ticks) | desertion > 20 % | deaths | key actors dying (games) |");
+    println!("|---|---|---|---|---|---|---|---|");
+    for r in info { println!("{r}"); }
+    println!("\n### Deaths paired (Ц2 − base, mean a game) and key actors (paired t)\n");
+    println!("| scenario | world | deaths | key |");
+    println!("|---|---|---|---|");
+    for r in army_rows { println!("{r}"); }
+    println!("\n### Submissions (Ц7): games @ tick p10/50/90, base → Ц2\n");
+    println!("| pair | world | base | Ц2 |");
+    println!("|---|---|---|---|");
+    for r in pair_rows { println!("{r}"); }
 }
