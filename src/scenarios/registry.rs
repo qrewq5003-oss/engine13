@@ -237,6 +237,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
     for action in scenario.patron_actions.iter().chain(&scenario.universal_actions).filter(|a| !a.forms_alliance.is_empty()) {
         alliance_lists.push((format!("action '{}': forms_alliance", action.id), &action.forms_alliance));
     }
+    for m in &scenario.milestone_events {
+        if let Some(fa) = &m.forms_alliance {
+            alliance_lists.push((format!("milestone '{}': forms_alliance", m.id), &fa.members));
+            if let Some(enemy) = &fa.common_enemy {
+                if !starting(enemy) {
+                    errors.push(format!("milestone '{}': forms_alliance's common enemy '{enemy}' is not a starting actor", m.id));
+                }
+                if fa.members.contains(enemy) {
+                    errors.push(format!("milestone '{}': forms_alliance's common enemy '{enemy}' is one of its members", m.id));
+                }
+            }
+        }
+    }
     for (what, ids) in &alliance_lists {
         let distinct: HashSet<&String> = ids.iter().collect();
         if distinct.len() != ids.len() || ids.len() < 2 {

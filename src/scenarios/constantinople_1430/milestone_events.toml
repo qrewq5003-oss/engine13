@@ -23,6 +23,27 @@ type = "tick"
 tick = 18
 
 [[milestone_events]]
+id = "federation_alliance"
+is_key = true
+triggers_collapse = false
+# F0 (owner's decision): the federation becomes an alliance. The scenario's own scale says
+# «51–80: реальный союз, совместные действия», and its text — «Венеция и Генуя — соперники,
+# которых объединяет только угроза»: an alliance with a common enemy. The members are those whose
+# actions and metrics feed the federation in the content (Ц9 stage 0). Economy v2 only: with v2
+# alliances off the milestone is not checked at all. The allies' strength stands behind Byzantium
+# in the assault of 1453 and in the streak of submission (Ц9).
+requires_alive = ["byzantium"]
+llm_context_shift = "Федерация становится союзом: Венеция, Генуя, Милан и папство встают рядом с Византией против османов."
+[milestone_events.forms_alliance]
+members = ["byzantium", "venice", "genoa", "milan", "papacy"]
+common_enemy = "ottomans"
+[milestone_events.condition]
+type = "metric"
+metric = "global:federation_progress"
+operator = "greater_or_equal"
+value = 51.0
+
+[[milestone_events]]
 id = "varna_crusade"
 is_key = true
 triggers_collapse = false

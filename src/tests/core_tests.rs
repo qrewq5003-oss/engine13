@@ -1213,6 +1213,9 @@ fn test_collapse_warnings_hold_only_living_actors() {
     let mut state = crate::AppState::default();
     let db = crate::db::Db::open_in_memory().unwrap();
     crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+    // milan's deaths (savoy, siena) exist on v1 only — on v2 nobody dies there (F0,
+    // docs/investigation_economy_f0.md); the bookkeeping checked here does not depend on the economy.
+    state.current_scenario.as_mut().unwrap().features.economy_v2 = false;
     state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
 
     let mut stale_seen: Vec<String> = Vec::new();
@@ -1314,6 +1317,9 @@ fn test_no_living_actor_carries_a_dead_actors_name() {
         let mut state = crate::AppState::default();
         let db = crate::db::Db::open_in_memory().unwrap();
         crate::application::load_scenario(&mut state, &db, scenario_id.to_string()).unwrap();
+        // milan's deaths exist on v1 only — on v2 nobody dies there (F0,
+        // docs/investigation_economy_f0.md); the name check does not depend on the economy.
+        state.current_scenario.as_mut().unwrap().features.economy_v2 = false;
         state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(SEED));
 
         let mut clashes: Vec<String> = Vec::new();
@@ -1716,6 +1722,9 @@ fn absorption_passes_the_border_to_the_absorber() {
     let db = crate::db::Db::open_in_memory().unwrap();
     let mut st = crate::commands::AppState::default();
     crate::application::load_scenario(&mut st, &db, "milan_1477".to_string()).unwrap();
+    // savoy is absorbed on v1 only — on v2 nobody dies in milan (F0, docs/investigation_economy_f0.md);
+    // the border hand-over checked here does not depend on the economy.
+    st.current_scenario.as_mut().unwrap().features.economy_v2 = false;
     st.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
     let savoy_neighbours: Vec<String> = st.world_state.as_ref().unwrap().actors["savoy"]
         .neighbors.iter().map(|n| n.id.clone()).filter(|id| id != "milan").collect();
