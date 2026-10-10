@@ -207,7 +207,9 @@ pub fn load_milan_1477() -> Scenario {
             family_panel: false,
             global_metrics_panel: false,
             patron_actions: true,
-            economy_v2: false,
+            // The switch to v2 (owner's decision after F0, docs/investigation_economy_f0.md): milan
+            // passes §9.2 on v2 and plays on it; rome and constantinople stay on v1 for now.
+            economy_v2: true,
         },
         // Economy v2 (Ц1): income coefficient (д′) of A46 stage 4; with the pull r = 0.03 income stays
         // within ±5 % of v1 (×1.047), so it was kept, not refitted (stage 2).

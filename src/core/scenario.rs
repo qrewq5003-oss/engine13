@@ -781,6 +781,22 @@ pub struct MilestoneEvent {
     /// of 1451). Validated at load like `effects`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub economy_v2_effects: HashMap<MetricRef, f64>,
+    /// Economy v2 only (Ц9, after F0): an alliance the milestone forms on the tick it fires —
+    /// constantinople's federation of rivals «united only by the threat» becomes an alliance
+    /// against the Ottomans. Without v2 alliances the milestone does not exist at all (it is not
+    /// checked and never fires), so the v1 world is untouched. Validated at load: two or more
+    /// distinct starting members, and the common enemy a starting actor outside them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forms_alliance: Option<MilestoneAlliance>,
+}
+
+/// An alliance formed by a milestone (Ц9): its members and their common enemy.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MilestoneAlliance {
+    pub members: Vec<String>,
+    #[serde(default)]
+    pub common_enemy: Option<String>,
 }
 
 /// The pair of a war of conquest declared by a milestone (Ц7).

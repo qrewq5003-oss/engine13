@@ -1431,6 +1431,12 @@ fn check_milestone_events(
             continue;
         }
 
+        // Economy v2 (Ц9): a milestone that forms an alliance exists only with v2 alliances on —
+        // without them it is not checked, so the v1 world does not change.
+        if milestone.forms_alliance.is_some() && !interactions::alliances_on(scenario) {
+            continue;
+        }
+
         // A milestone that follows another does not even start counting until that one
         // has fired (A2).
         if let Some(prev) = &milestone.after {
@@ -1501,6 +1507,11 @@ fn check_milestone_events(
                 world.war_streaks.remove(&bc.target);
                 // the war opens with the assault: one battle on this tick, without the roll for an attack
                 interactions::assault(world, scenario, &bc.attacker, &bc.target, event_log, rng);
+            }
+            // Economy v2 (Ц9): an authored alliance formed by the milestone (checked only with
+            // v2 alliances on, above).
+            if let Some(fa) = &milestone.forms_alliance {
+                interactions::form_alliance(world, &fa.members, fa.common_enemy.as_deref());
             }
 
             // Spawn actor if configured
@@ -2839,6 +2850,7 @@ mod tests {
             requires_alive: requires_alive.iter().map(|s| s.to_string()).collect(),
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         }
     }
@@ -3105,6 +3117,39 @@ mod tests {
             fight(&mut world, &scenario, 3..40);
             let bound = world.vassalages.iter().any(|v| v.vassal_id == "small" && v.overlord_id == "great");
             assert_eq!(bound, submits, "alliances {on}");
+        }
+    }
+
+    /// Economy v2 (Ц9, after F0): a milestone's `forms_alliance` forms an alliance against the
+    /// common enemy on the tick it fires, and the allies then stand behind the target in the
+    /// assault — S 1000 against the city's 10 takes it, against 10 + an ally's 500 it does not.
+    /// Both ways: with v2 alliances off the milestone is not checked at all (not fired, no
+    /// alliance), and the assault takes the city.
+    #[test]
+    fn economy_v2_milestone_alliance_stands_behind_the_city_in_the_assault() {
+        for on in [true, false] {
+            let (mut scenario, mut world) = war_world(Some(1));
+            scenario.economy_v2_alliances = on;
+            scenario.military_conflict_probability = 0.0; // only the assault fights
+            world.actors.insert("ally".into(), vassalage_actor("ally", 1000.0, 0.0, 50.0, 50.0, &[]));
+            let mut league = dated_milestone("league", None, &[]);
+            league.condition.condition_type = EventConditionType::Tick { tick: 2 };
+            league.forms_alliance = Some(crate::core::MilestoneAlliance { members: vec!["small".into(), "ally".into()], common_enemy: Some("great".into()) });
+            let mut assault = dated_milestone("assault", None, &[]);
+            assault.condition.condition_type = EventConditionType::Tick { tick: 5 };
+            assault.begins_conquest = Some(crate::core::BeginsConquest { attacker: "great".into(), target: "small".into() });
+            scenario.milestone_events = vec![league, assault];
+            let mut log = EventLog::new();
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(3);
+            for t in [2, 5] {
+                world.tick = t;
+                check_milestone_events(&mut world, &scenario, &mut log, &mut rng);
+                check_collapses(&mut world, &scenario, &mut log);
+            }
+            assert_eq!(world.milestone_events_fired.contains(&"league".to_string()), on, "alliances {on}");
+            assert_eq!(interactions::allied(&world, "small", "ally"), on, "alliances {on}");
+            if on { assert_eq!(world.alliances[0].common_enemy.as_deref(), Some("great")); }
+            assert_eq!(world.conquered_by.contains_key("small"), !on, "alliances {on}: the assault counts only without the ally");
         }
     }
 
@@ -4492,6 +4537,7 @@ mod tests {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         }];
         let mut world = WorldState::with_seed("test".into(), 375, 0);
@@ -4577,6 +4623,7 @@ mod tests {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         }];
         // Milan already names France on its own terms — that entry must survive as is.

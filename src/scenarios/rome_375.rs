@@ -1505,6 +1505,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
@@ -1538,6 +1539,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
@@ -1562,6 +1564,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
@@ -1585,6 +1588,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         },
         MilestoneEvent {
@@ -1610,6 +1614,7 @@ fn create_milestone_events() -> Vec<MilestoneEvent> {
             requires_alive: vec![],
             effects: Default::default(),
             begins_conquest: None,
+            forms_alliance: None,
             economy_v2_effects: Default::default(),
         },
     ]

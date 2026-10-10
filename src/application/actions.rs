@@ -83,7 +83,7 @@ pub fn apply_player_action(
     crate::core::census::clear_write_source();
     // Economy v2 (Ц9): the action makes its members allies.
     if !action.forms_alliance.is_empty() && crate::engine::interactions::alliances_on(scenario) {
-        crate::engine::interactions::form_alliance(world_state, &action.forms_alliance);
+        crate::engine::interactions::form_alliance(world_state, &action.forms_alliance, None);
     }
 
     // Record event — attributed to the scenario's own player actor.

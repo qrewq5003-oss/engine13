@@ -518,9 +518,10 @@ pub fn seed_starting_alliances(world: &mut WorldState, scenario: &Scenario) {
     }
 }
 
-/// Economy v2 (Ц9): an action's `forms_alliance` — one alliance of the living members named,
-/// unless the same members already stand in one; nothing if fewer than two are alive.
-pub fn form_alliance(world: &mut WorldState, members: &[String]) {
+/// Economy v2 (Ц9): an action's or a milestone's `forms_alliance` — one alliance of the living
+/// members named, against `common_enemy` if one is named, unless the same members already stand
+/// in one; nothing if fewer than two are alive.
+pub fn form_alliance(world: &mut WorldState, members: &[String], common_enemy: Option<&str>) {
     let mut ids: Vec<String> = members.iter().filter(|m| world.actors.contains_key(*m) && !world.dead_actor_ids.contains(*m)).cloned().collect();
     ids.sort();
     ids.dedup();
@@ -531,7 +532,7 @@ pub fn form_alliance(world: &mut WorldState, members: &[String]) {
     if world.alliances.iter().any(same) {
         return;
     }
-    world.alliances.push(crate::core::Alliance { actor_ids: ids, common_enemy: None, trade_benefit: false, formed_tick: world.tick });
+    world.alliances.push(crate::core::Alliance { actor_ids: ids, common_enemy: common_enemy.map(str::to_string), trade_benefit: false, formed_tick: world.tick });
 }
 
 /// Economy v2 (Ц9): an event's `leaves_alliance_as_enemy` — the actor leaves every alliance it is

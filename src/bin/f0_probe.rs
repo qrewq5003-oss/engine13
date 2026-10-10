@@ -106,6 +106,12 @@ struct Run {
     /// pair -> the engine's streak of the vassal to the overlord (allies counted): max before the
     /// pair's war of conquest is declared, max under it; the tick it was declared
     streak: BTreeMap<usize, (u32, u32, Option<u32>)>,
+    /// constantinople: the first tick `federation_progress` ≥ 51, and the federation on tick 45
+    fed51: Option<u32>,
+    fed45: Option<f64>,
+    /// constantinople, tick 45 (before the assault): the Ottoman battle strength, Byzantium's, and
+    /// its allies' (Ц9, as the war streak counts them)
+    str45: Option<(f64, f64, f64)>,
 }
 
 fn run(sc: &str, world: &str, v2: bool, seed: u64, ticks: u32) -> Run {
@@ -150,6 +156,14 @@ fn run(sc: &str, world: &str, v2: bool, seed: u64, ticks: u32) -> Run {
         if r.savoy.is_none() && engine13::engine::interactions::allied(ws, "milan", "savoy") { r.savoy = Some(t); }
         let al = |ws: &engine13::core::WorldState| ws.alliances.iter().map(|a| { let mut m = a.actor_ids.clone(); m.sort(); m }).collect::<Vec<_>>();
         if t == 34 { r.alliances_34 = al(ws); }
+        if let Some(f) = ws.global_metrics.get("federation_progress").copied() {
+            if r.fed51.is_none() && f >= 51.0 { r.fed51 = Some(t); }
+            if t == 45 {
+                r.fed45 = Some(f);
+                let st = |id: &str| ws.actors.get(id).map(|a| a.get_metric("military_size").max(0.0) * a.get_metric("military_quality").clamp(0.0, 100.0) / 100.0).unwrap_or(0.0);
+                if !ws.dead_actor_ids.contains("byzantium") { r.str45 = Some((st("ottomans"), st("byzantium"), engine13::engine::interactions::allies_strength(ws, "byzantium", "ottomans"))); }
+            }
+        }
         r.alliances_end = al(ws);
         let alive = |id: &str| ws.actors.contains_key(id) && !ws.dead_actor_ids.contains(id);
         for (i, (psc, lord, vas)) in PAIRS.iter().enumerate() {
@@ -295,6 +309,48 @@ fn main() {
                 let ott = runs.iter().filter(|r| r.win.is_some() && r.win_state.0).count();
                 println!("| {w} | {set} | {} | {} | {} | {tt} ({sh:.0} %) | {on} ({:.0} %) | {} | {} |", lab(v), wins.len(), q(&wins), share(on as u64, wins.len() as u64), runs.len() - wins.len(), if *w == "none" { ott.to_string() } else { "—".into() });
             }
+        }
+    }
+    // ---- the owner's gate after F0 (federation as an alliance): A10 no worse than v1, plus
+    // Byzantium with no player falls in the 1450s and with a player the city holds in some games
+    println!("\n### Gate after F0 — constantinople v2 against v1\n");
+    println!("Per world and seed set: most frequent tick ≤ 33 %; share on 40–43 ≤ v1's; games without a win > 0; no player: no win while the Ottomans live, Byzantium falls in ≥ 20 of 30 with median tick 40–59; with a player: Byzantium survives the assault (alive after tick 47) in ≥ 1 game.\n");
+    println!("| world | seeds | top tick v2 | 40–43 v1 → v2 | without a win | no-player win, Ottomans alive | Byzantium falls (median) | survives the assault / alive at the end | federation ≥ 51 first (p10/50/90), games | alliance formed, games (tick p10/50/90) | federation on tick 45 p10/50/90 | pass |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    let mut gate_ok = true;
+    for w in worlds("constantinople_1430") {
+        for (si, set) in sets.iter().enumerate() {
+            let r1 = &get("constantinople_1430", w, false)[si];
+            let r2 = &get("constantinople_1430", w, true)[si];
+            let wins = |rs: &[Run]| rs.iter().filter_map(|r| r.win).collect::<Vec<u32>>();
+            let (w1, w2) = (wins(r1), wins(r2));
+            let on = |v: &[u32]| share(v.iter().filter(|t| (40..=43).contains(*t)).count() as u64, v.len() as u64);
+            let (_, top2) = top(&w2);
+            let nowin = r2.len() - w2.len();
+            let ott = r2.iter().filter(|r| r.win.is_some() && r.win_state.0).count();
+            let falls: Vec<u32> = r2.iter().filter_map(|r| r.dead.get("byzantium").copied()).collect();
+            let med = if falls.is_empty() { f64::NAN } else { pct(&falls.iter().map(|x| *x as f64).collect::<Vec<_>>(), 0.5) };
+            let survives = r2.iter().filter(|r| r.dead.get("byzantium").is_none_or(|d| *d > 47)).count();
+            let alive_end = r2.iter().filter(|r| !r.dead.contains_key("byzantium")).count();
+            let f51: Vec<u32> = r2.iter().filter_map(|r| r.fed51).collect();
+            let al: Vec<u32> = r2.iter().filter_map(|r| r.ms.get("federation_alliance").copied()).collect();
+            let f45: Vec<f64> = r2.iter().filter_map(|r| r.fed45).collect();
+            let a10 = top2 <= 33.0 && on(&w2) <= on(&w1) && nowin > 0;
+            let ok = if *w == "none" { a10 && ott == 0 && falls.len() >= 20 && (40.0..=59.0).contains(&med) } else { a10 && survives >= 1 };
+            gate_ok &= ok;
+            println!("| {w} | {set} | {top2:.0} % | {:.0} → {:.0} % | {nowin} | {} | {} ({med:.0}) | {survives} / {alive_end} | {} ({}) | {} ({}) | {:.0}/{:.0}/{:.0} | {} |",
+                on(&w1), on(&w2), if *w == "none" { ott.to_string() } else { "—".into() }, falls.len(), q(&f51), f51.len(), al.len(), q(&al), pct(&f45, 0.1), pct(&f45, 0.5), pct(&f45, 0.9), if ok { "yes" } else { "**no**" });
+        }
+    }
+    println!("\nGate: {}", if gate_ok { "PASSED" } else { "NOT PASSED" });
+    println!("\nStrength on tick 45 (army × quality / 100), p10/50/90 — Ottomans; Byzantium; Byzantium's allies; Ottomans / (Byzantium + allies) (the assault needs ≥ 3 to count):\n");
+    for w in worlds("constantinople_1430") {
+        for v in [false, true] {
+            let rs: Vec<&Run> = get("constantinople_1430", w, v).iter().flatten().collect();
+            let x: Vec<(f64, f64, f64)> = rs.iter().filter_map(|r| r.str45).collect();
+            let c = |f: &dyn Fn(&(f64, f64, f64)) -> f64| { let v: Vec<f64> = x.iter().map(f).collect(); format!("{:.0}/{:.0}/{:.0}", pct(&v, 0.1), pct(&v, 0.5), pct(&v, 0.9)) };
+            let ratio: Vec<f64> = x.iter().map(|(o, b, a)| o / (b + a).max(1e-9)).collect();
+            println!("- {w} {}: {}; {}; {}; ratio {:.1}/{:.1}/{:.1} (games {})", lab(v), c(&|y| y.0), c(&|y| y.1), c(&|y| y.2), pct(&ratio, 0.1), pct(&ratio, 0.5), pct(&ratio, 0.9), x.len());
         }
     }
     println!("\n### A35 — Rome's family wins; the split on tick 40\n");
