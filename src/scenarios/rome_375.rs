@@ -213,6 +213,8 @@ pub fn load_rome_375() -> Scenario {
         economy_v2_cohesion_pull: Some(0.12),
         // Economy v2 (Ц10): population pulled to its norm P₀ × eo / T (owner, docs/investigation_economy_c10.md).
         economy_v2_population_pull: Some(0.01),
+        // Economy v2 (Ц2, owner's rule): the army paid out of the treasury, the militia unpaid, the sink.
+        economy_v2_army_pay: true,
         military_conflict_probability: 0.45,
         naval_conflict_probability: 0.10,
         random_events: create_random_events(),

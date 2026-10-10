@@ -177,6 +177,11 @@ pub struct TagDefinition {
     /// next sea tag joins by declaring itself, not by being added to a list in Rust.
     #[serde(default)]
     pub sea_going: bool,
+    /// Does carrying this tag make an actor's army a people under arms (Ц2)? The militia draw no
+    /// pay from the treasury under `economy_v2_army_pay`. A property of the tag, not a name known
+    /// to the engine — the lesson of `sea_going`.
+    #[serde(default)]
+    pub militia: bool,
     /// Era gate for spreading (`try_spread_direction`). A working mechanism that no tag in
     /// the three scenarios uses today (B49) — kept: it is a reader, not a dead field.
     #[serde(default)]
@@ -386,6 +391,16 @@ pub struct Scenario {
     /// are not applied (their meaning is in the norm). `None` = none of it.
     #[serde(default)]
     pub economy_v2_population_pull: Option<f64>,
+    /// Economy v2 only (Ц2, owner's rule): the army a state can pay for. Each tick a paid army gets
+    /// what the tick's income and a positive treasury can pay; the unpaid share leaves on the same
+    /// tick and the upkeep never takes the treasury below zero (it replaces the debt rule). The
+    /// militia — carriers of `tribal_confederation` or `nomadic`, a people under arms — draw no pay.
+    /// Recruiting goes to the norm M = min(C, 0.75 × income / 0.8) (C for the militia), only with a
+    /// non-negative treasury; the small-army rule's threshold is measured against M (`threshold ×
+    /// M / 100`); a treasury above 20 × the tick's income loses 5 % of the excess a tick (the sink).
+    /// `false` = none of it.
+    #[serde(default)]
+    pub economy_v2_army_pay: bool,
     /// Base probability for land military conflicts (0.0-1.0)
     pub military_conflict_probability: f64,
     /// Base probability for naval conflicts (0.0-1.0)

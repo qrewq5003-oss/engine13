@@ -191,10 +191,18 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
     // Economy v2 (Ц10): under the population pull the economy-to-population deficit rules give way —
     // their meaning is in the norm `P₀ × eo / T` (census keeps them for variant (б)).
     let skip_population_rules = population_pull_on(scenario) && !census::population_constant_norm();
+    // Economy v2 (Ц2): with the army paid out of the treasury, a rule whose source is `military_size`
+    // measures its threshold against the army norm M (`threshold × M / 100`).
+    let army_norms: std::collections::HashMap<String, f64> = if interactions::army_pay_on(scenario) {
+        world.actors.values().map(|a| (a.id.clone(), interactions::army_norm(a, scenario))).collect()
+    } else {
+        std::collections::HashMap::new()
+    };
     for actor in world.actors.values_mut() {
         let eo_scale = targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         let legitimacy_scale = legitimacy_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
         let cohesion_scale = cohesion_targets.get(&actor.id).map_or(1.0, |t| t / 100.0);
+        let army_scale = army_norms.get(&actor.id).map_or(1.0, |m| m / 100.0);
         for rule in &scenario.dependencies {
             if skip_cohesion_decay && rule.from.as_str() == "cohesion" && rule.to.as_str() == "cohesion" {
                 continue;
@@ -206,6 +214,7 @@ fn phase_apply_dependencies(world: &mut WorldState, scenario: &Scenario) {
                 "economic_output" => eo_scale,
                 "legitimacy" => legitimacy_scale,
                 "cohesion" => cohesion_scale,
+                "military_size" => army_scale,
                 _ => 1.0,
             };
             apply_dependency_rule(actor, rule, tick, scale, scenario.features.economy_v2 && census::debt_as_pay());
@@ -430,6 +439,11 @@ fn phase_region_ranks(world: &mut WorldState, scenario: &Scenario) {
 // ============================================================================
 
 fn phase_military_recovery(world: &mut WorldState, scenario: &Scenario) {
+    // Economy v2 (Ц2): with the army paid out of the treasury, recruiting goes to the norm M.
+    if interactions::army_pay_on(scenario) {
+        interactions::apply_military_recovery_to_norm(world, scenario);
+        return;
+    }
     // Economy v2 (Ц2 stage 2): no money, no levy — an actor in debt does not recruit.
     interactions::apply_military_recovery(world, scenario.features.economy_v2 && census::debt_as_pay());
 }
@@ -1080,6 +1094,35 @@ fn apply_treasury(world: &mut WorldState, scenario: &Scenario) {
         if let Some(actor) = world.actors.get_mut(&actor_id) {
             let incomes = actor.get_metric("economic_output") * actor.get_metric("population") * census::income_coefficient(coefficient);
             let expenses = actor.get_metric("military_size") * 0.8;
+            // Economy v2 (Ц2, owner's rule): the army gets what the state can pay — the tick's
+            // income and a positive treasury; the unpaid share leaves on this tick, and the upkeep
+            // never takes the treasury below zero. The militia draw no pay. Then the sink: a
+            // treasury above 20 × the tick's income loses 5 % of the excess.
+            if interactions::army_pay_on(scenario) {
+                let upkeep = if interactions::is_militia(actor, scenario) { 0.0 } else { expenses };
+                let current = actor.get_metric("treasury");
+                let payable = incomes.max(0.0) + current.max(0.0);
+                #[cfg(feature = "census")]
+                census::treasury_parts(&actor.id, incomes, upkeep.min(payable));
+                census::write_source(|| "treasury formula".to_string());
+                if upkeep > payable {
+                    actor.add_metric("treasury", -current);
+                    census::clear_write_source();
+                    census::write_source(|| "unpaid army".to_string());
+                    actor.set_metric("military_size", payable / 0.8);
+                } else {
+                    actor.add_metric("treasury", current.max(0.0) - current + incomes - upkeep);
+                }
+                census::clear_write_source();
+                let reserve = 20.0 * incomes.max(0.0);
+                let now = actor.get_metric("treasury");
+                if now > reserve {
+                    census::write_source(|| "treasury sink".to_string());
+                    actor.add_metric("treasury", -0.05 * (now - reserve));
+                    census::clear_write_source();
+                }
+                continue;
+            }
             #[cfg(feature = "census")]
             census::treasury_parts(&actor.id, incomes, expenses);
             census::write_source(|| "treasury formula".to_string());
@@ -2626,6 +2669,7 @@ mod tests {
             starting_alliances: vec![],
             economy_v2_cohesion_pull: None,
             economy_v2_population_pull: None,
+            economy_v2_army_pay: false,
             military_conflict_probability: 0.3,
             naval_conflict_probability: 0.1,
             random_events: vec![],
@@ -3225,6 +3269,108 @@ mod tests {
         assert!((run(true, Some(0.12)) - 23.6).abs() < 1e-9);
         assert_eq!(run(false, Some(0.12)), 20.0, "v1 does not pull");
         assert_eq!(run(true, None), 20.0, "no r, no pull");
+    }
+
+    /// An actor for the Ц2 tests: army, treasury, economy, population.
+    fn pay_actor(army: f64, treasury: f64, eo: f64, pop: f64, militia: bool) -> crate::core::Actor {
+        let mut a = vassalage_actor("city", army, 50.0, 50.0, 50.0, &[]);
+        a.set_metric("treasury", treasury);
+        a.set_metric("economic_output", eo);
+        a.set_metric("population", pop);
+        if militia {
+            a.actor_tags.insert("levy".into(), crate::core::ActorTag { metrics_modifier: HashMap::new(), spreads_via: vec![] });
+        }
+        a
+    }
+
+    fn pay_scenario(on: bool) -> Scenario {
+        let mut scenario = empty_scenario();
+        scenario.tag_definitions.push(crate::core::TagDefinition {
+            id: "levy".into(), metrics_modifier: HashMap::new(), spreads_via: vec![], spread_cooldown_ticks: 5, spread_chance: 0.3,
+            sea_going: false, militia: true, requires_era: None, requires_alive: vec![], ends_with: None,
+        });
+        scenario.features.economy_v2 = true;
+        scenario.economy_v2_income_coefficient = Some(0.001);
+        scenario.economy_v2_army_pay = on;
+        scenario
+    }
+
+    /// Economy v2 (Ц2): the unpaid share of a paid army leaves on the same tick and the treasury
+    /// stays at zero; the militia draw no pay. Both ways: with the switch off the treasury goes
+    /// into debt and the army stays.
+    #[test]
+    fn economy_v2_unpaid_army_leaves_and_the_militia_draw_no_pay() {
+        let run = |on: bool, militia: bool| {
+            let scenario = pay_scenario(on);
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            // upkeep 80, income 10 × 100 × 0.001 = 1, treasury 20: payable 21
+            world.actors.insert("city".into(), pay_actor(100.0, 20.0, 10.0, 100.0, militia));
+            apply_treasury(&mut world, &scenario);
+            let a = &world.actors["city"];
+            (a.get_metric("military_size"), a.get_metric("treasury"))
+        };
+        let (army, tr) = run(true, false);
+        assert!((army - 21.0 / 0.8).abs() < 1e-9 && tr == 0.0, "the unpaid share leaves: {army} {tr}");
+        // the militia keep their army and the income: 21, then the sink above the reserve 20 × 1 takes 0.05
+        let (army, tr) = run(true, true);
+        assert!(army == 100.0 && (tr - 20.95).abs() < 1e-9, "the militia keep their army and the income: {army} {tr}");
+        assert_eq!(run(false, false), (100.0, -59.0), "switch off: debt, the army stays");
+    }
+
+    /// Economy v2 (Ц2): recruiting goes to M = min(C, 0.75 × income / 0.8). Both ways: with the
+    /// switch off it goes to C.
+    #[test]
+    fn economy_v2_recruiting_goes_to_the_army_norm() {
+        let run = |on: bool| {
+            let scenario = pay_scenario(on);
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            // population 1000: C = 76.7; income 50 × 1000 × 0.001 = 50: M = 46.875
+            world.actors.insert("city".into(), pay_actor(0.0, 10.0, 50.0, 1000.0, false));
+            phase_military_recovery(&mut world, &scenario);
+            world.actors["city"].get_metric("military_size")
+        };
+        assert!((run(true) - 0.05 * 46.875).abs() < 1e-9, "to M");
+        assert!((run(false) - 0.05 * interactions::MILITARY_CAPACITY_K * 1000f64.powf(2.0 / 3.0)).abs() < 1e-6, "switch off: to C");
+    }
+
+    /// Economy v2 (Ц2): a treasury above 20 × the tick's income loses 5 % of the excess. Both ways:
+    /// with the switch off it keeps everything.
+    #[test]
+    fn economy_v2_sink_spends_above_the_reserve() {
+        let run = |on: bool| {
+            let scenario = pay_scenario(on);
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            world.actors.insert("city".into(), pay_actor(0.0, 10_000.0, 50.0, 1000.0, false));
+            apply_treasury(&mut world, &scenario);
+            world.actors["city"].get_metric("treasury")
+        };
+        // income 50, reserve 1000: 10 050 − 0.05 × 9 050 = 9 597.5
+        assert!((run(true) - 9597.5).abs() < 1e-9);
+        assert_eq!(run(false), 10_050.0, "switch off: no sink");
+    }
+
+    /// Economy v2 (Ц2): the small-army rule measures its threshold against M. Both ways: with the
+    /// switch off the absolute 50 makes an army of 30 a deficit.
+    #[test]
+    fn economy_v2_small_army_threshold_from_the_norm() {
+        let run = |on: bool| {
+            let mut scenario = pay_scenario(on);
+            scenario.dependencies.push(crate::core::DependencyRule {
+                id: "military_size_to_economic_output".into(),
+                from: crate::core::MetricName::new("military_size").unwrap(),
+                to: crate::core::MetricName::new("economic_output").unwrap(),
+                coefficient: 0.01,
+                threshold: Some(50.0),
+                mode: crate::core::DependencyMode::Deficit,
+            });
+            let mut world = WorldState::with_seed("test".into(), 1430, 0);
+            // M = 46.875: the threshold becomes 23.4, an army of 30 is above it
+            world.actors.insert("city".into(), pay_actor(30.0, 10.0, 50.0, 1000.0, false));
+            phase_apply_dependencies(&mut world, &scenario);
+            world.actors["city"].get_metric("economic_output")
+        };
+        assert_eq!(run(true), 50.0, "from the norm: no deficit");
+        assert!(run(false) < 50.0, "absolute: a deficit");
     }
 
     /// Economy v2 (Ц10): population is pulled toward `P₀ × eo / T`. Both ways: v1 and no r leave it.
