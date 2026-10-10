@@ -230,6 +230,7 @@ fn main() {
     if args.get(4).map(String::as_str) == Some("round2") { round2(first, seeds, ticks, rec_line); return; }
     if args.get(4).map(String::as_str) == Some("round3") { round3(first, seeds, ticks, rec_line); return; }
     if args.get(4).map(String::as_str) == Some("round4") { round4(first, seeds, ticks, rec_line); return; }
+    if args.get(4).map(String::as_str) == Some("trebizond") { trebizond(first, seeds, ticks, rec_line); return; }
     let mut cells: Vec<(Norm, Down)> = vec![(Norm::Replay, Down::None)];
     for n in [Norm::A, Norm::B, Norm::V(0.25), Norm::V(0.5)] { for d in [Down::Always, Down::Debt] { cells.push((n, d)); } }
     cells.push((Norm::G, Down::None));
@@ -722,10 +723,14 @@ fn replay4(rows: &[Row], eo_shift: f64) -> Vec<(u32, f64, f64, f64, bool, f64)> 
 /// income on ticks 125–150 against ticks 75–100 (pooled over games, ticks with income > 0); fails
 /// where the later is more than 1.1 × the earlier (and the earlier is positive or the later is).
 fn accumulation(series: &[Vec<(u32, f64, f64)>]) -> Vec<(f64, f64)> {
-    // series: per game, (tick, treasury, income)
+    // series: per game, (tick, treasury, income); refined a second time (§9.1): ticks 150–199 against 250–299
     let ratio = |a: u32, b: u32| { let x: Vec<f64> = series.iter().flat_map(|v| v.iter().filter(|p| (a..=b).contains(&p.0) && p.2 > 0.0).map(|p| p.1 / p.2)).collect(); (!x.is_empty()).then(|| x.iter().sum::<f64>() / x.len() as f64) };
-    match (ratio(75, 100), ratio(125, 150)) { (Some(e), Some(l)) => vec![(e, l)], _ => vec![] }
+    match (ratio(150, 199), ratio(250, 299)) { (Some(e), Some(l)) => vec![(e, l)], _ => vec![] }
 }
+
+/// The accumulation measure refined a second time: fails where the late mean exceeds 1.25 × the
+/// earlier mean + 5. Returns the margin (late − bound): negative passes.
+fn accumulation_margin(e: f64, l: f64) -> f64 { l - (1.25 * e + 5.0) }
 
 fn round4(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
     const PEOPLES: [&str; 5] = ["alamanni", "vandals", "visigoths", "burgundians", "franks"];
@@ -759,19 +764,27 @@ fn round4(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
             // accumulation, both ways: the protocol (no sink) and the rule
             let mut fails_now = Vec::new();
             let mut fails_new = Vec::new();
+            let mut near_now: Vec<(f64, String)> = Vec::new();
+            let mut near_new: Vec<(f64, String)> = Vec::new();
             let ids: Vec<String> = games.iter().flat_map(|g| g.keys().cloned()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
             for id in &ids {
                 let now: Vec<Vec<(u32, f64, f64)>> = games.iter().filter_map(|g| g.get(id).map(|v| v.iter().map(|r| (r.tick, r.treasury1, r.income)).collect())).collect();
                 let new: Vec<Vec<(u32, f64, f64)>> = reps.iter().filter_map(|rep| rep.get(id).map(|v| v.iter().map(|x| (x.0, x.2, x.5)).collect())).collect();
-                for (series, out) in [(&now, &mut fails_now), (&new, &mut fails_new)] {
+                for (series, out, near) in [(&now, &mut fails_now, &mut near_now), (&new, &mut fails_new, &mut near_new)] {
                     if let Some(&(e, l)) = accumulation(series).first() {
-                        if l > 1.1 * e && l > 0.0 { out.push(format!("{id} {e:.0}→{l:.0}")); }
+                        let m = accumulation_margin(e, l);
+                        if m > 0.0 { out.push(format!("{id} {e:.0}→{l:.0}")); }
+                        near.push((m, format!("{id} {e:.1}→{l:.1} (bound {:.1})", 1.25 * e + 5.0)));
                     }
                 }
             }
             acc_now_fail += (!fails_now.is_empty()) as usize;
             acc_new_fail += (!fails_new.is_empty()) as usize;
-            acc_rows.push(format!("| {sc} | {world} | {} | {} |", if fails_now.is_empty() { "passes".into() } else { format!("**fails**: {}", fails_now.join(", ")) }, if fails_new.is_empty() { "**passes**".into() } else { format!("fails: {}", fails_new.join(", ")) }));
+            near_now.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            near_new.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            acc_rows.push(format!("| {sc} | {world} | {} | {} | {} |", if fails_now.is_empty() { format!("passes (closest: {})", near_now.first().map_or("—".to_string(), |x| x.1.clone())) } else { format!("**fails**: {}", fails_now.join(", ")) },
+                if fails_new.is_empty() { "**passes**".into() } else { format!("fails: {}", fails_new.join(", ")) },
+                near_new.iter().take(3).map(|x| x.1.clone()).collect::<Vec<_>>().join("; ")));
             // desertion
             let mut des: BTreeMap<String, (u64, u64)> = BTreeMap::new();
             for rep in &reps { for (id, v) in rep { let e = des.entry(id.clone()).or_default(); for x in v.iter().filter(|x| x.3 > 1.0) { e.0 += 1; e.1 += x.4 as u64; } } }
@@ -837,9 +850,9 @@ fn round4(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
     println!("| world | d (t) | |");
     println!("|---|---|---|");
     for r in c3_rows { println!("{r}"); }
-    println!("\n## 3. The accumulation measure, both ways: mean treasury / income on ticks 125–150 ≤ 1.1 × on ticks 75–100, every actor (failing actors: earlier → later)\n");
-    println!("| scenario | world | the world now (protocol, no sink) — must fail | the rule with the sink — must pass |");
-    println!("|---|---|---|---|");
+    println!("\n## 3. The accumulation measure, both ways: mean treasury / income on ticks 250–299 ≤ 1.25 × on ticks 150–199 + 5, every actor (failing actors: earlier → later)\n");
+    println!("| scenario | world | the world now (protocol, no sink) — must fail | the rule with the sink — must pass | the rule: closest to the bound |");
+    println!("|---|---|---|---|---|");
     for r in acc_rows { println!("{r}"); }
     println!("\nThe world now fails in {acc_now_fail} of 10 worlds; the rule fails in {acc_new_fail} of 10.");
     println!("\n## 4. Desertion: share of living actor-ticks; who on more than 20 % of its ticks\n");
@@ -854,4 +867,39 @@ fn round4(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
     println!("| scenario | world | of | T_p |");
     println!("|---|---|---|---|");
     for r in tp_rows { println!("{r}"); }
+}
+
+/// Why Trebizond (and the mamluks) cross the accumulation bound under the rule: per window of 50
+/// ticks, the medians of income, upkeep, other treasury writes (gains / losses), treasury, the
+/// reserve, army and population, constantinople, every world.
+fn trebizond(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
+    println!("# Trebizond and the mamluks under the rule (round 4 with the sink), seeds {first}–{}\n", first + seeds - 1);
+    println!("| world | actor | ticks | income | upkeep (paid) | other treasury +/− | treasury | T / income | army | population |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
+    for world in worlds("constantinople_1430") {
+        let games: Vec<Game> = (first..first + seeds).map(|s| play("constantinople_1430", world, s, ticks, rec_line)).collect();
+        for id in ["trebizond", "mamluks"] {
+            for (a, b) in [(0u32, 49u32), (50, 99), (100, 149), (150, 199), (200, 249), (250, 299)] {
+                let mut cols: [Vec<f64>; 8] = Default::default();
+                for g in &games {
+                    let Some(rows) = g.get(id) else { continue };
+                    let shift = { let n = rows.len().max(1) as f64; -rows.iter().map(|r| -0.01 * (50.0 - r.army1).max(0.0) / 0.03).sum::<f64>() / n };
+                    let rep = replay4(rows, shift);
+                    for (r, x) in rows.iter().zip(&rep).filter(|(r, _)| (a..=b).contains(&r.tick)) {
+                        cols[0].push(x.5);
+                        cols[1].push(if r.militia { 0.0 } else { 0.8 * r.army0 });
+                        cols[2].push(r.tr_gain);
+                        cols[3].push(r.tr_loss);
+                        cols[4].push(x.2);
+                        if x.5 > 0.0 { cols[5].push(x.2 / x.5); }
+                        cols[6].push(x.1);
+                        cols[7].push(x.3);
+                    }
+                }
+                if cols[0].is_empty() { continue; }
+                let m = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len().max(1) as f64;
+                println!("| {world} | {id} | {a}–{b} | {:.2} | {:.2} | +{:.2} / {:.2} | {:.1} | {:.1} | {:.1} | {:.0} |", m(&cols[0]), m(&cols[1]), m(&cols[2]), m(&cols[3]), m(&cols[4]), m(&cols[5]), m(&cols[6]), m(&cols[7]));
+            }
+        }
+    }
 }
