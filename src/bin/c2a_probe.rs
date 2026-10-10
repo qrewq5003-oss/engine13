@@ -77,6 +77,8 @@ type Replayed = BTreeMap<String, Vec<(u32, f64, f64, f64)>>;
 type Replayed2 = BTreeMap<String, Vec<(u32, f64, f64, f64, f64)>>;
 /// per actor: Σ shift (absolute), Σ shift (relative), ticks, eo, T
 type Br = BTreeMap<String, (f64, f64, u64, Vec<f64>, Vec<f64>)>;
+/// (tick, army, treasury, population, deserted), per actor
+type Replayed3 = BTreeMap<String, Vec<(u32, f64, f64, f64, bool)>>;
 
 fn recovery_line() -> u32 {
     let src = include_str!("../engine/interactions.rs");
@@ -221,6 +223,7 @@ fn main() {
     census::enable_treasury_parts();
     let rec_line = recovery_line();
     if args.get(4).map(String::as_str) == Some("round2") { round2(first, seeds, ticks, rec_line); return; }
+    if args.get(4).map(String::as_str) == Some("round3") { round3(first, seeds, ticks, rec_line); return; }
     let mut cells: Vec<(Norm, Down)> = vec![(Norm::Replay, Down::None)];
     for n in [Norm::A, Norm::B, Norm::V(0.25), Norm::V(0.5)] { for d in [Down::Always, Down::Debt] { cells.push((n, d)); } }
     cells.push((Norm::G, Down::None));
@@ -513,4 +516,160 @@ fn round2(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
     println!("| world | cell | d (t) | army |");
     println!("|---|---|---|---|");
     for r in c3_rows { println!("{r}"); }
+}
+
+/// Third round (owner's decision after PR #255): the unpaid army leaves on the same tick. Each tick
+/// the army gets what the state can pay — the tick's income plus a positive treasury; the unpaid
+/// share leaves (`army × (1 − u)`), the upkeep never takes the treasury below zero; recruiting toward
+/// M = min(C, 0.75 F) only with a non-negative treasury; the small-army threshold from the norm (the
+/// economy shifted by removing the absolute rule's mean shift). With and without the sink (Г).
+/// Returns (tick, army, treasury, population, deserted this tick).
+fn replay3(rows: &[Row], sink: bool, eo_shift: f64) -> Vec<(u32, f64, f64, f64, bool)> {
+    let Some(first) = rows.first() else { return vec![] };
+    let (mut a, mut tr) = (first.army0, first.treasury0.max(0.0));
+    let mut out = Vec::with_capacity(rows.len());
+    let mut prev = first.tick;
+    for r in rows {
+        if r.tick != prev + 1 && r.tick != first.tick { a = r.army0; tr = r.treasury0.max(0.0); }
+        prev = r.tick;
+        let income = (r.eo + eo_shift).clamp(0.0, 100.0) * r.pc;
+        // pay the army out of the tick's income and a positive treasury; the unpaid share leaves
+        let payable = income.max(0.0) + tr.max(0.0);
+        let upkeep = 0.8 * a;
+        let deserted = upkeep > payable + 1e-12;
+        if deserted { a = payable / 0.8; tr = 0.0; } else { tr = tr.max(0.0) + income - upkeep; }
+        if sink {
+            let reserve = 20.0 * income.max(0.0);
+            if tr > reserve { tr -= 0.05 * (tr - reserve); }
+        }
+        a += r.gain;
+        let c = 0.767 * r.pop.max(0.0).powf(2.0 / 3.0);
+        let m = c.min(0.75 * income.max(0.0) / 0.8);
+        if a < m && tr >= 0.0 { a += 0.05 * (m - a); }
+        let base = r.army0 + r.gain + r.rec;
+        let share = if base > 0.0 { (r.loss / base).min(1.0) } else { 0.0 };
+        a = (a * (1.0 - share)).max(0.0);
+        tr += r.tr_gain;
+        if r.tr_loss < 0.0 { tr += r.tr_loss.max(-tr.max(0.0)); }
+        out.push((r.tick, a, tr, r.pop, deserted));
+    }
+    out
+}
+
+fn round3(first: u64, seeds: u64, ticks: u32, rec_line: u32) {
+    const PEOPLES: [&str; 5] = ["alamanni", "vandals", "visigoths", "burgundians", "franks"];
+    const MIDDLE: [&str; 4] = ["florence", "genoa", "papacy", "venice"];
+    println!("# Ц2, third round — the unpaid army leaves on the same tick; M = min(C, 0.75 F); small-army threshold from the norm; seeds {first}–{}, {ticks} ticks\n", first + seeds - 1);
+    println!("Battles are not replayed (losses: the protocol's share). The economy is shifted per actor by removing the absolute small-army rule's mean shift (b / r, r = 0.03).\n");
+    let mut acc_rows = Vec::new();
+    let mut desert_rows = Vec::new();
+    let mut army_rows = Vec::new();
+    let mut middle_rows = Vec::new();
+    let mut c3_rows = Vec::new();
+    let mut tp_rows = Vec::new();
+    let mut huns_rows = Vec::new();
+    for sc in SCENARIOS {
+        for world in worlds(sc) {
+            let games: Vec<Game> = (first..first + seeds).map(|s| play(sc, world, s, ticks, rec_line)).collect();
+            // per actor per game: the eo shift of rule 4
+            let shift_of = |rows: &[Row]| -> f64 { let n = rows.len().max(1) as f64; -rows.iter().map(|r| -0.01 * (50.0 - r.army1).max(0.0) / 0.03).sum::<f64>() / n };
+            for sink in [false, true] {
+                let label = if sink { "rule + (Г)" } else { "rule" };
+                let reps: Vec<Replayed3> = games.iter().map(|g| g.iter().map(|(k, v)| (k.clone(), replay3(v, sink, shift_of(v)))).collect()).collect();
+                // accumulation
+                let mut mono: BTreeMap<String, u32> = BTreeMap::new();
+                for rep in &reps { for (id, v) in rep {
+                    let st: Option<Vec<f64>> = (0..=15).map(|i| v.iter().find(|p| p.0 == i * 10).map(|p| p.2)).collect();
+                    if let Some(st) = st { if st.windows(2).all(|w| w[1] >= w[0]) && st[15] > st[0] { *mono.entry(id.clone()).or_default() += 1; } }
+                } }
+                let monos: Vec<String> = mono.iter().filter(|(_, c)| **c as u64 * 2 >= seeds).map(|(k, c)| format!("{k} {c}")).collect();
+                acc_rows.push(format!("| {sc} | {world} | {label} | {} |", if monos.is_empty() { "—".into() } else { monos.join(", ") }));
+                // desertion
+                let mut des: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+                for rep in &reps { for (id, v) in rep { let e = des.entry(id.clone()).or_default(); for x in v.iter().filter(|x| x.3 > 1.0) { e.0 += 1; e.1 += x.4 as u64; } } }
+                let (tot, dt): (u64, u64) = des.values().fold((0, 0), |a, v| (a.0 + v.0, a.1 + v.1));
+                let persistent: Vec<String> = des.iter().filter(|(_, v)| v.1 * 5 > v.0).map(|(k, v)| format!("{k} {:.0}", 100.0 * v.1 as f64 / v.0.max(1) as f64)).collect();
+                desert_rows.push(format!("| {sc} | {world} | {label} | {:.1} % | {} |", 100.0 * dt as f64 / tot.max(1) as f64, if persistent.is_empty() { "—".into() } else { persistent.join(", ") }));
+                if sc == "milan_1477" {
+                    let cells: Vec<String> = MIDDLE.iter().filter_map(|m| des.get(*m).map(|v| format!("{m} {:.1} %", 100.0 * v.1 as f64 / v.0.max(1) as f64))).collect();
+                    middle_rows.push(format!("| {world} | {label} | {} |", cells.join(", ")));
+                }
+                // armies
+                let at = |k: &str, t: u32| -> String { let x: Vec<f64> = reps.iter().filter_map(|rep| rep.get(k).and_then(|v| v.iter().find(|p| p.0 == t).map(|p| p.1))).collect(); if x.is_empty() { "—".into() } else { format!("{:.0}", pct(&x, 0.5)) } };
+                let win = |k: &str, a: u32, b: u32| -> String { let x: Vec<f64> = reps.iter().filter_map(|rep| rep.get(k).and_then(|v| { let y: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect(); (!y.is_empty()).then(|| y.iter().sum::<f64>() / y.len() as f64) })).collect(); if x.is_empty() { "—".into() } else { format!("{:.0}", pct(&x, 0.5)) } };
+                let mut cells_a = Vec::new();
+                for k in ["rome", "huns", "ottomans", "byzantium", "milan"] {
+                    if reps.iter().any(|rep| rep.contains_key(k)) { cells_a.push(format!("{k} {} / {} / {} / {} / {} / {}", at(k, 0), at(k, 1), at(k, 2), win(k, 10, 20), win(k, 40, 50), at(k, 100))); }
+                }
+                if sc == "rome_375" {
+                    let sum_at = |t: u32| { let x: Vec<f64> = reps.iter().map(|rep| PEOPLES.iter().filter_map(|p| rep.get(*p).and_then(|v| v.iter().find(|q| q.0 == t).map(|q| q.1))).sum()).collect(); format!("{:.0}", pct(&x, 0.5)) };
+                    cells_a.push(format!("five peoples (sum) {} / {} / {} / {} / {} / {}", sum_at(0), sum_at(1), sum_at(2), sum_at(15), sum_at(45), sum_at(100)));
+                    // huns: the stop condition — ticks 10–20 against the protocol
+                    let prot: Vec<f64> = games.iter().filter_map(|g| g.get("huns").map(|v| { let y: Vec<f64> = v.iter().filter(|r| (10..=20).contains(&r.tick)).map(|r| r.army1).collect(); y.iter().sum::<f64>() / y.len().max(1) as f64 })).collect();
+                    let now: Vec<f64> = reps.iter().filter_map(|rep| rep.get("huns").map(|v| { let y: Vec<f64> = v.iter().filter(|p| (10..=20).contains(&p.0)).map(|p| p.1).collect(); y.iter().sum::<f64>() / y.len().max(1) as f64 })).collect();
+                    let (p, n) = (pct(&prot, 0.5), pct(&now, 0.5));
+                    huns_rows.push(format!("| {world} | {label} | {p:.0} | {n:.0} | {:.0} % | {} |", 100.0 * n / p, if n < p / 3.0 { "**below a third — stop**" } else { "ok" }));
+                }
+                army_rows.push(format!("| {sc} | {world} | {label} | {} |", cells_a.join("; ")));
+                // Ц3
+                if sc == "constantinople_1430" {
+                    let w = |v: &Vec<(u32, f64, f64, f64, bool)>, a: u32, b: u32| { let y: Vec<f64> = v.iter().filter(|p| (a..=b).contains(&p.0)).map(|p| p.1).collect(); (!y.is_empty()).then(|| y.iter().sum::<f64>() / y.len() as f64) };
+                    let dd: Vec<f64> = reps.iter().filter_map(|rep| { let v = rep.get("ottomans")?; Some(w(v, 40, 50)? - 1.25 * w(v, 10, 20)?) }).collect();
+                    let nn = dd.len() as f64;
+                    let mean = dd.iter().sum::<f64>() / nn.max(1.0);
+                    let sd = (dd.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (nn - 1.0).max(1.0)).sqrt();
+                    let tt = if sd > 0.0 { mean / (sd / nn.sqrt()) } else { 0.0 };
+                    c3_rows.push(format!("| {world} | {label} | {mean:+.1} (t {tt:+.1}) | {} |", if mean > 0.0 && tt >= 2.0 { "yes" } else { "**no — stop**" }));
+                }
+                // T_p of the neighbours of huns and ottomans
+                for big in ["huns", "ottomans"] {
+                    let mut tps_p = Vec::new();
+                    let mut tps_c = Vec::new();
+                    for (g, rep) in games.iter().zip(&reps) {
+                        let Some(brows) = g.get(big) else { continue };
+                        let army_at = |id: &str, t: u32, replayed: bool| -> f64 { if replayed { rep.get(id).and_then(|v| v.iter().find(|p| p.0 == t)).map_or(0.0, |p| p.1) } else { g.get(id).and_then(|v| v.iter().find(|r| r.tick == t)).map_or(0.0, |r| r.army1) } };
+                        for nbid in brows.first().map(|r| r.nb.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).unwrap_or_default() {
+                            let Some(rows) = g.get(&nbid) else { continue };
+                            for r in rows.iter().filter(|r| r.tick % 5 == 0) {
+                                for (replayed, out) in [(false, &mut tps_p), (true, &mut tps_c)] {
+                                    let nsum: f64 = r.nb.iter().map(|(o, w)| w * army_at(o, r.tick, replayed)).sum();
+                                    let own = army_at(&nbid, r.tick, replayed);
+                                    out.push(if nsum <= 0.0 { 0.0 } else { 100.0 * nsum / (nsum + own) });
+                                }
+                            }
+                        }
+                    }
+                    if !tps_p.is_empty() { tp_rows.push(format!("| {sc} | {world} | {label} | {big} | {:.0} → {:.0} |", pct(&tps_p, 0.5), pct(&tps_c, 0.5))); }
+                }
+            }
+        }
+    }
+    println!("## Stop conditions\n\n### The huns' army on ticks 10–20 (median): protocol → rule\n");
+    println!("| world | cell | protocol | rule | share | |");
+    println!("|---|---|---|---|---|---|");
+    for r in huns_rows { println!("{r}"); }
+    println!("\n### Ц3 (Ottoman army m₄₀ ≥ 1.25 m₁₀)\n");
+    println!("| world | cell | d (t) | |");
+    println!("|---|---|---|---|");
+    for r in c3_rows { println!("{r}"); }
+    println!("\n## 1. Accumulation: treasury monotone to 150 in half the games or more\n");
+    println!("| scenario | world | cell | who (games) |");
+    println!("|---|---|---|---|");
+    for r in acc_rows { println!("{r}"); }
+    println!("\n## 2. Desertion: share of living actor-ticks the army leaves; who on more than 20 % of its ticks\n");
+    println!("| scenario | world | cell | share | persistent |");
+    println!("|---|---|---|---|---|");
+    for r in desert_rows { println!("{r}"); }
+    println!("\n## 3. Armies (median): tick 0 / 1 / 2 / mean 10–20 / mean 40–50 / tick 100 (five peoples: sum on 0 / 1 / 2 / 15 / 45 / 100)\n");
+    println!("| scenario | world | cell | armies |");
+    println!("|---|---|---|---|");
+    for r in army_rows { println!("{r}"); }
+    println!("\n## 4. milan's middle states: desertion share with and without the sink\n");
+    println!("| world | cell | desertion |");
+    println!("|---|---|---|");
+    for r in middle_rows { println!("{r}"); }
+    println!("\n## 5. T_p of the neighbours of the huns and the Ottomans (median every 5th tick), protocol → rule\n");
+    println!("| scenario | world | cell | of | T_p |");
+    println!("|---|---|---|---|---|");
+    for r in tp_rows { println!("{r}"); }
 }
