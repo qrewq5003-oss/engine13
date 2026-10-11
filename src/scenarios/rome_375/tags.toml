@@ -223,6 +223,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "declining"
+crisis = "упадок"
 metrics_modifier = { cohesion = -1 }
 spreads_via = []
 spread_cooldown_ticks = 0

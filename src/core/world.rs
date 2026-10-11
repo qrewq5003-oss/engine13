@@ -48,7 +48,9 @@ pub struct SuccessorWeight {
 
 /// One chronicle of the game's book: the text the chronicler produced for a half-year, kept
 /// only once its stream finished. It travels with the save and is shown in the «Летопись»
-/// panel; it never reaches a prompt (the chronicler reads `NarrativeWorldSnapshot` only).
+/// panel. No sentence of it reaches a prompt: the book gives the chronicler only the stop-list of
+/// turns it has repeated, phrases of at most six words (`llm::annals::stop_phrases`), as a
+/// prohibition, never as a fact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChronicleEntry {
     pub tick: u32,
@@ -65,6 +67,42 @@ pub struct Alliance {
     pub common_enemy: Option<String>,
     pub trade_benefit: bool,
     pub formed_tick: u32,
+    /// The tick the alliance took its `common_enemy` (formed against it, or turned on a member
+    /// that left). Read by the chronicler only («лига против Милана с 1478 года»). Absent in
+    /// older saves and on an alliance with no enemy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enemy_since: Option<u32>,
+}
+
+/// Every how many ticks the annals sample the actors' metrics (5 years).
+pub const ANNALS_EVERY: u32 = 10;
+/// The metrics the annals sample — the trajectories of the chronicler's dossier.
+pub const ANNALS_METRICS: [&str; 5] = ["economic_output", "military_size", "population", "legitimacy", "cohesion"];
+
+/// One sample of the annals: each living actor's `ANNALS_METRICS` at the end of `tick`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AnnalsSample {
+    pub tick: u32,
+    pub actors: std::collections::BTreeMap<String, Vec<f64>>,
+}
+
+/// The world's annals: what the engine keeps of the game's course for the chronicler and for
+/// nothing else — no phase of the simulation reads it. Written at the end of each tick
+/// (`engine::record_annals`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Annals {
+    /// A sample every `ANNALS_EVERY` ticks, oldest first.
+    #[serde(default)]
+    pub samples: Vec<AnnalsSample>,
+    /// actor → tag → the first tick of its current unbroken carry.
+    #[serde(default)]
+    pub tags_since: std::collections::BTreeMap<String, std::collections::BTreeMap<String, u32>>,
+}
+
+impl Annals {
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty() && self.tags_since.is_empty()
+    }
 }
 
 /// Vassalage relationship — a weaker actor (`vassal`) pays tribute to a stronger
@@ -215,6 +253,10 @@ pub struct WorldState {
     /// older save loads as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chronicle_book: Vec<ChronicleEntry>,
+    /// The world's annals (`Annals`): the course of the game for the chronicler's memory. Empty
+    /// before the first tick and then not written; an older save loads with empty annals.
+    #[serde(default, skip_serializing_if = "Annals::is_empty")]
+    pub annals: Annals,
     // `cultural_displacement_progress` removed with the mechanic (A30). It was
     // `#[serde(default)]`, so older builds still load a save written without it, and an
     // older save's copy is ignored here.
@@ -271,6 +313,7 @@ impl WorldState {
             conquests: Default::default(),
             conquered_by: Default::default(),
             chronicle_book: Vec::new(),
+            annals: Annals::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }
@@ -321,6 +364,7 @@ impl WorldState {
             conquests: Default::default(),
             conquered_by: Default::default(),
             chronicle_book: Vec::new(),
+            annals: Annals::default(),
             debt_ticks: Default::default(),
             depop_ticks: Default::default(),
         }

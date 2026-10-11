@@ -1045,6 +1045,31 @@ fn phase_record(world: &mut WorldState, scenario: &Scenario, event_log: &mut Eve
     check_generation_transfer(world, scenario, event_log);
     update_metric_history(world);
     update_prev_metrics(world);
+    record_annals(world);
+}
+
+/// The world's annals for the chronicler (`core::Annals`): which tags each living actor carries
+/// since when, and every `ANNALS_EVERY` ticks a sample of its `ANNALS_METRICS`. Reads the state
+/// and writes only the annals, which no phase reads — the simulation is unchanged.
+pub fn record_annals(world: &mut WorldState) {
+    let tick = world.tick;
+    let mut ids: Vec<String> = world.actors.keys().filter(|id| !world.dead_actor_ids.contains(*id)).cloned().collect();
+    ids.sort();
+    world.annals.tags_since.retain(|id, _| ids.contains(id));
+    for id in &ids {
+        let tags = &world.actors[id].tags;
+        let since = world.annals.tags_since.entry(id.clone()).or_default();
+        since.retain(|t, _| tags.contains(t));
+        for t in tags {
+            since.entry(t.clone()).or_insert(tick);
+        }
+    }
+    if tick.is_multiple_of(crate::core::ANNALS_EVERY) {
+        let actors = ids.iter()
+            .map(|id| (id.clone(), crate::core::ANNALS_METRICS.iter().map(|m| world.actors[id].get_metric(m)).collect()))
+            .collect();
+        world.annals.samples.push(crate::core::AnnalsSample { tick, actors });
+    }
 }
 
 // ============================================================================
@@ -3084,7 +3109,7 @@ mod tests {
         for (on, peace) in [(true, true), (false, false)] {
             let (mut scenario, mut world) = war_world(None);
             scenario.economy_v2_alliances = on;
-            world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+            world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0, enemy_since: None });
             fight(&mut world, &scenario, 3..40);
             assert_eq!(world.actors["small"].get_metric("military_size") == 20.0, peace, "alliances {on}");
         }
@@ -3096,7 +3121,7 @@ mod tests {
         for (allied, threat) in [(true, 0.0), (false, 100.0 * 1000.0 / 1020.0)] {
             let (_, mut world) = war_world(None);
             if allied {
-                world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+                world.alliances.push(crate::core::Alliance { actor_ids: vec!["great".into(), "small".into()], common_enemy: None, trade_benefit: false, formed_tick: 0, enemy_since: None });
             }
             let t = pressure_threat(&world, "small").unwrap();
             assert!((t - threat).abs() < 1e-9, "allied {allied}: {t}");
@@ -3113,7 +3138,7 @@ mod tests {
             let (mut scenario, mut world) = war_world(Some(1));
             scenario.economy_v2_alliances = on;
             world.actors.insert("ally".into(), vassalage_actor("ally", 1000.0, 0.0, 50.0, 50.0, &[]));
-            world.alliances.push(crate::core::Alliance { actor_ids: vec!["small".into(), "ally".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 });
+            world.alliances.push(crate::core::Alliance { actor_ids: vec!["small".into(), "ally".into()], common_enemy: None, trade_benefit: false, formed_tick: 0, enemy_since: None });
             fight(&mut world, &scenario, 3..40);
             let bound = world.vassalages.iter().any(|v| v.vassal_id == "small" && v.overlord_id == "great");
             assert_eq!(bound, submits, "alliances {on}");
@@ -3180,8 +3205,8 @@ mod tests {
             scenario.economy_v2_alliances = on;
             world.actors.insert("third".into(), vassalage_actor("third", 10.0, 0.0, 50.0, 50.0, &[]));
             world.alliances = vec![
-                crate::core::Alliance { actor_ids: vec!["great".into(), "small".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 },
-                crate::core::Alliance { actor_ids: vec!["great".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0 },
+                crate::core::Alliance { actor_ids: vec!["great".into(), "small".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0, enemy_since: None },
+                crate::core::Alliance { actor_ids: vec!["great".into(), "third".into()], common_enemy: None, trade_benefit: false, formed_tick: 0, enemy_since: None },
             ];
             scenario.random_events = vec![crate::core::RandomEvent {
                 id: "league_turns".into(),
@@ -3332,7 +3357,7 @@ mod tests {
         let mut scenario = empty_scenario();
         scenario.tag_definitions.push(crate::core::TagDefinition {
             id: "levy".into(), metrics_modifier: HashMap::new(), spreads_via: vec![], spread_cooldown_ticks: 5, spread_chance: 0.3,
-            sea_going: false, militia: true, requires_era: None, requires_alive: vec![], ends_with: None,
+            sea_going: false, militia: true, requires_era: None, requires_alive: vec![], ends_with: None, crisis: None,
         });
         scenario.features.economy_v2 = true;
         scenario.economy_v2_income_coefficient = Some(0.001);

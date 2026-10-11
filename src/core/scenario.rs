@@ -200,6 +200,12 @@ pub struct TagDefinition {
     /// the id names a milestone of the same scenario.
     #[serde(default)]
     pub ends_with: Option<String>,
+    /// A crisis the tag stands for, in the chronicler's words («кризис регентства»): an actor
+    /// carrying it has an open story, printed with the year it began (the world's annals). A
+    /// property of the tag, not a name known to the engine. Validated at load: a tag that only
+    /// lowers legitimacy or cohesion must declare it, so no crisis goes unseen by the chronicler.
+    #[serde(default)]
+    pub crisis: Option<String>,
     // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
     // — a dead contract. An authored `unlocks = […]` is now a load error (`deny_unknown_fields`).
 }
