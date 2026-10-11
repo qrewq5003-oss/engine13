@@ -514,7 +514,7 @@ pub fn allies_strength(world: &WorldState, id: &str, except: &str) -> f64 {
 /// Economy v2 (Ц9): the scenario's starting alliances enter the world (on its first tick).
 pub fn seed_starting_alliances(world: &mut WorldState, scenario: &Scenario) {
     for a in &scenario.starting_alliances {
-        world.alliances.push(crate::core::Alliance { actor_ids: a.actors.clone(), common_enemy: None, trade_benefit: false, formed_tick: world.tick });
+        world.alliances.push(crate::core::Alliance { actor_ids: a.actors.clone(), common_enemy: None, trade_benefit: false, formed_tick: world.tick, enemy_since: None });
     }
 }
 
@@ -532,7 +532,7 @@ pub fn form_alliance(world: &mut WorldState, members: &[String], common_enemy: O
     if world.alliances.iter().any(same) {
         return;
     }
-    world.alliances.push(crate::core::Alliance { actor_ids: ids, common_enemy: common_enemy.map(str::to_string), trade_benefit: false, formed_tick: world.tick });
+    world.alliances.push(crate::core::Alliance { actor_ids: ids, common_enemy: common_enemy.map(str::to_string), trade_benefit: false, formed_tick: world.tick, enemy_since: common_enemy.map(|_| world.tick) });
 }
 
 /// Economy v2 (Ц9): an event's `leaves_alliance_as_enemy` — the actor leaves every alliance it is
@@ -540,6 +540,9 @@ pub fn form_alliance(world: &mut WorldState, members: &[String], common_enemy: O
 pub fn leave_alliances_as_enemy(world: &mut WorldState, id: &str) {
     for a in world.alliances.iter_mut().filter(|a| a.actor_ids.iter().any(|m| m == id)) {
         a.actor_ids.retain(|m| m != id);
+        if a.common_enemy.as_deref() != Some(id) {
+            a.enemy_since = Some(world.tick);
+        }
         a.common_enemy = Some(id.to_string());
     }
     world.alliances.retain(|a| a.actor_ids.len() >= 2);

@@ -21,6 +21,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "regency_crisis"
+crisis = "кризис регентства"
 metrics_modifier = { legitimacy = -2, cohesion = -1 }
 spreads_via = []
 spread_cooldown_ticks = 5
@@ -80,6 +81,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "baronial_fronde"
+crisis = "баронская фронда"
 metrics_modifier = { cohesion = -2 }
 spreads_via = []
 spread_cooldown_ticks = 5
@@ -101,6 +103,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "nepotism"
+crisis = "кумовство при дворе"
 metrics_modifier = { cohesion = -1 }
 spreads_via = []
 spread_cooldown_ticks = 6
@@ -108,6 +111,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "factionalism"
+crisis = "борьба партий"
 metrics_modifier = { cohesion = -2 }
 spreads_via = []
 spread_cooldown_ticks = 5

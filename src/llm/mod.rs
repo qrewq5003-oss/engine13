@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use tauri::Emitter;
 
 use crate::core::{Scenario, WorldState};
 use crate::db::Db;
 use crate::engine::EventLog;
+
+pub mod annals;
+pub use annals::WorldAnnals;
 
 /// Half-year narrative unit for chronicle generation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -38,14 +40,6 @@ impl HalfYear {
             HalfYear::SecondHalf => "second half",
         }
     }
-}
-
-/// Summary of a player action for narrative generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerActionSummary {
-    pub id: String,
-    pub name: String,
-    pub key_effects: Vec<String>,
 }
 
 /// Одно показание ключевой метрики: как она называется, каким словом её читает
@@ -84,7 +78,10 @@ pub struct NarrativeWorldSnapshot {
     /// `france_intervenes`, `adrianople` — tells the model nothing.
     pub key_milestones_fired: Vec<(String, String)>,
     pub recent_important_events: Vec<crate::core::Event>,
-    pub recent_player_actions: Vec<PlayerActionSummary>,
+    /// The «летопись мира»: six layers of memory built from the engine's facts (`annals`).
+    /// Replaces the five last player actions, undated and printed with engine keys and numbers,
+    /// which stood as «recent» for 20–30 half-years (docs/investigation_chronicle_memory.md).
+    pub annals: WorldAnnals,
     /// Ключевые метрики как **слова**, в порядке, записанном автором сценария.
     ///
     /// Был `HashMap<String, f64>`: порядок обхода случаен на процесс, и блок
@@ -277,37 +274,10 @@ pub fn build_snapshot(
         &foreground_actors,
     );
     
-    // Recent player actions (last 5)
-    let recent_player_actions: Vec<PlayerActionSummary> = event_log.events.iter()
-        .filter(|e| matches!(e.event_type, crate::core::EventType::PlayerAction))
-        .rev()
-        .take(5)
-        .map(|e| PlayerActionSummary {
-            id: e.id.clone(),
-            name: e.description.clone(),
-            key_effects: {
-                // Parse effects from metadata if available.
-                // Sorted: the metadata deserializes into a HashMap, so `into_iter`
-                // order is randomized per process. These strings are emitted one per
-                // line under "=== ДЕЙСТВИЯ ИГРОКА ===", so an unsorted order makes the
-                // prompt differ run-to-run. This is the largest of the four sites in
-                // constantinople_1430, where every patron action carries >1 effect.
-                if !e.metadata.is_empty() {
-                    let mut effects: Vec<String> =
-                        serde_json::from_str::<HashMap<String, f64>>(&e.metadata)
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|(metric, delta)| format!("{}: {:+.1}", metric, delta))
-                            .collect();
-                    effects.sort();
-                    effects
-                } else {
-                    vec![]
-                }
-            },
-        })
-        .collect();
-    
+    // The world's annals: relations, open stories, chronology, dossier, the player's policy and
+    // the stop-list — for the half-year being narrated.
+    let annals = annals::world_annals(world, scenario, event_log, period_tick);
+
     // Key metrics from narrative config
     let mut key_metrics: Vec<KeyMetricReading> = Vec::new();
     for key_metric in &scenario.narrative_config.key_metrics {
@@ -435,7 +405,7 @@ pub fn build_snapshot(
         foreground_actors,
         key_milestones_fired,
         recent_important_events,
-        recent_player_actions,
+        annals,
         key_metrics,
         narrative_axes,
         tone_tags,
@@ -560,9 +530,10 @@ fn system_prompt() -> &'static str {
 /// 8. Recent player actions (as narrative causes)
 /// 9. Output instructions (2-4 paragraphs, world-first)
 ///
-/// There is no "previous narrative memory": it was deleted (the gist rule panicked on a byte
-/// slice of Cyrillic), and the game's book of chronicles (`WorldState::chronicle_book`) never
-/// enters a prompt — the snapshot carries nothing of it.
+/// There is no "previous narrative memory" of texts: it was deleted (the gist rule panicked on a
+/// byte slice of Cyrillic). The memory is the world's annals (`annals`), built from the engine's
+/// facts; the game's book of chronicles (`WorldState::chronicle_book`) reaches the prompt only
+/// as the stop-list of repeated turns, phrases of at most six words, never a sentence.
 pub fn generate_narrative_prompt(
     snapshot: &NarrativeWorldSnapshot,
     scenario: &Scenario,
@@ -805,6 +776,33 @@ pub fn generate_narrative_prompt(
     }
 
     // ========================================================================
+    // Section 6b: The world's annals — relations, open stories, chronology, dossier
+    // ========================================================================
+    //
+    // Built by the engine from its own facts (`annals::world_annals`); the past chronicles'
+    // texts are not among them. Before this the chronicler saw no alliance at all (0 of 60
+    // prompts), a vassalage only while its event sat in the five-slot window (3 of 15), and
+    // nothing older than that window.
+    let an = &snapshot.annals;
+    let chronology: Vec<String> = an.chronology_decades.iter().chain(&an.chronology_recent).cloned().collect();
+    let blocks: [(&str, &[String]); 4] = [
+        ("Отношения сейчас:", &an.relations),
+        ("Открытые сюжеты (идут и сейчас):", &an.open_stories),
+        ("Хронология партии:", &chronology),
+        ("Ведущие державы — траектории:", &an.dossier),
+    ];
+    if blocks.iter().any(|b| !b.1.is_empty()) {
+        prompt.push_str("=== ЛЕТОПИСЬ МИРА (факты; это положение дел и прошлое, а не события этого полугодия) ===\n");
+        for (title, lines) in blocks.iter().filter(|b| !b.1.is_empty()) {
+            prompt.push_str(&format!("{}\n", title));
+            for l in lines.iter() {
+                prompt.push_str(&format!("- {}\n", l));
+            }
+        }
+        prompt.push('\n');
+    }
+
+    // ========================================================================
     // Section 7: Recent Important Events (Top 5 as Evidence)
     // ========================================================================
     prompt.push_str("=== НЕДАВНИЕ СОБЫТИЯ (используй как доказательства, не как чек-лист) ===\n");
@@ -823,20 +821,31 @@ pub fn generate_narrative_prompt(
     prompt.push_str("Не описывай их по одному, если одно событие явно доминирует в этой половине года.\n\n");
 
     // ========================================================================
-    // Section 8: Recent Player Actions (as Narrative Causes)
+    // Section 8: The player's policy — the last two years dated, older decisions summed up
     // ========================================================================
-    if !snapshot.recent_player_actions.is_empty() {
-        prompt.push_str("=== ДЕЙСТВИЯ ИГРОКА (как причины изменений) ===\n");
-        for action in &snapshot.recent_player_actions {
-            prompt.push_str(&format!("- {}\n", action.name));
-            if !action.key_effects.is_empty() {
-                for effect in &action.key_effects {
-                    prompt.push_str(&format!("  → {}\n", effect));
-                }
+    //
+    // Was the five last actions, undated, with their effects as engine keys and numbers
+    // (`actor:genoa.cohesion: -3.0`) under the system rule against numbers. A bot that acted on
+    // ticks 0–3 kept the same five actions «recent» for 20–30 half-years, and every late
+    // chronicle narrated them as this half-year's deeds (docs/investigation_chronicle_memory.md).
+    let a = &snapshot.annals;
+    if !a.player_recent.is_empty() || !a.player_older.is_empty() {
+        prompt.push_str("=== ПОЛИТИКА ИГРОКА ===\n");
+        if a.player_recent.is_empty() {
+            prompt.push_str("Решений за последние два года не было.\n");
+        } else {
+            prompt.push_str("Решения последних двух лет:\n");
+            for l in &a.player_recent {
+                prompt.push_str(&format!("- {}\n", l));
             }
         }
-        prompt.push_str("\nИспользуй действия игрока как сигналы направления политики, причины изменений, сознательные ходы.\n");
-        prompt.push_str("Не превращай их в UI-log или список транзакций.\n\n");
+        if !a.player_older.is_empty() {
+            prompt.push_str("Прежние решения (это прошлое — не описывай их как дела этой половины года):\n");
+            for l in &a.player_older {
+                prompt.push_str(&format!("- {}\n", l));
+            }
+        }
+        prompt.push_str("\nИспользуй решения игрока как сигналы направления политики, а не как список транзакций.\n\n");
     }
 
     // ========================================================================
@@ -866,7 +875,18 @@ pub fn generate_narrative_prompt(
     prompt.push_str("- Используй акторов только в той мере, в какой они формируют общую картину.\n");
     prompt.push_str("- Будь ярким, но конкретным. Не заполняй объём абстрактной \"исторической\" водой.\n");
     prompt.push_str("- Каждый абзац должен добавлять новый смысл, основанный на snapshot.\n");
-    prompt.push_str("- НЕ повторяй одни и те же эмоции или формулировки.\n\n");
+    prompt.push_str("- НЕ повторяй одни и те же эмоции или формулировки.\n");
+    prompt.push_str("- Начни хронику с события этого полугодия — не с времени года и не с даты.\n\n");
+    // The stop-list: the only place the book of chronicles touches the prompt, as a prohibition
+    // — phrases of at most `annals::STOP_WORDS_MAX` words, never a sentence (the invariant
+    // `chronicle_book_reaches_the_prompt_only_as_the_stop_list`).
+    if !snapshot.annals.stop_phrases.is_empty() {
+        prompt.push_str("НЕ ПОВТОРЯЙ обороты, которые уже были в прошлых хрониках этой партии:\n");
+        for p in &snapshot.annals.stop_phrases {
+            prompt.push_str(&format!("- «{}»\n", p));
+        }
+        prompt.push('\n');
+    }
     // The scenario's own prohibitions. They were authored per scenario in
     // `NarrativeConfig.forbidden_claims` and **nobody read the field** — so the only
     // prohibitions that ever reached the model were the four about form below, and

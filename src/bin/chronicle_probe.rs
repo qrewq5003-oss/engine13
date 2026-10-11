@@ -13,6 +13,9 @@
 //!   chronicle_probe scan <world> <seeds>                  — per seed: when v2's facts appear
 //!   chronicle_probe live <world> <seed> <first> <n> <outdir> — n chronicles from tick `first`
 //!   chronicle_probe dry  <world> <seed> <first> <n> <outdir> — the same, prompts only
+//!   chronicle_probe check <livedir> <outdir>              — the world's annals (owner's decision
+//!     of 2026-10-11), checked without the model on the games of `livedir`: the same windows, the
+//!     saved chronicles put into the book as they were written, each layer against the engine
 
 use engine13::application::scripted::{play_scripted_tick, ScriptedStrategy};
 use rand::SeedableRng;
@@ -123,11 +126,153 @@ fn chronicles(world: &str, seed: u64, first: u32, n: u32, outdir: &str, live: bo
     std::fs::write(format!("{outdir}/{world}_s{seed}.md"), book_md).unwrap();
 }
 
+/// One line of a block of the prompt that starts with `- `, between `title` and the next blank line.
+fn block<'a>(prompt: &'a str, title: &str) -> Vec<&'a str> {
+    let Some(i) = prompt.find(title) else { return Vec::new() };
+    prompt[i + title.len()..].lines().skip(1).take_while(|l| l.starts_with("- ")).collect()
+}
+
+#[derive(Default)]
+struct Tally { facts: u32, missing: u32, examples: Vec<String> }
+
+impl Tally {
+    fn check(&mut self, ok: bool, what: impl FnOnce() -> String) {
+        self.facts += 1;
+        if !ok {
+            self.missing += 1;
+            if self.examples.len() < 3 { self.examples.push(what()); }
+        }
+    }
+    fn cell(&self) -> String { format!("{}/{}", self.facts - self.missing, self.facts) }
+}
+
+fn check(livedir: &str, outdir: &str) {
+    use engine13::llm::annals::{words, CHRONOLOGY_RECENT_TICKS, PLAYER_RECENT_TICKS, STOP_WORDS_MAX};
+    std::fs::create_dir_all(outdir).unwrap();
+    // The games of the live run: (world, seed) → the chronicles' ticks.
+    let mut games: std::collections::BTreeMap<(String, u64), Vec<u32>> = Default::default();
+    for e in std::fs::read_dir(livedir).unwrap() {
+        let n = e.unwrap().file_name().into_string().unwrap();
+        let Some(stem) = n.strip_suffix(".text.txt") else { continue };
+        let p: Vec<&str> = stem.split('_').collect();
+        games.entry((p[0].to_string(), p[1][1..].parse().unwrap())).or_default().push(p[3][1..].parse().unwrap());
+    }
+    println!("| game | ticks | L1 alliances | L1 vassalages | L2 crises | L2 league | L2 defeats | L3 chronology | L5 old not recent | L5 old summed | L4 dossier lines | L6 stop-list (mean) | 7 words of the book: brought by the book / quoting the prompt | prompt before mean / max | after mean / max |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for ((world, seed), mut ticks) in games {
+        ticks.sort();
+        let (mut st, db, strategy) = new_game(&world, seed);
+        for _ in 0..ticks[0] - 1 { advance(&mut st, &strategy); }
+        let mut t: [Tally; 9] = Default::default();
+        let (mut dossier, mut stop, mut leak, mut quoted) = (0usize, 0usize, 0u32, 0u32);
+        let (mut before, mut after): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+        for (i, tick) in ticks.iter().enumerate() {
+            advance(&mut st, &strategy);
+            let ws = st.world_state.as_ref().unwrap();
+            assert_eq!(ws.tick, *tick);
+            let scn = st.current_scenario.as_ref().unwrap();
+            let snap = engine13::llm::build_snapshot(ws, scn, &st.event_log);
+            let prompt = engine13::llm::generate_narrative_prompt(&snap, scn, &db);
+            let stamp = engine13::llm::ChronicleStamp::of(ws, &snap);
+            let tag = format!("{world}_s{seed}_{i:02}_t{tick}");
+            std::fs::write(format!("{outdir}/{tag}.prompt.txt"), &prompt).unwrap();
+            before.push(std::fs::read_to_string(format!("{livedir}/{tag}.prompt.txt")).unwrap().chars().count());
+            after.push(prompt.chars().count());
+            let name = |id: &str| ws.actors.get(id).map(|a| a.name.clone()).or_else(|| ws.dead_actors.iter().find(|d| d.id == id).map(|d| d.name.clone())).unwrap_or_else(|| id.to_string());
+            let period = ws.tick - 1;
+            let year = |t: u32| scn.start_year + (t / 2) as i32;
+            let date = |t: u32| format!("{} г., {}", year(t), engine13::HalfYear::from_tick(t).display_name());
+            let rel = block(&prompt, "Отношения сейчас:");
+            let stories = block(&prompt, "Открытые сюжеты (идут и сейчас):");
+            let chron = block(&prompt, "Хронология партии:");
+            // L1
+            for a in &ws.alliances {
+                t[0].check(rel.iter().any(|l| l.starts_with("- Союз:") && a.actor_ids.iter().all(|m| l.contains(&name(m)))), || format!("t{tick} alliance {:?}", a.actor_ids));
+            }
+            for v in &ws.vassalages {
+                t[1].check(rel.iter().any(|l| l.contains(&format!("{} — вассал; сюзерен — {}", name(&v.vassal_id), name(&v.overlord_id)))), || format!("t{tick} {}→{}", v.vassal_id, v.overlord_id));
+            }
+            // L2
+            let mut ids: Vec<&String> = ws.actors.keys().collect();
+            ids.sort();
+            for id in &ids {
+                for tg in &ws.actors[*id].tags {
+                    if let Some(label) = scn.tag_definitions.iter().find(|d| &d.id == tg).and_then(|d| d.crisis.as_deref()) {
+                        t[2].check(stories.iter().any(|l| l.contains(&format!("{}: {label}", name(id)))), || format!("t{tick} {id} {tg}"));
+                    }
+                }
+                if let Some((w, n)) = ws.war_streaks.get(*id) {
+                    if *n >= 1 && ws.actors.contains_key(w) {
+                        t[4].check(stories.iter().any(|l| l.contains(&format!("{} терпит поражение за поражением; победитель — {}", name(id), name(w)))), || format!("t{tick} {id}←{w}"));
+                    }
+                }
+            }
+            for a in ws.alliances.iter().filter(|a| a.common_enemy.is_some()) {
+                let e = name(a.common_enemy.as_ref().unwrap());
+                t[3].check(stories.iter().any(|l| l.contains(&format!("против общего врага ({e})"))), || format!("t{tick} league vs {e}"));
+            }
+            // L3: every death, vassalage change, milestone and player decision has its line.
+            let recent_from = period.saturating_sub(CHRONOLOGY_RECENT_TICKS - 1);
+            let mut fact_ticks: Vec<(u32, String)> = ws.dead_actors.iter().map(|d| (d.tick_death, format!("death {}", d.id))).collect();
+            for e in st.event_log.events.iter().filter(|e| e.tick <= period) {
+                let kind = matches!(e.event_type, engine13::core::EventType::PlayerAction) || (e.id.starts_with("vassalage_") && !e.id.starts_with("vassalage_tribute_"))
+                    || ws.milestone_events_fired.contains(&e.id);
+                if kind { fact_ticks.push((e.tick, e.id.clone())); }
+            }
+            for (ft, what) in fact_ticks {
+                let ok = if ft >= recent_from {
+                    chron.iter().any(|l| l.starts_with(&format!("- {} —", date(ft))))
+                } else {
+                    chron.iter().any(|l| l.starts_with(&format!("- {}-е:", year(ft) / 10 * 10)))
+                };
+                t[5].check(ok, || format!("t{tick} {what}@{ft}"));
+            }
+            // L5
+            let recent = block(&prompt, "Решения последних двух лет:");
+            let older = block(&prompt, "Прежние решения");
+            let pr_from = period.saturating_sub(PLAYER_RECENT_TICKS - 1);
+            for e in st.event_log.events.iter().filter(|e| matches!(e.event_type, engine13::core::EventType::PlayerAction) && e.tick < pr_from) {
+                let n = e.description.trim_start_matches("Действие игрока: ");
+                t[6].check(!recent.iter().any(|l| l.starts_with(&format!("- {}:", date(e.tick)))), || format!("t{tick} {} recent", e.id));
+                t[7].check(older.iter().any(|l| l.starts_with(&format!("- {n} — "))), || format!("t{tick} {} not summed", e.id));
+            }
+            dossier += block(&prompt, "Ведущие державы — траектории:").len();
+            stop += snap.annals.stop_phrases.len();
+            // Seven words of the book in the prompt that the same prompt without the book does not
+            // have: what the book itself brought in (a chronicle quoting the prompt — a milestone's
+            // sentence — is not the book reaching the prompt).
+            let pw = format!(" {} ", words(&prompt).join(" "));
+            let mut bare = ws.clone();
+            bare.chronicle_book.clear();
+            let pw0 = format!(" {} ", words(&engine13::llm::generate_narrative_prompt(&engine13::llm::build_snapshot(&bare, scn, &st.event_log), scn, &db)).join(" "));
+            for e in &ws.chronicle_book {
+                for w in words(&e.text).windows(STOP_WORDS_MAX + 1) {
+                    let w = format!(" {} ", w.join(" "));
+                    if pw.contains(&w) {
+                        quoted += 1;
+                        if !pw0.contains(&w) { leak += 1; eprintln!("  book→prompt t{tick}:{w}"); }
+                    }
+                }
+            }
+            // The chronicle as the model wrote it goes into the book, as in the live run.
+            let text = std::fs::read_to_string(format!("{livedir}/{tag}.text.txt")).ok();
+            engine13::llm::record_chronicle(st.world_state.as_mut().unwrap(), &stamp, text);
+        }
+        let mm = |v: &Vec<usize>| format!("{} / {}", v.iter().sum::<usize>() / v.len(), v.iter().max().unwrap());
+        let n = ticks.len();
+        println!("| {world} s{seed} | {}–{} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.1} | {leak} / {quoted} | {} | {} |",
+            ticks[0], ticks[n - 1], t[0].cell(), t[1].cell(), t[2].cell(), t[3].cell(), t[4].cell(), t[5].cell(), t[6].cell(), t[7].cell(),
+            dossier as f64 / n as f64, stop as f64 / n as f64, mm(&before), mm(&after));
+        for x in &t { for e in &x.examples { eprintln!("  missing: {e}"); } }
+    }
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     match a.get(1).map(String::as_str) {
         Some("scan") => scan(&a[2], a[3].parse().unwrap()),
+        Some("check") => check(&a[2], &a[3]),
         Some(m @ ("live" | "dry")) => chronicles(&a[2], a[3].parse().unwrap(), a[4].parse().unwrap(), a[5].parse().unwrap(), &a[6], m == "live"),
-        _ => eprintln!("usage: chronicle_probe scan|live|dry …"),
+        _ => eprintln!("usage: chronicle_probe scan|live|dry|check …"),
     }
 }

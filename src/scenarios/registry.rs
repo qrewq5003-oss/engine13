@@ -291,6 +291,18 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A tag that only lowers legitimacy or cohesion is a crisis and names itself for the
+    // chronicler (`crisis`); a declared crisis is never empty.
+    for t in &scenario.tag_definitions {
+        let lowers = t.metrics_modifier.iter().any(|(m, v)| *v < 0 && matches!(m.as_str(), "legitimacy" | "cohesion"));
+        let raises = t.metrics_modifier.values().any(|v| *v > 0);
+        match &t.crisis {
+            None if lowers && !raises => errors.push(format!("tag '{}': lowers legitimacy or cohesion and declares no crisis", t.id)),
+            Some(c) if c.trim().is_empty() => errors.push(format!("tag '{}': an empty crisis", t.id)),
+            _ => {}
+        }
+    }
+
     // An actor never starts carrying a tag that is a relation to itself (A37 follow-up):
     // the engine refuses to spread it there, and a template or starting actor may not
     // bring it in either.
@@ -658,6 +670,18 @@ mod tests {
             let e = validate_scenario(&s).unwrap_err();
             assert!(e.iter().any(|e| e.contains(&format!("tag 'regency_crisis': ends_with '{bad}' is not a milestone"))), "{e:?}");
         }
+    }
+
+    /// A tag that only lowers legitimacy or cohesion must declare its crisis for the chronicler.
+    /// Both ways: milan as authored validates; with `regency_crisis` stripped of it, it does not.
+    #[test]
+    fn validate_requires_a_crisis_tag_to_name_itself() {
+        let base = crate::scenarios::milan_1477::load_milan_1477;
+        assert!(validate_scenario(&base()).is_ok());
+        let mut s = base();
+        s.tag_definitions.iter_mut().find(|t| t.id == "regency_crisis").unwrap().crisis = None;
+        let e = validate_scenario(&s).unwrap_err();
+        assert!(e.iter().any(|e| e.contains("tag 'regency_crisis': lowers legitimacy or cohesion and declares no crisis")), "{e:?}");
     }
 
     /// A37 follow-up: an actor may not carry a tag that is a relation to itself.

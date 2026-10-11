@@ -593,23 +593,90 @@ fn chronicle_book_keeps_finished_chronicles_of_their_own_run_and_tick() {
     assert_eq!((world.chronicle_book[0].tick, world.chronicle_book[0].year), (stamp.tick, stamp.year));
 }
 
-/// Invariant: a saved chronicle never reaches the prompt — not through the snapshot, not
-/// through the prompt text. Both ways: the marker is in the book, and absent from both.
+/// Invariant (owner's decision of 2026-10-11): no sentence of the past chronicles enters the
+/// prompt; the book reaches it only as the stop-list, phrases of at most six words. Both ways: a
+/// turn repeated in two chronicles is in the prompt, as a prohibition; a sentence that stands in
+/// one chronicle only is not, and no run of seven words of the book is.
 #[test]
-fn chronicle_book_never_reaches_the_prompt() {
+fn chronicle_book_reaches_the_prompt_only_as_the_stop_list() {
     let mut state = setup_rome_state();
     let db = setup_test_db();
     let marker = "МАРКЕР-КНИГИ-ПАРТИИ-7f3a";
-    let stamp = stamp_of(&state);
-    assert!(crate::llm::record_chronicle(state.world_state.as_mut().unwrap(), &stamp, Some(format!("Хроника с {marker}."))));
-    advance_tick(&mut state, None).expect("tick");
+    let repeated = "серые тучи сгущались над старым городом";
+    let texts = [
+        format!("Хроника с {marker} и долгим рассказом о судьбе империи. А {repeated} снова."),
+        format!("Другая хроника, где {repeated} опять, и варвары стояли у ворот."),
+    ];
+    for t in &texts {
+        let stamp = stamp_of(&state);
+        assert!(crate::llm::record_chronicle(state.world_state.as_mut().unwrap(), &stamp, Some(t.clone())));
+        advance_tick(&mut state, None).expect("tick");
+    }
     let world = state.world_state.as_ref().unwrap();
-    assert!(world.chronicle_book.iter().any(|e| e.text.contains(marker)), "the book holds the chronicle");
+    assert_eq!(world.chronicle_book.len(), 2, "the book holds both chronicles");
     let scenario = state.current_scenario.as_ref().unwrap();
     let snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
-    assert!(!format!("{snapshot:?}").contains(marker), "the snapshot carries nothing of the book");
     let prompt = crate::llm::generate_narrative_prompt(&snapshot, scenario, &db);
-    assert!(!prompt.contains(marker), "the prompt carries nothing of the book");
+    assert!(!format!("{snapshot:?}").contains(marker) && !prompt.contains(marker), "a sentence of one chronicle never reaches the prompt");
+    assert!(snapshot.annals.stop_phrases.iter().all(|p| p.split(' ').count() <= crate::llm::annals::STOP_WORDS_MAX));
+    let stop = &snapshot.annals.stop_phrases;
+    assert!(stop.iter().any(|p| repeated.contains(p.as_str())), "the repeated turn is on the stop-list: {stop:?}");
+    assert!(prompt.contains(&format!("«{}»", stop[0])), "the stop-list is in the prompt");
+    let prompt_words = format!(" {} ", crate::llm::annals::words(&prompt).join(" "));
+    for t in &texts {
+        for w in crate::llm::annals::words(t).windows(crate::llm::annals::STOP_WORDS_MAX + 1) {
+            assert!(!prompt_words.contains(&format!(" {} ", w.join(" "))), "seven words of the book reached the prompt: {w:?}");
+        }
+    }
+}
+
+/// The world's annals in milan on v2 (the six layers are the engine's facts): the League stands
+/// in the relations from the first half-year and the regency crisis is an open story dated 1477;
+/// a player decision older than two years is summed up among the past ones and never listed
+/// as recent, while one of this half-year is. Both ways on each.
+#[test]
+fn world_annals_carry_relations_stories_and_dated_player_policy() {
+    let db = setup_test_db();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    let action = |tick: u32| crate::core::Event::new("player_action_milan_bribe_curia".into(), tick, 1477, "milan".into(),
+        crate::core::EventType::PlayerAction, true, "Действие игрока: Подкуп курии".into());
+    state.event_log.add(action(0));
+    for _ in 0..12 {
+        advance_tick(&mut state, None).expect("tick");
+    }
+    let snap = |state: &AppState| crate::llm::build_snapshot(state.world_state.as_ref().unwrap(), state.current_scenario.as_ref().unwrap(), &state.event_log);
+    let a = snap(&state).annals;
+    assert!(a.relations.iter().any(|l| l.starts_with("Союз:") && l.contains("Флорентийская республика")), "{:?}", a.relations);
+    assert!(a.open_stories.iter().any(|l| l.contains("кризис регентства — с 1477 года")) || state.world_state.as_ref().unwrap().milestone_events_fired.iter().any(|m| m == "ludovico_takes_regency"), "{:?}", a.open_stories);
+    assert!(a.player_recent.is_empty(), "a decision of tick 0 is not recent at tick 12: {:?}", a.player_recent);
+    assert_eq!(a.player_older, vec!["Подкуп курии — однажды, 1477 г.".to_string()]);
+    let now = state.world_state.as_ref().unwrap().tick - 1;
+    state.event_log.add(action(now));
+    let a = snap(&state).annals;
+    assert_eq!(a.player_recent.len(), 1, "a decision of this half-year is recent: {:?}", a.player_recent);
+    assert!(a.player_recent[0].ends_with(": Подкуп курии"));
+    let prompt = crate::llm::generate_narrative_prompt(&snap(&state), state.current_scenario.as_ref().unwrap(), &db);
+    assert!(!prompt.contains("actor:") && !prompt.contains("→"), "the player's block prints no engine keys or effects");
+}
+
+/// The stop-list: a turn in two chronicles is listed, one in a single chronicle is not; a shared
+/// opening comes first; nothing longer than six words.
+#[test]
+fn stop_list_lists_turns_repeated_across_chronicles_only() {
+    let book = [
+        "Весна нынешнего года застала Италию в оцепенении. Купцы молчали у причалов.",
+        "Весна нынешнего года застала Италию врасплох. Флот ушёл на юг.",
+        "Осень принесла дожди. Купцы молчали у причалов Генуи.",
+    ];
+    let stop = crate::llm::annals::stop_phrases(&book);
+    assert_eq!(stop[0], "весна нынешнего года застала италию", "{stop:?}");
+    assert!(stop.iter().any(|p| p == "купцы молчали у причалов"), "{stop:?}");
+    assert!(!stop.iter().any(|p| p.contains("флот") || p.contains("дожди")), "{stop:?}");
+    assert!(stop.iter().all(|p| (4..=6).contains(&p.split(' ').count())));
+    assert!(crate::llm::annals::stop_phrases(&book[..1]).is_empty(), "one chronicle repeats nothing");
 }
 
 /// The book travels with the save; a save written without one (older saves) loads with an
