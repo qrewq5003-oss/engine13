@@ -1,5 +1,6 @@
 [[tags]]
 id = "orthodoxy"
+label = "православие"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 8
@@ -7,6 +8,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "greek_culture"
+label = "греческая культура"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["culture", "trade"]
 spread_cooldown_ticks = 7
@@ -14,6 +16,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "siege_defense"
+label = "искусство обороны крепостей"
 metrics_modifier = { military_quality = 2 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 10
@@ -21,6 +24,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "islam"
+label = "ислам"
 metrics_modifier = {}
 spreads_via = ["culture", "conquest"]
 spread_cooldown_ticks = 6
@@ -28,6 +32,7 @@ spread_chance = 0.35
 
 [[tags]]
 id = "ghazi"
+label = "дух газавата"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -35,6 +40,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "siege_warfare"
+label = "осадное искусство"
 metrics_modifier = { military_quality = 2 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 8
@@ -42,6 +48,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "janissaries"
+label = "янычарский строй"
 metrics_modifier = { military_quality = 3 }
 spreads_via = ["conquest"]
 spread_cooldown_ticks = 10
@@ -49,6 +56,7 @@ spread_chance = 0.15
 
 [[tags]]
 id = "maritime"
+label = "морская торговля"
 sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
@@ -57,6 +65,7 @@ spread_chance = 0.4
 
 [[tags]]
 id = "trade_empire"
+label = "сеть торговых факторий"
 sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
@@ -65,6 +74,7 @@ spread_chance = 0.35
 
 [[tags]]
 id = "catholic"
+label = "католичество"
 metrics_modifier = {}
 spreads_via = ["culture", "trade"]
 spread_cooldown_ticks = 8
@@ -72,6 +82,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "galaata"
+label = "генуэзская торговля Галаты"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 8
@@ -79,6 +90,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "condottieri"
+label = "наёмное войско кондотьеров"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 8
@@ -86,6 +98,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "banking"
+label = "банковское дело"
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 6
@@ -93,6 +106,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "religious_authority"
+label = "церковный авторитет"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -100,6 +114,7 @@ spread_chance = 0.15
 
 [[tags]]
 id = "crusade_caller"
+label = "призыв к крестовому походу"
 metrics_modifier = { external_pressure = 1 }
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -110,6 +125,7 @@ requires_alive = ["ottomans"]
 
 [[tags]]
 id = "kingdom"
+label = "королевская власть"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 8
@@ -117,6 +133,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "ottoman_frontier"
+label = "османское пограничье"
 metrics_modifier = { external_pressure = 1, military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -127,6 +144,7 @@ requires_alive = ["ottomans"]
 
 [[tags]]
 id = "vassal"
+label = "вассальная зависимость"
 metrics_modifier = {}
 spreads_via = ["conquest"]
 spread_cooldown_ticks = 6
@@ -134,6 +152,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "trade"
+label = "торговля"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 5

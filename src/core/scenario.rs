@@ -206,6 +206,12 @@ pub struct TagDefinition {
     /// lowers legitimacy or cohesion must declare it, so no crisis goes unseen by the chronicler.
     #[serde(default)]
     pub crisis: Option<String>,
+    /// The tag in the chronicler's words, nominative («католичество», «французское влияние»):
+    /// the event window prints a spread as «{label} распространяется от … к …» instead of the
+    /// tag's id. Validated at load: a tag that can spread (`spreads_via` not empty) must declare
+    /// it — no spread reaches the chronicler as an engine key.
+    #[serde(default)]
+    pub label: Option<String>,
     // `unlocks` removed (B49): empty in every tag of all three scenarios and read by nothing
     // — a dead contract. An authored `unlocks = […]` is now a load error (`deny_unknown_fields`).
 }

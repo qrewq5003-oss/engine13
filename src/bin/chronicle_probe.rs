@@ -133,9 +133,12 @@ fn block<'a>(prompt: &'a str, title: &str) -> Vec<&'a str> {
 }
 
 /// The event window's lines: (lines, with an actor id, with an event key, with another Latin
-/// token — a tag id, an engine word, with a digit). Tokens are whole runs of ASCII letters, digits, `_`.
-fn window_stats(prompt: &str, actor_ids: &[String]) -> [u32; 5] {
-    let mut r = [0u32; 5];
+/// token — a tag id, an engine word, with a digit, with a tag id, with an era's code name, with a
+/// promotion's debug reason). Tokens are whole runs of ASCII letters, digits, `_`.
+fn window_stats(prompt: &str, actor_ids: &[String], tag_ids: &[String]) -> [u32; 8] {
+    const ERAS: [&str; 5] = ["Ancient", "EarlyMedieval", "HighMedieval", "LateMedieval", "EarlyModern"];
+    const DEBUG: [&str; 3] = ["power_projection", "military contact", "internal upheaval"];
+    let mut r = [0u32; 8];
     let Some(i) = prompt.find("=== НЕДАВНИЕ СОБЫТИЯ") else { return r };
     for l in prompt[i..].lines().skip(1).take_while(|l| l.starts_with("- ")) {
         r[0] += 1;
@@ -149,6 +152,9 @@ fn window_stats(prompt: &str, actor_ids: &[String]) -> [u32; 5] {
             .any(|t| !actor_ids.iter().any(|a| a == t) && t.chars().any(|c| c.is_ascii_alphabetic()));
         if other { r[3] += 1; }
         if body.chars().any(|c| c.is_ascii_digit()) { r[4] += 1; }
+        if toks.iter().any(|t| tag_ids.iter().any(|a| a == t)) { r[5] += 1; }
+        if toks.iter().any(|t| ERAS.contains(t)) { r[6] += 1; }
+        if DEBUG.iter().any(|d| l.contains(d)) { r[7] += 1; }
     }
     r
 }
@@ -178,8 +184,8 @@ fn check(livedir: &str, outdir: &str) {
         let p: Vec<&str> = stem.split('_').collect();
         games.entry((p[0].to_string(), p[1][1..].parse().unwrap())).or_default().push(p[3][1..].parse().unwrap());
     }
-    println!("| game | ticks | L1 alliances | L1 vassalages | L2 crises | L2 league | L2 defeats | L3 chronology | L5 old not recent | L5 old summed | L4 dossier lines | L6 stop-list (mean) | 7 words of the book: brought by the book / quoting the prompt | prompt before mean / max | after mean / max | window lines | actor ids before / after | event keys before / after | other Latin tokens before / after | digits before / after |");
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("| game | ticks | L1 alliances | L1 vassalages | L2 crises | L2 league | L2 defeats | L3 chronology | L5 old not recent | L5 old summed | L4 dossier lines | L6 stop-list (mean) | 7 words of the book: brought by the book / quoting the prompt | prompt before mean / max | after mean / max | window lines | actor ids before / after | event keys before / after | other Latin tokens before / after | digits before / after | tag ids before / after | era code names before / after | debug reasons before / after |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for ((world, seed), mut ticks) in games {
         ticks.sort();
         let (mut st, db, strategy) = new_game(&world, seed);
@@ -187,8 +193,9 @@ fn check(livedir: &str, outdir: &str) {
         let mut t: [Tally; 9] = Default::default();
         let (mut dossier, mut stop, mut leak, mut quoted) = (0usize, 0usize, 0u32, 0u32);
         let (mut before, mut after): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
-        let (mut wb, mut wa) = ([0u32; 5], [0u32; 5]);
+        let (mut wb, mut wa) = ([0u32; 8], [0u32; 8]);
         let actor_ids: Vec<String> = st.current_scenario.as_ref().unwrap().actors.iter().map(|a| a.id.clone()).collect();
+        let tag_ids: Vec<String> = st.current_scenario.as_ref().unwrap().tag_definitions.iter().map(|t| t.id.clone()).collect();
         for (i, tick) in ticks.iter().enumerate() {
             advance(&mut st, &strategy);
             let ws = st.world_state.as_ref().unwrap();
@@ -201,8 +208,8 @@ fn check(livedir: &str, outdir: &str) {
             std::fs::write(format!("{outdir}/{tag}.prompt.txt"), &prompt).unwrap();
             let old_prompt = std::fs::read_to_string(format!("{livedir}/{tag}.prompt.txt")).unwrap();
             before.push(old_prompt.chars().count());
-            for (k, v) in window_stats(&old_prompt, &actor_ids).into_iter().enumerate() { wb[k] += v; }
-            for (k, v) in window_stats(&prompt, &actor_ids).into_iter().enumerate() { wa[k] += v; }
+            for (k, v) in window_stats(&old_prompt, &actor_ids, &tag_ids).into_iter().enumerate() { wb[k] += v; }
+            for (k, v) in window_stats(&prompt, &actor_ids, &tag_ids).into_iter().enumerate() { wa[k] += v; }
             after.push(prompt.chars().count());
             let name = |id: &str| ws.actors.get(id).map(|a| a.name.clone()).or_else(|| ws.dead_actors.iter().find(|d| d.id == id).map(|d| d.name.clone())).unwrap_or_else(|| id.to_string());
             let period = ws.tick - 1;
@@ -286,9 +293,9 @@ fn check(livedir: &str, outdir: &str) {
         }
         let mm = |v: &Vec<usize>| format!("{} / {}", v.iter().sum::<usize>() / v.len(), v.iter().max().unwrap());
         let n = ticks.len();
-        println!("| {world} s{seed} | {}–{} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.1} | {leak} / {quoted} | {} | {} | {} | {} / {} | {} / {} | {} / {} | {} / {} |",
+        println!("| {world} s{seed} | {}–{} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.1} | {leak} / {quoted} | {} | {} | {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} |",
             ticks[0], ticks[n - 1], t[0].cell(), t[1].cell(), t[2].cell(), t[3].cell(), t[4].cell(), t[5].cell(), t[6].cell(), t[7].cell(),
-            dossier as f64 / n as f64, stop as f64 / n as f64, mm(&before), mm(&after), wa[0], wb[1], wa[1], wb[2], wa[2], wb[3], wa[3], wb[4], wa[4]);
+            dossier as f64 / n as f64, stop as f64 / n as f64, mm(&before), mm(&after), wa[0], wb[1], wa[1], wb[2], wa[2], wb[3], wa[3], wb[4], wa[4], wb[5], wa[5], wb[6], wa[6], wb[7], wa[7]);
         for x in &t { for e in &x.examples { eprintln!("  missing: {e}"); } }
     }
 }

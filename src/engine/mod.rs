@@ -3357,7 +3357,7 @@ mod tests {
         let mut scenario = empty_scenario();
         scenario.tag_definitions.push(crate::core::TagDefinition {
             id: "levy".into(), metrics_modifier: HashMap::new(), spreads_via: vec![], spread_cooldown_ticks: 5, spread_chance: 0.3,
-            sea_going: false, militia: true, requires_era: None, requires_alive: vec![], ends_with: None, crisis: None,
+            sea_going: false, militia: true, requires_era: None, requires_alive: vec![], ends_with: None, crisis: None, label: None,
         });
         scenario.features.economy_v2 = true;
         scenario.economy_v2_income_coefficient = Some(0.001);

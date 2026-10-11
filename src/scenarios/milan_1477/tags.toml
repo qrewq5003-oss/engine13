@@ -1,5 +1,6 @@
 [[tags]]
 id = "catholic"
+label = "католичество"
 metrics_modifier = {}
 spreads_via = ["culture", "trade"]
 spread_cooldown_ticks = 8
@@ -7,6 +8,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "condottieri"
+label = "наёмное войско кондотьеров"
 metrics_modifier = { military_quality = 2 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -14,6 +16,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "banking"
+label = "банковское дело"
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 6
@@ -33,6 +36,7 @@ ends_with = "ludovico_takes_regency"
 
 [[tags]]
 id = "maritime"
+label = "морская торговля"
 sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
@@ -41,6 +45,7 @@ spread_chance = 0.4
 
 [[tags]]
 id = "trade_empire"
+label = "сеть торговых факторий"
 sea_going = true
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
@@ -89,6 +94,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "ottoman_frontier"
+label = "османская угроза"
 metrics_modifier = { external_pressure = 2 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -147,6 +153,7 @@ spread_chance = 0.0
 
 [[tags]]
 id = "french_orbit"
+label = "французское влияние"
 metrics_modifier = { external_pressure = 1 }
 spreads_via = ["culture"]
 spread_cooldown_ticks = 7
