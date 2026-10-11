@@ -286,6 +286,8 @@ fn cmd_save_llm_config(provider: String, base_url: String, api_key: Option<Strin
         api_key,
         model,
         base_url,
+        // Not set from the UI: kept as the config file has it.
+        max_tokens: engine13::llm::get_llm_config().max_tokens,
     };
     let result = llm::save_llm_config(&config);
     eprintln!("[RUST] cmd_save_llm_config - result: {:?}", result.is_ok());

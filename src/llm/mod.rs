@@ -525,7 +525,15 @@ pub struct LlmConfig {
     pub api_key: Option<String>,
     pub model: String,
     pub base_url: String,
+    /// The answer's token budget (`DEFAULT_MAX_TOKENS` when absent). A model that always reasons
+    /// spends it on reasoning first: GLM-5.3 at 4000 returned an empty chronicle in 35 of 60
+    /// (docs/investigation_model_compare.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
+
+/// The answer's token budget when the config names none.
+pub const DEFAULT_MAX_TOKENS: u32 = 4000;
 
 impl Default for LlmConfig {
     fn default() -> Self {
@@ -534,11 +542,16 @@ impl Default for LlmConfig {
             api_key: None,
             model: "local-model".to_string(),
             base_url: "http://localhost:1234".to_string(),
+            max_tokens: None,
         }
     }
 }
 
 impl LlmConfig {
+    pub fn max_tokens(&self) -> u32 {
+        self.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS)
+    }
+
     pub fn default_base_url(provider: &str) -> String {
         match provider {
             "lmstudio" => "http://localhost:1234".to_string(),
@@ -1035,7 +1048,7 @@ pub async fn stream_narrative_anthropic(
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "x-api-key",
-        config.api_key.unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
+        config.api_key.clone().unwrap_or_default().parse().map_err(|e| format!("Invalid API key: {}", e))?,
     );
     headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
 
@@ -1057,7 +1070,7 @@ pub async fn stream_narrative_anthropic(
 
     let body = serde_json::json!({
         "model": config.model,
-        "max_tokens": 4000,
+        "max_tokens": config.max_tokens(),
         "system": system_content,
         "messages": [
             {
@@ -1164,7 +1177,7 @@ pub async fn stream_narrative_openai(
                 "content": prompt
             }
         ],
-        "max_tokens": 4000,
+        "max_tokens": config.max_tokens(),
         "stream": true
     });
 
@@ -1310,7 +1323,7 @@ pub fn generate_narrative_blocking(
             format!("{}/v1/messages", config.base_url),
             serde_json::json!({
                 "model": config.model,
-                "max_tokens": 4000,
+                "max_tokens": config.max_tokens(),
                 "messages": [{ "role": "user", "content": prompt }],
             }),
         )
@@ -1320,7 +1333,7 @@ pub fn generate_narrative_blocking(
             serde_json::json!({
                 "model": config.model,
                 "messages": [{ "role": "user", "content": prompt }],
-                "max_tokens": 4000,
+                "max_tokens": config.max_tokens(),
                 "stream": false,
             }),
         )

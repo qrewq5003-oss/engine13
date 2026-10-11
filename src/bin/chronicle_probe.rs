@@ -13,7 +13,12 @@
 //!   chronicle_probe scan <world> <seeds>                  — per seed: when v2's facts appear
 //!   chronicle_probe live <world> <seed> <first> <n> <outdir> — n chronicles from tick `first`
 //!   chronicle_probe dry  <world> <seed> <first> <n> <outdir> — the same, prompts only
-//!     (`CHRONICLE_MODEL=<id>` runs `live` on another model of the same provider)
+//!     (`CHRONICLE_MODEL=<id>` runs `live` on another model of the same provider,
+//!     `CHRONICLE_MAX_TOKENS=<n>` with another answer budget)
+//!   chronicle_probe step <world> <seed> <first> <n> <outdir> — the same chain, written from outside: replays
+//!     the game, puts every `<tag>.text.txt` already in `outdir` into the book, writes the next prompt and
+//!     prints `NEXT <prompt> <text to write>`; prints `DONE` once all `n` are written (a chronicler that is
+//!     not an API — the Sonnet subagents of step 2)
 //!   chronicle_probe check <livedir> <outdir>              — the world's annals (owner's decision
 //!     of 2026-10-11), checked without the model on the games of `livedir`: the same windows, the
 //!     saved chronicles put into the book as they were written, each layer against the engine
@@ -96,7 +101,8 @@ fn chronicles(world: &str, seed: u64, first: u32, n: u32, outdir: &str, live: bo
     let mut cfg = engine13::llm::get_llm_config();
     // The model comparison (step 2): the same provider and key, another model.
     if let Ok(m) = std::env::var("CHRONICLE_MODEL") { cfg.model = m; }
-    if live { eprintln!("[chronicle] provider={} model={}", cfg.provider, cfg.model); }
+    if let Some(t) = std::env::var("CHRONICLE_MAX_TOKENS").ok().and_then(|t| t.parse().ok()) { cfg.max_tokens = Some(t); }
+    if live { eprintln!("[chronicle] provider={} model={} max_tokens={}", cfg.provider, cfg.model, cfg.max_tokens()); }
     std::fs::create_dir_all(outdir).unwrap();
     let mut book_md = format!("# milan_1477 / {world} / seed {seed} — chronicles {first}…{}\n\nmodel: {} ({})\n", first + n - 1, cfg.model, cfg.provider);
     for _ in 0..first { advance(&mut st, &strategy); }
@@ -303,11 +309,44 @@ fn check(livedir: &str, outdir: &str) {
     }
 }
 
+fn step(world: &str, seed: u64, first: u32, n: u32, outdir: &str) {
+    let (mut st, db, strategy) = new_game(world, seed);
+    std::fs::create_dir_all(outdir).unwrap();
+    for _ in 0..first { advance(&mut st, &strategy); }
+    let mut book_md = format!("# milan_1477 / {world} / seed {seed} — chronicles {first}…{}\n\nmodel: Sonnet (Claude Code subagent)\n", first + n - 1);
+    for i in 0..n {
+        advance(&mut st, &strategy);
+        let (prompt, stamp) = {
+            let ws = st.world_state.as_ref().unwrap();
+            let scn = st.current_scenario.as_ref().unwrap();
+            let snapshot = engine13::llm::build_snapshot(ws, scn, &st.event_log);
+            (engine13::llm::generate_narrative_prompt(&snapshot, scn, &db), engine13::llm::ChronicleStamp::of(ws, &snapshot))
+        };
+        let tag = format!("{outdir}/{world}_s{seed}_{i:02}_t{}", stamp.tick);
+        let text = std::fs::read_to_string(format!("{tag}.text.txt")).ok().filter(|t| !t.trim().is_empty());
+        let Some(text) = text else {
+            std::fs::write(format!("{tag}.prompt.txt"), &prompt).unwrap();
+            std::fs::write(format!("{tag}.facts.txt"), facts(&st).join("\n")).unwrap();
+            println!("NEXT {tag}.prompt.txt {tag}.text.txt");
+            return;
+        };
+        std::fs::write(format!("{tag}.prompt.txt"), &prompt).unwrap();
+        engine13::llm::record_chronicle(st.world_state.as_mut().unwrap(), &stamp, Some(text.clone()));
+        let f = facts(&st);
+        std::fs::write(format!("{tag}.facts.txt"), f.join("\n")).unwrap();
+        let _ = write!(book_md, "\n---\n\n## tick {} — {} год, {}\n\n### facts\n\n{}\n\n### chronicle\n\n{}\n",
+            stamp.tick, stamp.year, stamp.half_year, f.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"), text);
+    }
+    std::fs::write(format!("{outdir}/{world}_s{seed}.md"), book_md).unwrap();
+    println!("DONE");
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     match a.get(1).map(String::as_str) {
         Some("scan") => scan(&a[2], a[3].parse().unwrap()),
         Some("check") => check(&a[2], &a[3]),
+        Some("step") => step(&a[2], a[3].parse().unwrap(), a[4].parse().unwrap(), a[5].parse().unwrap(), &a[6]),
         Some(m @ ("live" | "dry")) => chronicles(&a[2], a[3].parse().unwrap(), a[4].parse().unwrap(), a[5].parse().unwrap(), &a[6], m == "live"),
         _ => eprintln!("usage: chronicle_probe scan|live|dry|check …"),
     }
