@@ -729,3 +729,50 @@ fn milan_league_and_the_savoy_alliance_exist_only_under_the_switch() {
         assert!(ws.actors["savoy"].get_metric("external_pressure") < savoy_before || savoy_before == 0.0, "the action's metrics are written either way");
     }
 }
+
+/// The event window reads names: ids are replaced by whole token, so `rome` is renamed and
+/// `rome_west` is not touched by it. Both ways.
+#[test]
+fn event_window_names_replace_ids_by_whole_token_only() {
+    let names: std::collections::BTreeMap<String, String> =
+        [("rome", "Рим"), ("rome_west", "Западная империя")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+    assert_eq!(crate::llm::with_actor_names("Военный конфликт между rome и rome_west", &names), "Военный конфликт между Рим и Западная империя");
+    assert_eq!(crate::llm::with_actor_names("romeo, rome2 и xrome", &names), "romeo, rome2 и xrome", "no part of a token is renamed");
+}
+
+/// The event window of the prompt carries no actor id and no event key, in all three worlds — the
+/// engine's log keeps its descriptions as written. Both ways: the log does hold ids (the
+/// defect is real), the window does not.
+#[test]
+fn event_window_carries_no_actor_ids_and_no_event_keys() {
+    use rand::SeedableRng;
+    let db = setup_test_db();
+    let mut ids_in_log = 0;
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for seed in 0..3u64 {
+            let mut state = AppState::default();
+            crate::application::load_scenario(&mut state, &db, sc.to_string()).unwrap();
+            state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+            let ids: Vec<String> = state.current_scenario.as_ref().unwrap().actors.iter().map(|a| a.id.clone()).collect();
+            let has_id = |text: &str| text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|t| ids.iter().any(|i| i == t));
+            for _ in 0..60 {
+                advance_tick(&mut state, None).expect("tick");
+                let world = state.world_state.as_ref().unwrap();
+                let scenario = state.current_scenario.as_ref().unwrap();
+                let snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
+                let prompt = crate::llm::generate_narrative_prompt(&snapshot, scenario, &db);
+                let start = prompt.find("=== НЕДАВНИЕ СОБЫТИЯ").expect("the window");
+                let window: Vec<&str> = prompt[start..].lines().skip(1).take_while(|l| l.starts_with("- ")).collect();
+                for l in &window {
+                    assert!(!has_id(l), "{sc} seed {seed} tick {}: an actor id in the window: {l}", world.tick);
+                    let toks: Vec<&str> = l.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).collect();
+                    for e in &snapshot.recent_important_events {
+                        assert!(!toks.contains(&e.id.as_str()), "{sc} seed {seed}: the event key {} in the window: {l}", e.id);
+                    }
+                }
+            }
+            ids_in_log += state.event_log.events.iter().filter(|e| has_id(&e.description)).count();
+        }
+    }
+    assert!(ids_in_log > 0, "the engine's log keeps ids in its descriptions — the window renames them");
+}

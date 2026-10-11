@@ -108,6 +108,38 @@ pub struct NarrativeWorldSnapshot {
 
 
 
+/// Every actor id the world or the scenario knows → its display name: the living, the fallen
+/// (their name at death), and the scenario's actors and heir templates.
+fn actor_names(world: &WorldState, scenario: &Scenario) -> std::collections::BTreeMap<String, String> {
+    let mut names: std::collections::BTreeMap<String, String> =
+        scenario.actors.iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+    for d in world.dead_actors.iter().filter(|d| !d.name.is_empty()) {
+        names.insert(d.id.clone(), d.name.clone());
+    }
+    for a in world.actors.values() {
+        names.insert(a.id.clone(), a.name.clone());
+    }
+    names
+}
+
+/// `text` with every actor id replaced by the actor's name — by whole token (a run of ASCII
+/// letters, digits and `_`), so `rome` never touches `rome_west`.
+pub fn with_actor_names(text: &str, names: &std::collections::BTreeMap<String, String>) -> String {
+    let is_tok = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(is_tok) {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        let end = tail.find(|c: char| !is_tok(c)).unwrap_or(tail.len());
+        let tok = &tail[..end];
+        out.push_str(names.get(tok).map(String::as_str).unwrap_or(tok));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Build narrative world snapshot from game state
 /// 
 /// This is a pure function: it reads state but has no side effects.
@@ -267,12 +299,25 @@ pub fn build_snapshot(
     // task (A) established — a different decision about a different function. Measured
     // as a counterfactual (§19.3): the shift changes which events are shown in a
     // minority of half-years and nothing else, and it is not made here.
+    //
+    // The selected events are then shown with the powers' names. Twelve engine sites write an
+    // event's description with actor ids (`interactions.rs`: «Военный конфликт между florence и
+    // siena», vassalage, trade, migration, …) — the log keeps them as written, so `sim` and drift
+    // are unchanged; the chronicler's copy reads names. Selection is untouched: only the text of
+    // the chosen events changes, after the choice.
+    let names = actor_names(world, scenario);
     let recent_important_events: Vec<crate::core::Event> = crate::db::select_relevant_events(
         event_candidates,
         world.tick,
         &[],
         &foreground_actors,
-    );
+    )
+    .into_iter()
+    .map(|mut e| {
+        e.description = with_actor_names(&e.description, &names);
+        e
+    })
+    .collect();
     
     // The world's annals: relations, open stories, chronology, dossier, the player's policy and
     // the stop-list — for the half-year being narrated.
@@ -814,7 +859,8 @@ pub fn generate_narrative_prompt(
         prompt.push_str("Нет недавних событий.\n");
     } else {
         for event in events_to_show {
-            prompt.push_str(&format!("- {}: {}\n", event.id, event.description));
+            // The description only: the event's id is an engine key (`military_conflict_florence_siena`).
+            prompt.push_str(&format!("- {}\n", event.description));
         }
     }
     prompt.push_str("\nИспользуй эти события как доказательства, а не как обязательный список для пересказа.\n");
