@@ -13,6 +13,7 @@
 //!   chronicle_probe scan <world> <seeds>                  — per seed: when v2's facts appear
 //!   chronicle_probe live <world> <seed> <first> <n> <outdir> — n chronicles from tick `first`
 //!   chronicle_probe dry  <world> <seed> <first> <n> <outdir> — the same, prompts only
+//!     (`CHRONICLE_MODEL=<id>` runs `live` on another model of the same provider)
 //!   chronicle_probe check <livedir> <outdir>              — the world's annals (owner's decision
 //!     of 2026-10-11), checked without the model on the games of `livedir`: the same windows, the
 //!     saved chronicles put into the book as they were written, each layer against the engine
@@ -92,7 +93,9 @@ fn scan(world: &str, seeds: u64) {
 
 fn chronicles(world: &str, seed: u64, first: u32, n: u32, outdir: &str, live: bool) {
     let (mut st, db, strategy) = new_game(world, seed);
-    let cfg = engine13::llm::get_llm_config();
+    let mut cfg = engine13::llm::get_llm_config();
+    // The model comparison (step 2): the same provider and key, another model.
+    if let Ok(m) = std::env::var("CHRONICLE_MODEL") { cfg.model = m; }
     if live { eprintln!("[chronicle] provider={} model={}", cfg.provider, cfg.model); }
     std::fs::create_dir_all(outdir).unwrap();
     let mut book_md = format!("# milan_1477 / {world} / seed {seed} — chronicles {first}…{}\n\nmodel: {} ({})\n", first + n - 1, cfg.model, cfg.provider);
