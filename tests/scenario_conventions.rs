@@ -183,6 +183,7 @@ fn contagious_tag_check_catches_a_new_violator() {
         requires_alive: Vec::new(),
         ends_with: None,
         crisis: None,
+        label: None,
             sea_going: false,
             militia: false,
     };

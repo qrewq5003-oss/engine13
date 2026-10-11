@@ -1,5 +1,6 @@
 [[tags]]
 id = "bureaucracy"
+label = "чиновное управление"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 8
@@ -7,6 +8,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "roman_law"
+label = "римское право"
 metrics_modifier = {}
 spreads_via = ["conquest"]
 spread_cooldown_ticks = 10
@@ -14,6 +16,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "trade_networks"
+label = "торговые связи"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 5
@@ -21,6 +24,7 @@ spread_chance = 0.5
 
 [[tags]]
 id = "coinage"
+label = "монетное обращение"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 7
@@ -28,6 +32,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "christianity"
+label = "христианство"
 metrics_modifier = {}
 spreads_via = ["culture", "trade"]
 spread_cooldown_ticks = 6
@@ -35,6 +40,7 @@ spread_chance = 0.35
 
 [[tags]]
 id = "christianity_arian"
+label = "арианство"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 8
@@ -42,6 +48,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "nomadic"
+label = "кочевой уклад"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war", "migration"]
 spread_cooldown_ticks = 4
@@ -51,6 +58,7 @@ militia = true
 
 [[tags]]
 id = "cavalry"
+label = "конное войско"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -58,6 +66,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "raid_economy"
+label = "набеговое хозяйство"
 metrics_modifier = { economic_output = -1, military_quality = 1 }
 spreads_via = ["war", "migration"]
 spread_cooldown_ticks = 5
@@ -65,6 +74,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "pastoral"
+label = "скотоводство"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade", "migration"]
 spread_cooldown_ticks = 8
@@ -72,6 +82,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "tribal_confederation"
+label = "племенной союз"
 metrics_modifier = {}
 spreads_via = ["war", "migration"]
 spread_cooldown_ticks = 6
@@ -81,6 +92,7 @@ militia = true
 
 [[tags]]
 id = "federati_potential"
+label = "служба федератов"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -88,6 +100,7 @@ spread_chance = 0.15
 
 [[tags]]
 id = "steppe_adjacent"
+label = "степное соседство"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 8
@@ -95,6 +108,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "zoroastrianism"
+label = "зороастризм"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -102,6 +116,7 @@ spread_chance = 0.15
 
 [[tags]]
 id = "silk_road"
+label = "торговля Шёлкового пути"
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade"]
 spread_cooldown_ticks = 5
@@ -109,6 +124,7 @@ spread_chance = 0.4
 
 [[tags]]
 id = "cavalry_heavy"
+label = "тяжёлая конница"
 metrics_modifier = { military_quality = 2 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 8
@@ -116,6 +132,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "migrating"
+label = "переселение народов"
 metrics_modifier = { external_pressure = 1 }
 spreads_via = ["migration"]
 spread_cooldown_ticks = 4
@@ -123,6 +140,7 @@ spread_chance = 0.35
 
 [[tags]]
 id = "rhine_border"
+label = "напряжение рейнского рубежа"
 metrics_modifier = { external_pressure = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -132,6 +150,7 @@ requires_alive = ["rome"]
 
 [[tags]]
 id = "roman_contact"
+label = "римское влияние"
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade", "culture"]
 spread_cooldown_ticks = 8
@@ -139,6 +158,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "seafaring"
+label = "мореходство"
 sea_going = true
 metrics_modifier = { economic_output = 1 }
 spreads_via = ["trade"]
@@ -147,6 +167,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "desert_warfare"
+label = "искусство войны в пустыне"
 metrics_modifier = { military_quality = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 8
@@ -154,6 +175,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "roman_frontier"
+label = "римское пограничье"
 metrics_modifier = { external_pressure = 1, economic_output = 1 }
 spreads_via = ["trade", "war"]
 spread_cooldown_ticks = 6
@@ -163,6 +185,7 @@ requires_alive = ["rome"]
 
 [[tags]]
 id = "buffer_state"
+label = "положение буферного государства"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -170,6 +193,7 @@ spread_chance = 0.15
 
 [[tags]]
 id = "persian_border"
+label = "напряжение персидского рубежа"
 metrics_modifier = { external_pressure = 1 }
 spreads_via = ["war"]
 spread_cooldown_ticks = 6
@@ -179,6 +203,7 @@ requires_alive = ["sassanids"]
 
 [[tags]]
 id = "roman_border"
+label = "римский рубеж"
 metrics_modifier = { external_pressure = 1, economic_output = 1 }
 spreads_via = ["trade", "war"]
 spread_cooldown_ticks = 6
@@ -188,6 +213,7 @@ requires_alive = ["rome"]
 
 [[tags]]
 id = "buddhism"
+label = "буддизм"
 metrics_modifier = {}
 spreads_via = ["culture", "trade"]
 spread_cooldown_ticks = 8
@@ -195,6 +221,7 @@ spread_chance = 0.25
 
 [[tags]]
 id = "hinduism"
+label = "индуизм"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10
@@ -202,6 +229,7 @@ spread_chance = 0.2
 
 [[tags]]
 id = "golden_age"
+label = "расцвет"
 metrics_modifier = { economic_output = 2 }
 spreads_via = ["trade", "culture"]
 spread_cooldown_ticks = 6
@@ -209,6 +237,7 @@ spread_chance = 0.3
 
 [[tags]]
 id = "confucianism"
+label = "конфуцианство"
 metrics_modifier = {}
 spreads_via = ["culture"]
 spread_cooldown_ticks = 10

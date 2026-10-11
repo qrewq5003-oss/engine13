@@ -303,6 +303,16 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // A tag that can spread names itself for the chronicler (`label`): the event window prints the
+    // spread with it, never with the tag's id. A declared label is never empty.
+    for t in &scenario.tag_definitions {
+        match &t.label {
+            None if !t.spreads_via.is_empty() => errors.push(format!("tag '{}': spreads and declares no label", t.id)),
+            Some(l) if l.trim().is_empty() => errors.push(format!("tag '{}': an empty label", t.id)),
+            _ => {}
+        }
+    }
+
     // An actor never starts carrying a tag that is a relation to itself (A37 follow-up):
     // the engine refuses to spread it there, and a template or starting actor may not
     // bring it in either.
@@ -682,6 +692,28 @@ mod tests {
         s.tag_definitions.iter_mut().find(|t| t.id == "regency_crisis").unwrap().crisis = None;
         let e = validate_scenario(&s).unwrap_err();
         assert!(e.iter().any(|e| e.contains("tag 'regency_crisis': lowers legitimacy or cohesion and declares no crisis")), "{e:?}");
+    }
+
+    /// A tag that can spread must name itself for the chronicler (`label`). Both ways: all three
+    /// worlds as authored validate; with a spreading tag stripped of its label, or a label
+    /// emptied, they do not.
+    #[test]
+    fn validate_requires_a_spreading_tag_to_name_itself() {
+        for (load, tag) in [
+            (crate::scenarios::milan_1477::load_milan_1477 as fn() -> Scenario, "french_orbit"),
+            (crate::scenarios::rome_375::load_rome_375, "christianity"),
+            (crate::scenarios::constantinople_1430::load_constantinople_1430, "orthodoxy"),
+        ] {
+            assert!(validate_scenario(&load()).is_ok());
+            let mut s = load();
+            s.tag_definitions.iter_mut().find(|t| t.id == tag).unwrap().label = None;
+            let e = validate_scenario(&s).unwrap_err();
+            assert!(e.iter().any(|e| e.contains(&format!("tag '{tag}': spreads and declares no label"))), "{e:?}");
+            let mut s = load();
+            s.tag_definitions.iter_mut().find(|t| t.id == tag).unwrap().label = Some(" ".into());
+            let e = validate_scenario(&s).unwrap_err();
+            assert!(e.iter().any(|e| e.contains(&format!("tag '{tag}': an empty label"))), "{e:?}");
+        }
     }
 
     /// A37 follow-up: an actor may not carry a tag that is a relation to itself.

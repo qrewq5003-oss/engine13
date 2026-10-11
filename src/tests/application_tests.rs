@@ -776,3 +776,59 @@ fn event_window_carries_no_actor_ids_and_no_event_keys() {
     }
     assert!(ids_in_log > 0, "the engine's log keeps ids in its descriptions — the window renames them");
 }
+
+/// The three engine descriptions that carry engine words are reworded for the chronicler from
+/// their own parts: a tag spread reads the tag's label, an era change reads words, a promotion
+/// to the foreground loses its debug reasons. Both ways: any other description is untouched.
+#[test]
+fn chronicler_description_rewords_tag_spread_era_and_foreground() {
+    let scenario = crate::scenarios::milan_1477::load_milan_1477();
+    let ev = |id: &str, d: &str| crate::core::Event::new(id.into(), 1, 1477, "milan".into(), crate::core::EventType::Cultural, false, d.into());
+    let r = |id: &str, d: &str| crate::llm::chronicler_description(&ev(id, d), &scenario);
+    assert_eq!(r("tag_spread_french_orbit_savoy", "Тег 'french_orbit' распространился от france к savoy"),
+        "Французское влияние распространяется от france к savoy");
+    assert_eq!(r("era_milan_earlymodern", "Миланское герцогство перешёл из LateMedieval в EarlyModern эру"),
+        "Миланское герцогство переходит из позднего Средневековья в раннее Новое время");
+    assert_eq!(r("foreground_savoy", "Савойя вышел на передний план: power_projection 88 > 70% avg 32, internal upheaval"),
+        "Савойя выходит на передний план");
+    assert_eq!(r("military_conflict_florence_siena", "Военный конфликт между florence и siena"), "Военный конфликт между florence и siena");
+}
+
+/// The event window carries no tag id, no era's code name and no debug reason of a promotion,
+/// in all three worlds. Both ways: the engine's log does hold tag spreads and promotions with
+/// those words (the defect is real), the window does not.
+#[test]
+fn event_window_carries_no_tag_ids_era_names_or_debug_reasons() {
+    use rand::SeedableRng;
+    let db = setup_test_db();
+    let eras = ["Ancient", "EarlyMedieval", "HighMedieval", "LateMedieval", "EarlyModern"];
+    let debug = ["power_projection", "military contact", "internal upheaval"];
+    let (mut spreads_in_log, mut promotions_in_log, mut shown) = (0, 0, 0);
+    for sc in ["rome_375", "constantinople_1430", "milan_1477"] {
+        for seed in 0..3u64 {
+            let mut state = AppState::default();
+            crate::application::load_scenario(&mut state, &db, sc.to_string()).unwrap();
+            state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+            let tags: Vec<String> = state.current_scenario.as_ref().unwrap().tag_definitions.iter().map(|t| t.id.clone()).collect();
+            for _ in 0..60 {
+                advance_tick(&mut state, None).expect("tick");
+                let world = state.world_state.as_ref().unwrap();
+                let scenario = state.current_scenario.as_ref().unwrap();
+                let snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
+                let prompt = crate::llm::generate_narrative_prompt(&snapshot, scenario, &db);
+                let start = prompt.find("=== НЕДАВНИЕ СОБЫТИЯ").expect("the window");
+                for l in prompt[start..].lines().skip(1).take_while(|l| l.starts_with("- ")) {
+                    let toks: Vec<&str> = l.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).collect();
+                    assert!(!toks.iter().any(|t| tags.iter().any(|x| x == t)), "{sc} seed {seed} tick {}: a tag id in the window: {l}", world.tick);
+                    assert!(!toks.iter().any(|t| eras.contains(t)), "{sc} seed {seed}: an era's code name in the window: {l}");
+                    assert!(!debug.iter().any(|d| l.contains(d)), "{sc} seed {seed}: a debug reason in the window: {l}");
+                    if l.contains("распространяется от") || l.contains("выходит на передний план") { shown += 1; }
+                }
+            }
+            spreads_in_log += state.event_log.events.iter().filter(|e| e.id.starts_with("tag_spread_") && e.description.starts_with("Тег '")).count();
+            promotions_in_log += state.event_log.events.iter().filter(|e| e.id.starts_with("foreground_") && debug.iter().any(|d| e.description.contains(d))).count();
+        }
+    }
+    assert!(spreads_in_log > 0 && promotions_in_log > 0, "the log keeps the engine's words: spreads {spreads_in_log}, promotions {promotions_in_log}");
+    assert!(shown > 0, "reworded spreads or promotions do reach the window");
+}

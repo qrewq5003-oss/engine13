@@ -140,6 +140,63 @@ pub fn with_actor_names(text: &str, names: &std::collections::BTreeMap<String, S
     out
 }
 
+/// An era in the chronicler's words: (from — genitive, into — accusative).
+fn era_words(era: &crate::core::Era) -> (&'static str, &'static str) {
+    use crate::core::Era::*;
+    match era {
+        Ancient => ("Античности", "Античность"),
+        EarlyMedieval => ("раннего Средневековья", "раннее Средневековье"),
+        HighMedieval => ("высокого Средневековья", "высокое Средневековье"),
+        LateMedieval => ("позднего Средневековья", "позднее Средневековье"),
+        EarlyModern => ("раннего Нового времени", "раннее Новое время"),
+    }
+}
+
+/// The era whose engine name (`{:?}`, as the era event writes it) is `name`.
+fn era_named(name: &str) -> Option<crate::core::Era> {
+    use crate::core::Era::*;
+    [Ancient, EarlyMedieval, HighMedieval, LateMedieval, EarlyModern].into_iter().find(|e| format!("{e:?}") == name)
+}
+
+/// An event's description as the chronicler reads it. Three engine sites write engine words
+/// into the log, and the log keeps them (`sim` and drift unchanged); the chronicler's copy is
+/// rewritten from the description's own parts:
+/// - a tag spread (`tag_spread_*`) prints the tag's id — here, the tag's authored `label`;
+/// - an era change (`era_*`) prints the variants' code names (`LateMedieval`) — here, words;
+/// - a promotion to the foreground (`foreground_*`) prints debug reasons with numbers
+///   («power_projection 88 > 70% avg 32») — here, the promotion alone.
+///
+/// Any other description, or one whose shape is not the engine's, is returned as written: the
+/// test of the window then finds the engine word, rather than this function hiding it.
+pub fn chronicler_description(event: &crate::core::Event, scenario: &Scenario) -> String {
+    let d = event.description.as_str();
+    let rewritten = if event.id.starts_with("tag_spread_") {
+        d.strip_prefix("Тег '")
+            .and_then(|r| r.split_once("' распространился от "))
+            .and_then(|(tag, r)| r.split_once(" к ").map(|(from, to)| (tag, from, to)))
+            .and_then(|(tag, from, to)| {
+                let label = scenario.tag_definitions.iter().find(|t| t.id == tag)?.label.as_deref()?;
+                let mut c = label.chars();
+                let first = c.next()?;
+                Some(format!("{}{} распространяется от {from} к {to}", first.to_uppercase(), c.as_str()))
+            })
+    } else if event.id.starts_with("era_") {
+        d.strip_suffix(" эру")
+            .and_then(|r| r.rsplit_once(" в "))
+            .and_then(|(r, new)| r.rsplit_once(" перешёл из ").map(|(name, old)| (name, old, new)))
+            .and_then(|(name, old, new)| {
+                let (from, _) = era_words(&era_named(old)?);
+                let (_, into) = era_words(&era_named(new)?);
+                Some(format!("{name} переходит из {from} в {into}"))
+            })
+    } else if event.id.starts_with("foreground_") {
+        d.split_once(" вышел на передний план").map(|(name, _)| format!("{name} выходит на передний план"))
+    } else {
+        None
+    };
+    rewritten.unwrap_or_else(|| d.to_string())
+}
+
 /// Build narrative world snapshot from game state
 /// 
 /// This is a pure function: it reads state but has no side effects.
@@ -305,6 +362,8 @@ pub fn build_snapshot(
     // siena», vassalage, trade, migration, …) — the log keeps them as written, so `sim` and drift
     // are unchanged; the chronicler's copy reads names. Selection is untouched: only the text of
     // the chosen events changes, after the choice.
+    // Tag spreads, era changes and promotions to the foreground are first reworded from their
+    // engine words (`chronicler_description`).
     let names = actor_names(world, scenario);
     let recent_important_events: Vec<crate::core::Event> = crate::db::select_relevant_events(
         event_candidates,
@@ -314,7 +373,7 @@ pub fn build_snapshot(
     )
     .into_iter()
     .map(|mut e| {
-        e.description = with_actor_names(&e.description, &names);
+        e.description = with_actor_names(&chronicler_description(&e, scenario), &names);
         e
     })
     .collect();
