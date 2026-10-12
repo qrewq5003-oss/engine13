@@ -832,3 +832,19 @@ fn event_window_carries_no_tag_ids_era_names_or_debug_reasons() {
     assert!(spreads_in_log > 0 && promotions_in_log > 0, "the log keeps the engine's words: spreads {spreads_in_log}, promotions {promotions_in_log}");
     assert!(shown > 0, "reworded spreads or promotions do reach the window");
 }
+
+#[test]
+fn claude_cli_lines_give_text_and_the_final_verdict() {
+    use crate::llm::{parse_claude_cli_line, ClaudeCliLine};
+    let delta = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Милан — "}}}"#;
+    assert_eq!(parse_claude_cli_line(delta), ClaudeCliLine::Text("Милан — ".to_string()));
+    let ok = r#"{"type":"result","subtype":"success","is_error":false,"result":"Милан — город."}"#;
+    assert_eq!(parse_claude_cli_line(ok), ClaudeCliLine::Done(Ok(())));
+    let err = r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in"}"#;
+    assert_eq!(parse_claude_cli_line(err), ClaudeCliLine::Done(Err("Not logged in".to_string())));
+    // The whole message repeated after the stream, and the CLI's own lines, are not text.
+    let assistant = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Милан — город."}]}}"#;
+    assert_eq!(parse_claude_cli_line(assistant), ClaudeCliLine::Other);
+    assert_eq!(parse_claude_cli_line(r#"{"type":"system","subtype":"init"}"#), ClaudeCliLine::Other);
+    assert_eq!(parse_claude_cli_line("not json"), ClaudeCliLine::Other);
+}

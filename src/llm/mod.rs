@@ -532,6 +532,15 @@ pub struct LlmConfig {
     pub max_tokens: Option<u32>,
 }
 
+/// The provider that writes chronicles through the locally installed Claude Code (`claude -p`)
+/// on the owner's subscription, for personal play. `base_url` holds the program to run
+/// (`claude` on `PATH` by default), `api_key` is unused, and `max_tokens` is not passed: the CLI
+/// has no such flag.
+pub const CLAUDE_CLI: &str = "claude_cli";
+
+/// Models offered for `CLAUDE_CLI` (the CLI has no model listing).
+pub const CLAUDE_CLI_MODELS: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
+
 /// The answer's token budget when the config names none.
 pub const DEFAULT_MAX_TOKENS: u32 = 4000;
 
@@ -560,6 +569,7 @@ impl LlmConfig {
             "anthropic" => "https://api.anthropic.com".to_string(),
             "deepseek" => "https://api.deepseek.com".to_string(),
             "nanogpt" => "https://nano-gpt.com/api".to_string(),
+            CLAUDE_CLI => "claude".to_string(),
             _ => "http://localhost:1234".to_string(),
         }
     }
@@ -1031,6 +1041,17 @@ pub fn generate_narrative_prompt(
     prompt
 }
 
+/// Split a prompt for a model that takes a separate system part (Anthropic, `claude` CLI):
+/// system = the chronicler persona and factual rules, everything before
+/// «=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===»; user = the rest (snapshot, events, instructions).
+fn split_system_user(prompt: &str) -> (String, String) {
+    match prompt.find("=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===") {
+        Some(end) if end > 0 => (prompt[..end].trim().to_string(), prompt[end..].trim().to_string()),
+        // Fallback: use first 500 chars as system
+        _ => (prompt.chars().take(500).collect(), prompt.to_string()),
+    }
+}
+
 /// Stream narrative from Anthropic API
 /// Stream a chronicle from the Anthropic API to the frontend. Returns the full text only when the
 /// stream finished (`message_stop`); a broken stream, or the placeholder on a failed connection,
@@ -1055,18 +1076,7 @@ pub async fn stream_narrative_anthropic(
     // Split prompt into system and user content
     // System: chronicler persona + factual rules (first two sections before === НАРРАТИВНЫЕ ИНСТРУКЦИИ ===)
     // User: everything else (snapshot, events, instructions)
-    let system_end = prompt.find("=== НАРРАТИВНЫЕ ИНСТРУКЦИИ ===").unwrap_or(0);
-    let system_content = if system_end > 0 {
-        prompt[..system_end].trim().to_string()
-    } else {
-        // Fallback: use first 500 chars as system
-        prompt.chars().take(500).collect()
-    };
-    let user_content = if system_end > 0 {
-        prompt[system_end..].trim().to_string()
-    } else {
-        prompt
-    };
+    let (system_content, user_content) = split_system_user(&prompt);
 
     let body = serde_json::json!({
         "model": config.model,
@@ -1276,6 +1286,102 @@ pub fn record_chronicle(world: &mut WorldState, stamp: &ChronicleStamp, text: Op
     true
 }
 
+/// One line of `claude -p --output-format stream-json --include-partial-messages`.
+#[derive(Debug, PartialEq)]
+pub enum ClaudeCliLine {
+    /// A piece of the chronicle's text.
+    Text(String),
+    /// The run's final line: `Ok` when the answer finished, `Err` with the CLI's message otherwise.
+    Done(Result<(), String>),
+    Other,
+}
+
+pub fn parse_claude_cli_line(line: &str) -> ClaudeCliLine {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        return ClaudeCliLine::Other;
+    };
+    match v["type"].as_str() {
+        Some("stream_event") if v["event"]["type"] == "content_block_delta" => v["event"]["delta"]["text"]
+            .as_str()
+            .map_or(ClaudeCliLine::Other, |t| ClaudeCliLine::Text(t.to_string())),
+        Some("result") if v["is_error"] == false => ClaudeCliLine::Done(Ok(())),
+        Some("result") => ClaudeCliLine::Done(Err(v["result"]
+            .as_str()
+            .or_else(|| v["subtype"].as_str())
+            .unwrap_or("claude: error")
+            .to_string())),
+        _ => ClaudeCliLine::Other,
+    }
+}
+
+/// Write a chronicle through the local `claude` CLI (`CLAUDE_CLI`), passing each piece of text to
+/// `on_text` as it arrives. The prompt is split as for the Anthropic API. The CLI runs with no
+/// tools, no MCP servers, no saved session, from an empty directory, so it sees the prompt only.
+/// Returns the full text only when the CLI reported a finished answer.
+pub fn generate_narrative_claude_cli(
+    prompt: &str,
+    config: &LlmConfig,
+    mut on_text: impl FnMut(&str),
+) -> Result<Option<String>, String> {
+    use std::io::{BufRead, Write};
+    let (system, user) = split_system_user(prompt);
+    let program = if config.base_url.trim().is_empty() { "claude" } else { config.base_url.trim() };
+    let cwd = std::env::temp_dir().join("engine13-claude-cli");
+    fs::create_dir_all(&cwd).map_err(|e| format!("claude: {}: {}", cwd.display(), e))?;
+    let mut child = std::process::Command::new(program)
+        .args(["-p", "--model", &config.model, "--system-prompt", &system])
+        .args(["--tools", "", "--strict-mcp-config", "--no-session-persistence"])
+        .args(["--output-format", "stream-json", "--include-partial-messages", "--verbose"])
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("claude: cannot run `{}`: {}", program, e))?;
+    {
+        let mut stdin = child.stdin.take().ok_or("claude: no stdin")?;
+        stdin.write_all(user.as_bytes()).map_err(|e| format!("claude: stdin: {}", e))?;
+    } // stdin closed here: the CLI starts on end of input
+    let stdout = child.stdout.take().ok_or("claude: no stdout")?;
+    let mut full = String::new();
+    let mut done = None;
+    for line in std::io::BufReader::new(stdout).lines() {
+        let line = line.map_err(|e| format!("claude: stdout: {}", e))?;
+        match parse_claude_cli_line(&line) {
+            ClaudeCliLine::Text(t) => {
+                full.push_str(&t);
+                on_text(&t);
+            }
+            ClaudeCliLine::Done(r) => done = Some(r),
+            ClaudeCliLine::Other => {}
+        }
+    }
+    let status = child.wait().map_err(|e| format!("claude: {}", e))?;
+    match done {
+        Some(Ok(())) => Ok((!full.trim().is_empty()).then_some(full)),
+        Some(Err(e)) => Err(format!("claude: {}", e)),
+        None => Err(format!("claude: no result ({})", status)),
+    }
+}
+
+/// `generate_narrative_claude_cli` streamed to the frontend like the API providers.
+pub async fn stream_narrative_claude_cli(
+    prompt: String,
+    config: LlmConfig,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    let emitter = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        generate_narrative_claude_cli(&prompt, &config, |t| {
+            let _ = emitter.emit("narrative_chunk", t.to_string());
+        })
+    })
+    .await
+    .map_err(|e| format!("claude: {}", e))?;
+    let _ = app.emit("narrative_done", "");
+    result
+}
+
 /// Generate a narrative headlessly, without a Tauri app handle, and return the text.
 ///
 /// The streaming entry points (`stream_narrative_anthropic` / `stream_narrative_openai`)
@@ -1298,6 +1404,21 @@ pub fn generate_narrative_blocking(
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| format!("Client build failed: {}", e))?;
+
+    if config.provider == CLAUDE_CLI {
+        let mut last_err = String::new();
+        for attempt in 1..=attempts.max(1) {
+            match generate_narrative_claude_cli(prompt, config, |_| {}) {
+                Ok(Some(text)) => return Ok(text),
+                Ok(None) => last_err = "claude: empty answer".to_string(),
+                Err(e) => last_err = e,
+            }
+            if attempt < attempts.max(1) {
+                std::thread::sleep(std::time::Duration::from_secs(5 * attempt as u64));
+            }
+        }
+        return Err(last_err);
+    }
 
     let anthropic = config.provider == "anthropic";
     let mut headers = reqwest::header::HeaderMap::new();
@@ -1395,6 +1516,9 @@ pub fn get_available_models(provider: String, base_url: String, api_key: Option<
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("Client build failed: {}", e))?;
+    if provider == CLAUDE_CLI {
+        return Ok(CLAUDE_CLI_MODELS.iter().map(|m| m.to_string()).collect());
+    }
     let mut headers = reqwest::header::HeaderMap::new();
 
     if provider == "anthropic" {

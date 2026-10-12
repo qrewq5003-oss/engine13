@@ -20,6 +20,7 @@ const PROVIDERS: ProviderOption[] = [
   { value: 'anthropic', label: 'Anthropic', defaultBaseUrl: 'https://api.anthropic.com' },
   { value: 'deepseek', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com' },
   { value: 'nanogpt', label: 'NanoGPT', defaultBaseUrl: 'https://nano-gpt.com/api' },
+  { value: 'claude_cli', label: 'Claude (подписка, claude CLI)', defaultBaseUrl: 'claude' },
 ];
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {

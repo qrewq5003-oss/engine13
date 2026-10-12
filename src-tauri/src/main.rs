@@ -252,7 +252,9 @@ async fn cmd_get_narrative(
     eprintln!("[NARRATIVE] Getting narrative for year {}", year);
     eprintln!("[NARRATIVE] Provider: {}, URL: {}, Model: {}", config.provider, config.base_url, config.model);
 
-    let result = if config.provider == "anthropic" {
+    let result = if config.provider == engine13::llm::CLAUDE_CLI {
+        engine13::llm::stream_narrative_claude_cli(prompt, config, app).await
+    } else if config.provider == "anthropic" {
         engine13::llm::stream_narrative_anthropic(prompt, placeholder, config, app).await
     } else {
         engine13::llm::stream_narrative_openai(prompt, placeholder, config, app).await
