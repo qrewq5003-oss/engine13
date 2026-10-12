@@ -14,7 +14,8 @@
 //!   chronicle_probe live <world> <seed> <first> <n> <outdir> — n chronicles from tick `first`
 //!   chronicle_probe dry  <world> <seed> <first> <n> <outdir> — the same, prompts only
 //!     (`CHRONICLE_MODEL=<id>` runs `live` on another model of the same provider,
-//!     `CHRONICLE_MAX_TOKENS=<n>` with another answer budget)
+//!     `CHRONICLE_MAX_TOKENS=<n>` with another answer budget, `CHRONICLE_PROVIDER=<p>` on another provider
+//!     at its default address, e.g. `claude_cli`)
 //!   chronicle_probe step <world> <seed> <first> <n> <outdir> — the same chain, written from outside: replays
 //!     the game, puts every `<tag>.text.txt` already in `outdir` into the book, writes the next prompt and
 //!     prints `NEXT <prompt> <text to write>`; prints `DONE` once all `n` are written (a chronicler that is
@@ -100,6 +101,10 @@ fn chronicles(world: &str, seed: u64, first: u32, n: u32, outdir: &str, live: bo
     let (mut st, db, strategy) = new_game(world, seed);
     let mut cfg = engine13::llm::get_llm_config();
     // The model comparison (step 2): the same provider and key, another model.
+    if let Ok(p) = std::env::var("CHRONICLE_PROVIDER") {
+        cfg.base_url = engine13::llm::LlmConfig::default_base_url(&p);
+        cfg.provider = p;
+    }
     if let Ok(m) = std::env::var("CHRONICLE_MODEL") { cfg.model = m; }
     if let Some(t) = std::env::var("CHRONICLE_MAX_TOKENS").ok().and_then(|t| t.parse().ok()) { cfg.max_tokens = Some(t); }
     if live { eprintln!("[chronicle] provider={} model={} max_tokens={}", cfg.provider, cfg.model, cfg.max_tokens()); }
