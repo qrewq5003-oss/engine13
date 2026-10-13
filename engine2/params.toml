@@ -51,7 +51,9 @@ band = [-0.002, 0.005]
 unit = "share per year"
 e0 = "П7"
 
-# E0 А8 — soldiers a province's people can supply (Roth 1999; derived from Э8 × Э2).
+# E0 А8 — soldiers the polity's economy can sustain per 1 000 inhabitants (Э8 × Э2, with
+# Roth 1999 for the ration): a polity-wide ratio. Until the economy exists it stands in for
+# local supply by the province a unit occupies — a placeholder, not the design (plan §14).
 [supply.soldiers_per_1000_people]
 kind = "a"
 value = 150.0
@@ -81,8 +83,9 @@ band = [0.2, 0.9]
 unit = "share of years"
 e0 = "А12"
 
-# E0 А5 — provinces a unit crosses per tick; the campaign season (6–8 months) is in the
-# tick already, the province size comes from E1b; checked through the war outcomes (А12).
+# E0 А5 — provinces a unit crosses per tick. A placeholder: 1 per half-year tick makes the
+# march the main brake on war; the war system derives the value from А5 (15–25 km a day,
+# a 6–8 month season) and the province area (owner's note on PR #281). Checked through А12.
 [movement.provinces_per_tick]
 kind = "c"
 value = 1.0

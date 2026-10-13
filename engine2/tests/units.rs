@@ -105,6 +105,33 @@ fn an_unsupplied_unit_melts_at_the_attrition_rate_until_zero() {
 }
 
 #[test]
+fn a_shortfall_is_shared_pro_rata_not_by_unit_id() {
+    let mut w = testworld::world(8);
+    let a = ActorId(0);
+    let first = w.units_of(a)[0];
+    let home = w.units[&first].position;
+    let cap = w.supply_capacity(home, &params());
+    // Two units of different sizes, together twice the province's supply.
+    let second = UnitId(w.next_unit);
+    w.next_unit += 1;
+    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None });
+    w.ledger.open(w.tick, engine2::Account::Soldiers(second), 0).unwrap();
+    let (big, small) = (cap * 3 / 2, cap / 2);
+    w.post(engine2::Account::Soldiers(first), engine2::Source::Recruit, (big - w.soldiers(first)) * 1000).unwrap();
+    w.post(engine2::Account::Soldiers(second), engine2::Source::Recruit, small * 1000).unwrap();
+    w.tick(&params()).unwrap();
+    let lost_big = big - w.soldiers(first);
+    let lost_small = small - w.soldiers(second);
+    // Each keeps cap/total = 1/2 of its men supplied; the unsupplied half melts at 15 % a
+    // tick. The ledger carries the fraction, so the whole part that left is the ceiling.
+    let melt = |unsupplied: i64| (unsupplied * 150 + 999) / 1000;
+    assert_eq!(lost_big, melt(big - big * cap / (big + small)));
+    assert_eq!(lost_small, melt(small - small * cap / (big + small)));
+    // Same share, whatever the id: the ratio of losses equals the ratio of sizes.
+    assert_eq!(lost_big * small, lost_small * big, "{lost_big}:{big} vs {lost_small}:{small}");
+}
+
+#[test]
 fn foreign_land_is_closed_and_own_land_is_open_through_the_chokepoint() {
     let s = extreme("chokepoint");
     let mut w = world_of(&s);

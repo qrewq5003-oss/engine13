@@ -11,12 +11,19 @@
 //! arrive (E0 А10). A unit moves `movement.provinces_per_tick` edges a tick along the
 //! shortest passable path; with no path the order is dropped with a `NoPath` event.
 //!
-//! **Supply is local.** A unit is supplied by the province it stands in: `population ×
-//! supply.soldiers_per_1000_people / 1000` soldiers of its owner can stand there. An enclave
-//! or a colony therefore feeds its own garrison without any land link home. Everything
-//! beyond that, or any unit on foreign land, is unsupplied and loses
-//! `army.attrition_unsupplied_per_year / 2` of its soldiers a tick (E0 А7) through the
-//! ledger — a stock that reaches zero is a `BoundHit` like any other.
+//! **Supply — a stand-in until the economy, not the design (owner's review of PR #281).**
+//! Until the economy exists, a unit is fed by the province it stands in: `population ×
+//! supply.soldiers_per_1000_people / 1000` soldiers of its owner can stand there. That is a
+//! placeholder with a known wrong consequence: an army cannot be concentrated even at home
+//! (10 000 soldiers do not fit a capital of 50 000 people). The design, due with the economy
+//! and the army system (plan §14): at home the **treasury** keeps the army — pay per soldier
+//! (E0 А3) and the budget as the limit, with А8 (Э8 × Э2) the polity-wide ratio the economy
+//! can sustain; **foraging** off the local province is for foreign land or unpaid troops, at
+//! the cost of ruining the province (П6). What stays from this step: an enclave or a colony
+//! feeds its own garrison without a land link home, and a shortfall is **shared pro rata**
+//! among the units standing there — not "lower ids eat first". Unsupplied soldiers melt at
+//! `army.attrition_unsupplied_per_year / 2` a tick (E0 А7) through the ledger; a stock that
+//! reaches zero is a `BoundHit` like any other.
 //!
 //! Decisions are in canonical order (ascending `UnitId`), so the ordinal of any future draw
 //! is the same whatever the caller's traversal (plan §3).
@@ -122,9 +129,13 @@ impl World {
                 }
             }
         }
-        // Supply: per province, per owner, in canonical order of units — the first units
-        // are fed first, the overflow is unsupplied.
-        let mut used: BTreeMap<(ProvinceId, ActorId), i64> = BTreeMap::new();
+        // Supply: per province and owner, the shortfall is shared pro rata among the units
+        // standing there (owner's rule: not "lower ids eat first").
+        let mut standing: BTreeMap<(ProvinceId, ActorId), i64> = BTreeMap::new();
+        for id in &ids {
+            let u = &self.units[id];
+            *standing.entry((u.position, u.owner)).or_insert(0) += self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0);
+        }
         for id in &ids {
             let (owner, at) = {
                 let u = &self.units[id];
@@ -133,11 +144,13 @@ impl World {
             let soldiers = self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0);
             let supplied = if self.provinces[&at].owner == owner {
                 let cap = self.supply_capacity(at, params);
-                let taken = used.entry((at, owner)).or_insert(0);
-                let room = (cap - *taken).max(0);
-                let fed = soldiers.min(room);
-                *taken += fed;
-                fed
+                let total = standing[&(at, owner)];
+                if total <= cap {
+                    soldiers
+                } else {
+                    // Each unit keeps the same share of its men: soldiers × cap / total.
+                    soldiers * cap / total
+                }
             } else {
                 0
             };
