@@ -7,16 +7,17 @@
 
 use std::process::Command;
 
-use engine2::{testworld, to_save, World};
+use engine2::{testworld, to_save, Params, World};
 
 const TICKS: u32 = 300;
 const SEED: u64 = 0x5EED_0001;
 
 fn play() -> String {
     let mut w = World::from_facts(&testworld::five_states(), SEED).unwrap();
+    let params = Params::load().unwrap();
     let mut out = String::new();
     for _ in 0..TICKS {
-        let r = w.tick().unwrap();
+        let r = w.tick(&params).unwrap();
         out.push_str(&serde_json::to_string(&r).unwrap());
         out.push('\n');
     }

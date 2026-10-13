@@ -10,8 +10,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::event::{Event, Stamped};
 use crate::ids::{ActorId, ProvinceId};
 use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
+use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
 use crate::time::Tick;
 
@@ -62,13 +64,18 @@ pub struct World {
     /// draw is its count among the earlier draws of the tick with the same point and id,
     /// so the journal itself is the counter and nothing else needs saving.
     draws: Vec<RngDraw>,
+    /// Events of the tick being played; drained into the tick report.
+    events: Vec<Stamped>,
+    /// Next event sequence number; saved, so numbering continues across a load.
+    next_seq: u64,
 }
 
-/// What one tick did: every posting and every draw, nothing more (plan §5).
+/// What one tick did: every event, every posting and every draw, nothing more (plan §5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TickReport {
     pub tick: Tick,
+    pub events: Vec<Stamped>,
     pub postings: Vec<Posting>,
     pub draws: Vec<RngDraw>,
 }
@@ -114,7 +121,23 @@ impl World {
         }
         // The opening postings belong to no tick report; the world starts settled.
         ledger.drain_postings();
-        Ok(World { seed, start_year: facts.start_year, tick, actors, provinces, ledger, draws: Vec::new() })
+        Ok(World {
+            seed,
+            start_year: facts.start_year,
+            tick,
+            actors,
+            provinces,
+            ledger,
+            draws: Vec::new(),
+            events: Vec::new(),
+            next_seq: 0,
+        })
+    }
+
+    /// Append an event of the current tick.
+    pub fn emit(&mut self, event: Event) {
+        self.events.push(Stamped { seq: self.next_seq, tick: self.tick, event });
+        self.next_seq += 1;
     }
 
     /// A keyed draw for this world, journaled. Repeated draws of one point for one id in
@@ -127,26 +150,38 @@ impl World {
         value
     }
 
-    /// Play one tick. E1a: advance time, journal one decision draw per actor, and move each
-    /// province's population one thousandth of the way to its capacity through the ledger.
+    /// Draws for several ids of one point, **in canonical order** — ascending id, duplicates
+    /// collapsed — whatever order the caller holds them in. The ordinal `n` depends on the
+    /// order of draws within a `(point, id)` pair, so systems must not let the traversal
+    /// order of their code leak into the key (owner's rule after PR #277). Returns the
+    /// values keyed by id.
+    pub fn draw_each(&mut self, point: DrawPoint, ids: impl IntoIterator<Item = u32>) -> BTreeMap<u32, u64> {
+        let sorted: std::collections::BTreeSet<u32> = ids.into_iter().collect();
+        sorted.into_iter().map(|id| (id, self.draw(point, id))).collect()
+    }
+
+    /// Play one tick. E1: advance time, journal one decision draw per actor, move each
+    /// province's population toward its capacity through the ledger (the share per tick is
+    /// `params.population_pull_to_capacity_ppm`), and close the tick with `TickPlayed`.
     /// The flow is a stand-in that E2's population system replaces; it exists so the
     /// acceptance tests cover postings and the remainder carry, not an empty world.
-    pub fn tick(&mut self) -> Result<TickReport, WorldError> {
+    pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let before = self.ledger.snapshot();
-        let actor_ids: Vec<ActorId> = self.actors.keys().copied().collect();
-        for id in actor_ids {
-            let _ = self.draw(DrawPoint::Decision, id.0);
-        }
+        let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
+        let _ = self.draw_each(DrawPoint::Decision, actor_ids);
         let provinces: Vec<(ProvinceId, u64)> = self.provinces.iter().map(|(p, pr)| (*p, pr.capacity)).collect();
         for (p, capacity) in provinces {
             let account = Account::Population(p);
             let gap_people = capacity as i64 - self.ledger.stock(account).unwrap_or(0);
-            // One thousandth of the gap in people is `gap` thousandths of a person.
-            self.ledger.post(self.tick, account, Source::Growth, gap_people)?;
+            // gap people = gap·1000 milli; times ppm/1 000 000 = gap·ppm/1000 milli.
+            let milli = gap_people * params.population_pull_to_capacity_ppm / 1000;
+            self.ledger.post(self.tick, account, Source::Growth, milli)?;
         }
         self.ledger.check_tick(&before)?;
+        self.emit(Event::TickPlayed);
         let report = TickReport {
             tick: self.tick,
+            events: std::mem::take(&mut self.events),
             postings: self.ledger.drain_postings(),
             draws: std::mem::take(&mut self.draws),
         };
@@ -172,6 +207,10 @@ mod tests {
     use super::*;
     use crate::testworld;
 
+    fn params() -> Params {
+        Params::load().unwrap()
+    }
+
     #[test]
     fn dangling_owner_and_neighbour_are_refused() {
         let mut facts = testworld::five_states();
@@ -185,13 +224,33 @@ mod tests {
     #[test]
     fn tick_advances_time_and_reports_one_draw_per_actor() {
         let mut w = World::from_facts(&testworld::five_states(), 7).unwrap();
-        let r = w.tick().unwrap();
+        let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.len(), w.actors.len());
         assert_eq!(r.postings.len(), w.provinces.len());
         assert!(r.postings.iter().all(|p| p.source == Source::Growth));
+        assert_eq!(r.events.len(), 1);
+        assert!(matches!(r.events[0].event, Event::TickPlayed));
+        assert_eq!(r.events[0].seq, 0);
         assert_eq!(w.tick, Tick(1));
         assert_eq!(w.year(), 1477);
+        let r2 = w.tick(&params()).unwrap();
+        assert_eq!(r2.events[0].seq, 1, "sequence numbers continue across ticks");
+    }
+
+    #[test]
+    fn draw_each_is_canonical_whatever_the_callers_order() {
+        let mut a = World::from_facts(&testworld::five_states(), 11).unwrap();
+        let mut b = World::from_facts(&testworld::five_states(), 11).unwrap();
+        let va = a.draw_each(DrawPoint::Battle, [4, 1, 3, 1, 2]);
+        let vb = b.draw_each(DrawPoint::Battle, [2, 3, 1, 4]);
+        assert_eq!(va, vb);
+        assert_eq!(va.len(), 4);
+        // And a second round for the same ids gets the next ordinals, still canonically.
+        let va2 = a.draw_each(DrawPoint::Battle, [3, 4, 2, 1]);
+        let vb2 = b.draw_each(DrawPoint::Battle, [1, 2, 3, 4]);
+        assert_eq!(va2, vb2);
+        assert_ne!(va, va2);
     }
 
     #[test]
@@ -200,7 +259,7 @@ mod tests {
         let a = w.draw(DrawPoint::Battle, 3);
         let b = w.draw(DrawPoint::Battle, 3);
         assert_ne!(a, b);
-        let r = w.tick().unwrap();
+        let r = w.tick(&params()).unwrap();
         let ordinals: Vec<u32> = r.draws.iter().filter(|d| d.draw.point == DrawPoint::Battle).map(|d| d.draw.n).collect();
         assert_eq!(ordinals, vec![0, 1]);
     }
@@ -212,7 +271,7 @@ mod tests {
         let cap = w.provinces[&p].capacity as i64;
         let before = w.population(p);
         for _ in 0..10 {
-            w.tick().unwrap();
+            w.tick(&params()).unwrap();
         }
         let after = w.population(p);
         assert!(after > before && after <= cap, "{before} -> {after} <= {cap}");

@@ -11,3 +11,4 @@ serde_json = { version = "1.0.108", features = ["float_roundtrip"] }
 rand_chacha = "0.3"
 rand = "0.8"
 thiserror = "1.0.50"
+toml = "0.8"

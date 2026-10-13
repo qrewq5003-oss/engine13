@@ -11,6 +11,10 @@
 //!
 //! Invariant checked by [`Ledger::check_tick`] and by the tests: for every account,
 //! `Σ postings of the tick (in milli) == (stock_after − stock_before) * 1000 + (carry_after − carry_before)`.
+//!
+//! **Sign by kind of account (owner's rule, E1b).** People and soldiers never go below
+//! zero: a posting that would take them there is refused and nothing changes. Treasuries
+//! may be negative — that is debt.
 
 use std::collections::BTreeMap;
 
@@ -33,14 +37,38 @@ pub enum Account {
     HouseTreasury(HouseId),
 }
 
-/// Why a stock changed. Grows with the systems of E2; E1 needs only the opening entry and
-/// a test source.
+impl Account {
+    /// Whether the stock may be negative. Only money can: a debt is a negative treasury;
+    /// people and soldiers cannot be owed.
+    pub const fn may_be_negative(self) -> bool {
+        matches!(self, Account::Treasury(_) | Account::HouseTreasury(_))
+    }
+}
+
+/// Why a stock changed. The closed list of the engine's flows; systems of E2 use these,
+/// a new flow adds a variant here, not a bare number elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Source {
     /// The scenario's starting fact.
     Opening,
-    /// Natural growth of population.
+    /// Natural growth of population toward capacity.
     Growth,
+    Famine,
+    Plague,
+    MigrationIn,
+    MigrationOut,
+    Tax,
+    Upkeep,
+    Loot,
+    Recruit,
+    Disband,
+    Desertion,
+    BattleLoss,
+    Tribute,
+    Loan,
+    Interest,
+    /// A verb's own cost, e.g. a bribe.
+    Verb,
     /// Used by tests of the ledger itself.
     Test,
 }
@@ -107,6 +135,8 @@ pub enum LedgerError {
     AlreadyOpen(Account),
     #[error("account {account:?}: Σ postings {sum} ≠ stock delta {delta} (milli)")]
     Unbalanced { account: Account, sum: i64, delta: i64 },
+    #[error("account {account:?} cannot go below zero (would be {would_be})")]
+    Negative { account: Account, would_be: i64 },
 }
 
 impl Default for Ledger {
@@ -144,12 +174,17 @@ impl Ledger {
         self.balances.keys().copied()
     }
 
-    /// Post a signed change in thousandths. The only way a stock moves.
+    /// Post a signed change in thousandths. The only way a stock moves. A posting that would
+    /// take people or soldiers below zero is refused and leaves the account untouched.
     pub fn post(&mut self, tick: Tick, account: Account, source: Source, milli: i64) -> Result<(), LedgerError> {
         let b = self.balances.get_mut(&account).ok_or(LedgerError::NotOpen(account))?;
         let total = b.carry + milli;
         // Euclidean division keeps the carry in 0..1000 for negative totals too.
-        b.whole += total.div_euclid(1000);
+        let whole = b.whole + total.div_euclid(1000);
+        if whole < 0 && !account.may_be_negative() {
+            return Err(LedgerError::Negative { account, would_be: whole });
+        }
+        b.whole = whole;
         b.carry = total.rem_euclid(1000);
         self.postings.push(Posting { tick, account, source, milli });
         Ok(())
@@ -230,6 +265,25 @@ mod tests {
         // Tamper: a posting that never happened.
         l.postings.pop();
         assert!(matches!(l.check_tick(&before), Err(LedgerError::Unbalanced { .. })));
+    }
+
+    #[test]
+    fn people_cannot_go_negative_but_treasury_can() {
+        let mut l = Ledger::new();
+        l.open(Tick(0), P, 3).unwrap();
+        let before = l.snapshot();
+        assert_eq!(
+            l.post(Tick(1), P, Source::Famine, -3500),
+            Err(LedgerError::Negative { account: P, would_be: -1 })
+        );
+        assert_eq!(l.snapshot(), before, "a refused posting changes nothing");
+        assert_eq!(l.postings().len(), 1, "and is not journaled");
+        l.post(Tick(1), P, Source::Famine, -3000).unwrap();
+        assert_eq!(l.stock(P), Some(0));
+        let t = Account::Treasury(ActorId(0));
+        l.open(Tick(0), t, 10).unwrap();
+        l.post(Tick(1), t, Source::Upkeep, -25_000).unwrap();
+        assert_eq!(l.stock(t), Some(-15));
     }
 
     #[test]

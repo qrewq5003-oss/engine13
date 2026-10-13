@@ -1,0 +1,23 @@
+# engine2 constants — one table for every scenario (brief §0.2, §2; E0 §1 and §5).
+#
+# Every entry carries its kind (owner's rule, plan §1):
+#   kind = "a"  engine input with a historical source: `value` inside `band` (E0 §5), guarded;
+#   kind = "b"  observed bound the engine must *produce*: `band` only, measured by E2 and the
+#               sentinel, never read as an input;
+#   kind = "c"  model parameter without a source: `value` and the (b) row it is checked by.
+# Units are written out; the engine converts to per-tick and to thousandths itself.
+#
+# E1b: only what the stand-in flow of the empty world reads. Systems add their rows in E2,
+# each with its E0 §5 line.
+
+[population.pull_to_capacity]
+kind = "c"
+value = 0.001
+unit = "share of the gap to capacity, per tick"
+checked_by = "П7"
+
+[population.observed_growth_per_year]
+kind = "b"
+band = [-0.002, 0.005]
+unit = "share per year"
+e0 = "П7"
