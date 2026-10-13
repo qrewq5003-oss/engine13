@@ -53,6 +53,8 @@ pub struct Province {
     pub owner: ActorId,
     pub area_km2: u64,
     pub land: Land,
+    /// Touches the sea: a fact of geography (a port is an institution, later).
+    pub coastal: bool,
     /// People the land can carry: `area_km2 × density(land)` from `params.toml` (E0 П1).
     /// Derived, never authored (brief §0.1: an authored capacity tunes growth per province).
     pub capacity: u64,
@@ -71,6 +73,17 @@ pub struct Names {
     pub provinces: Vec<(String, String)>,
 }
 
+/// One province of the starting facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProvinceFact {
+    pub area_km2: u64,
+    pub land: Land,
+    pub coastal: bool,
+    pub population: u64,
+    pub owner: ActorId,
+    pub neighbours: Vec<ProvinceId>,
+}
+
 /// The starting facts the world is built from — the compiled scenario (`scenario.rs`).
 ///
 /// Only facts: counts in world units, geography, ownership. No rule numbers.
@@ -78,8 +91,8 @@ pub struct Names {
 pub struct Facts {
     pub scenario_id: String,
     pub start_year: i32,
-    /// `(area_km2, land, population, owner, neighbours)` per province, index = `ProvinceId`.
-    pub provinces: Vec<(u64, Land, u64, ActorId, Vec<ProvinceId>)>,
+    /// Index = `ProvinceId`.
+    pub provinces: Vec<ProvinceFact>,
     /// Starting treasury in kg of wheat-equivalent per actor, index = `ActorId`.
     pub treasuries: Vec<i64>,
 }
@@ -165,19 +178,22 @@ impl World {
         }
         let mut provinces: BTreeMap<ProvinceId, Province> = BTreeMap::new();
         let n = facts.provinces.len() as u32;
-        for (i, (area_km2, land, population, owner, neighbours)) in facts.provinces.iter().enumerate() {
+        for (i, f) in facts.provinces.iter().enumerate() {
             let id = ProvinceId(i as u32);
-            if !neighbours.windows(2).all(|w| w[0] < w[1]) {
+            if !f.neighbours.windows(2).all(|w| w[0] < w[1]) {
                 return Err(WorldError::NeighboursUnsorted(id));
             }
-            if let Some(bad) = neighbours.iter().find(|p| p.0 >= n) {
+            if let Some(bad) = f.neighbours.iter().find(|p| p.0 >= n) {
                 return Err(WorldError::UnknownNeighbour(id, *bad));
             }
-            let actor = actors.get_mut(owner).ok_or(WorldError::UnknownOwner(id, *owner))?;
+            let actor = actors.get_mut(&f.owner).ok_or(WorldError::UnknownOwner(id, f.owner))?;
             actor.provinces.push(id);
-            let capacity = params.capacity(*area_km2, *land);
-            provinces.insert(id, Province { owner: *owner, area_km2: *area_km2, land: *land, capacity, neighbours: neighbours.clone() });
-            ledger.open(tick, Account::Population(id), *population as i64)?;
+            let capacity = params.capacity(f.area_km2, f.land);
+            provinces.insert(
+                id,
+                Province { owner: f.owner, area_km2: f.area_km2, land: f.land, coastal: f.coastal, capacity, neighbours: f.neighbours.clone() },
+            );
+            ledger.open(tick, Account::Population(id), f.population as i64)?;
         }
         // The opening postings belong to no tick report; the world starts settled.
         ledger.drain_postings();
@@ -290,10 +306,10 @@ mod tests {
     #[test]
     fn dangling_owner_and_neighbour_are_refused() {
         let (mut facts, names) = testworld::five_states();
-        facts.provinces[0].3 = ActorId(99);
+        facts.provinces[0].owner = ActorId(99);
         assert!(matches!(World::from_facts(&facts, names.clone(), &params(), 1), Err(WorldError::UnknownOwner(..))));
         let (mut facts, names) = testworld::five_states();
-        facts.provinces[0].4 = vec![ProvinceId(999)];
+        facts.provinces[0].neighbours = vec![ProvinceId(999)];
         assert!(matches!(World::from_facts(&facts, names, &params(), 1), Err(WorldError::UnknownNeighbour(..))));
     }
 

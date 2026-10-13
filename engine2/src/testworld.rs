@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::ids::{ActorId, ProvinceId};
 use crate::params::Params;
 use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
-use crate::world::{Facts, Land, Names, World};
+use crate::world::{Facts, Land, Names, ProvinceFact, World};
 
 /// Five states, each a column of the 5×5 grid; all land arable; province `i` has an area
 /// of `250 + 25·i` km², which at the arable density of `params.toml` (40 people per km²,
@@ -38,7 +38,7 @@ pub fn five_states() -> (Facts, Names) {
             neighbours.sort();
             let area_km2 = 250 + 25 * u64::from(i);
             let capacity = 10_000 + 1_000 * u64::from(i);
-            provinces.push((area_km2, Land::Arable, capacity * 6 / 10, ActorId(x), neighbours));
+            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal: y == 0, population: capacity * 6 / 10, owner: ActorId(x), neighbours });
             province_names.push((format!("p{i:02}"), format!("Province {i}")));
         }
     }
@@ -63,17 +63,18 @@ pub fn five_states_scenario() -> ScenarioData {
         actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: *t });
     }
     let mut provinces = BTreeMap::new();
-    for (i, (area_km2, land, population, owner, neighbours)) in facts.provinces.iter().enumerate() {
+    for (i, f) in facts.provinces.iter().enumerate() {
         let (pid, name) = &names.provinces[i];
         provinces.insert(
             pid.clone(),
             ProvinceData {
                 name: name.clone(),
-                owner: names.actors[owner.index()].0.clone(),
-                area_km2: *area_km2,
-                land: *land,
-                population: *population,
-                neighbours: neighbours.iter().map(|n| names.provinces[n.index()].0.clone()).collect(),
+                owner: names.actors[f.owner.index()].0.clone(),
+                area_km2: f.area_km2,
+                land: f.land,
+                coastal: f.coastal,
+                population: f.population,
+                neighbours: f.neighbours.iter().map(|n| names.provinces[n.index()].0.clone()).collect(),
             },
         );
     }
@@ -97,7 +98,7 @@ mod tests {
 
     #[test]
     fn scenario_and_facts_builders_agree() {
-        let c = five_states_scenario().compile().unwrap();
+        let c = five_states_scenario().compile(&Params::load().unwrap()).unwrap();
         let (facts, names) = five_states();
         assert_eq!(c.facts, facts);
         assert_eq!(c.names, names);

@@ -6,7 +6,8 @@
 //! - every struct that derives `Deserialize` carries `deny_unknown_fields` (or is
 //!   `transparent`): a save with a field this build does not know is refused;
 //! - the display currency is read only where it is defined (`scenario.rs`, which moves it
-//!   into `Names`), in `view.rs`, and built in `testworld.rs` (test data) (plan §9 item 3);
+//!   into `Display`), in `view.rs`, and built in `testworld.rs` and `worldgen.rs` (scenario
+//!   data builders) (plan §9 item 3);
 //! - `params.toml` validates: every (a)/(b) inside its band, every (c) names its (b) row
 //!   (plan §9 item 4) — the loader's own validation, run over the shipped file.
 
@@ -88,7 +89,9 @@ fn display_currency_is_read_only_by_the_view() {
     let mut hits = Vec::new();
     for (path, text) in sources() {
         let file = path.file_name().unwrap().to_string_lossy().to_string();
-        if file == "scenario.rs" || file == "view.rs" || file == "testworld.rs" {
+        // scenario.rs defines it, view.rs reads it, testworld.rs and worldgen.rs *build*
+        // scenario data (the same role as a scenario file).
+        if file == "scenario.rs" || file == "view.rs" || file == "testworld.rs" || file == "worldgen.rs" {
             continue;
         }
         for (n, line) in code_lines(&text) {

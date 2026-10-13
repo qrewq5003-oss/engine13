@@ -22,3 +22,7 @@ sentinel = ["dep:sentinel"]
 [[test]]
 name = "sentinel_short_run"
 required-features = ["sentinel"]
+
+[[test]]
+name = "worldgen"
+required-features = ["sentinel"]

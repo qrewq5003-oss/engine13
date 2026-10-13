@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ActorId, ProvinceId};
+use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{Facts, Land, Names};
+use crate::world::{Facts, Land, Names, ProvinceFact};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -58,6 +59,8 @@ pub struct ProvinceData {
     pub owner: String,
     pub area_km2: u64,
     pub land: Land,
+    /// Touches the sea.
+    pub coastal: bool,
     pub population: u64,
     pub neighbours: Vec<String>,
 }
@@ -86,6 +89,8 @@ pub enum SchemaError {
     UnknownVerb(String),
     #[error("scenario has no actors or no provinces")]
     Empty,
+    #[error("province '{province}' starts with {population} people on land that carries {capacity}")]
+    OverCapacity { province: String, population: u64, capacity: u64 },
 }
 
 /// Everything a scenario compiles to.
@@ -103,8 +108,10 @@ impl ScenarioData {
 
     /// Compile into engine facts, the starting names and the presentation data. Ids are
     /// assigned in the sorted order of the string ids (`BTreeMap` order), so the same file
-    /// always compiles to the same numbers.
-    pub fn compile(&self) -> Result<Compiled, SchemaError> {
+    /// always compiles to the same numbers. A province that starts above the capacity the
+    /// engine derives for its land is a schema error (owner's review of PR #278): the
+    /// mismatch is caught when the scenario is written, not as famine on the first tick.
+    pub fn compile(&self, params: &Params) -> Result<Compiled, SchemaError> {
         if self.actors.is_empty() || self.provinces.is_empty() {
             return Err(SchemaError::Empty);
         }
@@ -126,7 +133,11 @@ impl ScenarioData {
             if neighbours.windows(2).any(|w| w[0] == w[1]) || neighbours.contains(&own) {
                 return Err(SchemaError::BadNeighbours(key.clone()));
             }
-            provinces.push((p.area_km2, p.land, p.population, owner, neighbours));
+            let capacity = params.capacity(p.area_km2, p.land);
+            if p.population > capacity {
+                return Err(SchemaError::OverCapacity { province: key.clone(), population: p.population, capacity });
+            }
+            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours });
         }
         let treasuries = self.actors.values().map(|a| a.treasury_kg).collect();
 
@@ -169,6 +180,7 @@ name = "P2"
 owner = "b"
 area_km2 = 100
 land = "Arable"
+coastal = true
 population = 50
 neighbours = ["p1"]
 [provinces.p1]
@@ -176,22 +188,28 @@ name = "P1"
 owner = "a"
 area_km2 = 100
 land = "Hills"
+coastal = false
 population = 50
 neighbours = ["p2"]
 [verbs]
 raise_tax = "Поднять налог"
 "#;
 
+    fn params() -> Params {
+        Params::load().unwrap()
+    }
+
     #[test]
     fn compiles_with_ids_in_sorted_order() {
         let s = ScenarioData::parse(OK).unwrap();
-        let c = s.compile().unwrap();
+        let c = s.compile(&params()).unwrap();
         assert_eq!(c.names.actors[0].0, "a");
         assert_eq!(c.names.actors[1].0, "b");
         assert_eq!(c.facts.treasuries, vec![20, 10]);
-        assert_eq!(c.facts.provinces[0].3, ActorId(0)); // p1 owned by a
-        assert_eq!(c.facts.provinces[1].3, ActorId(1)); // p2 owned by b
-        assert_eq!(c.facts.provinces[0].1, Land::Hills);
+        assert_eq!(c.facts.provinces[0].owner, ActorId(0)); // p1 owned by a
+        assert_eq!(c.facts.provinces[1].owner, ActorId(1)); // p2 owned by b
+        assert_eq!(c.facts.provinces[0].land, Land::Hills);
+        assert!(c.facts.provinces[1].coastal && !c.facts.provinces[0].coastal);
         assert_eq!(c.display.verbs, vec![(VerbId::RaiseTax, "Поднять налог".to_string())]);
         assert_eq!(c.facts.scenario_id, "t");
     }
@@ -213,10 +231,18 @@ raise_tax = "Поднять налог"
     #[test]
     fn dangling_references_are_errors() {
         let bad = OK.replacen("owner = \"b\"", "owner = \"zzz\"", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(), Err(SchemaError::UnknownOwner(..))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownOwner(..))));
         let bad = OK.replacen("neighbours = [\"p1\"]", "neighbours = [\"nowhere\"]", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(), Err(SchemaError::UnknownNeighbour(..))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownNeighbour(..))));
         let bad = OK.replacen("raise_tax", "invent_gunpowder", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(), Err(SchemaError::UnknownVerb(_))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownVerb(_))));
+    }
+
+    #[test]
+    fn a_province_above_its_capacity_is_a_schema_error_with_its_name() {
+        // p1: 100 km² of hills carries 1 200 people at the shipped density.
+        let bad = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Hills\"\ncoastal = false\npopulation = 5000", 1);
+        let err = ScenarioData::parse(&bad).unwrap().compile(&params()).unwrap_err();
+        assert_eq!(err, SchemaError::OverCapacity { province: "p1".into(), population: 5000, capacity: 1200 });
     }
 }
