@@ -4,7 +4,11 @@
 //! - no `default` or `skip` inside any `serde(...)` attribute in `engine2/src`: an
 //!   incompatible save bumps `SAVE_FORMAT`, nothing is filled in silently;
 //! - every struct that derives `Deserialize` carries `deny_unknown_fields` (or is
-//!   `transparent`): a save with a field this build does not know is refused.
+//!   `transparent`): a save with a field this build does not know is refused;
+//! - the display currency is read only where it is defined (`scenario.rs`, which moves it
+//!   into `Names`), in `view.rs`, and built in `testworld.rs` (test data) (plan §9 item 3);
+//! - `params.toml` validates: every (a)/(b) inside its band, every (c) names its (b) row
+//!   (plan §9 item 4) — the loader's own validation, run over the shipped file.
 
 use std::path::{Path, PathBuf};
 
@@ -77,6 +81,30 @@ fn no_serde_defaults_or_skips_in_engine_sources() {
         }
     }
     assert!(hits.is_empty(), "serde default/skip in a saved type:\n{}", hits.join("\n"));
+}
+
+#[test]
+fn display_currency_is_read_only_by_the_view() {
+    let mut hits = Vec::new();
+    for (path, text) in sources() {
+        let file = path.file_name().unwrap().to_string_lossy().to_string();
+        if file == "scenario.rs" || file == "view.rs" || file == "testworld.rs" {
+            continue;
+        }
+        for (n, line) in code_lines(&text) {
+            if line.contains("display_currency") || line.contains(".currency") || line.contains("DisplayCurrency") {
+                hits.push(format!("{}:{}: {}", path.display(), n, line.trim()));
+            }
+        }
+    }
+    assert!(hits.is_empty(), "display_currency read outside the view:\n{}", hits.join("\n"));
+}
+
+#[test]
+fn params_in_range() {
+    // The loader refuses an out-of-band (a), a (b) with a value, a (c) without its (b) row;
+    // the shipped file must pass it.
+    engine2::Params::load().expect("engine2/params.toml");
 }
 
 #[test]

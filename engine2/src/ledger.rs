@@ -9,8 +9,17 @@
 //! 400 people (0.2 people a tick) therefore accumulates instead of rounding to zero forever.
 //! The carry is deterministic and needs no randomness.
 //!
-//! Invariant checked by [`Ledger::check_tick`] and by the tests: for every account,
-//! `Σ postings of the tick (in milli) == (stock_after − stock_before) * 1000 + (carry_after − carry_before)`.
+//! Invariant checked by [`Ledger::check`] and by the tests: for every account, over the
+//! period since the last [`Ledger::drain_postings`],
+//! `Σ postings (in milli) == (stock_after − stock_before) * 1000 + (carry_after − carry_before)`.
+//! The ledger keeps the period's opening balances itself, so a posting made between two
+//! ticks (a verb's cost, a famine the test injects) is covered like one made inside a tick.
+//!
+//! **Sign by kind of account (owner's rule, E1b).** People and soldiers never go below
+//! zero: a posting that would take them there is **clamped** — the stock stops at zero,
+//! the amount that actually left is what gets journaled, and [`Posted::clamped`] tells the
+//! caller so the world can emit a `BoundHit` (brief §2: a bound is a sentinel flag, not a
+//! crash). Treasuries may be negative — that is debt.
 
 use std::collections::BTreeMap;
 
@@ -33,14 +42,38 @@ pub enum Account {
     HouseTreasury(HouseId),
 }
 
-/// Why a stock changed. Grows with the systems of E2; E1 needs only the opening entry and
-/// a test source.
+impl Account {
+    /// Whether the stock may be negative. Only money can: a debt is a negative treasury;
+    /// people and soldiers cannot be owed.
+    pub const fn may_be_negative(self) -> bool {
+        matches!(self, Account::Treasury(_) | Account::HouseTreasury(_))
+    }
+}
+
+/// Why a stock changed. The closed list of the engine's flows; systems of E2 use these,
+/// a new flow adds a variant here, not a bare number elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Source {
     /// The scenario's starting fact.
     Opening,
-    /// Natural growth of population.
+    /// Natural growth of population toward capacity.
     Growth,
+    Famine,
+    Plague,
+    MigrationIn,
+    MigrationOut,
+    Tax,
+    Upkeep,
+    Loot,
+    Recruit,
+    Disband,
+    Desertion,
+    BattleLoss,
+    Tribute,
+    Loan,
+    Interest,
+    /// A verb's own cost, e.g. a bribe.
+    Verb,
     /// Used by tests of the ledger itself.
     Test,
 }
@@ -73,7 +106,10 @@ pub struct Ledger {
     /// enum. Order is the `BTreeMap` order, so the bytes are deterministic.
     #[serde(with = "pairs")]
     balances: BTreeMap<Account, Balance>,
-    /// Postings of the tick being played; drained into the tick report.
+    /// Balances when the current period began (the last drain), for the invariant.
+    #[serde(with = "pairs")]
+    at_period_start: BTreeMap<Account, Balance>,
+    /// Postings of the period being played; drained into the tick report.
     postings: Vec<Posting>,
 }
 
@@ -109,6 +145,14 @@ pub enum LedgerError {
     Unbalanced { account: Account, sum: i64, delta: i64 },
 }
 
+/// What a posting did: the thousandths actually applied (equal to the request unless the
+/// stock was clamped at zero) and whether it was clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Posted {
+    pub applied_milli: i64,
+    pub clamped: bool,
+}
+
 impl Default for Ledger {
     fn default() -> Self {
         Self::new()
@@ -117,7 +161,7 @@ impl Default for Ledger {
 
 impl Ledger {
     pub fn new() -> Self {
-        Ledger { balances: BTreeMap::new(), postings: Vec::new() }
+        Ledger { balances: BTreeMap::new(), at_period_start: BTreeMap::new(), postings: Vec::new() }
     }
 
     /// Open an account with its starting stock, journaled as [`Source::Opening`].
@@ -126,7 +170,8 @@ impl Ledger {
             return Err(LedgerError::AlreadyOpen(account));
         }
         self.balances.insert(account, Balance { whole: 0, carry: 0 });
-        self.post(tick, account, Source::Opening, whole * 1000)
+        self.at_period_start.insert(account, Balance { whole: 0, carry: 0 });
+        self.post(tick, account, Source::Opening, whole * 1000).map(|_| ())
     }
 
     /// The whole stock of an account, `None` if it is not open.
@@ -144,15 +189,27 @@ impl Ledger {
         self.balances.keys().copied()
     }
 
-    /// Post a signed change in thousandths. The only way a stock moves.
-    pub fn post(&mut self, tick: Tick, account: Account, source: Source, milli: i64) -> Result<(), LedgerError> {
+    /// Post a signed change in thousandths. The only way a stock moves. A posting that would
+    /// take people or soldiers below zero is clamped: the stock and its carry go to zero,
+    /// the journaled amount is what actually left, and the result says `clamped`.
+    pub fn post(&mut self, tick: Tick, account: Account, source: Source, milli: i64) -> Result<Posted, LedgerError> {
         let b = self.balances.get_mut(&account).ok_or(LedgerError::NotOpen(account))?;
         let total = b.carry + milli;
         // Euclidean division keeps the carry in 0..1000 for negative totals too.
-        b.whole += total.div_euclid(1000);
-        b.carry = total.rem_euclid(1000);
-        self.postings.push(Posting { tick, account, source, milli });
-        Ok(())
+        let whole = b.whole + total.div_euclid(1000);
+        let posted = if whole < 0 && !account.may_be_negative() {
+            // Everything there was leaves; nothing more can.
+            let applied = -(b.whole * 1000 + b.carry);
+            b.whole = 0;
+            b.carry = 0;
+            Posted { applied_milli: applied, clamped: true }
+        } else {
+            b.whole = whole;
+            b.carry = total.rem_euclid(1000);
+            Posted { applied_milli: milli, clamped: false }
+        };
+        self.postings.push(Posting { tick, account, source, milli: posted.applied_milli });
+        Ok(posted)
     }
 
     /// Postings of the current tick, in posting order.
@@ -160,25 +217,22 @@ impl Ledger {
         &self.postings
     }
 
-    /// Hand the tick's postings over (to the tick report) and start the next tick empty.
+    /// Hand the period's postings over (to the tick report) and start the next period
+    /// from the current balances.
     pub fn drain_postings(&mut self) -> Vec<Posting> {
+        self.at_period_start = self.balances.clone();
         std::mem::take(&mut self.postings)
     }
 
-    /// A snapshot of `(whole, carry)` per account, to check a tick against.
-    pub fn snapshot(&self) -> BTreeMap<Account, (i64, i64)> {
-        self.balances.iter().map(|(a, b)| (*a, (b.whole, b.carry))).collect()
-    }
-
-    /// The ledger invariant for the postings since `before` was taken.
-    pub fn check_tick(&self, before: &BTreeMap<Account, (i64, i64)>) -> Result<(), LedgerError> {
+    /// The ledger invariant for the period since the last drain.
+    pub fn check(&self) -> Result<(), LedgerError> {
         let mut sums: BTreeMap<Account, i64> = BTreeMap::new();
         for p in &self.postings {
             *sums.entry(p.account).or_insert(0) += p.milli;
         }
         for (account, b) in &self.balances {
-            let (w0, c0) = before.get(account).copied().unwrap_or((0, 0));
-            let delta = (b.whole - w0) * 1000 + (b.carry - c0);
+            let b0 = self.at_period_start.get(account).copied().unwrap_or(Balance { whole: 0, carry: 0 });
+            let delta = (b.whole - b0.whole) * 1000 + (b.carry - b0.carry);
             let sum = sums.get(account).copied().unwrap_or(0);
             if sum != delta {
                 return Err(LedgerError::Unbalanced { account: *account, sum, delta });
@@ -222,14 +276,35 @@ mod tests {
     fn invariant_holds_and_catches_tampering() {
         let mut l = Ledger::new();
         l.open(Tick(0), P, 100).unwrap();
+        l.check().unwrap();
         l.drain_postings();
-        let before = l.snapshot();
         l.post(Tick(1), P, Source::Test, 2345).unwrap();
         l.post(Tick(1), P, Source::Test, -45).unwrap();
-        l.check_tick(&before).unwrap();
+        l.check().unwrap();
         // Tamper: a posting that never happened.
         l.postings.pop();
-        assert!(matches!(l.check_tick(&before), Err(LedgerError::Unbalanced { .. })));
+        assert!(matches!(l.check(), Err(LedgerError::Unbalanced { .. })));
+    }
+
+    #[test]
+    fn people_are_clamped_at_zero_but_treasury_can_go_negative() {
+        let mut l = Ledger::new();
+        l.open(Tick(0), P, 3).unwrap();
+        l.post(Tick(0), P, Source::Test, 250).unwrap(); // 3.25 people
+        l.drain_postings();
+        let posted = l.post(Tick(1), P, Source::Famine, -3500).unwrap();
+        assert_eq!(posted, Posted { applied_milli: -3250, clamped: true });
+        assert_eq!(l.stock(P), Some(0));
+        assert_eq!(l.carry(P), Some(0));
+        assert_eq!(l.postings()[0].milli, -3250, "the journal holds what actually left");
+        l.check().unwrap();
+        let exact = l.post(Tick(1), P, Source::Famine, 0).unwrap();
+        assert!(!exact.clamped);
+        let t = Account::Treasury(ActorId(0));
+        l.open(Tick(0), t, 10).unwrap();
+        let debt = l.post(Tick(1), t, Source::Upkeep, -25_000).unwrap();
+        assert_eq!(debt, Posted { applied_milli: -25_000, clamped: false });
+        assert_eq!(l.stock(t), Some(-15));
     }
 
     #[test]

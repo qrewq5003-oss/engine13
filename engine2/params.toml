@@ -1,0 +1,53 @@
+# engine2 constants — one table for every scenario (brief §0.2, §2; E0 §1 and §5).
+#
+# Every entry carries its kind (owner's rule, plan §1):
+#   kind = "a"  engine input with a historical source: `value` inside `band` (E0 §5) and
+#               `e0` naming the E0 §5 row the band comes from — without a source no entry;
+#   kind = "b"  observed bound the engine must *produce*: `band` and `e0` only, measured by
+#               E2 and the sentinel, never read as an input;
+#   kind = "c"  model parameter without a source: `value` and `checked_by` naming the `e0`
+#               of a (b) row in this file.
+# Units are written out; the engine converts to per-tick and to thousandths itself.
+#
+# E1: only what the empty world reads. Systems add their rows in E2, each with its E0 §5 line.
+
+# E0 П1 — land capacity, people per km² (Scheidel 2007 via Frier; Russell; Khazanov).
+[capacity.arable]
+kind = "a"
+value = 40.0
+band = [26.0, 42.0]
+unit = "people per km²"
+e0 = "П1"
+
+[capacity.hills]
+kind = "a"
+value = 12.0
+band = [8.0, 19.0]
+unit = "people per km²"
+e0 = "П1"
+
+[capacity.steppe]
+kind = "a"
+value = 1.0
+band = [0.5, 2.0]
+unit = "people per km²"
+e0 = "П1"
+
+[capacity.desert]
+kind = "a"
+value = 0.5
+band = [0.1, 1.0]
+unit = "people per km²"
+e0 = "П1"
+
+[population.pull_to_capacity]
+kind = "c"
+value = 0.001
+unit = "share of the gap to capacity, per tick"
+checked_by = "П7"
+
+[population.observed_growth_per_year]
+kind = "b"
+band = [-0.002, 0.005]
+unit = "share per year"
+e0 = "П7"
