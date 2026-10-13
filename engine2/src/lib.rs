@@ -6,6 +6,8 @@
 //! Step E1b: the typed event stream, the `Simulation` contract, the scenario schema (facts
 //! only, `deny_unknown_fields`), the constants file with kinds, the presentation model.
 //! Step E1c: `Observed` for the sentinel crate (`observe.rs`), the short run in CI.
+//! E2 step 2: the province graph with land and sea edges, units that move and are supplied
+//! on it (`movement.rs`).
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -21,6 +23,7 @@
 pub mod event;
 pub mod ids;
 pub mod ledger;
+pub mod movement;
 #[cfg(feature = "sentinel")]
 pub mod observe;
 pub mod params;
@@ -46,4 +49,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{Facts, Land, Names, ProvinceFact, TickReport, World};
+pub use world::{ActorFact, Facts, Land, Names, ProvinceFact, TickReport, Unit, World};

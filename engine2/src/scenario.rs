@@ -6,6 +6,13 @@
 //! `params.toml` (E0 П1) — an authored capacity would tune growth per province, which is
 //! the per-scenario fitting of brief §0.1.
 //!
+//! Geography is two graphs of facts: `neighbours` (land) and `sea_neighbours` (which coasts
+//! face each other across the water). A sea link is what makes an island reachable; the
+//! `coastal` mark alone is not a link (plan §14). Both are checked symmetric.
+//!
+//! A polity gives its capital and its starting army in soldiers (E0 А11); the army starts as
+//! one unit at the capital.
+//!
 //! The engine receives the compiled [`Facts`] and the starting [`Names`], which then live in
 //! the world (an heir born in the game is named there). What is presentation only — the
 //! verbs' display names and the display currency — stays in [`Display`], and only `view.rs`
@@ -18,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{ActorId, ProvinceId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{Facts, Land, Names, ProvinceFact};
+use crate::world::{ActorFact, Facts, Land, Names, ProvinceFact};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -50,6 +57,10 @@ pub struct ActorData {
     pub name: String,
     /// Starting treasury in kilograms of wheat-equivalent.
     pub treasury_kg: i64,
+    /// The province id of the capital; must be one of the actor's own.
+    pub capital: String,
+    /// Starting army in soldiers, one unit at the capital.
+    pub soldiers: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -62,7 +73,10 @@ pub struct ProvinceData {
     /// Touches the sea.
     pub coastal: bool,
     pub population: u64,
+    /// Land neighbours.
     pub neighbours: Vec<String>,
+    /// Coasts faced across the water; only on coastal provinces.
+    pub sea_neighbours: Vec<String>,
 }
 
 /// Presentation data that is not part of the world: verbs' display names and the money.
@@ -85,6 +99,12 @@ pub enum SchemaError {
     UnknownNeighbour(String, String),
     #[error("province '{0}' lists itself or a neighbour twice")]
     BadNeighbours(String),
+    #[error("province '{0}' and '{1}' disagree on being neighbours")]
+    Asymmetric(String, String),
+    #[error("province '{0}' has sea neighbours but is not coastal")]
+    SeaWithoutCoast(String),
+    #[error("actor '{0}' names capital '{1}', which is not a province it owns")]
+    BadCapital(String, String),
     #[error("unknown verb '{0}'")]
     UnknownVerb(String),
     #[error("scenario has no actors or no provinces")]
@@ -120,26 +140,61 @@ impl ScenarioData {
         let province_index: BTreeMap<&str, ProvinceId> =
             self.provinces.keys().enumerate().map(|(i, k)| (k.as_str(), ProvinceId(i as u32))).collect();
 
+        let resolve = |key: &str, list: &[String]| -> Result<Vec<ProvinceId>, SchemaError> {
+            let own = province_index[key];
+            let mut out = Vec::with_capacity(list.len());
+            for n in list {
+                let id = *province_index.get(n.as_str()).ok_or_else(|| SchemaError::UnknownNeighbour(key.to_string(), n.clone()))?;
+                out.push(id);
+            }
+            out.sort();
+            if out.windows(2).any(|w| w[0] == w[1]) || out.contains(&own) {
+                return Err(SchemaError::BadNeighbours(key.to_string()));
+            }
+            Ok(out)
+        };
+
+        // First every reference must exist (so the error names the dangling one), then the
+        // graphs must be symmetric.
+        let mut resolved: BTreeMap<&str, (Vec<ProvinceId>, Vec<ProvinceId>)> = BTreeMap::new();
+        for (key, p) in &self.provinces {
+            resolved.insert(key, (resolve(key, &p.neighbours)?, resolve(key, &p.sea_neighbours)?));
+        }
+        for (key, p) in &self.provinces {
+            for n in p.neighbours.iter() {
+                if !self.provinces[n].neighbours.contains(key) {
+                    return Err(SchemaError::Asymmetric(key.clone(), n.clone()));
+                }
+            }
+            for n in p.sea_neighbours.iter() {
+                if !self.provinces[n].sea_neighbours.contains(key) {
+                    return Err(SchemaError::Asymmetric(key.clone(), n.clone()));
+                }
+            }
+        }
         let mut provinces = Vec::with_capacity(self.provinces.len());
         for (key, p) in &self.provinces {
             let owner = *actor_index.get(p.owner.as_str()).ok_or_else(|| SchemaError::UnknownOwner(key.clone(), p.owner.clone()))?;
-            let mut neighbours = Vec::with_capacity(p.neighbours.len());
-            for n in &p.neighbours {
-                let id = *province_index.get(n.as_str()).ok_or_else(|| SchemaError::UnknownNeighbour(key.clone(), n.clone()))?;
-                neighbours.push(id);
-            }
-            neighbours.sort();
-            let own = province_index[key.as_str()];
-            if neighbours.windows(2).any(|w| w[0] == w[1]) || neighbours.contains(&own) {
-                return Err(SchemaError::BadNeighbours(key.clone()));
+            let (neighbours, sea_neighbours) = resolved.remove(key.as_str()).expect("resolved above");
+            if !sea_neighbours.is_empty() && !p.coastal {
+                return Err(SchemaError::SeaWithoutCoast(key.clone()));
             }
             let capacity = params.capacity(p.area_km2, p.land);
             if p.population > capacity {
                 return Err(SchemaError::OverCapacity { province: key.clone(), population: p.population, capacity });
             }
-            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours });
+            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours });
         }
-        let treasuries = self.actors.values().map(|a| a.treasury_kg).collect();
+
+        let mut actors = Vec::with_capacity(self.actors.len());
+        for (key, a) in &self.actors {
+            let capital = province_index.get(a.capital.as_str()).copied();
+            let owned = capital.is_some_and(|_| self.provinces[&a.capital].owner == *key);
+            let Some(capital) = capital.filter(|_| owned) else {
+                return Err(SchemaError::BadCapital(key.clone(), a.capital.clone()));
+            };
+            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers });
+        }
 
         let mut verbs = Vec::new();
         for (key, name) in &self.verbs {
@@ -149,7 +204,7 @@ impl ScenarioData {
         verbs.sort_by_key(|(id, _)| *id);
 
         Ok(Compiled {
-            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, provinces, treasuries },
+            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, provinces, actors },
             names: Names {
                 actors: self.actors.iter().map(|(k, a)| (k.clone(), a.name.clone())).collect(),
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
@@ -172,9 +227,13 @@ kg_per_unit = 100.0
 [actors.b]
 name = "B"
 treasury_kg = 10
+capital = "p2"
+soldiers = 20
 [actors.a]
 name = "A"
 treasury_kg = 20
+capital = "p1"
+soldiers = 0
 [provinces.p2]
 name = "P2"
 owner = "b"
@@ -183,6 +242,7 @@ land = "Arable"
 coastal = true
 population = 50
 neighbours = ["p1"]
+sea_neighbours = ["p3"]
 [provinces.p1]
 name = "P1"
 owner = "a"
@@ -191,6 +251,16 @@ land = "Hills"
 coastal = false
 population = 50
 neighbours = ["p2"]
+sea_neighbours = []
+[provinces.p3]
+name = "P3"
+owner = "a"
+area_km2 = 100
+land = "Arable"
+coastal = true
+population = 50
+neighbours = []
+sea_neighbours = ["p2"]
 [verbs]
 raise_tax = "Поднять налог"
 "#;
@@ -205,10 +275,13 @@ raise_tax = "Поднять налог"
         let c = s.compile(&params()).unwrap();
         assert_eq!(c.names.actors[0].0, "a");
         assert_eq!(c.names.actors[1].0, "b");
-        assert_eq!(c.facts.treasuries, vec![20, 10]);
+        assert_eq!(c.facts.actors[0].treasury_kg, 20);
+        assert_eq!(c.facts.actors[1].soldiers, 20);
+        assert_eq!(c.facts.actors[1].capital, ProvinceId(1)); // p2
         assert_eq!(c.facts.provinces[0].owner, ActorId(0)); // p1 owned by a
         assert_eq!(c.facts.provinces[1].owner, ActorId(1)); // p2 owned by b
         assert_eq!(c.facts.provinces[0].land, Land::Hills);
+        assert_eq!(c.facts.provinces[1].sea_neighbours, vec![ProvinceId(2)]);
         assert!(c.facts.provinces[1].coastal && !c.facts.provinces[0].coastal);
         assert_eq!(c.display.verbs, vec![(VerbId::RaiseTax, "Поднять налог".to_string())]);
         assert_eq!(c.facts.scenario_id, "t");
@@ -220,22 +293,36 @@ raise_tax = "Поднять налог"
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
         let bad = OK.replacen("start_year = 1477", "start_year = 1477\nconflict_probability = 0.3", 1);
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
-        // Capacity is derived by the engine; an authored one is refused.
-        let bad = OK.replacen("area_km2 = 100\nland = \"Arable\"", "area_km2 = 100\nland = \"Arable\"\ncapacity = 9000", 1);
+        let bad = OK.replacen("coastal = true\npopulation = 50\nneighbours = [\"p1\"]", "coastal = true\ncapacity = 9000\npopulation = 50\nneighbours = [\"p1\"]", 1);
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
-        // Land is a closed list.
         let bad = OK.replacen("land = \"Hills\"", "land = \"Swamp\"", 1);
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
     }
 
     #[test]
     fn dangling_references_are_errors() {
+        let p = params();
         let bad = OK.replacen("owner = \"b\"", "owner = \"zzz\"", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownOwner(..))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownOwner(..))));
         let bad = OK.replacen("neighbours = [\"p1\"]", "neighbours = [\"nowhere\"]", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownNeighbour(..))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownNeighbour(..))));
         let bad = OK.replacen("raise_tax", "invent_gunpowder", 1);
-        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownVerb(_))));
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownVerb(_))));
+        let bad = OK.replacen("capital = \"p2\"", "capital = \"p1\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::BadCapital(..))));
+    }
+
+    #[test]
+    fn graphs_must_be_symmetric_and_sea_links_need_a_coast() {
+        let p = params();
+        // p2 says p1 is a land neighbour; make p2 forget p1 while p1 still names p2.
+        let bad = OK.replacen("neighbours = [\"p1\"]\nsea_neighbours = [\"p3\"]", "neighbours = []\nsea_neighbours = [\"p3\"]", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::Asymmetric(..))));
+        // p1 is inland; give it a sea link (and the reverse, so symmetry is not the error).
+        let bad = OK
+            .replacen("coastal = false\npopulation = 50\nneighbours = [\"p2\"]\nsea_neighbours = []", "coastal = false\npopulation = 50\nneighbours = [\"p2\"]\nsea_neighbours = [\"p3\"]", 1)
+            .replacen("neighbours = []\nsea_neighbours = [\"p2\"]", "neighbours = []\nsea_neighbours = [\"p1\", \"p2\"]", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::SeaWithoutCoast(_))));
     }
 
     #[test]

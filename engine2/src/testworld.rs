@@ -9,12 +9,15 @@ use std::collections::BTreeMap;
 use crate::ids::{ActorId, ProvinceId};
 use crate::params::Params;
 use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
-use crate::world::{Facts, Land, Names, ProvinceFact, World};
+use crate::world::{ActorFact, Facts, Land, Names, ProvinceFact, World};
 
 /// Five states, each a column of the 5×5 grid; all land arable; province `i` has an area
 /// of `250 + 25·i` km², which at the arable density of `params.toml` (40 people per km²,
 /// E0 П1) carries `10_000 + 1_000·i` people; it starts at 60 % of that; treasuries
-/// 100 000 kg each. Returns the facts and their names.
+/// 100 000 kg each. The top row is the coast, and each coastal province faces the coasts
+/// two columns away across a bay (a sea link no land link duplicates). Each state's capital
+/// is its top province, with 600 soldiers (≈ 1 % of its people, E0 А11). Returns the facts
+/// and their names.
 pub fn five_states() -> (Facts, Names) {
     const SIDE: u32 = 5;
     let mut provinces = Vec::new();
@@ -36,13 +39,24 @@ pub fn five_states() -> (Facts, Names) {
                 neighbours.push(ProvinceId(i + SIDE));
             }
             neighbours.sort();
+            let coastal = y == 0;
+            let mut sea_neighbours = Vec::new();
+            if coastal {
+                if x >= 2 {
+                    sea_neighbours.push(ProvinceId(i - 2));
+                }
+                if x + 2 < SIDE {
+                    sea_neighbours.push(ProvinceId(i + 2));
+                }
+            }
             let area_km2 = 250 + 25 * u64::from(i);
             let capacity = 10_000 + 1_000 * u64::from(i);
-            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal: y == 0, population: capacity * 6 / 10, owner: ActorId(x), neighbours });
+            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours });
             province_names.push((format!("p{i:02}"), format!("Province {i}")));
         }
     }
-    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, provinces, treasuries: vec![100_000; SIDE as usize] };
+    let actors = (0..SIDE).map(|a| ActorFact { treasury_kg: 100_000, capital: ProvinceId(a), soldiers: 600 }).collect();
+    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, provinces, actors };
     let names = Names { actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(), provinces: province_names };
     (facts, names)
 }
@@ -57,10 +71,11 @@ pub fn world(seed: u64) -> World {
 /// `p00..p24` sort in the same order the facts above use, so both builders agree.
 pub fn five_states_scenario() -> ScenarioData {
     let (facts, names) = five_states();
+    let pname = |p: &ProvinceId| names.provinces[p.index()].0.clone();
     let mut actors = BTreeMap::new();
-    for (i, t) in facts.treasuries.iter().enumerate() {
+    for (i, a) in facts.actors.iter().enumerate() {
         let (sid, name) = &names.actors[i];
-        actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: *t });
+        actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: a.treasury_kg, capital: pname(&a.capital), soldiers: a.soldiers });
     }
     let mut provinces = BTreeMap::new();
     for (i, f) in facts.provinces.iter().enumerate() {
@@ -74,7 +89,8 @@ pub fn five_states_scenario() -> ScenarioData {
                 land: f.land,
                 coastal: f.coastal,
                 population: f.population,
-                neighbours: f.neighbours.iter().map(|n| names.provinces[n.index()].0.clone()).collect(),
+                neighbours: f.neighbours.iter().map(pname).collect(),
+                sea_neighbours: f.sea_neighbours.iter().map(pname).collect(),
             },
         );
     }
@@ -112,7 +128,6 @@ mod tests {
         assert_eq!(w.actors.len(), 5);
         let owned: usize = w.actors.values().map(|a| a.provinces.len()).sum();
         assert_eq!(owned, 25);
-        // Reachability from province 0 over the neighbour lists.
         let mut seen = [false; 25];
         let mut stack = vec![ProvinceId(0)];
         while let Some(p) = stack.pop() {
@@ -122,5 +137,12 @@ mod tests {
             stack.extend(w.provinces[&p].neighbours.iter().copied());
         }
         assert!(seen.iter().all(|s| *s));
+        // The sea links are symmetric and only on the coast.
+        for (p, pr) in &w.provinces {
+            for s in &pr.sea_neighbours {
+                assert!(pr.coastal && w.provinces[s].coastal);
+                assert!(w.provinces[s].sea_neighbours.contains(p));
+            }
+        }
     }
 }

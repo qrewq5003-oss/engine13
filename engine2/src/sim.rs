@@ -59,6 +59,12 @@ impl Game {
         &self.world
     }
 
+    /// Mutable access for orders (movement) until the verbs and agents of E3 give orders
+    /// through the contract.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     pub fn display(&self) -> &Display {
         &self.display
     }

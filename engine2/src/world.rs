@@ -1,12 +1,12 @@
-//! The world state and the tick (plan §4, §5 — the empty world of E1).
+//! The world state and the tick (plan §4, §5, §14).
 //!
 //! Everything is in ordered collections and derives `Serialize`/`Deserialize`; the save
-//! format is this struct (see `save.rs`). Systems arrive in E2 and fill [`World::tick`];
-//! until then the tick carries one **stand-in** flow — population moving toward capacity —
-//! so that the acceptance tests exercise the ledger, the remainder carry and a save taken
-//! in the middle of an accumulated remainder (owner's review of PR #277).
+//! format is this struct (see `save.rs`). Systems fill [`World::tick`] one by one (brief §8);
+//! E2 step 2 brought the province graph with land and sea edges and the units on it
+//! (`movement.rs`). The population flow is still the E1 stand-in (toward capacity) until
+//! the population system arrives.
 //!
-//! Three contract decisions of the owner's review of PR #278:
+//! Contract decisions of the owner's review of PR #278:
 //! - a stock that would cross zero is **clamped** at zero, the actual amount is posted, a
 //!   `BoundHit` event is emitted and the tick goes on (brief §2: a bound is a sentinel flag,
 //!   not a crash) — [`World::post`] is the one write path the systems use;
@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Event, Stamped};
-use crate::ids::{ActorId, ProvinceId};
+use crate::ids::{ActorId, ProvinceId, UnitId};
 use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
 use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
@@ -35,7 +35,7 @@ pub enum Land {
     Desert,
 }
 
-/// A polity as the engine sees it: which provinces it owns and a legitimacy rating.
+/// A polity as the engine sees it: its provinces, its capital and a legitimacy rating.
 ///
 /// `legitimacy` is the one `f64` of E1; it exists so that save/load exercises the float
 /// round trip the old engine needed `float_roundtrip` for (B31).
@@ -43,10 +43,12 @@ pub enum Land {
 #[serde(deny_unknown_fields)]
 pub struct Actor {
     pub provinces: Vec<ProvinceId>,
+    pub capital: ProvinceId,
     pub legitimacy: f64,
 }
 
-/// A province as the engine sees it: owner, land and the capacity the engine derived.
+/// A province as the engine sees it: owner, land, the capacity the engine derived, and its
+/// edges — land neighbours and sea neighbours, both facts of geography.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Province {
@@ -58,8 +60,23 @@ pub struct Province {
     /// People the land can carry: `area_km2 × density(land)` from `params.toml` (E0 П1).
     /// Derived, never authored (brief §0.1: an authored capacity tunes growth per province).
     pub capacity: u64,
-    /// Neighbouring provinces, sorted, no duplicates.
+    /// Land neighbours, sorted, no duplicates.
     pub neighbours: Vec<ProvinceId>,
+    /// Coasts this coast faces across the water, sorted, no duplicates; only on coastal
+    /// provinces. The link that makes an island or a colony reachable.
+    pub sea_neighbours: Vec<ProvinceId>,
+}
+
+/// An army on the graph: owner, position, quality, and where it is ordered to go. Its
+/// soldiers are the ledger's `Account::Soldiers(id)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unit {
+    pub owner: ActorId,
+    pub position: ProvinceId,
+    /// Quality rating, 0..100; dynamics come with the army system.
+    pub quality: f64,
+    pub destination: Option<ProvinceId>,
 }
 
 /// The names the presentation layer shows, indexed by id. Part of the world and of the
@@ -82,6 +99,17 @@ pub struct ProvinceFact {
     pub population: u64,
     pub owner: ActorId,
     pub neighbours: Vec<ProvinceId>,
+    pub sea_neighbours: Vec<ProvinceId>,
+}
+
+/// One polity of the starting facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ActorFact {
+    /// Starting treasury in kg of wheat-equivalent.
+    pub treasury_kg: i64,
+    pub capital: ProvinceId,
+    /// Starting army, stationed at the capital as one unit.
+    pub soldiers: u64,
 }
 
 /// The starting facts the world is built from — the compiled scenario (`scenario.rs`).
@@ -93,8 +121,8 @@ pub struct Facts {
     pub start_year: i32,
     /// Index = `ProvinceId`.
     pub provinces: Vec<ProvinceFact>,
-    /// Starting treasury in kg of wheat-equivalent per actor, index = `ActorId`.
-    pub treasuries: Vec<i64>,
+    /// Index = `ActorId`.
+    pub actors: Vec<ActorFact>,
 }
 
 impl Facts {
@@ -122,6 +150,9 @@ pub struct World {
     pub tick: Tick,
     pub actors: BTreeMap<ActorId, Actor>,
     pub provinces: BTreeMap<ProvinceId, Province>,
+    pub units: BTreeMap<UnitId, Unit>,
+    /// Next unit id; units born in play (recruitment, E2) number on from here.
+    pub next_unit: u32,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -152,18 +183,30 @@ pub enum WorldError {
     UnknownNeighbour(ProvinceId, ProvinceId),
     #[error("province {0:?}: neighbours must be sorted and unique")]
     NeighboursUnsorted(ProvinceId),
+    #[error("province {0:?} has a sea neighbour but is not coastal")]
+    SeaWithoutCoast(ProvinceId),
+    #[error("actor {0:?}: capital {1:?} is not one of its provinces")]
+    CapitalNotOwned(ActorId, ProvinceId),
     #[error("names table has {names} entries for {items} {what}")]
     NamesMismatch { what: &'static str, names: usize, items: usize },
+    #[error("unknown province {0:?}")]
+    UnknownProvince(ProvinceId),
+    #[error("unknown unit {0:?}")]
+    UnknownUnit(UnitId),
     #[error("ledger: {0}")]
     Ledger(#[from] LedgerError),
+}
+
+fn sorted_unique(v: &[ProvinceId]) -> bool {
+    v.windows(2).all(|w| w[0] < w[1])
 }
 
 impl World {
     /// Build a world from compiled facts and their names. Fails on a dangling reference
     /// rather than carrying it (lesson of the old engine's dangling neighbours).
     pub fn from_facts(facts: &Facts, names: Names, params: &Params, seed: u64) -> Result<World, WorldError> {
-        if names.actors.len() != facts.treasuries.len() {
-            return Err(WorldError::NamesMismatch { what: "actors", names: names.actors.len(), items: facts.treasuries.len() });
+        if names.actors.len() != facts.actors.len() {
+            return Err(WorldError::NamesMismatch { what: "actors", names: names.actors.len(), items: facts.actors.len() });
         }
         if names.provinces.len() != facts.provinces.len() {
             return Err(WorldError::NamesMismatch { what: "provinces", names: names.provinces.len(), items: facts.provinces.len() });
@@ -171,29 +214,54 @@ impl World {
         let tick = Tick::ZERO;
         let mut ledger = Ledger::new();
         let mut actors: BTreeMap<ActorId, Actor> = BTreeMap::new();
-        for (i, treasury) in facts.treasuries.iter().enumerate() {
+        for (i, a) in facts.actors.iter().enumerate() {
             let id = ActorId(i as u32);
-            actors.insert(id, Actor { provinces: Vec::new(), legitimacy: 50.0 });
-            ledger.open(tick, Account::Treasury(id), *treasury)?;
+            actors.insert(id, Actor { provinces: Vec::new(), capital: a.capital, legitimacy: 50.0 });
+            ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
         }
         let mut provinces: BTreeMap<ProvinceId, Province> = BTreeMap::new();
         let n = facts.provinces.len() as u32;
         for (i, f) in facts.provinces.iter().enumerate() {
             let id = ProvinceId(i as u32);
-            if !f.neighbours.windows(2).all(|w| w[0] < w[1]) {
+            if !sorted_unique(&f.neighbours) || !sorted_unique(&f.sea_neighbours) {
                 return Err(WorldError::NeighboursUnsorted(id));
             }
-            if let Some(bad) = f.neighbours.iter().find(|p| p.0 >= n) {
+            if let Some(bad) = f.neighbours.iter().chain(f.sea_neighbours.iter()).find(|p| p.0 >= n) {
                 return Err(WorldError::UnknownNeighbour(id, *bad));
+            }
+            if !f.sea_neighbours.is_empty() && !f.coastal {
+                return Err(WorldError::SeaWithoutCoast(id));
             }
             let actor = actors.get_mut(&f.owner).ok_or(WorldError::UnknownOwner(id, f.owner))?;
             actor.provinces.push(id);
             let capacity = params.capacity(f.area_km2, f.land);
             provinces.insert(
                 id,
-                Province { owner: f.owner, area_km2: f.area_km2, land: f.land, coastal: f.coastal, capacity, neighbours: f.neighbours.clone() },
+                Province {
+                    owner: f.owner,
+                    area_km2: f.area_km2,
+                    land: f.land,
+                    coastal: f.coastal,
+                    capacity,
+                    neighbours: f.neighbours.clone(),
+                    sea_neighbours: f.sea_neighbours.clone(),
+                },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
+        }
+        let mut units: BTreeMap<UnitId, Unit> = BTreeMap::new();
+        let mut next_unit = 0u32;
+        for (i, a) in facts.actors.iter().enumerate() {
+            let id = ActorId(i as u32);
+            if provinces.get(&a.capital).map(|p| p.owner) != Some(id) {
+                return Err(WorldError::CapitalNotOwned(id, a.capital));
+            }
+            if a.soldiers > 0 {
+                let uid = UnitId(next_unit);
+                next_unit += 1;
+                units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None });
+                ledger.open(tick, Account::Soldiers(uid), a.soldiers as i64)?;
+            }
         }
         // The opening postings belong to no tick report; the world starts settled.
         ledger.drain_postings();
@@ -205,6 +273,8 @@ impl World {
             tick,
             actors,
             provinces,
+            units,
+            next_unit,
             names,
             ledger,
             draws: Vec::new(),
@@ -249,14 +319,13 @@ impl World {
         sorted.into_iter().map(|id| (id, self.draw(point, id))).collect()
     }
 
-    /// Play one tick. E1: advance time, journal one decision draw per actor, move each
-    /// province's population toward its capacity through the ledger (the share per tick is
-    /// `params.population_pull_to_capacity_ppm`), and close the tick with `TickPlayed`.
-    /// The flow is a stand-in that E2's population system replaces; it exists so the
-    /// acceptance tests cover postings and the remainder carry, not an empty world.
+    /// Play one tick: one decision draw per actor (stand-in for E3), units move and are
+    /// supplied (`movement.rs`), population moves toward capacity (stand-in for the
+    /// population system), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
+        self.phase_units(params)?;
         let provinces: Vec<(ProvinceId, u64)> = self.provinces.iter().map(|(p, pr)| (*p, pr.capacity)).collect();
         for (p, capacity) in provinces {
             let account = Account::Population(p);
@@ -288,6 +357,15 @@ impl World {
     pub fn treasury(&self, a: ActorId) -> i64 {
         self.ledger.stock(Account::Treasury(a)).unwrap_or(0)
     }
+
+    pub fn soldiers(&self, u: UnitId) -> i64 {
+        self.ledger.stock(Account::Soldiers(u)).unwrap_or(0)
+    }
+
+    /// The units of an actor, in id order.
+    pub fn units_of(&self, a: ActorId) -> Vec<UnitId> {
+        self.units.iter().filter(|(_, u)| u.owner == a).map(|(id, _)| *id).collect()
+    }
 }
 
 #[cfg(test)]
@@ -304,13 +382,19 @@ mod tests {
     }
 
     #[test]
-    fn dangling_owner_and_neighbour_are_refused() {
+    fn dangling_owner_neighbour_capital_and_sea_are_refused() {
         let (mut facts, names) = testworld::five_states();
         facts.provinces[0].owner = ActorId(99);
         assert!(matches!(World::from_facts(&facts, names.clone(), &params(), 1), Err(WorldError::UnknownOwner(..))));
         let (mut facts, names) = testworld::five_states();
         facts.provinces[0].neighbours = vec![ProvinceId(999)];
-        assert!(matches!(World::from_facts(&facts, names, &params(), 1), Err(WorldError::UnknownNeighbour(..))));
+        assert!(matches!(World::from_facts(&facts, names.clone(), &params(), 1), Err(WorldError::UnknownNeighbour(..))));
+        let (mut facts, names) = testworld::five_states();
+        facts.actors[0].capital = ProvinceId(1); // owned by state 1
+        assert!(matches!(World::from_facts(&facts, names.clone(), &params(), 1), Err(WorldError::CapitalNotOwned(..))));
+        let (mut facts, names) = testworld::five_states();
+        facts.provinces[12].sea_neighbours = vec![ProvinceId(0)]; // inland cell
+        assert!(matches!(World::from_facts(&facts, names, &params(), 1), Err(WorldError::SeaWithoutCoast(..))));
     }
 
     #[test]
@@ -333,9 +417,20 @@ mod tests {
     fn facts_hash_changes_with_a_fact() {
         let (facts, _) = testworld::five_states();
         let mut other = facts.clone();
-        other.treasuries[0] += 1;
+        other.actors[0].treasury_kg += 1;
         assert_ne!(facts.hash(), other.hash());
         assert_eq!(facts.hash(), testworld::five_states().0.hash());
+    }
+
+    #[test]
+    fn every_actor_starts_with_one_unit_at_its_capital() {
+        let w = world(1);
+        for (a, actor) in &w.actors {
+            let units = w.units_of(*a);
+            assert_eq!(units.len(), 1);
+            assert_eq!(w.units[&units[0]].position, actor.capital);
+            assert!(w.soldiers(units[0]) > 0);
+        }
     }
 
     #[test]
@@ -344,7 +439,7 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.len(), w.actors.len());
-        assert_eq!(r.postings.len(), w.provinces.len());
+        assert_eq!(r.postings.len(), w.provinces.len(), "only the stand-in growth posts: every unit is supplied at home");
         assert!(r.postings.iter().all(|p| p.source == Source::Growth));
         assert_eq!(r.events.len(), 1);
         assert!(matches!(r.events[0].event, Event::TickPlayed));
@@ -360,15 +455,12 @@ mod tests {
         let mut w = world(5);
         let p = ProvinceId(0);
         let pop = w.population(p);
-        // A famine larger than the province: the stock stops at zero, the actual loss is
-        // posted, the event is emitted, the tick completes with the ledger balanced.
         w.post(Account::Population(p), Source::Famine, -(pop + 1_000) * 1000).unwrap();
         let r = w.tick(&params()).unwrap();
         assert!(r.events.iter().any(|e| matches!(e.event, Event::BoundHit { account, source: Source::Famine } if account == Account::Population(p))));
         assert!(matches!(r.events.last().unwrap().event, Event::TickPlayed));
         let famine = r.postings.iter().find(|q| q.source == Source::Famine).unwrap();
         assert_eq!(famine.milli, -pop * 1000, "the posted amount is what actually left");
-        // After the famine the stand-in growth moved it up again by a thousandth of the gap.
         assert!(w.population(p) >= 0);
         assert_eq!(w.tick, Tick(1));
     }
@@ -381,7 +473,6 @@ mod tests {
         let vb = b.draw_each(DrawPoint::Battle, [2, 3, 1, 4]);
         assert_eq!(va, vb);
         assert_eq!(va.len(), 4);
-        // And a second round for the same ids gets the next ordinals, still canonically.
         let va2 = a.draw_each(DrawPoint::Battle, [3, 4, 2, 1]);
         let vb2 = b.draw_each(DrawPoint::Battle, [1, 2, 3, 4]);
         assert_eq!(va2, vb2);
@@ -410,7 +501,6 @@ mod tests {
         }
         let after = w.population(p);
         assert!(after > before && after <= cap, "{before} -> {after} <= {cap}");
-        // 10 000 - 6 000 = 4 000 gap: 4 000 milli a tick at first, shrinking; a remainder appears.
         assert!(w.ledger.carry(Account::Population(p)).unwrap() > 0);
     }
 }
