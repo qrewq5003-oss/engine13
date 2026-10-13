@@ -38,11 +38,69 @@ band = [0.1, 1.0]
 unit = "people per km²"
 e0 = "П1"
 
-# Stand-in of E1 until the population system: share of the gap to capacity closed per tick.
-[population.pull_to_capacity]
+# E0 П2 — intrinsic growth below capacity. Derived with the plague loss in (owner, PR #282):
+# Italy c. 1300 stood at capacity (12.5 M, Munro 2013), c. 1400 at about two thirds of it, and
+# over the 15th century grew ≈ 0.2 % a year with plague alive (≈ 10 M by 1500, Malanima).
+# Logistic growth at two thirds of capacity is r × ⅓; net of the plague loss of 0.24 % a year
+# that must leave +0.2 %: r × ⅓ − 0.24 % ≈ 0.2 % → r ≈ 1.2 %. The earlier band (0.5–1.0) was
+# derived without the plague loss, which is why its top was too low.
+[population.growth_per_year]
+kind = "a"
+value = 0.012
+band = [0.008, 0.016]
+unit = "share per year, logistic toward capacity"
+e0 = "П2"
+
+# E0 П3 — famine: the share a province above its capacity loses (Jordan 1996; Ó Gráda 2009).
+[famine.mortality_per_year]
+kind = "a"
+value = 0.10
+band = [0.05, 0.20]
+unit = "share of the province per crisis year"
+e0 = "П3"
+
+# E0 П4 — plague where the world has it. Whether plague exists is a fact of the scenario
+# (its pool of diseases), not a constant. **Level matters (owner's review of PR #282):** E0
+# gives the *urban* outbreak (10–20 % of a city) and Europe-wide recurrence (somewhere,
+# every 2–20 years); a province is a city and its countryside, and a province sees only its
+# own outbreaks.
+#   frequency — one city's catalogue: Florence 1400, 1411, 1417, 1424, 1430, 1437, 1449,
+#   1457, 1464, 1479 ≈ 10 outbreaks a century (Biraben 1975 vol. 1; Del Panta 1980;
+#   Carmichael 1986 — by memory, to open before E4), hence 0.08 per province-year, band
+#   0.05–0.15 (every 7–20 years);
+#   mortality — urban share × urban outbreak, countryside largely spared: 15th-century
+#   plague had become an urban disease of the poor (Carmichael 1986, ch. 3–4); urban share
+#   of Italy c. 1500 ≈ 20 % (Malanima 2005 — by memory); 0.2 × 10–20 % = 2–4 % of the
+#   province, value 0.03, band 0.02–0.05.
+# Check: 0.08 × 0.03 = 0.24 % a year lost, below the П2 growth of 0.7 % — a plague world
+# settles near two thirds of capacity instead of dying out (the loader refuses constants
+# whose mean plague loss exceeds the growth: extinction would then be written in them).
+[plague.outbreaks_per_year]
+kind = "a"
+value = 0.08
+band = [0.05, 0.15]
+unit = "outbreaks per province per year"
+e0 = "П4"
+
+[plague.mortality]
+kind = "a"
+value = 0.03
+band = [0.02, 0.05]
+unit = "share of the province per outbreak (urban share × urban outbreak)"
+e0 = "П4"
+
+# E0 П5 — migration, kind (в): people move toward an emptier land neighbour; the sum of
+# people never changes (ledger). Checked through П7.
+[migration.rate_per_tick]
 kind = "c"
-value = 0.001
-unit = "share of the gap to capacity, per tick"
+value = 0.02
+unit = "share of the fuller province per tick, times the fill gap"
+checked_by = "П7"
+
+[migration.min_gap]
+kind = "c"
+value = 0.10
+unit = "fill gap (share of capacity) below which nobody moves"
 checked_by = "П7"
 
 [population.observed_growth_per_year]

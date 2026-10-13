@@ -32,7 +32,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::params::Params;
 use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
 use crate::verbs::VerbId;
-use crate::world::Land;
+use crate::world::{Disease, Land};
 
 /// Province area, km². E0 §2a: tens of provinces per scenario; Italy's ~300 000 km² over
 /// ~25 provinces is ~12 000; the band leaves room for small city territories.
@@ -351,7 +351,7 @@ impl Map {
     /// never starts above capacity. The capital is the most populous province (ties: lowest
     /// id); the army is E0 А11's share of the polity's people, kept within the capital's
     /// supply (E0 А8). Province ids are cell indices, so the map stays legible.
-    fn into_scenario(self, id: String, states: usize, params: &Params) -> ScenarioData {
+    fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, params: &Params) -> ScenarioData {
         let pid = |i: u32| format!("p{i:03}");
         let sid = |a: usize| format!("s{a:02}");
         let mut provinces = BTreeMap::new();
@@ -398,6 +398,7 @@ impl Map {
         ScenarioData {
             id,
             start_year: 1000,
+            diseases,
             display_currency: DisplayCurrency { name: "coin".to_string(), kg_per_unit: 100.0 },
             actors,
             provinces,
@@ -535,7 +536,9 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
             map.cell_mut(i).owner = other;
         }
     }
-    map.into_scenario(format!("gen{seed}"), states, params)
+    // Plague in the world's pool of diseases: a fact drawn by seed, half the worlds have it.
+    let diseases = if rng.gen_bool(0.5) { vec![Disease::Plague] } else { Vec::new() };
+    map.into_scenario(format!("gen{seed}"), states, diseases, params)
 }
 
 /// A hand-made map from an ASCII sketch: `.` is sea, a letter is the owning polity
@@ -563,7 +566,7 @@ fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, s
     let comps = map.components();
     map.guarantee_sea_links(&comps);
     map.mark_coast();
-    map.into_scenario(id.to_string(), states, params)
+    map.into_scenario(id.to_string(), states, Vec::new(), params)
 }
 
 /// The hand-made extreme worlds (owner, plan §12 item 11): each with its name.
@@ -611,7 +614,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 16_130_146_076_271_241_423;
+    const PINNED_WORLD_ONE: u64 = 9_511_406_158_875_466_560;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

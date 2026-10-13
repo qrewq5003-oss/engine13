@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{ActorId, ProvinceId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{ActorFact, Facts, Land, Names, ProvinceFact};
+use crate::world::{ActorFact, Disease, Facts, Land, Names, ProvinceFact};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -33,6 +33,9 @@ use crate::world::{ActorFact, Facts, Land, Names, ProvinceFact};
 pub struct ScenarioData {
     pub id: String,
     pub start_year: i32,
+    /// The diseases this world holds (brief §0.2: a fact, like culture); plague strikes by
+    /// E0 П4 only where it is listed.
+    pub diseases: Vec<Disease>,
     /// The money the presentation layer shows; the engine does not read it.
     pub display_currency: DisplayCurrency,
     /// Keyed by the scenario's string id of the actor.
@@ -204,7 +207,7 @@ impl ScenarioData {
         verbs.sort_by_key(|(id, _)| *id);
 
         Ok(Compiled {
-            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, provinces, actors },
+            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors },
             names: Names {
                 actors: self.actors.iter().map(|(k, a)| (k.clone(), a.name.clone())).collect(),
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
@@ -221,6 +224,7 @@ mod tests {
     const OK: &str = r#"
 id = "t"
 start_year = 1477
+diseases = ["Plague"]
 [display_currency]
 name = "ducat"
 kg_per_unit = 100.0
@@ -285,6 +289,10 @@ raise_tax = "Поднять налог"
         assert!(c.facts.provinces[1].coastal && !c.facts.provinces[0].coastal);
         assert_eq!(c.display.verbs, vec![(VerbId::RaiseTax, "Поднять налог".to_string())]);
         assert_eq!(c.facts.scenario_id, "t");
+        assert_eq!(c.facts.diseases, vec![Disease::Plague]);
+        let no_plague = ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = []", 1)).unwrap();
+        assert!(no_plague.compile(&params()).unwrap().facts.diseases.is_empty());
+        assert!(ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = [\"Dragonpox\"]", 1)).is_err());
     }
 
     #[test]
