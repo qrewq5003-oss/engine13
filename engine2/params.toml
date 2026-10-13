@@ -38,12 +38,16 @@ band = [0.1, 1.0]
 unit = "people per km²"
 e0 = "П1"
 
-# E0 П2 — intrinsic growth below capacity (derived from the observed П7: the recovery peak
-# of 0.4–0.5 % a year must be reachable, so r sits above it).
+# E0 П2 — intrinsic growth below capacity. Derived with the plague loss in (owner, PR #282):
+# Italy c. 1300 stood at capacity (12.5 M, Munro 2013), c. 1400 at about two thirds of it, and
+# over the 15th century grew ≈ 0.2 % a year with plague alive (≈ 10 M by 1500, Malanima).
+# Logistic growth at two thirds of capacity is r × ⅓; net of the plague loss of 0.24 % a year
+# that must leave +0.2 %: r × ⅓ − 0.24 % ≈ 0.2 % → r ≈ 1.2 %. The earlier band (0.5–1.0) was
+# derived without the plague loss, which is why its top was too low.
 [population.growth_per_year]
 kind = "a"
-value = 0.007
-band = [0.005, 0.010]
+value = 0.012
+band = [0.008, 0.016]
 unit = "share per year, logistic toward capacity"
 e0 = "П2"
 

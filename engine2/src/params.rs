@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn shipped_file_loads() {
         let p = Params::load().unwrap();
-        assert_eq!(p.population_growth_ppm_per_tick, 3500);
+        assert_eq!(p.population_growth_ppm_per_tick, 6000);
         assert_eq!(p.famine_mortality_ppm_per_tick, 50_000);
         assert!((p.plague_outbreak_probability_per_tick - 0.04).abs() < 1e-12);
         assert_eq!(p.plague_mortality_ppm, 30_000);
@@ -229,12 +229,19 @@ mod tests {
 
     #[test]
     fn plague_that_outgrows_people_is_refused() {
-        let text = PARAMS_TOML.replacen("value = 0.03
+        // Plague at the top of its bands against growth at the bottom of a lower band:
+        // 0.15 × 0.05 = 0.0075 ≥ 0.007 — refused. (With the shipped bands the guard cannot
+        // trip: 0.0075 < 0.008; it stands against future changes of either band.)
+        let text = PARAMS_TOML
+            .replacen("value = 0.03
 band = [0.02, 0.05]", "value = 0.05
-band = [0.02, 0.05]", 1).replacen("value = 0.08
+band = [0.02, 0.05]", 1)
+            .replacen("value = 0.08
 band = [0.05, 0.15]", "value = 0.15
-band = [0.05, 0.15]", 1);
-        // 0.15 × 0.05 = 0.0075 ≥ 0.007: refused.
+band = [0.05, 0.15]", 1)
+            .replacen("value = 0.012
+band = [0.008, 0.016]", "value = 0.007
+band = [0.005, 0.010]", 1);
         assert!(matches!(Params::parse(&text), Err(ParamsError::PlagueOutgrowsPeople { .. })));
         assert!(Params::parse(PARAMS_TOML).is_ok());
     }
