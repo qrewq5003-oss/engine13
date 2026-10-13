@@ -81,7 +81,7 @@ impl Game {
 
 impl Simulation for Game {
     fn new(scenario: &ScenarioData, params: Params, seed: u64) -> Result<Game, SimError> {
-        let c = scenario.compile()?;
+        let c = scenario.compile(&params)?;
         let world = World::from_facts(&c.facts, c.names, &params, seed)?;
         Ok(Game { world, display: c.display, params, last_events: Vec::new() })
     }
@@ -117,7 +117,7 @@ impl Simulation for Game {
     }
 
     fn from_save(scenario: &ScenarioData, params: Params, s: &str) -> Result<Game, SimError> {
-        let c = scenario.compile()?;
+        let c = scenario.compile(&params)?;
         let world = save::from_save(s)?;
         let scenario_hash = c.facts.hash();
         if world.scenario_id != c.facts.scenario_id || world.facts_hash != scenario_hash {

@@ -20,7 +20,7 @@ jobs:
       - run: cargo test --workspace
       # The sentinel (brief §6) measures engine2 behind a feature, so the game's build never
       # carries it; this line is the short run in CI (plan §8).
-      - run: cargo test -p engine2 --features sentinel
+      - run: cargo test -p engine2 --all-features
       - run: cargo clippy --workspace --all-features -- -D warnings
       - run: cargo clippy --workspace -- -D warnings
       # The B44 census (`core::census`, `dead_read_probe`) builds only with its feature;

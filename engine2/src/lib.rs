@@ -33,6 +33,8 @@ pub mod time;
 pub mod verbs;
 pub mod view;
 pub mod world;
+#[cfg(feature = "worldgen")]
+pub mod worldgen;
 
 pub use event::{Event, Stamped};
 pub use ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
@@ -44,4 +46,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{Facts, Land, Names, TickReport, World};
+pub use world::{Facts, Land, Names, ProvinceFact, TickReport, World};
