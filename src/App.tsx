@@ -220,12 +220,13 @@ const App: React.FC = () => {
           setIsGeneratingNarrative(false);
         },
         (error) => {
-          // Error handling - use placeholder
+          // Error handling - placeholder, and the reason under it: the chronicle was not written
           console.error('[Narrative] Error:', error);
           const placeholder = currentState
             ? `${currentState.year} год. Хроника продолжается.`
             : 'Хроника продолжается.';
-          setNarrative(placeholder);
+          const reason = error.length > 400 ? `${error.slice(0, 400)}…` : error;
+          setNarrative(`${placeholder}\n\nЛетописец не ответил, хроника не записана: ${reason}`);
           setNarrativeLoading(false);
           setIsGeneratingNarrative(false);
         }
