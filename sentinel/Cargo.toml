@@ -1,0 +1,12 @@
+[package]
+name = "sentinel"
+version = "0.1.0"
+edition = "2021"
+description = "ENGINE13 degeneration sentinel (brief §6): engine-independent, reads observations and typed events"
+
+# No dependency on engine2 or on the old engine: both are measured through `Observed`
+# (plan §8), and the old engine's adapter (E6) must not pull engine2 into the old crate.
+[dependencies]
+serde = { version = "1.0.193", features = ["derive"] }
+toml = "0.8"
+thiserror = "1.0.50"
