@@ -293,6 +293,13 @@ pub struct NarrativeConfig {
     /// stated, deliberately: it used to be stated four times, twice inside one prompt
     /// and with different numbers (docs/investigation_paragraph_contract.md).
     pub paragraph_target: u32,
+    /// What the chronicler surveys from above, in the accusative — the scenario's own world
+    /// («всю Италию от Альп до Сицилии…»). Completes the persona line of the system prompt,
+    /// whose century comes from the chronicle's year. The persona used to be one fixed text
+    /// for every scenario: «летописец XIV-XV века», who «видит Европу, Анатолию, Балканы» —
+    /// in Rome 375 as well. Required by `validate_scenario`.
+    #[serde(default)]
+    pub horizon: String,
 }
 
 impl NarrativeConfig {

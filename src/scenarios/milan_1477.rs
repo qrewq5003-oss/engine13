@@ -325,6 +325,7 @@ pub fn load_milan_1477() -> Scenario {
                 "Не утверждать, что Италия объединена, если этого не говорит состояние мира".to_string(),
             ],
             paragraph_target: 4,
+            horizon: "всю Италию от Альп до Сицилии, Савойю и Францию за перевалами, османские паруса на море".to_string(),
         },
         dependencies,
         patron_actions,

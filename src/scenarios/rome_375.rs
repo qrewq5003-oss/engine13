@@ -330,6 +330,7 @@ pub fn load_rome_375() -> Scenario {
                 "Не утверждать, что Рим пал, если он не в списке павших".to_string(),
             ],
             paragraph_target: 3,
+            horizon: "всю империю от Британии до Евфрата, варварский мир за Рейном и Дунаем, Персию и дальние царства Востока".to_string(),
         },
         dependencies,
         patron_actions,
