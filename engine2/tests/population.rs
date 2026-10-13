@@ -10,7 +10,9 @@
 //!   and the stocks differ across game seeds — randomness reaches the world. The outcome
 //!   (who is alive, who owns what) is still seed-independent, because no system yet changes
 //!   it; that flag is asserted here on purpose and must fall with the army and battle.
-//! - **Plague and П7:** measured and reported, not asserted — see the PR.
+//! - **Plague and П7:** one band for every world (owner's decision on PR #282): a plague
+//!   world's growth over 100 ticks lies in the same band, and the mean over plague worlds is
+//!   reported.
 
 use engine2::sim::{Game, Simulation};
 use engine2::{worldgen, Disease, Event, Params, ScenarioData, Source};
@@ -84,6 +86,7 @@ fn migration_conserves_people_exactly_and_moves_toward_emptier_neighbours() {
 #[test]
 fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
     let p = params();
+    let band = p.entries["population.observed_growth_per_year"].band.unwrap();
     let mut plague_worlds = 0;
     let mut growths = Vec::new();
     for world_seed in 1..=20u64 {
@@ -109,6 +112,9 @@ fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
         }
         let flags = m.flags(&Thresholds::default(), &possible, None);
         assert!(possible.contains(&"Plague".to_string()));
+        for (i, growth) in growths.iter().rev().take(3).enumerate() {
+            assert!((band[0]..=band[1]).contains(growth), "world {world_seed} game seed {}: growth {growth:.4}/year outside П7 {band:?}", 3 - i);
+        }
         assert!(!flags.iter().any(|f| matches!(f, Flag::Never { .. })), "world {world_seed}: plague declared but never struck in 3 × 100 ticks");
         assert!(stocks[0] != stocks[1] || stocks[1] != stocks[2], "world {world_seed}: three game seeds, identical stocks — randomness did not reach the world");
         // Honest statement of this step: nothing changes who is alive or who owns what yet.
@@ -118,7 +124,7 @@ fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
     let mean = growths.iter().sum::<f64>() / growths.len() as f64;
     let (lo, hi) = growths.iter().fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(*g), hi.max(*g)));
     eprintln!("plague worlds: {plague_worlds}; growth per year over 100 ticks: mean {mean:.4}, min {lo:.4}, max {hi:.4}");
-    assert!(mean > -0.02, "plague worlds collapse: mean growth {mean:.4}/year");
+    assert!((band[0]..=band[1]).contains(&mean), "plague worlds: mean growth {mean:.4}/year outside П7 {band:?}");
 }
 
 #[test]

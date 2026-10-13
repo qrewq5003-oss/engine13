@@ -58,6 +58,8 @@ pub enum ParamsError {
     BandUnordered(String),
     #[error("missing parameter {0}")]
     Missing(String),
+    #[error("plague loss {loss:.4}/year (outbreaks × mortality) is not below the growth {growth:.4}/year: a plague world would die out by its constants")]
+    PlagueOutgrowsPeople { loss: f64, growth: f64 },
 }
 
 /// The validated constants the engine reads. Fields are typed accessors; the raw table is
@@ -134,6 +136,11 @@ impl Params {
         let plague_mortality = value("plague.mortality")?;
         let migration_rate = value("migration.rate_per_tick")?;
         let migration_gap = value("migration.min_gap")?;
+        // Owner's guard (PR #282): the mean plague loss must stay below the maximum growth,
+        // or extinction is written into the constants rather than played out.
+        if outbreaks * plague_mortality >= growth {
+            return Err(ParamsError::PlagueOutgrowsPeople { loss: outbreaks * plague_mortality, growth });
+        }
         let milli = |key: &str| -> Result<i64, ParamsError> { Ok((value(key)? * 1000.0).round() as i64) };
         let capacity_milli_per_km2 = [
             (Land::Arable, milli("capacity.arable")?),
@@ -209,8 +216,8 @@ mod tests {
         let p = Params::load().unwrap();
         assert_eq!(p.population_growth_ppm_per_tick, 3500);
         assert_eq!(p.famine_mortality_ppm_per_tick, 50_000);
-        assert!((p.plague_outbreak_probability_per_tick - 0.05).abs() < 1e-12);
-        assert_eq!(p.plague_mortality_ppm, 100_000);
+        assert!((p.plague_outbreak_probability_per_tick - 0.04).abs() < 1e-12);
+        assert_eq!(p.plague_mortality_ppm, 30_000);
         assert_eq!(p.migration_rate_ppm_per_tick, 20_000);
         assert_eq!(p.migration_min_gap_ppm, 100_000);
         assert_eq!(p.capacity(250, Land::Arable), 10_000);
@@ -218,6 +225,18 @@ mod tests {
         assert_eq!(p.supply_soldiers_per_1000, 150);
         assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
         assert_eq!(p.movement_provinces_per_tick, 1);
+    }
+
+    #[test]
+    fn plague_that_outgrows_people_is_refused() {
+        let text = PARAMS_TOML.replacen("value = 0.03
+band = [0.02, 0.05]", "value = 0.05
+band = [0.02, 0.05]", 1).replacen("value = 0.08
+band = [0.05, 0.15]", "value = 0.15
+band = [0.05, 0.15]", 1);
+        // 0.15 × 0.05 = 0.0075 ≥ 0.007: refused.
+        assert!(matches!(Params::parse(&text), Err(ParamsError::PlagueOutgrowsPeople { .. })));
+        assert!(Params::parse(PARAMS_TOML).is_ok());
     }
 
     #[test]

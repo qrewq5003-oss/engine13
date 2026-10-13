@@ -55,21 +55,34 @@ band = [0.05, 0.20]
 unit = "share of the province per crisis year"
 e0 = "П3"
 
-# E0 П4 — plague where the world has it: recurrences every 2–20 years (Marshall 1994),
-# a province-wide outbreak takes 5–20 % (Carmichael 1986; Munro 2013). Whether plague
-# exists is a fact of the scenario (its pool of diseases), not a constant.
+# E0 П4 — plague where the world has it. Whether plague exists is a fact of the scenario
+# (its pool of diseases), not a constant. **Level matters (owner's review of PR #282):** E0
+# gives the *urban* outbreak (10–20 % of a city) and Europe-wide recurrence (somewhere,
+# every 2–20 years); a province is a city and its countryside, and a province sees only its
+# own outbreaks.
+#   frequency — one city's catalogue: Florence 1400, 1411, 1417, 1424, 1430, 1437, 1449,
+#   1457, 1464, 1479 ≈ 10 outbreaks a century (Biraben 1975 vol. 1; Del Panta 1980;
+#   Carmichael 1986 — by memory, to open before E4), hence 0.08 per province-year, band
+#   0.05–0.15 (every 7–20 years);
+#   mortality — urban share × urban outbreak, countryside largely spared: 15th-century
+#   plague had become an urban disease of the poor (Carmichael 1986, ch. 3–4); urban share
+#   of Italy c. 1500 ≈ 20 % (Malanima 2005 — by memory); 0.2 × 10–20 % = 2–4 % of the
+#   province, value 0.03, band 0.02–0.05.
+# Check: 0.08 × 0.03 = 0.24 % a year lost, below the П2 growth of 0.7 % — a plague world
+# settles near two thirds of capacity instead of dying out (the loader refuses constants
+# whose mean plague loss exceeds the growth: extinction would then be written in them).
 [plague.outbreaks_per_year]
 kind = "a"
-value = 0.10
-band = [0.05, 0.50]
+value = 0.08
+band = [0.05, 0.15]
 unit = "outbreaks per province per year"
 e0 = "П4"
 
 [plague.mortality]
 kind = "a"
-value = 0.10
-band = [0.05, 0.20]
-unit = "share of the province per outbreak"
+value = 0.03
+band = [0.02, 0.05]
+unit = "share of the province per outbreak (urban share × urban outbreak)"
 e0 = "П4"
 
 # E0 П5 — migration, kind (в): people move toward an emptier land neighbour; the sum of
