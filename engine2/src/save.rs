@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::world::World;
 
 /// Bump on any incompatible change of [`World`] or its parts.
-pub const SAVE_FORMAT: u32 = 1;
+pub const SAVE_FORMAT: u32 = 2;
 
 /// Written envelope: borrows the world, no copy.
 #[derive(Debug, Serialize)]
@@ -68,17 +68,18 @@ mod tests {
 
     #[test]
     fn unknown_field_anywhere_is_refused() {
-        let w = World::from_facts(&testworld::five_states(), 3).unwrap();
+        let w = testworld::world(3);
         let s = to_save(&w).unwrap();
         let extra_top = s.replacen("{\"format\":", "{\"extra\":1,\"format\":", 1);
         assert!(matches!(from_save(&extra_top).unwrap_err(), SaveError::Json(_)));
         let extra_inner = s.replacen("\"seed\":", "\"extra\":1,\"seed\":", 1);
+        assert!(s.contains("\"seed\":"), "the inner probe must hit a real field");
         assert!(matches!(from_save(&extra_inner).unwrap_err(), SaveError::Json(_)));
     }
 
     #[test]
     fn round_trip_is_equal() {
-        let w = World::from_facts(&testworld::five_states(), 3).unwrap();
+        let w = testworld::world(3);
         let s = to_save(&w).unwrap();
         assert_eq!(from_save(&s).unwrap(), w);
     }

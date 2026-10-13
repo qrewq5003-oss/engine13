@@ -1,16 +1,16 @@
 //! The presentation model (plan §5): what the UI and the chronicler get, built from the
-//! state and the `Names` table. Not a mirror of `World`.
+//! state, the world's names and the scenario's presentation data. Not a mirror of `World`.
 //!
-//! This is the only module that reads the display currency (`Names::currency`, guard
+//! This is the only module that reads the display currency (`Display::currency`, guard
 //! `display_currency_is_read_only_by_the_view`): the engine counts in kilograms of
 //! wheat-equivalent, the view converts for showing.
 
 use serde::Serialize;
 
 use crate::event::Stamped;
-use crate::scenario::Names;
+use crate::scenario::Display;
 use crate::time::HalfYear;
-use crate::world::World;
+use crate::world::{Names, World};
 
 /// One polity as shown.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -35,7 +35,7 @@ pub struct WorldView {
 }
 
 /// The chronicler's snapshot: the period's facts with names, no numbers the model should
-/// quote (E0 §3 of the old engine's lessons: forbidden claims, no engine keys).
+/// quote (lessons of the old engine: forbidden claims, no engine keys).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChronicleSnapshot {
     pub year: i32,
@@ -53,18 +53,18 @@ fn half(w: &World) -> u8 {
     }
 }
 
-pub fn world_view(w: &World, names: &Names) -> WorldView {
-    let currency = &names.currency;
+pub fn world_view(w: &World, display: &Display) -> WorldView {
+    let currency = &display.currency;
     let actors = w
         .actors
         .iter()
         .map(|(id, a)| {
-            let (sid, name) = &names.actors[id.index()];
+            let (sid, name) = &w.names.actors[id.index()];
             let treasury_kg = w.treasury(*id);
             ActorView {
                 id: sid.clone(),
                 name: name.clone(),
-                provinces: a.provinces.iter().map(|p| names.provinces[p.index()].1.clone()).collect(),
+                provinces: a.provinces.iter().map(|p| w.names.provinces[p.index()].1.clone()).collect(),
                 population: a.provinces.iter().map(|p| w.population(*p)).sum(),
                 treasury_kg,
                 treasury_display: treasury_kg as f64 / currency.kg_per_unit,
@@ -75,12 +75,12 @@ pub fn world_view(w: &World, names: &Names) -> WorldView {
     WorldView { year: w.year(), half_year: half(w), currency: currency.name.clone(), actors }
 }
 
-pub fn chronicle_snapshot(w: &World, names: &Names, events: &[Stamped]) -> ChronicleSnapshot {
+pub fn chronicle_snapshot(w: &World, events: &[Stamped]) -> ChronicleSnapshot {
     ChronicleSnapshot {
         year: w.year(),
         half_year: half(w),
-        alive_actors: w.actors.keys().map(|id| names.actors[id.index()].1.clone()).collect(),
+        alive_actors: w.actors.keys().map(|id| w.names.actors[id.index()].1.clone()).collect(),
         events: events.to_vec(),
-        names: names.clone(),
+        names: w.names.clone(),
     }
 }

@@ -1,9 +1,10 @@
 //! E1b acceptance (plan §11): the `Simulation` contract on the test world — a verb is
-//! journaled, the ledger invariant holds every tick, save → load through the contract
-//! continues bit for bit, the view shows names and display currency, the chronicle carries
-//! typed events only.
+//! journaled, a disabled verb is an error, the ledger invariant holds every tick, save →
+//! load through the contract continues bit for bit and refuses another scenario's save,
+//! names live in the world and survive the save, the view shows names and display
+//! currency, the chronicle carries typed events only.
 
-use engine2::sim::{Game, Simulation};
+use engine2::sim::{Game, SimError, Simulation};
 use engine2::{testworld, ActorId, ActorRef, Event, Params, ProvinceId, Target, VerbCall, VerbId};
 
 fn game(seed: u64) -> Game {
@@ -20,9 +21,40 @@ fn verbs_are_offered_journaled_and_have_no_effect_yet() {
     let r = g.tick(&[call]).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Verb { verb: VerbId::RaiseTax, .. })));
     assert!(matches!(r.events.last().unwrap().event, Event::TickPlayed));
-    // A verb not enabled by the scenario is not journaled.
-    let r = g.tick(&[VerbCall { actor: who, verb: VerbId::DeclareWar, target: Target::Actor(ActorId(1)) }]).unwrap();
-    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Verb { .. })));
+    // A verb not enabled by the scenario is an error, and nothing is played.
+    let tick_before = g.world().tick;
+    let err = g.tick(&[VerbCall { actor: who, verb: VerbId::DeclareWar, target: Target::Actor(ActorId(1)) }]).unwrap_err();
+    assert!(matches!(err, SimError::VerbNotEnabled(VerbId::DeclareWar)));
+    assert_eq!(g.world().tick, tick_before);
+}
+
+#[test]
+fn a_save_of_another_scenario_is_refused() {
+    let mut g = game(4);
+    g.tick(&[]).unwrap();
+    let s = g.to_save().unwrap();
+    let mut other = testworld::five_states_scenario();
+    other.id = "elsewhere".to_string();
+    assert!(matches!(Game::from_save(&other, Params::load().unwrap(), &s), Err(SimError::WrongScenario { .. })));
+    // Same id, one fact changed: still refused — the hash of the compiled facts differs.
+    let mut other = testworld::five_states_scenario();
+    other.actors.get_mut("s0").unwrap().treasury_kg += 1;
+    assert!(matches!(Game::from_save(&other, Params::load().unwrap(), &s), Err(SimError::WrongScenario { .. })));
+}
+
+#[test]
+fn names_live_in_the_world_and_survive_the_save() {
+    let scenario = testworld::five_states_scenario();
+    let mut g = game(6);
+    // An heir born in the game would be named here, not in the scenario.
+    let s = {
+        let mut w = g.world().clone();
+        w.names.actors[0].1 = "Renamed in play".to_string();
+        engine2::to_save(&w).unwrap()
+    };
+    let g2 = Game::from_save(&scenario, Params::load().unwrap(), &s).unwrap();
+    assert_eq!(g2.view().actors[0].name, "Renamed in play");
+    g.tick(&[]).unwrap();
 }
 
 #[test]
