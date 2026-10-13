@@ -290,7 +290,7 @@ pub fn force_spawn(
         actor_id.clone(),
         EventType::Milestone,
         true,
-        format!("{} появился на сцене истории (debug).", label),
+        format!("На сцену истории выходит {} (debug).", label),
     );
     state.event_log.add(event);
 

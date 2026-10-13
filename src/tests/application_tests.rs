@@ -819,6 +819,11 @@ fn chronicler_description_rewords_tag_spread_era_and_foreground() {
         "Миланское герцогство переходит из позднего Средневековья в раннее Новое время");
     assert_eq!(r("foreground_savoy", "Савойя вышел на передний план: power_projection 88 > 70% avg 32, internal upheaval"),
         "Савойя выходит на передний план");
+    // The templates no longer depend on gender; an older save keeps the old wording, read the same.
+    assert_eq!(r("era_milan_earlymodern", "Миланское герцогство переходит из LateMedieval в EarlyModern эру"),
+        "Миланское герцогство переходит из позднего Средневековья в раннее Новое время");
+    assert_eq!(r("foreground_savoy", "Савойя выходит на передний план: power_projection 88 > 70% avg 32"),
+        "Савойя выходит на передний план");
     assert_eq!(r("military_conflict_florence_siena", "Военный конфликт между florence и siena"), "Военный конфликт между florence и siena");
 }
 
@@ -911,4 +916,154 @@ fn claude_cli_run_streams_text_and_names_every_failure() {
     let e = run_claude_cli(sh(&format!("echo '{delta}'; exec sleep 30")), "", Duration::from_secs(1), |_| {}).unwrap_err();
     assert!(e.contains("не ответил"), "{e}");
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+/// The milan state used by the annals tests: v2 content, seed 0, `ticks` half-years played.
+fn milan_after(ticks: u32) -> (AppState, Db) {
+    let db = setup_test_db();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    for _ in 0..ticks {
+        advance_tick(&mut state, None).expect("tick");
+    }
+    (state, db)
+}
+
+fn annals_of(state: &AppState) -> crate::llm::WorldAnnals {
+    crate::llm::build_snapshot(state.world_state.as_ref().unwrap(), state.current_scenario.as_ref().unwrap(), &state.event_log).annals
+}
+
+fn chronology_of(a: &crate::llm::WorldAnnals) -> String {
+    a.chronology_decades.iter().chain(&a.chronology_recent).cloned().collect::<Vec<_>>().join("\n")
+}
+
+/// The chronology holds only what is over. Both ways on each kind: a vassalage in force stands in
+/// the relations and not here, the same vassalage ended is here (its spell and its end); an open
+/// war is a story and not here, the same pair's war gone quiet is here as ended; standing
+/// alliances, the player's decisions and the milestones are never here (their own blocks hold them).
+#[test]
+fn chronology_holds_only_what_is_over() {
+    let (mut state, _db) = milan_after(30);
+    let now = state.world_state.as_ref().unwrap().tick;
+    let add = |state: &mut AppState, id: &str, actor: &str, t: u32, ty: crate::core::EventType| {
+        state.event_log.add(crate::core::Event::new(id.into(), t, 1477 + (t / 2) as i32, actor.into(), ty, true, "—".into()));
+    };
+    // A vassalage in force: relations, not chronology.
+    add(&mut state, "vassalage_form_bologna_ferrara", "ferrara", now - 3, crate::core::EventType::Diplomatic);
+    state.world_state.as_mut().unwrap().vassalages.push(crate::core::Vassalage { vassal_id: "ferrara".into(), overlord_id: "bologna".into(), formed_tick: now - 3 });
+    // An open war (recent battles) and an ended one (battles long ago).
+    // (pairs with no battles of their own in this game, outside any alliance)
+    for t in [now - 2, now - 1] { add(&mut state, "military_conflict_bologna_urbino", "bologna", t, crate::core::EventType::War); }
+    for t in [2, 3] { add(&mut state, "military_conflict_genoa_siena", "genoa", t, crate::core::EventType::War); }
+    let a = annals_of(&state);
+    let chron = chronology_of(&a);
+    assert!(a.relations.iter().any(|l| l.starts_with("Феррарское герцогство (Эсте) — вассал")), "{:?}", a.relations);
+    assert!(!chron.contains("Феррарское герцогство (Эсте) становится вассалом"), "{chron}");
+    assert!(a.open_stories.iter().any(|l| l.starts_with("Война: Болонская синьория (Бентивольо) и Урбинское герцогство (Монтефельтро)")), "{:?}", a.open_stories);
+    assert!(!chron.contains("война: Болонская синьория (Бентивольо) и Урбинское"), "{chron}");
+    assert!(chron.contains("война: Генуэзская республика и Сиенская республика — бои в 1478 году, окончена"), "{chron}");
+    assert!(!a.open_stories.iter().any(|l| l.contains("Генуэзская республика и Сиенская")), "{:?}", a.open_stories);
+    for gone in ["союз", "решения игрока", "веха"] {
+        assert!(!chron.contains(gone), "{gone} stands in its own block: {chron}");
+    }
+    assert!(!state.world_state.as_ref().unwrap().alliances.is_empty() && !state.world_state.as_ref().unwrap().milestone_events_fired.is_empty(), "both ways: the world has alliances and milestones");
+    // The vassalage ends: now it is the past.
+    add(&mut state, "vassalage_end_bologna_ferrara", "ferrara", now - 1, crate::core::EventType::Diplomatic);
+    state.world_state.as_mut().unwrap().vassalages.clear();
+    let a = annals_of(&state);
+    let chron = chronology_of(&a);
+    assert!(chron.contains("Феррарское герцогство (Эсте) становится вассалом; сюзерен — Болонская синьория (Бентивольо)"), "{chron}");
+    assert!(chron.contains("Феррарское герцогство (Эсте) выходит из-под власти сюзерена (Болонская синьория (Бентивольо))"), "{chron}");
+    assert!(!a.relations.iter().any(|l| l.contains("— вассал")), "{:?}", a.relations);
+}
+
+/// The trajectories: at most `DOSSIER_MAX` notable changes, the strongest of each kind first. Both
+/// ways: the world has more notable changes than that; a list where one kind is the strongest
+/// three times still shows other kinds; with one kind only, the strongest three of it.
+#[test]
+fn dossier_keeps_only_the_most_notable_changes() {
+    use crate::llm::annals::{dossier_all, dossier_pick, DOSSIER_MAX};
+    let (state, _db) = milan_after(40);
+    let ws = state.world_state.as_ref().unwrap();
+    let all = dossier_all(ws, state.current_scenario.as_ref().unwrap(), ws.tick - 1);
+    assert!(all.len() > DOSSIER_MAX, "the world has more notable changes than are shown: {all:?}");
+    assert!(all.windows(2).all(|w| w[0].0 >= w[1].0), "strongest first");
+    let a = annals_of(&state);
+    assert_eq!(a.dossier.len(), DOSSIER_MAX);
+    assert_eq!(a.dossier, dossier_pick(&all));
+    let l = |s: f64, k: usize, t: &str| (s, k, t.to_string());
+    let armies = [l(3.0, 1, "A: армия"), l(2.9, 1, "B: армия"), l(2.8, 1, "C: армия"), l(1.2, 0, "D: богатеет"), l(1.1, 4, "E: раздоры")];
+    assert_eq!(dossier_pick(&armies), vec!["A: армия", "D: богатеет", "E: раздоры"]);
+    assert_eq!(dossier_pick(&armies[..3]), vec!["A: армия", "B: армия", "C: армия"]);
+}
+
+/// The stop-list leaves out a list of powers: forbidding «Венеции, Неаполя, Рима и Флоренции»
+/// would leave no way to name the alliance. Both ways: a repeated turn with a word of its own
+/// stays, and a capitalised opening of a sentence is not a name list.
+#[test]
+fn stop_list_leaves_out_lists_of_powers() {
+    let book = [
+        "Союз Венеции, Неаполя, Рима и Флоренции стоит. Тишина легла на дороги Ломбардии.",
+        "Против Милана — союз Венеции, Неаполя, Рима и Флоренции. Тишина легла на дороги Ломбардии.",
+        "Весна выдалась сухой, союз Венеции, Неаполя, Рима и Флоренции молчит.",
+    ];
+    let stop = crate::llm::annals::stop_phrases(&book);
+    assert!(!stop.iter().any(|p| p == "венеции неаполя рима и" || p == "союз венеции неаполя рима и флоренции" || p == "неаполя рима и флоренции"), "{stop:?}");
+    assert!(stop.iter().all(|p| p.split(' ').any(|w| !["союз", "венеции", "неаполя", "рима", "и", "флоренции"].contains(&w))), "no phrase of names alone: {stop:?}");
+    assert!(stop.iter().any(|p| p.starts_with("тишина легла на дороги")), "a turn of its own stays: {stop:?}");
+}
+
+/// No event template makes a power's name agree with a past-tense verb («Франция появился»): the
+/// logs of the three worlds hold no name followed by one. Both ways: the check finds the old form.
+#[test]
+fn event_texts_do_not_put_a_name_before_a_past_tense_verb() {
+    use rand::SeedableRng;
+    let past = |name: &str, d: &str| {
+        d.match_indices(name).any(|(i, _)| {
+            // «Держава X прекратила существование»: the verb agrees with «держава», not the name.
+            if d[..i].trim_end().to_lowercase().ends_with("держава") {
+                return false;
+            }
+            let next = d[i + name.len()..].trim_start().split(|c: char| !c.is_alphabetic()).next().unwrap_or("");
+            ["л", "ла", "ло", "лся", "лась", "лось"].iter().any(|e| next.ends_with(e)) && next.chars().count() > 3
+        })
+    };
+    // Every name is blanked out longest first, so «Римская Империя» is not found inside
+    // «Восточная Римская Империя»; then a blank followed by a past-tense verb is the defect.
+    let past_any = |names: &[String], d: &str| {
+        let mut names = names.to_vec();
+        names.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+        let mut d = d.to_string();
+        for n in names.iter().filter(|n| !n.is_empty()) {
+            d = d.replace(n.as_str(), "\u{1}");
+        }
+        past("\u{1}", &d)
+    };
+    assert!(past("Франция", "Франция появился на сцене истории."), "the check finds the old form");
+    assert!(!past("Франция", "На сцену истории выходит Франция."));
+    assert!(!past("Римская Империя", "Держава Римская Империя прекратила существование"));
+    let db = setup_test_db();
+    for scenario in ["milan_1477", "rome_375", "constantinople_1430"] {
+        for seed in 0..3u64 {
+            let mut state = AppState::default();
+            crate::application::load_scenario(&mut state, &db, scenario.to_string()).unwrap();
+            state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(seed));
+            for _ in 0..60 {
+                advance_tick(&mut state, None).expect("tick");
+            }
+            let ws = state.world_state.as_ref().unwrap();
+            let mut names: Vec<String> = ws.actors.values().map(|a| a.name.clone()).chain(ws.actors.keys().cloned()).collect();
+            names.extend(state.current_scenario.as_ref().unwrap().actors.iter().flat_map(|a| [a.name.clone(), a.id.clone()]));
+            // Authored texts («Польша-Литва обратила взор на юг») agree by hand; the templates are
+            // the engine's own events.
+            let sc = state.current_scenario.as_ref().unwrap();
+            let authored = |id: &str| sc.random_events.iter().any(|r| r.id == id) || sc.milestone_events.iter().any(|m| m.id == id)
+                || id.starts_with("player_action_");
+            for e in state.event_log.events.iter().filter(|e| !authored(&e.id)) {
+                assert!(!past_any(&names, &e.description), "{scenario} s{seed}: «{}»", e.description);
+            }
+        }
+    }
 }

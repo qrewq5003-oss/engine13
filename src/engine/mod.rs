@@ -923,7 +923,7 @@ fn phase_era_progression(world: &mut WorldState, scenario: &Scenario, event_log:
                     actor.id.clone(),
                     crate::core::EventType::Milestone,
                     true,
-                    format!("{} перешёл из {:?} в {:?} эру", actor.name, old_era, era_def.era),
+                    format!("{} переходит из {:?} в {:?} эру", actor.name, old_era, era_def.era),
                 );
                 event_log.add(event);
             }
@@ -1606,7 +1606,7 @@ fn check_milestone_events(
                         cfg.actor_id.clone(),
                         EventType::Birth,
                         true,
-                        format!("{} появился на сцене истории.", cfg.label),
+                        format!("На сцену истории выходит {}.", cfg.label),
                     )
                     .with_tags(vec!["birth".to_string(), cfg.actor_id.clone()]);
                     event_log.add(event);
@@ -1992,7 +1992,7 @@ fn check_relevance_thresholds(
                 actor_id.clone(),
                 EventType::Threshold,
                 true,
-                format!("{} вышел на передний план: {}", actor.name, reasons.join(", ")),
+                format!("{} выходит на передний план: {}", actor.name, reasons.join(", ")),
             );
             event_log.add(event);
         }
@@ -2050,7 +2050,7 @@ fn check_relevance_thresholds(
                 actor_id.clone(),
                 EventType::Threshold,
                 false,
-                format!("{} вернулся в фон: низкая релевантность", actor.name),
+                format!("{} уходит в фон: низкая релевантность", actor.name),
             );
             event_log.add(event);
         }
