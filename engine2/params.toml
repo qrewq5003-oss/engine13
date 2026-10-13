@@ -38,11 +38,52 @@ band = [0.1, 1.0]
 unit = "people per km²"
 e0 = "П1"
 
-# Stand-in of E1 until the population system: share of the gap to capacity closed per tick.
-[population.pull_to_capacity]
+# E0 П2 — intrinsic growth below capacity (derived from the observed П7: the recovery peak
+# of 0.4–0.5 % a year must be reachable, so r sits above it).
+[population.growth_per_year]
+kind = "a"
+value = 0.007
+band = [0.005, 0.010]
+unit = "share per year, logistic toward capacity"
+e0 = "П2"
+
+# E0 П3 — famine: the share a province above its capacity loses (Jordan 1996; Ó Gráda 2009).
+[famine.mortality_per_year]
+kind = "a"
+value = 0.10
+band = [0.05, 0.20]
+unit = "share of the province per crisis year"
+e0 = "П3"
+
+# E0 П4 — plague where the world has it: recurrences every 2–20 years (Marshall 1994),
+# a province-wide outbreak takes 5–20 % (Carmichael 1986; Munro 2013). Whether plague
+# exists is a fact of the scenario (its pool of diseases), not a constant.
+[plague.outbreaks_per_year]
+kind = "a"
+value = 0.10
+band = [0.05, 0.50]
+unit = "outbreaks per province per year"
+e0 = "П4"
+
+[plague.mortality]
+kind = "a"
+value = 0.10
+band = [0.05, 0.20]
+unit = "share of the province per outbreak"
+e0 = "П4"
+
+# E0 П5 — migration, kind (в): people move toward an emptier land neighbour; the sum of
+# people never changes (ledger). Checked through П7.
+[migration.rate_per_tick]
 kind = "c"
-value = 0.001
-unit = "share of the gap to capacity, per tick"
+value = 0.02
+unit = "share of the fuller province per tick, times the fill gap"
+checked_by = "П7"
+
+[migration.min_gap]
+kind = "c"
+value = 0.10
+unit = "fill gap (share of capacity) below which nobody moves"
 checked_by = "П7"
 
 [population.observed_growth_per_year]

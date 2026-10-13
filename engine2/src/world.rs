@@ -26,6 +26,13 @@ use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
 use crate::time::Tick;
 
+/// A disease the world may hold (brief §0.2: a fact of the scenario, like culture). Plague
+/// strikes provinces by E0 П4 where it exists; between 270 and 541 it did not exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Disease {
+    Plague,
+}
+
 /// Land of a province: the closed list the capacity density (E0 П1) is keyed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Land {
@@ -119,6 +126,8 @@ pub struct ActorFact {
 pub struct Facts {
     pub scenario_id: String,
     pub start_year: i32,
+    /// The diseases this world holds.
+    pub diseases: Vec<Disease>,
     /// Index = `ProvinceId`.
     pub provinces: Vec<ProvinceFact>,
     /// Index = `ActorId`.
@@ -148,6 +157,7 @@ pub struct World {
     pub seed: u64,
     pub start_year: i32,
     pub tick: Tick,
+    pub diseases: std::collections::BTreeSet<Disease>,
     pub actors: BTreeMap<ActorId, Actor>,
     pub provinces: BTreeMap<ProvinceId, Province>,
     pub units: BTreeMap<UnitId, Unit>,
@@ -271,6 +281,7 @@ impl World {
             seed,
             start_year: facts.start_year,
             tick,
+            diseases: facts.diseases.iter().copied().collect(),
             actors,
             provinces,
             units,
@@ -299,13 +310,22 @@ impl World {
         Ok(())
     }
 
+    /// The ordinal the next draw of `(point, id)` gets this tick.
+    pub(crate) fn draw_ordinal(&self, point: DrawPoint, id: u32) -> u32 {
+        self.draws.iter().filter(|r| r.draw.point == point && r.draw.id == id).count() as u32
+    }
+
+    /// Journal a draw made with [`rng::draw`] on a key built from [`draw_ordinal`].
+    pub(crate) fn journal_draw(&mut self, d: Draw, value: u64) {
+        self.draws.push(RngDraw { draw: d, value });
+    }
+
     /// A keyed draw for this world, journaled. Repeated draws of one point for one id in
     /// one tick get successive ordinals and therefore different numbers.
     pub fn draw(&mut self, point: DrawPoint, id: u32) -> u64 {
-        let n = self.draws.iter().filter(|r| r.draw.point == point && r.draw.id == id).count() as u32;
-        let d = Draw { point, tick: self.tick, id, n };
+        let d = Draw { point, tick: self.tick, id, n: self.draw_ordinal(point, id) };
         let value = rng::draw(self.seed, d);
-        self.draws.push(RngDraw { draw: d, value });
+        self.journal_draw(d, value);
         value
     }
 
@@ -320,20 +340,13 @@ impl World {
     }
 
     /// Play one tick: one decision draw per actor (stand-in for E3), units move and are
-    /// supplied (`movement.rs`), population moves toward capacity (stand-in for the
-    /// population system), then `TickPlayed`.
+    /// supplied (`movement.rs`), people grow, starve, sicken and migrate
+    /// (`population.rs`), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
         self.phase_units(params)?;
-        let provinces: Vec<(ProvinceId, u64)> = self.provinces.iter().map(|(p, pr)| (*p, pr.capacity)).collect();
-        for (p, capacity) in provinces {
-            let account = Account::Population(p);
-            let gap_people = capacity as i64 - self.ledger.stock(account).unwrap_or(0);
-            // gap people = gap·1000 milli; times ppm/1 000 000 = gap·ppm/1000 milli.
-            let milli = gap_people * params.population_pull_to_capacity_ppm / 1000;
-            self.post(account, Source::Growth, milli)?;
-        }
+        self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);
         let report = TickReport {
@@ -439,8 +452,8 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.len(), w.actors.len());
-        assert_eq!(r.postings.len(), w.provinces.len(), "only the stand-in growth posts: every unit is supplied at home");
-        assert!(r.postings.iter().all(|p| p.source == Source::Growth));
+        assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut)), "every unit is supplied at home: only people move");
+        assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert_eq!(r.events.len(), 1);
         assert!(matches!(r.events[0].event, Event::TickPlayed));
         assert_eq!(r.events[0].seq, 0);
@@ -491,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn stand_in_growth_moves_population_toward_capacity_and_keeps_a_remainder() {
+    fn growth_moves_population_toward_capacity_and_keeps_a_remainder() {
         let mut w = world(7);
         let p = ProvinceId(0);
         let cap = w.provinces[&p].capacity as i64;

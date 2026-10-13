@@ -7,7 +7,8 @@
 //! only, `deny_unknown_fields`), the constants file with kinds, the presentation model.
 //! Step E1c: `Observed` for the sentinel crate (`observe.rs`), the short run in CI.
 //! E2 step 2: the province graph with land and sea edges, units that move and are supplied
-//! on it (`movement.rs`).
+//! on it (`movement.rs`). E2 step 3: the population system (`population.rs`) — the first
+//! randomness (plague).
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -27,6 +28,7 @@ pub mod movement;
 #[cfg(feature = "sentinel")]
 pub mod observe;
 pub mod params;
+pub mod population;
 pub mod rng;
 pub mod save;
 pub mod scenario;
@@ -49,4 +51,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{ActorFact, Facts, Land, Names, ProvinceFact, TickReport, Unit, World};
+pub use world::{ActorFact, Disease, Facts, Land, Names, ProvinceFact, TickReport, Unit, World};

@@ -87,15 +87,24 @@ impl Observed for Game {
                 Event::UnitMoved { .. } => ObsEvent::Other("UnitMoved".into()),
                 Event::NoPath { .. } => ObsEvent::Other("NoPath".into()),
                 Event::Attrition { .. } => ObsEvent::Other("Attrition".into()),
+                Event::Famine { province, .. } => ObsEvent::Other(format!("Famine@{}", self.province_id(*province).0)),
+                Event::Plague { .. } => ObsEvent::Other("Plague".into()),
+                Event::Migration { .. } => ObsEvent::Other("Migration".into()),
             })
             .collect()
     }
 
-    /// Kinds the systems so far can produce **without anyone ordering anything**: none —
-    /// movement needs an order (E3 agents), attrition needs an unsupplied unit. A declared
-    /// kind that never occurs across the matrix is the sentinel's `Never`; registering
-    /// kinds that only orders can cause would flag the absence of agents, not a defect.
+    /// Kinds the systems so far can produce **without anyone ordering anything**. Plague,
+    /// where the world holds it (E0 П4). Not yet: movement and attrition need an order (E3
+    /// agents); famine needs something to push a province over its capacity (foraging,
+    /// capacity shocks — with war); migration happens only with a fill gap. A declared kind
+    /// that never occurs across the matrix is the sentinel's `Never`; registering kinds that
+    /// nothing can cause yet would flag the absence of later systems, not a defect.
     fn possible_kinds(&self) -> Vec<String> {
-        Vec::new()
+        let mut out = Vec::new();
+        if self.world().diseases.contains(&crate::world::Disease::Plague) {
+            out.push("Plague".to_string());
+        }
+        out
     }
 }

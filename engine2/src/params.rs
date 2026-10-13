@@ -64,9 +64,18 @@ pub enum ParamsError {
 /// kept for the guard and for tools.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Params {
-    /// Stand-in of E1: share of the gap to capacity the population closes per tick, as
-    /// parts per million so the ledger arithmetic stays integer.
-    pub population_pull_to_capacity_ppm: i64,
+    /// E0 П2: logistic growth per tick, parts per million.
+    pub population_growth_ppm_per_tick: i64,
+    /// E0 П3: share of a province above capacity lost per tick, parts per million.
+    pub famine_mortality_ppm_per_tick: i64,
+    /// E0 П4: probability of an outbreak per province per tick (where plague exists).
+    pub plague_outbreak_probability_per_tick: f64,
+    /// E0 П4: share of a province an outbreak takes, parts per million.
+    pub plague_mortality_ppm: i64,
+    /// E0 П5 (в): migration rate per tick, parts per million, times the fill gap.
+    pub migration_rate_ppm_per_tick: i64,
+    /// E0 П5 (в): fill gap below which nobody moves, parts per million.
+    pub migration_min_gap_ppm: i64,
     /// E0 П1: people per km² by land, as thousandths so capacity is integer arithmetic.
     pub capacity_milli_per_km2: [(Land, i64); 4],
     /// E0 А8: soldiers 1 000 inhabitants can supply.
@@ -119,7 +128,12 @@ impl Params {
         let value = |key: &str| -> Result<f64, ParamsError> {
             entries.get(key).and_then(|e| e.value).ok_or_else(|| ParamsError::Missing(key.to_string()))
         };
-        let pull = value("population.pull_to_capacity")?;
+        let growth = value("population.growth_per_year")?;
+        let famine = value("famine.mortality_per_year")?;
+        let outbreaks = value("plague.outbreaks_per_year")?;
+        let plague_mortality = value("plague.mortality")?;
+        let migration_rate = value("migration.rate_per_tick")?;
+        let migration_gap = value("migration.min_gap")?;
         let milli = |key: &str| -> Result<i64, ParamsError> { Ok((value(key)? * 1000.0).round() as i64) };
         let capacity_milli_per_km2 = [
             (Land::Arable, milli("capacity.arable")?),
@@ -131,7 +145,12 @@ impl Params {
         let attrition_year = value("army.attrition_unsupplied_per_year")?;
         let moves = value("movement.provinces_per_tick")?;
         Ok(Params {
-            population_pull_to_capacity_ppm: (pull * 1_000_000.0).round() as i64,
+            population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
+            famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
+            plague_outbreak_probability_per_tick: outbreaks / 2.0,
+            plague_mortality_ppm: (plague_mortality * 1_000_000.0).round() as i64,
+            migration_rate_ppm_per_tick: (migration_rate * 1_000_000.0).round() as i64,
+            migration_min_gap_ppm: (migration_gap * 1_000_000.0).round() as i64,
             capacity_milli_per_km2,
             supply_soldiers_per_1000: supply.round() as i64,
             // Two ticks a year: half the yearly share per tick.
@@ -188,7 +207,12 @@ mod tests {
     #[test]
     fn shipped_file_loads() {
         let p = Params::load().unwrap();
-        assert_eq!(p.population_pull_to_capacity_ppm, 1000);
+        assert_eq!(p.population_growth_ppm_per_tick, 3500);
+        assert_eq!(p.famine_mortality_ppm_per_tick, 50_000);
+        assert!((p.plague_outbreak_probability_per_tick - 0.05).abs() < 1e-12);
+        assert_eq!(p.plague_mortality_ppm, 100_000);
+        assert_eq!(p.migration_rate_ppm_per_tick, 20_000);
+        assert_eq!(p.migration_min_gap_ppm, 100_000);
         assert_eq!(p.capacity(250, Land::Arable), 10_000);
         assert_eq!(p.capacity(1000, Land::Steppe), 1000);
         assert_eq!(p.supply_soldiers_per_1000, 150);

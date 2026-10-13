@@ -62,6 +62,12 @@ pub enum Event {
     NoPath { unit: UnitId, to: ProvinceId },
     /// A unit lost men for want of supply; `unsupplied` is how many stood beyond it.
     Attrition { unit: UnitId, unsupplied: u64 },
+    /// A province above its capacity lost people.
+    Famine { province: ProvinceId, dead: u64 },
+    /// An outbreak took people of a province.
+    Plague { province: ProvinceId, dead: u64 },
+    /// People moved to an emptier neighbour; the sum of people is unchanged.
+    Migration { from: ProvinceId, to: ProvinceId, people: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

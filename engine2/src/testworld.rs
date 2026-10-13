@@ -56,7 +56,7 @@ pub fn five_states() -> (Facts, Names) {
         }
     }
     let actors = (0..SIDE).map(|a| ActorFact { treasury_kg: 100_000, capital: ProvinceId(a), soldiers: 600 }).collect();
-    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, provinces, actors };
+    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors };
     let names = Names { actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(), provinces: province_names };
     (facts, names)
 }
@@ -101,6 +101,7 @@ pub fn five_states_scenario() -> ScenarioData {
     ScenarioData {
         id: facts.scenario_id.clone(),
         start_year: facts.start_year,
+        diseases: facts.diseases.clone(),
         display_currency: DisplayCurrency { name: "ducat".to_string(), kg_per_unit: 100.0 },
         actors,
         provinces,
