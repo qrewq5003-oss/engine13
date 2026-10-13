@@ -43,8 +43,12 @@ fn seed_independence_is_still_true_in_e1() {
         m.add(summary);
         g.get_or_insert_with(|| Game::new(&testworld::five_states_scenario(), Params::load().unwrap(), seed).unwrap());
     }
-    let possible = g.unwrap().possible_kinds();
-    let history = History::parse(include_str!("../../sentinel/history/testworld.toml")).unwrap();
+    let g = g.unwrap();
+    let possible = g.possible_kinds();
+    // The history file is the sentinel's: engine2 does not know where it lives, the test
+    // reads it through the sentinel crate's manifest directory.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("sentinel").join("history").join("testworld.toml");
+    let history = History::load(&std::fs::read_to_string(path).unwrap(), &g.observe()).unwrap();
     let flags = m.flags(&Thresholds::default(), &possible, Some(&history));
     assert_eq!(flags, vec![Flag::SeedIndependent { strategy: "none".into(), runs: 3 }]);
 }

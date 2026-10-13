@@ -12,4 +12,13 @@ rand_chacha = "0.3"
 rand = "0.8"
 thiserror = "1.0.50"
 toml = "0.8"
-sentinel = { path = "../sentinel" }
+# The sentinel is a measuring instrument, not part of the game: behind a feature so the
+# shell's build (E5) never carries it. CI enables it for the short run.
+sentinel = { path = "../sentinel", optional = true }
+
+[features]
+sentinel = ["dep:sentinel"]
+
+[[test]]
+name = "sentinel_short_run"
+required-features = ["sentinel"]

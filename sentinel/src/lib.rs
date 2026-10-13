@@ -8,11 +8,16 @@
 //! Two layers of flags:
 //! - **single run** ([`Sentinel`]): pinned to a bound, bound hit, read of an absent actor,
 //!   stagnation of the whole world;
-//! - **matrix of runs** ([`Matrix`]): never / always over the event kinds an engine declares
-//!   possible, outcome independent of the seed, outcome independent of the player's
-//!   strategy, and `history_lock` — the real course of events repeating in too many runs
-//!   without a player. The real course lives in this crate (`history/<scenario>.toml`), so
-//!   neither engine nor chronicler can read it by construction (owner's decision, plan §8).
+//! - **matrix of runs** ([`Matrix`]): `Never` over the event kinds an engine declares
+//!   possible; `Always` over **(kind, participant)** pairs — a battle in every game is
+//!   normal, the death of the same actor in every game is a degeneration; outcome
+//!   independent of the seed or of the player's strategy, compared on the **outcome**
+//!   ([`EndState`]: who is alive, who owns what), not on every stock, which would differ by
+//!   one person as soon as anything is random; and `history_lock` — the real course of
+//!   events repeating in too many runs without a player. The real course lives in this
+//!   crate (`history/<scenario>.toml`), so neither engine nor chronicler can read it by
+//!   construction (owner's decision, plan §8), and its ids are checked against the world's
+//!   starting observation, so a typo cannot make an outcome vacuously true.
 //!
 //! Thresholds are model parameters (E0 kind (в)); `history_lock`'s share is the owner's
 //! (brief §11 №5).
@@ -31,6 +36,12 @@ pub struct ObsId(pub String);
 impl From<&str> for ObsId {
     fn from(s: &str) -> Self {
         ObsId(s.to_string())
+    }
+}
+
+impl std::fmt::Display for ObsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -60,10 +71,25 @@ pub struct Stock {
 pub struct Observation {
     pub tick: u32,
     pub alive: Vec<ObsId>,
-    /// `(province, owner)`, for `history_lock` outcomes about territory.
+    /// `(province, owner)`, for outcomes about territory.
     pub owners: Vec<(ObsId, ObsId)>,
     pub ratings: Vec<Rating>,
     pub stocks: Vec<Stock>,
+}
+
+/// The outcome of a run: who is alive and who owns what (brief §1 — later also vassalage
+/// and goals). Seed and strategy independence are judged on this, never on the stocks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EndState {
+    pub alive: Vec<ObsId>,
+    pub owners: Vec<(ObsId, ObsId)>,
+}
+
+impl Observation {
+    pub fn outcome(&self) -> EndState {
+        EndState { alive: self.alive.clone(), owners: self.owners.clone() }
+    }
 }
 
 /// The typed events the sentinel understands. Engines map their own events onto these;
@@ -88,7 +114,7 @@ pub enum ObsEvent {
 }
 
 impl ObsEvent {
-    /// The kind name, the unit of the never/always flags.
+    /// The kind name, the unit of the `Never` flag.
     pub fn kind(&self) -> String {
         match self {
             ObsEvent::TickPlayed => "TickPlayed".into(),
@@ -106,6 +132,22 @@ impl ObsEvent {
             ObsEvent::Other(k) => k.clone(),
         }
     }
+
+    /// Who the event is about: the ids that, paired with the kind, make the unit of the
+    /// `Always` flag. The place of a battle or a transfer, the parties of a war, the actor
+    /// who died…
+    pub fn participants(&self) -> Vec<ObsId> {
+        match self {
+            ObsEvent::TickPlayed | ObsEvent::Other(_) => vec![],
+            ObsEvent::Verb { actor, .. } => vec![actor.clone()],
+            ObsEvent::Battle { place, .. } => vec![place.clone()],
+            ObsEvent::Transfer { place, from, to } => vec![place.clone(), from.clone(), to.clone()],
+            ObsEvent::War(a, b) | ObsEvent::Peace(a, b) => vec![a.clone(), b.clone()],
+            ObsEvent::Died(id) | ObsEvent::Born(id) | ObsEvent::Freed(id) | ObsEvent::ReadAbsent(id) => vec![id.clone()],
+            ObsEvent::Vassal { vassal, of } => vec![vassal.clone(), of.clone()],
+            ObsEvent::BoundHit { who, .. } => vec![who.clone()],
+        }
+    }
 }
 
 /// What an engine exposes to the sentinel.
@@ -114,8 +156,8 @@ pub trait Observed {
     /// The events of the tick just played, mapped.
     fn events_of_last_tick(&self) -> Vec<ObsEvent>;
     /// The event kinds this engine's systems can produce. A declared kind that never
-    /// appears across a matrix of runs is the `Never` flag; one that appears in every run is
-    /// `Always`. Systems register their kinds as they arrive (E2).
+    /// appears across a matrix of runs is the `Never` flag. Systems register their kinds as
+    /// they arrive (E2).
     fn possible_kinds(&self) -> Vec<String>;
 }
 
@@ -144,8 +186,10 @@ pub enum Flag {
     BoundHit { who: ObsId, stock: String, count: u32 },
     ReadAbsent { who: ObsId },
     Stagnation { from_tick: u32, ticks: u32 },
+    /// A declared kind that happened in no run.
     Never { kind: String },
-    Always { kind: String },
+    /// This event to this participant happened in every run.
+    Always { kind: String, who: ObsId },
     SeedIndependent { strategy: String, runs: usize },
     StrategyIndependent { seed: u64, runs: usize },
     HistoryLock { share: f64, runs: usize },
@@ -163,6 +207,7 @@ pub struct Sentinel {
     unchanged_ticks: u32,
     stagnation: Option<(u32, u32)>,
     kinds: BTreeSet<String>,
+    pairs: BTreeSet<(String, ObsId)>,
     pinned_flags: BTreeMap<(ObsId, String), u32>,
 }
 
@@ -178,6 +223,7 @@ impl Sentinel {
             unchanged_ticks: 0,
             stagnation: None,
             kinds: BTreeSet::new(),
+            pairs: BTreeSet::new(),
             pinned_flags: BTreeMap::new(),
         }
     }
@@ -185,7 +231,11 @@ impl Sentinel {
     /// Feed one tick: the observation at its end and its events.
     pub fn watch(&mut self, obs: &Observation, events: &[ObsEvent]) {
         for e in events {
-            self.kinds.insert(e.kind());
+            let kind = e.kind();
+            for who in e.participants() {
+                self.pairs.insert((kind.clone(), who));
+            }
+            self.kinds.insert(kind);
             match e {
                 ObsEvent::BoundHit { who, stock, .. } => {
                     *self.bound_hits.entry((who.clone(), stock.clone())).or_insert(0) += 1;
@@ -249,7 +299,8 @@ impl Sentinel {
             seed,
             strategy: strategy.to_string(),
             kinds: self.kinds.clone(),
-            end: self.last.clone().unwrap_or(Observation { tick: 0, alive: vec![], owners: vec![], ratings: vec![], stocks: vec![] }),
+            pairs: self.pairs.clone(),
+            outcome: self.last.as_ref().map(Observation::outcome).unwrap_or(EndState { alive: vec![], owners: vec![] }),
         }
     }
 }
@@ -267,13 +318,16 @@ pub fn run<S: Observed>(sim: &mut S, ticks: u32, seed: u64, strategy: &str, th: 
 }
 
 /// One run as the matrix sees it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunSummary {
     pub seed: u64,
     /// The player's strategy label; `"none"` is a run without a player.
     pub strategy: String,
+    /// Event kinds that occurred.
     pub kinds: BTreeSet<String>,
-    pub end: Observation,
+    /// `(kind, participant)` pairs that occurred.
+    pub pairs: BTreeSet<(String, ObsId)>,
+    pub outcome: EndState,
 }
 
 /// The real course of events after the scenario's start, in the sentinel's own data
@@ -298,10 +352,12 @@ pub enum Outcome {
     Owns { province: ObsId, owner: ObsId },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum HistoryError {
     #[error("history file is not valid TOML of the schema: {0}")]
     Toml(String),
+    #[error("history names '{0}', which is not in the world's starting observation")]
+    UnknownId(ObsId),
 }
 
 impl History {
@@ -309,15 +365,46 @@ impl History {
         toml::from_str(text).map_err(|e| HistoryError::Toml(e.to_string()))
     }
 
-    /// Does this end state repeat the real course in full? A history with no outcomes
-    /// names no course, so nothing repeats it (otherwise an empty file would lock every run).
-    pub fn matches(&self, end: &Observation) -> bool {
+    /// Parse and check every id against the world's starting observation: an unknown id is
+    /// an error, not an outcome that comes true by itself.
+    pub fn load(text: &str, start: &Observation) -> Result<History, HistoryError> {
+        let h = History::parse(text)?;
+        h.check(start)?;
+        Ok(h)
+    }
+
+    pub fn check(&self, start: &Observation) -> Result<(), HistoryError> {
+        let actors: BTreeSet<&ObsId> = start.alive.iter().collect();
+        let provinces: BTreeSet<&ObsId> = start.owners.iter().map(|(p, _)| p).collect();
+        for o in &self.outcomes {
+            match o {
+                Outcome::Dead { id } | Outcome::Alive { id } => {
+                    if !actors.contains(id) {
+                        return Err(HistoryError::UnknownId(id.clone()));
+                    }
+                }
+                Outcome::Owns { province, owner } => {
+                    if !provinces.contains(province) {
+                        return Err(HistoryError::UnknownId(province.clone()));
+                    }
+                    if !actors.contains(owner) {
+                        return Err(HistoryError::UnknownId(owner.clone()));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Does this outcome repeat the real course in full? A history with no outcomes names
+    /// no course, so nothing repeats it (otherwise an empty file would lock every run).
+    pub fn matches(&self, end: &EndState) -> bool {
         !self.outcomes.is_empty()
             && self.outcomes.iter().all(|o| match o {
-            Outcome::Dead { id } => !end.alive.contains(id),
-            Outcome::Alive { id } => end.alive.contains(id),
-            Outcome::Owns { province, owner } => end.owners.iter().any(|(p, a)| p == province && a == owner),
-        })
+                Outcome::Dead { id } => !end.alive.contains(id),
+                Outcome::Alive { id } => end.alive.contains(id),
+                Outcome::Owns { province, owner } => end.owners.iter().any(|(p, a)| p == province && a == owner),
+            })
     }
 }
 
@@ -343,39 +430,45 @@ impl Matrix {
             return out;
         }
         for kind in possible {
-            let in_runs = self.runs.iter().filter(|r| r.kinds.contains(kind)).count();
-            if in_runs == 0 {
+            if !self.runs.iter().any(|r| r.kinds.contains(kind)) {
                 out.push(Flag::Never { kind: kind.clone() });
-            } else if in_runs == self.runs.len() && self.runs.len() >= 2 && kind != "TickPlayed" {
-                out.push(Flag::Always { kind: kind.clone() });
             }
         }
-        // Seed independence: same strategy, different seeds, identical end.
+        if self.runs.len() >= 2 {
+            let mut common: BTreeSet<(String, ObsId)> = self.runs[0].pairs.clone();
+            for r in &self.runs[1..] {
+                common = common.intersection(&r.pairs).cloned().collect();
+            }
+            for (kind, who) in common {
+                out.push(Flag::Always { kind, who });
+            }
+        }
+        // Seed independence: same strategy, different seeds, identical outcome.
         let mut by_strategy: BTreeMap<&str, Vec<&RunSummary>> = BTreeMap::new();
         for r in &self.runs {
             by_strategy.entry(r.strategy.as_str()).or_default().push(r);
         }
         for (strategy, runs) in &by_strategy {
             let seeds: BTreeSet<u64> = runs.iter().map(|r| r.seed).collect();
-            if seeds.len() >= 2 && runs.iter().all(|r| r.end == runs[0].end) {
+            if seeds.len() >= 2 && runs.iter().all(|r| r.outcome == runs[0].outcome) {
                 out.push(Flag::SeedIndependent { strategy: strategy.to_string(), runs: runs.len() });
             }
         }
-        // Strategy independence: same seed, different strategies, identical end.
+        // Strategy independence: same seed, different strategies, identical outcome.
         let mut by_seed: BTreeMap<u64, Vec<&RunSummary>> = BTreeMap::new();
         for r in &self.runs {
             by_seed.entry(r.seed).or_default().push(r);
         }
         for (seed, runs) in &by_seed {
             let strategies: BTreeSet<&str> = runs.iter().map(|r| r.strategy.as_str()).collect();
-            if strategies.len() >= 2 && runs.iter().all(|r| r.end == runs[0].end) {
+            if strategies.len() >= 2 && runs.iter().all(|r| r.outcome == runs[0].outcome) {
                 out.push(Flag::StrategyIndependent { seed: *seed, runs: runs.len() });
             }
         }
         if let Some(h) = history {
             let no_player: Vec<&RunSummary> = self.runs.iter().filter(|r| r.strategy == "none").collect();
             if !no_player.is_empty() {
-                let repeating = no_player.iter().filter(|r| h.matches(&r.end)).count();
+                let repeating = no_player.iter().filter(|r| h.matches(&r.outcome)).count();
                 let share = repeating as f64 / no_player.len() as f64;
                 if share >= th.history_lock_share {
                     out.push(Flag::HistoryLock { share, runs: no_player.len() });

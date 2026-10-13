@@ -21,6 +21,7 @@
 pub mod event;
 pub mod ids;
 pub mod ledger;
+#[cfg(feature = "sentinel")]
 pub mod observe;
 pub mod params;
 pub mod rng;
