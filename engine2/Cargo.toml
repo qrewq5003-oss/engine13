@@ -18,6 +18,9 @@ sentinel = { path = "../sentinel", optional = true }
 
 [features]
 sentinel = ["dep:sentinel"]
+# The world generator is a measuring instrument for E2 acceptance, not a game mode (the
+# brief has none): behind a feature, out of the game's build.
+worldgen = []
 
 [[test]]
 name = "sentinel_short_run"
@@ -25,4 +28,4 @@ required-features = ["sentinel"]
 
 [[test]]
 name = "worldgen"
-required-features = ["sentinel"]
+required-features = ["sentinel", "worldgen"]

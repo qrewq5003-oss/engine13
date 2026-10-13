@@ -33,6 +33,7 @@ pub mod time;
 pub mod verbs;
 pub mod view;
 pub mod world;
+#[cfg(feature = "worldgen")]
 pub mod worldgen;
 
 pub use event::{Event, Stamped};
