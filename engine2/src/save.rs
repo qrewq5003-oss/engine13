@@ -15,10 +15,22 @@ use crate::world::World;
 /// Bump on any incompatible change of [`World`] or its parts.
 pub const SAVE_FORMAT: u32 = 1;
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Written envelope: borrows the world, no copy.
+#[derive(Debug, Serialize)]
+struct EnvelopeRef<'a> {
+    format: u32,
+    world: &'a World,
+}
+
+/// Read envelope: the format first, the world as raw JSON, so that a wrong format is
+/// reported as such and not as a missing field inside `world`. `deny_unknown_fields`: a
+/// save with a field this build does not know is refused, not loaded with a silent gap
+/// (plan §4).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Envelope {
     format: u32,
-    world: World,
+    world: serde_json::Value,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,23 +43,16 @@ pub enum SaveError {
 
 /// Serialize a world. Infallible for a well-formed world; the `Result` is only serde's.
 pub fn to_save(world: &World) -> Result<String, SaveError> {
-    Ok(serde_json::to_string(&Envelope { format: SAVE_FORMAT, world: world.clone() })?)
+    Ok(serde_json::to_string(&EnvelopeRef { format: SAVE_FORMAT, world })?)
 }
 
 /// Deserialize a save of the current format.
 pub fn from_save(s: &str) -> Result<World, SaveError> {
-    // Read the format first so that a wrong format is reported as such, not as a missing
-    // field inside `world`.
-    #[derive(Deserialize)]
-    struct Head {
-        format: u32,
-    }
-    let head: Head = serde_json::from_str(s)?;
-    if head.format != SAVE_FORMAT {
-        return Err(SaveError::Format { found: head.format, supported: SAVE_FORMAT });
-    }
     let env: Envelope = serde_json::from_str(s)?;
-    Ok(env.world)
+    if env.format != SAVE_FORMAT {
+        return Err(SaveError::Format { found: env.format, supported: SAVE_FORMAT });
+    }
+    Ok(serde_json::from_value(env.world)?)
 }
 
 #[cfg(test)]
@@ -59,6 +64,16 @@ mod tests {
     fn wrong_format_is_reported_as_format() {
         let err = from_save(r#"{"format":999,"world":{}}"#).unwrap_err();
         assert!(matches!(err, SaveError::Format { found: 999, .. }), "{err}");
+    }
+
+    #[test]
+    fn unknown_field_anywhere_is_refused() {
+        let w = World::from_facts(&testworld::five_states(), 3).unwrap();
+        let s = to_save(&w).unwrap();
+        let extra_top = s.replacen("{\"format\":", "{\"extra\":1,\"format\":", 1);
+        assert!(matches!(from_save(&extra_top).unwrap_err(), SaveError::Json(_)));
+        let extra_inner = s.replacen("\"seed\":", "\"extra\":1,\"seed\":", 1);
+        assert!(matches!(from_save(&extra_inner).unwrap_err(), SaveError::Json(_)));
     }
 
     #[test]

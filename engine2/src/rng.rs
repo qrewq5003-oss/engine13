@@ -1,7 +1,9 @@
 //! Keyed deterministic randomness with a draw journal (plan §3).
 //!
-//! Every draw is addressed by `(seed, point, tick, id)` and computed from a ChaCha8 stream
-//! seeded with exactly that key. There is no shared stream to advance, so:
+//! Every draw is addressed by `(seed, point, tick, id, n)` — `n` being the ordinal of the
+//! draw among those with the same point, tick and id — and computed from a ChaCha8 stream
+//! seeded with exactly that key. Without `n`, two battles in one province in one tick, or
+//! two decisions of one actor, would share one number (owner's review of PR #277). There is no shared stream to advance, so:
 //! - the same key gives the same value in any process on any platform (ChaCha is
 //!   platform-independent, the key is little-endian bytes);
 //! - a run that draws *more* in one place (a different player verb, an extra battle) gets
@@ -39,33 +41,39 @@ pub enum DrawPoint {
     Mortality = 4,
 }
 
-/// One request for randomness: where, when, for whom.
+/// One request for randomness: where, when, for whom, which in turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Draw {
     pub point: DrawPoint,
     pub tick: Tick,
     /// The id the draw belongs to (actor, province, person…); which table is implied by
     /// the point.
     pub id: u32,
+    /// Ordinal of this draw among the draws with the same `(point, tick, id)`, from 0.
+    /// The world assigns it (`World::draw`); callers never choose it.
+    pub n: u32,
 }
 
 /// A journaled draw: the request and the value it produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RngDraw {
     pub draw: Draw,
     pub value: u64,
 }
 
-/// The 32-byte ChaCha seed for a draw: run seed, point, tick, id, and a domain tag.
+/// The 32-byte ChaCha seed for a draw: run seed, point, tick, id, ordinal, and a domain tag.
 fn key(seed: u64, draw: Draw) -> [u8; 32] {
     let mut k = [0u8; 32];
     k[0..8].copy_from_slice(&seed.to_le_bytes());
     k[8..12].copy_from_slice(&(draw.point as u32).to_le_bytes());
     k[12..16].copy_from_slice(&draw.tick.0.to_le_bytes());
     k[16..20].copy_from_slice(&draw.id.to_le_bytes());
+    k[20..24].copy_from_slice(&draw.n.to_le_bytes());
     // Domain separation so that another keyed use (e.g. a future map generator) cannot
     // collide with world draws even with equal numeric fields.
-    k[20..28].copy_from_slice(b"e2draw01");
+    k[24..32].copy_from_slice(b"e2draw02");
     k
 }
 
@@ -86,18 +94,20 @@ mod tests {
 
     #[test]
     fn same_key_same_value_and_keys_differ() {
-        let d = Draw { point: DrawPoint::Decision, tick: Tick(7), id: 3 };
+        let d = Draw { point: DrawPoint::Decision, tick: Tick(7), id: 3, n: 0 };
         assert_eq!(draw(42, d), draw(42, d));
         assert_ne!(draw(42, d), draw(43, d));
         assert_ne!(draw(42, d), draw(42, Draw { id: 4, ..d }));
         assert_ne!(draw(42, d), draw(42, Draw { tick: Tick(8), ..d }));
         assert_ne!(draw(42, d), draw(42, Draw { point: DrawPoint::Battle, ..d }));
+        // Two draws of one point for one id in one tick are two different numbers.
+        assert_ne!(draw(42, d), draw(42, Draw { n: 1, ..d }));
     }
 
     #[test]
     fn unit_draw_is_in_half_open_interval() {
         for id in 0..1000 {
-            let u = draw_unit(1, Draw { point: DrawPoint::Event, tick: Tick(0), id });
+            let u = draw_unit(1, Draw { point: DrawPoint::Event, tick: Tick(0), id, n: 0 });
             assert!((0.0..1.0).contains(&u), "{u}");
         }
     }
@@ -106,12 +116,13 @@ mod tests {
     /// that silently plays a different game.
     #[test]
     fn value_is_pinned() {
-        let v = draw(0, Draw { point: DrawPoint::Decision, tick: Tick(0), id: 0 });
-        assert_eq!(v, draw(0, Draw { point: DrawPoint::Decision, tick: Tick(0), id: 0 }));
+        let d = Draw { point: DrawPoint::Decision, tick: Tick(0), id: 0, n: 0 };
+        let v = draw(0, d);
+        assert_eq!(v, draw(0, d));
         // Recorded on first implementation; if this changes, every saved seed replays
         // differently and the plan's "bit-exact" promise is broken.
         assert_eq!(v, PINNED_FIRST_DRAW);
     }
 
-    const PINNED_FIRST_DRAW: u64 = 4_822_078_279_126_159_532;
+    const PINNED_FIRST_DRAW: u64 = 13_227_027_778_929_364_601;
 }

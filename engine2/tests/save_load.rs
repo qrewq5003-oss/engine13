@@ -18,6 +18,9 @@ fn save_then_load_continues_the_same_run() {
     for _ in 0..150 {
         reports.push(first.tick().unwrap());
     }
+    // The save is taken in the middle of accumulated remainders: at least one province
+    // carries a non-zero fraction, so the carry itself travels through the save.
+    assert!(first.ledger.accounts().any(|a| first.ledger.carry(a).unwrap() != 0), "no remainder to save");
     let save = to_save(&first).unwrap();
     drop(first);
     let mut second = from_save(&save).unwrap();
@@ -27,6 +30,8 @@ fn save_then_load_continues_the_same_run() {
 
     assert_eq!(reports, straight_reports);
     assert_eq!(to_save(&second).unwrap(), to_save(&straight).unwrap());
+    // And the run did move stocks: this is not an empty world.
+    assert!(straight_reports.iter().any(|r| r.postings.iter().any(|p| p.milli != 0)));
 }
 
 #[test]

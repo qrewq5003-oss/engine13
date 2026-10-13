@@ -1,14 +1,17 @@
 //! The world state and the tick (plan §4, §5 — the empty world of E1a).
 //!
 //! Everything is in ordered collections and derives `Serialize`/`Deserialize`; the save
-//! format is this struct (see `save.rs`). Systems arrive in E2 and fill [`World::tick`].
+//! format is this struct (see `save.rs`). Systems arrive in E2 and fill [`World::tick`];
+//! until then the tick carries one **stand-in** flow — population moving toward capacity —
+//! so that the acceptance tests exercise the ledger, the remainder carry and a save taken
+//! in the middle of an accumulated remainder (owner's review of PR #277).
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ActorId, ProvinceId};
-use crate::ledger::{Account, Ledger, LedgerError, Posting};
+use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
 use crate::time::Tick;
 
@@ -17,6 +20,7 @@ use crate::time::Tick;
 /// `legitimacy` is the one `f64` of E1a; it exists so that save/load exercises the float
 /// round trip the old engine needed `float_roundtrip` for (B31).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Actor {
     pub provinces: Vec<ProvinceId>,
     pub legitimacy: f64,
@@ -24,6 +28,7 @@ pub struct Actor {
 
 /// A province as the engine sees it: owner and land capacity in people.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Province {
     pub owner: ActorId,
     pub capacity: u64,
@@ -45,6 +50,7 @@ pub struct Facts {
 
 /// The whole state of one run. **This is the save format**: see `save.rs` for the rules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct World {
     pub seed: u64,
     pub start_year: i32,
@@ -52,12 +58,15 @@ pub struct World {
     pub actors: BTreeMap<ActorId, Actor>,
     pub provinces: BTreeMap<ProvinceId, Province>,
     pub ledger: Ledger,
-    /// Draws of the tick being played; drained into the tick report.
+    /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
+    /// draw is its count among the earlier draws of the tick with the same point and id,
+    /// so the journal itself is the counter and nothing else needs saving.
     draws: Vec<RngDraw>,
 }
 
 /// What one tick did: every posting and every draw, nothing more (plan §5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TickReport {
     pub tick: Tick,
     pub postings: Vec<Posting>,
@@ -108,21 +117,32 @@ impl World {
         Ok(World { seed, start_year: facts.start_year, tick, actors, provinces, ledger, draws: Vec::new() })
     }
 
-    /// A keyed draw for this world, journaled.
+    /// A keyed draw for this world, journaled. Repeated draws of one point for one id in
+    /// one tick get successive ordinals and therefore different numbers.
     pub fn draw(&mut self, point: DrawPoint, id: u32) -> u64 {
-        let d = Draw { point, tick: self.tick, id };
+        let n = self.draws.iter().filter(|r| r.draw.point == point && r.draw.id == id).count() as u32;
+        let d = Draw { point, tick: self.tick, id, n };
         let value = rng::draw(self.seed, d);
         self.draws.push(RngDraw { draw: d, value });
         value
     }
 
-    /// Play one tick. E1a: advance time and journal one decision draw per actor so that the
-    /// determinism and save/load tests exercise the whole path; systems come in E2.
+    /// Play one tick. E1a: advance time, journal one decision draw per actor, and move each
+    /// province's population one thousandth of the way to its capacity through the ledger.
+    /// The flow is a stand-in that E2's population system replaces; it exists so the
+    /// acceptance tests cover postings and the remainder carry, not an empty world.
     pub fn tick(&mut self) -> Result<TickReport, WorldError> {
         let before = self.ledger.snapshot();
         let actor_ids: Vec<ActorId> = self.actors.keys().copied().collect();
         for id in actor_ids {
             let _ = self.draw(DrawPoint::Decision, id.0);
+        }
+        let provinces: Vec<(ProvinceId, u64)> = self.provinces.iter().map(|(p, pr)| (*p, pr.capacity)).collect();
+        for (p, capacity) in provinces {
+            let account = Account::Population(p);
+            let gap_people = capacity as i64 - self.ledger.stock(account).unwrap_or(0);
+            // One thousandth of the gap in people is `gap` thousandths of a person.
+            self.ledger.post(self.tick, account, Source::Growth, gap_people)?;
         }
         self.ledger.check_tick(&before)?;
         let report = TickReport {
@@ -168,8 +188,35 @@ mod tests {
         let r = w.tick().unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.len(), w.actors.len());
-        assert!(r.postings.is_empty());
+        assert_eq!(r.postings.len(), w.provinces.len());
+        assert!(r.postings.iter().all(|p| p.source == Source::Growth));
         assert_eq!(w.tick, Tick(1));
         assert_eq!(w.year(), 1477);
+    }
+
+    #[test]
+    fn repeated_draws_of_one_point_in_one_tick_differ() {
+        let mut w = World::from_facts(&testworld::five_states(), 7).unwrap();
+        let a = w.draw(DrawPoint::Battle, 3);
+        let b = w.draw(DrawPoint::Battle, 3);
+        assert_ne!(a, b);
+        let r = w.tick().unwrap();
+        let ordinals: Vec<u32> = r.draws.iter().filter(|d| d.draw.point == DrawPoint::Battle).map(|d| d.draw.n).collect();
+        assert_eq!(ordinals, vec![0, 1]);
+    }
+
+    #[test]
+    fn stand_in_growth_moves_population_toward_capacity_and_keeps_a_remainder() {
+        let mut w = World::from_facts(&testworld::five_states(), 7).unwrap();
+        let p = ProvinceId(0);
+        let cap = w.provinces[&p].capacity as i64;
+        let before = w.population(p);
+        for _ in 0..10 {
+            w.tick().unwrap();
+        }
+        let after = w.population(p);
+        assert!(after > before && after <= cap, "{before} -> {after} <= {cap}");
+        // 10 000 - 6 000 = 4 000 gap: 4 000 milli a tick at first, shrinking; a remainder appears.
+        assert!(w.ledger.carry(Account::Population(p)).unwrap() > 0);
     }
 }

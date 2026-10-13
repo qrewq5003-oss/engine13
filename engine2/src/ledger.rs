@@ -47,6 +47,7 @@ pub enum Source {
 
 /// One signed change of one account, in thousandths of the stock's unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Posting {
     pub tick: Tick,
     pub account: Account,
@@ -57,6 +58,7 @@ pub struct Posting {
 
 /// A stock with its carried remainder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Balance {
     whole: i64,
     /// Always in `0..1000` (so a negative posting borrows from the whole part).
@@ -65,6 +67,7 @@ struct Balance {
 
 /// All stocks of the world and the postings of the current tick.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Ledger {
     /// Serialized as a sorted list of pairs: JSON keys must be strings, and `Account` is an
     /// enum. Order is the `BTreeMap` order, so the bytes are deterministic.
