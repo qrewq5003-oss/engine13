@@ -1,0 +1,13 @@
+[package]
+name = "engine2"
+version = "0.1.0"
+edition = "2021"
+description = "ENGINE13 new engine (docs/engine2_brief.md): systems in the engine, scenarios as data"
+
+[dependencies]
+serde = { version = "1.0.193", features = ["derive"] }
+# Load must restore f64 bit-exact (lesson B31 of the old engine).
+serde_json = { version = "1.0.108", features = ["float_roundtrip"] }
+rand_chacha = "0.3"
+rand = "0.8"
+thiserror = "1.0.50"

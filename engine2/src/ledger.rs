@@ -1,0 +1,239 @@
+//! Integer stocks behind a ledger (plan §1, §7).
+//!
+//! A stock changes only through [`Ledger::post`], and every posting is signed with its
+//! [`Source`]. The budget of any stock over a tick is therefore a sum, not a probe.
+//!
+//! **Remainder carry (owner's rule, plan §1).** Postings arrive in thousandths
+//! (`milli`): the whole part moves the stock, the fractional part accumulates per account
+//! and is carried into the next posting. A slow process such as 0.1 % a year on a province of
+//! 400 people (0.2 people a tick) therefore accumulates instead of rounding to zero forever.
+//! The carry is deterministic and needs no randomness.
+//!
+//! Invariant checked by [`Ledger::check_tick`] and by the tests: for every account,
+//! `Σ postings of the tick (in milli) == (stock_after − stock_before) * 1000 + (carry_after − carry_before)`.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{ActorId, HouseId, ProvinceId, UnitId};
+use crate::time::Tick;
+
+/// A stock the ledger keeps. One variant per kind of owner so that a posting cannot be
+/// addressed to the wrong table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Account {
+    /// People living in a province.
+    Population(ProvinceId),
+    /// Soldiers of a unit.
+    Soldiers(UnitId),
+    /// A polity's treasury, kilograms of wheat-equivalent; may go negative (debt).
+    Treasury(ActorId),
+    /// A house's own treasury, kilograms of wheat-equivalent.
+    HouseTreasury(HouseId),
+}
+
+/// Why a stock changed. Grows with the systems of E2; E1 needs only the opening entry and
+/// a test source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Source {
+    /// The scenario's starting fact.
+    Opening,
+    /// Natural growth of population.
+    Growth,
+    /// Used by tests of the ledger itself.
+    Test,
+}
+
+/// One signed change of one account, in thousandths of the stock's unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Posting {
+    pub tick: Tick,
+    pub account: Account,
+    pub source: Source,
+    /// Thousandths: `+1500` is one and a half people / kilograms.
+    pub milli: i64,
+}
+
+/// A stock with its carried remainder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct Balance {
+    whole: i64,
+    /// Always in `0..1000` (so a negative posting borrows from the whole part).
+    carry: i64,
+}
+
+/// All stocks of the world and the postings of the current tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ledger {
+    /// Serialized as a sorted list of pairs: JSON keys must be strings, and `Account` is an
+    /// enum. Order is the `BTreeMap` order, so the bytes are deterministic.
+    #[serde(with = "pairs")]
+    balances: BTreeMap<Account, Balance>,
+    /// Postings of the tick being played; drained into the tick report.
+    postings: Vec<Posting>,
+}
+
+/// `BTreeMap<Account, Balance>` as a list of pairs (see the field doc).
+mod pairs {
+    use super::{Account, Balance};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(m: &BTreeMap<Account, Balance>, s: S) -> Result<S::Ok, S::Error> {
+        m.iter().map(|(a, b)| (*a, *b)).collect::<Vec<_>>().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<Account, Balance>, D::Error> {
+        let v: Vec<(Account, Balance)> = Vec::deserialize(d)?;
+        let mut m = BTreeMap::new();
+        for (a, b) in v {
+            if m.insert(a, b).is_some() {
+                return Err(serde::de::Error::custom(format!("duplicate account {a:?}")));
+            }
+        }
+        Ok(m)
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum LedgerError {
+    #[error("account {0:?} is not open")]
+    NotOpen(Account),
+    #[error("account {0:?} is already open")]
+    AlreadyOpen(Account),
+    #[error("account {account:?}: Σ postings {sum} ≠ stock delta {delta} (milli)")]
+    Unbalanced { account: Account, sum: i64, delta: i64 },
+}
+
+impl Default for Ledger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        Ledger { balances: BTreeMap::new(), postings: Vec::new() }
+    }
+
+    /// Open an account with its starting stock, journaled as [`Source::Opening`].
+    pub fn open(&mut self, tick: Tick, account: Account, whole: i64) -> Result<(), LedgerError> {
+        if self.balances.contains_key(&account) {
+            return Err(LedgerError::AlreadyOpen(account));
+        }
+        self.balances.insert(account, Balance { whole: 0, carry: 0 });
+        self.post(tick, account, Source::Opening, whole * 1000)
+    }
+
+    /// The whole stock of an account, `None` if it is not open.
+    pub fn stock(&self, account: Account) -> Option<i64> {
+        self.balances.get(&account).map(|b| b.whole)
+    }
+
+    /// The carried remainder of an account in thousandths, `None` if it is not open.
+    pub fn carry(&self, account: Account) -> Option<i64> {
+        self.balances.get(&account).map(|b| b.carry)
+    }
+
+    /// All open accounts in id order.
+    pub fn accounts(&self) -> impl Iterator<Item = Account> + '_ {
+        self.balances.keys().copied()
+    }
+
+    /// Post a signed change in thousandths. The only way a stock moves.
+    pub fn post(&mut self, tick: Tick, account: Account, source: Source, milli: i64) -> Result<(), LedgerError> {
+        let b = self.balances.get_mut(&account).ok_or(LedgerError::NotOpen(account))?;
+        let total = b.carry + milli;
+        // Euclidean division keeps the carry in 0..1000 for negative totals too.
+        b.whole += total.div_euclid(1000);
+        b.carry = total.rem_euclid(1000);
+        self.postings.push(Posting { tick, account, source, milli });
+        Ok(())
+    }
+
+    /// Postings of the current tick, in posting order.
+    pub fn postings(&self) -> &[Posting] {
+        &self.postings
+    }
+
+    /// Hand the tick's postings over (to the tick report) and start the next tick empty.
+    pub fn drain_postings(&mut self) -> Vec<Posting> {
+        std::mem::take(&mut self.postings)
+    }
+
+    /// A snapshot of `(whole, carry)` per account, to check a tick against.
+    pub fn snapshot(&self) -> BTreeMap<Account, (i64, i64)> {
+        self.balances.iter().map(|(a, b)| (*a, (b.whole, b.carry))).collect()
+    }
+
+    /// The ledger invariant for the postings since `before` was taken.
+    pub fn check_tick(&self, before: &BTreeMap<Account, (i64, i64)>) -> Result<(), LedgerError> {
+        let mut sums: BTreeMap<Account, i64> = BTreeMap::new();
+        for p in &self.postings {
+            *sums.entry(p.account).or_insert(0) += p.milli;
+        }
+        for (account, b) in &self.balances {
+            let (w0, c0) = before.get(account).copied().unwrap_or((0, 0));
+            let delta = (b.whole - w0) * 1000 + (b.carry - c0);
+            let sum = sums.get(account).copied().unwrap_or(0);
+            if sum != delta {
+                return Err(LedgerError::Unbalanced { account: *account, sum, delta });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const P: Account = Account::Population(ProvinceId(1));
+
+    #[test]
+    fn carry_accumulates_instead_of_rounding_to_zero() {
+        let mut l = Ledger::new();
+        l.open(Tick(0), P, 400).unwrap();
+        // 0.1 % a year on 400 people = 0.4 a year = 0.2 a tick = 200 milli.
+        for t in 1..=100 {
+            l.post(Tick(t), P, Source::Growth, 200).unwrap();
+        }
+        assert_eq!(l.stock(P), Some(420));
+        assert_eq!(l.carry(P), Some(0));
+    }
+
+    #[test]
+    fn negative_postings_borrow_and_keep_carry_in_range() {
+        let mut l = Ledger::new();
+        l.open(Tick(0), P, 10).unwrap();
+        l.post(Tick(1), P, Source::Test, -1500).unwrap();
+        assert_eq!(l.stock(P), Some(8));
+        assert_eq!(l.carry(P), Some(500));
+        l.post(Tick(1), P, Source::Test, -500).unwrap();
+        assert_eq!(l.stock(P), Some(8));
+        assert_eq!(l.carry(P), Some(0));
+    }
+
+    #[test]
+    fn invariant_holds_and_catches_tampering() {
+        let mut l = Ledger::new();
+        l.open(Tick(0), P, 100).unwrap();
+        l.drain_postings();
+        let before = l.snapshot();
+        l.post(Tick(1), P, Source::Test, 2345).unwrap();
+        l.post(Tick(1), P, Source::Test, -45).unwrap();
+        l.check_tick(&before).unwrap();
+        // Tamper: a posting that never happened.
+        l.postings.pop();
+        assert!(matches!(l.check_tick(&before), Err(LedgerError::Unbalanced { .. })));
+    }
+
+    #[test]
+    fn unknown_account_is_refused() {
+        let mut l = Ledger::new();
+        assert_eq!(l.post(Tick(0), P, Source::Test, 1), Err(LedgerError::NotOpen(P)));
+        l.open(Tick(0), P, 1).unwrap();
+        assert_eq!(l.open(Tick(0), P, 1), Err(LedgerError::AlreadyOpen(P)));
+    }
+}
