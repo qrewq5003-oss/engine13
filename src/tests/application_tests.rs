@@ -662,6 +662,34 @@ fn world_annals_carry_relations_stories_and_dated_player_policy() {
     assert!(!prompt.contains("actor:") && !prompt.contains("→"), "the player's block prints no engine keys or effects");
 }
 
+/// An open war is one the engine still lets go on: two recent battles make Florence and Siena a
+/// war story; once Siena is Florence's vassal (Ц7: the pair cannot fight) the story is closed,
+/// though the battles are as recent as before.
+#[test]
+fn open_war_closes_when_the_pair_is_bound_by_vassalage() {
+    let db = setup_test_db();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "milan_1477".to_string()).unwrap();
+    use rand::SeedableRng;
+    state.rng = Some(rand_chacha::ChaCha8Rng::seed_from_u64(0));
+    for _ in 0..4 {
+        advance_tick(&mut state, None).expect("tick");
+    }
+    assert!(crate::engine::interactions::conquest_on(state.current_scenario.as_ref().unwrap()), "milan plays Ц7");
+    let now = state.world_state.as_ref().unwrap().tick;
+    for t in [now - 2, now - 1] {
+        state.event_log.add(crate::core::Event::new("military_conflict_florence_siena".into(), t, 1478, "florence".into(),
+            crate::core::EventType::War, true, "Военный конфликт".into()));
+    }
+    let war = |state: &AppState| {
+        let a = crate::llm::build_snapshot(state.world_state.as_ref().unwrap(), state.current_scenario.as_ref().unwrap(), &state.event_log).annals;
+        a.open_stories.iter().any(|l| l.starts_with("Война:") && l.contains("Флорентийская республика") && l.contains("Сиенская республика"))
+    };
+    assert!(war(&state), "two recent battles are an open war");
+    state.world_state.as_mut().unwrap().vassalages.push(crate::core::Vassalage { vassal_id: "siena".into(), overlord_id: "florence".into(), formed_tick: now - 1 });
+    assert!(!war(&state), "a vassal and its overlord are at peace: no open war");
+}
+
 /// The stop-list: a turn in two chronicles is listed, one in a single chronicle is not; a shared
 /// opening comes first; nothing longer than six words.
 #[test]

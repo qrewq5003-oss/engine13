@@ -208,6 +208,12 @@ fn open_stories(c: &Ctx, log: &EventLog, period_tick: u32) -> Vec<String> {
         if !c.alive(&a) || !c.alive(&b) {
             continue;
         }
+        // A pair the engine no longer lets fight (vassalage under Ц7, alliance under Ц9 — the
+        // same checks as `interactions`) has no war going on, however recent its last battle.
+        use crate::engine::interactions::{alliances_on, allied, bound_by_vassalage, conquest_on};
+        if (conquest_on(c.scenario) && bound_by_vassalage(c.world, &a, &b)) || (alliances_on(c.scenario) && allied(c.world, &a, &b)) {
+            continue;
+        }
         ticks.sort();
         ticks.dedup();
         let last = *ticks.last().unwrap();
