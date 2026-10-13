@@ -848,3 +848,39 @@ fn claude_cli_lines_give_text_and_the_final_verdict() {
     assert_eq!(parse_claude_cli_line(r#"{"type":"system","subtype":"init"}"#), ClaudeCliLine::Other);
     assert_eq!(parse_claude_cli_line("not json"), ClaudeCliLine::Other);
 }
+
+#[cfg(unix)]
+#[test]
+fn claude_cli_run_streams_text_and_names_every_failure() {
+    use crate::llm::run_claude_cli;
+    use std::time::Duration;
+    let sh = |script: &str| {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", script]);
+        c
+    };
+    let delta = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Милан"}}}"#;
+    let ok = r#"{"type":"result","is_error":false,"result":"Милан"}"#;
+    let mut pieces = Vec::new();
+    let text = run_claude_cli(sh(&format!("cat >/dev/null; echo '{delta}'; echo '{ok}'")), "вход", Duration::from_secs(20), |t| {
+        pieces.push(t.to_string())
+    });
+    assert_eq!(text, Ok(Some("Милан".to_string())));
+    assert_eq!(pieces, vec!["Милан".to_string()]);
+
+    let missing = run_claude_cli(std::process::Command::new("engine13-no-such-claude"), "", Duration::from_secs(5), |_| {});
+    assert!(missing.unwrap_err().contains("не найден"));
+
+    let not_logged_in = r#"{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}"#;
+    let e = run_claude_cli(sh(&format!("echo '{not_logged_in}'; exit 1")), "", Duration::from_secs(20), |_| {}).unwrap_err();
+    assert!(e.contains("Not logged in"), "{e}");
+
+    let e = run_claude_cli(sh("exit 1"), "", Duration::from_secs(20), |_| {}).unwrap_err();
+    assert!(e.contains("без ответа"), "{e}");
+
+    // A hung process is stopped and the half-written text is not a chronicle.
+    let started = std::time::Instant::now();
+    let e = run_claude_cli(sh(&format!("echo '{delta}'; exec sleep 30")), "", Duration::from_secs(1), |_| {}).unwrap_err();
+    assert!(e.contains("не ответил"), "{e}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+}

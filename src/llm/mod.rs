@@ -1314,72 +1314,123 @@ pub fn parse_claude_cli_line(line: &str) -> ClaudeCliLine {
     }
 }
 
+/// How long one chronicle may take through the `claude` CLI before the process is stopped
+/// (a Sonnet chronicle takes 15–60 s).
+pub const CLAUDE_CLI_TIMEOUT_SECS: u64 = 300;
+
 /// Write a chronicle through the local `claude` CLI (`CLAUDE_CLI`), passing each piece of text to
-/// `on_text` as it arrives. The prompt is split as for the Anthropic API. The CLI runs with no
-/// tools, no MCP servers, no saved session, from an empty directory, so it sees the prompt only.
-/// Returns the full text only when the CLI reported a finished answer.
+/// `on_text` as it arrives. The prompt is split as for the Anthropic API. The CLI sees the prompt
+/// only: no tools, no MCP servers, no skills, no saved session, an empty working directory, and no
+/// settings sources — without `--setting-sources ""` a `CLAUDE.md` is read into the chat even under
+/// `--system-prompt` (measured: a `CLAUDE.md` in the working directory turned the answer into its
+/// own words). Returns the full text only when the CLI reported a finished answer; every failure
+/// is an `Err` in words the game window can show.
 pub fn generate_narrative_claude_cli(
     prompt: &str,
     config: &LlmConfig,
-    mut on_text: impl FnMut(&str),
+    on_text: impl FnMut(&str),
 ) -> Result<Option<String>, String> {
-    use std::io::{BufRead, Write};
     let (system, user) = split_system_user(prompt);
     let program = if config.base_url.trim().is_empty() { "claude" } else { config.base_url.trim() };
     let cwd = std::env::temp_dir().join("engine13-claude-cli");
-    fs::create_dir_all(&cwd).map_err(|e| format!("claude: {}: {}", cwd.display(), e))?;
-    let mut child = std::process::Command::new(program)
+    fs::create_dir_all(&cwd).map_err(|e| format!("Claude Code: каталог {}: {}", cwd.display(), e))?;
+    let mut command = std::process::Command::new(program);
+    command
         .args(["-p", "--model", &config.model, "--system-prompt", &system])
-        .args(["--tools", "", "--strict-mcp-config", "--no-session-persistence"])
+        .args(["--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", ""])
+        .args(["--no-session-persistence"])
         .args(["--output-format", "stream-json", "--include-partial-messages", "--verbose"])
-        .current_dir(&cwd)
+        .current_dir(&cwd);
+    run_claude_cli(command, &user, std::time::Duration::from_secs(CLAUDE_CLI_TIMEOUT_SECS), on_text)
+}
+
+/// Run a prepared `claude -p` stream-json command: `input` on stdin, text pieces to `on_text`,
+/// the process killed after `timeout`.
+pub fn run_claude_cli(
+    mut command: std::process::Command,
+    input: &str,
+    timeout: std::time::Duration,
+    mut on_text: impl FnMut(&str),
+) -> Result<Option<String>, String> {
+    use std::io::{BufRead, Write};
+    let program = command.get_program().to_string_lossy().into_owned();
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("claude: cannot run `{}`: {}", program, e))?;
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => format!(
+                "Claude Code не найден: программы «{program}» нет (установите Claude Code или укажите путь к нему в поле адреса)"
+            ),
+            _ => format!("Claude Code не запустился ({program}): {e}"),
+        })?;
     {
-        let mut stdin = child.stdin.take().ok_or("claude: no stdin")?;
-        stdin.write_all(user.as_bytes()).map_err(|e| format!("claude: stdin: {}", e))?;
+        let mut stdin = child.stdin.take().ok_or("Claude Code: нет stdin")?;
+        // A CLI that exits at once (not logged in) closes its stdin: its verdict is on stdout.
+        let _ = stdin.write_all(input.as_bytes());
     } // stdin closed here: the CLI starts on end of input
-    let stdout = child.stdout.take().ok_or("claude: no stdout")?;
+    let stdout = child.stdout.take().ok_or("Claude Code: нет stdout")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + timeout;
     let mut full = String::new();
     let mut done = None;
-    for line in std::io::BufReader::new(stdout).lines() {
-        let line = line.map_err(|e| format!("claude: stdout: {}", e))?;
-        match parse_claude_cli_line(&line) {
-            ClaudeCliLine::Text(t) => {
-                full.push_str(&t);
-                on_text(&t);
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(line) => match parse_claude_cli_line(&line) {
+                ClaudeCliLine::Text(t) => {
+                    full.push_str(&t);
+                    on_text(&t);
+                }
+                ClaudeCliLine::Done(r) => done = Some(r),
+                ClaudeCliLine::Other => {}
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "Claude Code не ответил за {} с — процесс остановлен, хроника не записана",
+                    timeout.as_secs()
+                ));
             }
-            ClaudeCliLine::Done(r) => done = Some(r),
-            ClaudeCliLine::Other => {}
         }
     }
-    let status = child.wait().map_err(|e| format!("claude: {}", e))?;
+    let status = child.wait().map_err(|e| format!("Claude Code: {e}"))?;
     match done {
-        Some(Ok(())) => Ok((!full.trim().is_empty()).then_some(full)),
-        Some(Err(e)) => Err(format!("claude: {}", e)),
-        None => Err(format!("claude: no result ({})", status)),
+        Some(Ok(())) if full.trim().is_empty() => Err("Claude Code вернул пустой ответ".to_string()),
+        Some(Ok(())) => Ok(Some(full)),
+        Some(Err(e)) => Err(format!("Claude Code вернул ошибку: {e}")),
+        None => Err(format!("Claude Code завершился без ответа ({status})")),
     }
 }
 
-/// `generate_narrative_claude_cli` streamed to the frontend like the API providers.
+/// `generate_narrative_claude_cli` streamed to the frontend like the API providers. A failure is
+/// returned as `Err` without `narrative_done`, so the game window shows its message.
 pub async fn stream_narrative_claude_cli(
     prompt: String,
     config: LlmConfig,
     app: tauri::AppHandle,
 ) -> Result<Option<String>, String> {
     let emitter = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let text = tauri::async_runtime::spawn_blocking(move || {
         generate_narrative_claude_cli(&prompt, &config, |t| {
             let _ = emitter.emit("narrative_chunk", t.to_string());
         })
     })
     .await
-    .map_err(|e| format!("claude: {}", e))?;
+    .map_err(|e| format!("Claude Code: {e}"))??;
     let _ = app.emit("narrative_done", "");
-    result
+    Ok(text)
 }
 
 /// Generate a narrative headlessly, without a Tauri app handle, and return the text.
@@ -1410,7 +1461,7 @@ pub fn generate_narrative_blocking(
         for attempt in 1..=attempts.max(1) {
             match generate_narrative_claude_cli(prompt, config, |_| {}) {
                 Ok(Some(text)) => return Ok(text),
-                Ok(None) => last_err = "claude: empty answer".to_string(),
+                Ok(None) => last_err = "Claude Code вернул пустой ответ".to_string(),
                 Err(e) => last_err = e,
             }
             if attempt < attempts.max(1) {
