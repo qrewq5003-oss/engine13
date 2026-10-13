@@ -118,6 +118,12 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), Vec<String>> {
         }
     }
 
+    // The chronicler's horizon completes the persona line of the system prompt; empty, the
+    // chronicler would «видеть одновременно» nothing.
+    if scenario.narrative_config.horizon.trim().is_empty() {
+        errors.push("narrative_config.horizon: пусто — летописцу не сказано, какой мир он видит".to_string());
+    }
+
     // Check on_collapse heirs. Every declared heir must be an actor of THIS
     // scenario — a template or a living power. The engine creates a successor only
     // when it finds one in `scenario.actors` and used to skip silently otherwise:
@@ -488,6 +494,19 @@ mod tests {
         for entry in get_registry() {
             let scenario = (entry.loader)();
             assert!(validate_scenario(&scenario).is_ok(), "{}: {:?}", entry.id, validate_scenario(&scenario));
+        }
+    }
+
+    /// The chronicler's horizon completes the persona line of the system prompt: every scenario
+    /// authors one, and a blank one is a load error.
+    #[test]
+    fn validate_requires_a_chronicler_horizon() {
+        for entry in get_registry() {
+            let mut scenario = (entry.loader)();
+            assert!(!scenario.narrative_config.horizon.trim().is_empty(), "{}: no horizon", entry.id);
+            scenario.narrative_config.horizon = "  ".to_string();
+            let e = validate_scenario(&scenario).unwrap_err();
+            assert!(e.iter().any(|e| e.starts_with("narrative_config.horizon")), "{}: {e:?}", entry.id);
         }
     }
 

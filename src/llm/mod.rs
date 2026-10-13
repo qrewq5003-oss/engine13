@@ -628,20 +628,35 @@ pub fn save_llm_config(config: &LlmConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// System prompt for chronicler persona
-fn system_prompt() -> &'static str {
-    // Generic chronicler persona - half-year specific framing done in prompt body
-    "Ты летописец XIV-XV века. Пишешь подробную хронику событий.
+/// The century of `year` in Roman numerals, the way the chronicle dates itself: 375 → «IV века»,
+/// 1477 → «XV века». A year before the common era gets «до н. э.».
+pub fn century_words(year: i32) -> String {
+    let (n, bce) = if year >= 1 { ((year - 1) / 100 + 1, false) } else { (-year / 100 + 1, true) };
+    let mut rest = n;
+    let mut roman = String::new();
+    for (value, digits) in [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")] {
+        while rest >= value {
+            roman.push_str(digits);
+            rest -= value;
+        }
+    }
+    if bce { format!("{roman} века до н. э.") } else { format!("{roman} века") }
+}
+
+/// The chronicler's persona: the century of the chronicle's own year and the scenario's horizon.
+/// Half-year specific framing is done in the prompt body.
+fn system_prompt(year: i32, horizon: &str) -> String {
+    format!("Ты летописец {}. Пишешь подробную хронику событий.
 
 ОБЯЗАТЕЛЬНО:
-- Пиши с высоты птичьего полёта — видишь всю Европу, Анатолию, Балканы одновременно
+- Пиши с высоты птичьего полёта — видишь {horizon} одновременно
 - Передавай ощущение эпохи, движение сил, атмосферу — не перечисляй факты
 - Упоминай правителей по имени когда это драматично
 - НИКОГДА не перечисляй акторов по очереди
 - НИКОГДА не называй числа и проценты
 - НИКОГДА не пиши 'актор X имеет Y единиц'
 - Пиши как будто читатель уже знает кто эти люди
-- Фокус на предчувствиях, расстановке сил, напряжении"
+- Фокус на предчувствиях, расстановке сил, напряжении", century_words(year))
 }
 
 /// Generate narrative prompt from world snapshot
@@ -674,7 +689,7 @@ pub fn generate_narrative_prompt(
     // ========================================================================
     // Section 1: Identity / Role — Chronicler Persona
     // ========================================================================
-    prompt.push_str(system_prompt());
+    prompt.push_str(&system_prompt(snapshot.year, &scenario.narrative_config.horizon));
     prompt.push_str("\n\n");
 
     // ========================================================================

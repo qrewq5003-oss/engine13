@@ -367,6 +367,7 @@ pub fn load_constantinople_1430() -> Scenario {
                 "Не утверждать, что османы победили, если этого не говорит состояние мира".to_string(),
             ],
             paragraph_target: 4,
+            horizon: "всю Европу, Анатолию, Балканы".to_string(),
         },
         dependencies,
         patron_actions,

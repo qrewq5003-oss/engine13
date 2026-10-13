@@ -1067,3 +1067,56 @@ fn event_texts_do_not_put_a_name_before_a_past_tense_verb() {
         }
     }
 }
+
+/// The century as the chronicle dates itself, at the edges of a century and before the era.
+#[test]
+fn century_words_counts_centuries_from_year_one() {
+    for (year, words) in [
+        (1, "I века"), (100, "I века"), (101, "II века"), (375, "IV века"), (400, "IV века"),
+        (401, "V века"), (476, "V века"), (1430, "XV века"), (1477, "XV века"), (1500, "XV века"),
+        (1501, "XVI века"), (-44, "I века до н. э."), (-490, "V века до н. э."),
+    ] {
+        assert_eq!(crate::llm::century_words(year), words, "year {year}");
+    }
+}
+
+/// The chronicler is a person of the chronicle's own century, surveying the scenario's own world.
+/// It used to be «летописец XIV-XV века», who «видит всю Европу, Анатолию, Балканы», in every
+/// scenario — Rome 375 included. Both ways: the persona follows the snapshot's year as it moves
+/// (Rome in 375 and in 476), and no scenario's prompt carries another scenario's horizon.
+#[test]
+fn chronicler_persona_follows_the_scenarios_century_and_horizon() {
+    let db = setup_test_db();
+    let horizons: Vec<(String, String)> = ["rome_375", "milan_1477", "constantinople_1430"]
+        .iter()
+        .map(|sc| (sc.to_string(), crate::scenarios::registry::load_by_id(sc).unwrap().narrative_config.horizon))
+        .collect();
+    for (sc, horizon) in &horizons {
+        let mut state = AppState::default();
+        crate::application::load_scenario(&mut state, &db, sc.to_string()).unwrap();
+        state.rng = Some(<rand_chacha::ChaCha8Rng as rand::SeedableRng>::seed_from_u64(0));
+        let world = state.world_state.as_ref().unwrap();
+        let scenario = state.current_scenario.as_ref().unwrap();
+        let mut snapshot = crate::llm::build_snapshot(world, scenario, &state.event_log);
+        let years = if sc == "rome_375" { vec![snapshot.year, 476] } else { vec![snapshot.year] };
+        for year in years {
+            snapshot.year = year;
+            let prompt = crate::llm::generate_narrative_prompt(&snapshot, scenario, &db);
+            let persona = format!("Ты летописец {}.", crate::llm::century_words(year));
+            assert!(prompt.starts_with(&persona), "{sc} {year}: {}", prompt.chars().take(80).collect::<String>());
+            assert!(prompt.contains(&format!("видишь {horizon} одновременно")), "{sc}: horizon missing");
+            for (other, other_horizon) in &horizons {
+                if other != sc {
+                    assert!(!prompt.contains(other_horizon.as_str()), "{sc} carries {other}'s horizon");
+                }
+            }
+        }
+    }
+    let rome = crate::scenarios::registry::load_by_id("rome_375").unwrap();
+    let mut state = AppState::default();
+    crate::application::load_scenario(&mut state, &db, "rome_375".to_string()).unwrap();
+    state.rng = Some(<rand_chacha::ChaCha8Rng as rand::SeedableRng>::seed_from_u64(0));
+    let snapshot = crate::llm::build_snapshot(state.world_state.as_ref().unwrap(), &rome, &state.event_log);
+    let prompt = crate::llm::generate_narrative_prompt(&snapshot, &rome, &db);
+    assert!(prompt.starts_with("Ты летописец IV века.") && !prompt.contains("XIV"), "{}", prompt.chars().take(80).collect::<String>());
+}
