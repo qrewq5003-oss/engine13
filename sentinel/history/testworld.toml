@@ -1,0 +1,10 @@
+# The real course of events for a scenario, in the sentinel's own data (plan §8): what a
+# player-less run must not repeat in ≥ 50 % of runs (brief §11 №5). Neither engine nor
+# chronicler can read this file by construction — it lives outside their crates.
+#
+# The synthetic test world has no history; the file exists so the loader and the format are
+# exercised. Real scenarios (E4: milan_1477, E7: constantinople_1430, rome_375) list their
+# outcomes here as facts of the world: `dead`, `alive`, `owns`.
+
+scenario = "testworld"
+outcome = []

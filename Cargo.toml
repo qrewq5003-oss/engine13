@@ -2,7 +2,7 @@
 # it sits inside this directory, declares no workspace of its own and depends on the root
 # crate by path, so without `exclude` cargo refuses to build it (AGENTS.md, engine2_e1_plan §0).
 [workspace]
-members = ["engine2"]
+members = ["engine2", "sentinel"]
 exclude = ["src-tauri"]
 
 [package]

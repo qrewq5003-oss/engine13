@@ -5,6 +5,7 @@
 //! state, bit-exact save/load, and a synthetic test world.
 //! Step E1b: the typed event stream, the `Simulation` contract, the scenario schema (facts
 //! only, `deny_unknown_fields`), the constants file with kinds, the presentation model.
+//! Step E1c: `Observed` for the sentinel crate (`observe.rs`), the short run in CI.
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -20,6 +21,8 @@
 pub mod event;
 pub mod ids;
 pub mod ledger;
+#[cfg(feature = "sentinel")]
+pub mod observe;
 pub mod params;
 pub mod rng;
 pub mod save;

@@ -1,8 +1,8 @@
 //! The `Simulation` contract (plan §5) and its implementation on the E1 world.
 //!
 //! The shell talks to this trait only: create from a scenario, tick with the player's
-//! verbs, view for the UI, snapshot for the chronicler, save and load. `observe` for the
-//! sentinel arrives with the `sentinel` crate (E1c).
+//! verbs, view for the UI, snapshot for the chronicler, save and load. The sentinel reads
+//! the game through `sentinel::Observed` (`observe.rs`).
 //!
 //! A load checks that the save belongs to the scenario it is loaded with — scenario id and
 //! the hash of the compiled facts — so a run of one scenario cannot continue as another
@@ -61,6 +61,11 @@ impl Game {
 
     pub fn display(&self) -> &Display {
         &self.display
+    }
+
+    /// Events of the last played tick (the chronicle and the sentinel read them).
+    pub fn last_events(&self) -> &[Stamped] {
+        &self.last_events
     }
 
     /// The one availability-and-cost function (lesson B42). E1b: every enabled verb is on
