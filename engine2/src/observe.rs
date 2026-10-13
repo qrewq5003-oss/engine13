@@ -16,10 +16,14 @@ impl Game {
         ObsId(self.world().names.provinces[id.index()].0.clone())
     }
 
+    fn unit_id(&self, id: crate::ids::UnitId) -> ObsId {
+        ObsId(format!("u{}", id.0))
+    }
+
     fn account(&self, a: Account) -> (ObsId, String) {
         match a {
             Account::Population(p) => (self.province_id(p), "population".into()),
-            Account::Soldiers(u) => (ObsId(format!("unit{}", u.0)), "soldiers".into()),
+            Account::Soldiers(u) => (self.unit_id(u), "soldiers".into()),
             Account::Treasury(a) => (self.actor_id(a), "treasury".into()),
             Account::HouseTreasury(h) => (ObsId(format!("house{}", h.0)), "treasury".into()),
         }
@@ -59,13 +63,13 @@ impl Observed for Game {
                     },
                     verb: verb.key().into(),
                 },
-                Event::Battle { province, outcome, .. } => ObsEvent::Battle {
+                Event::Battle { province, attacker, defender, outcome, .. } => ObsEvent::Battle {
                     place: self.province_id(*province),
-                    a: ObsId("attacker".into()),
-                    b: ObsId("defender".into()),
+                    a: self.unit_id(*attacker),
+                    b: self.unit_id(*defender),
                     winner: match outcome {
-                        crate::event::Outcome::AttackerWon => Some(ObsId("attacker".into())),
-                        crate::event::Outcome::DefenderWon => Some(ObsId("defender".into())),
+                        crate::event::Outcome::AttackerWon => Some(self.unit_id(*attacker)),
+                        crate::event::Outcome::DefenderWon => Some(self.unit_id(*defender)),
                         crate::event::Outcome::Drawn => None,
                     },
                 },
@@ -80,12 +84,17 @@ impl Observed for Game {
                     let (who, stock) = self.account(*account);
                     ObsEvent::BoundHit { who, stock, source: format!("{source:?}") }
                 }
+                Event::UnitMoved { .. } => ObsEvent::Other("UnitMoved".into()),
+                Event::NoPath { .. } => ObsEvent::Other("NoPath".into()),
+                Event::Attrition { .. } => ObsEvent::Other("Attrition".into()),
             })
             .collect()
     }
 
-    /// E1: no system registered yet. Each system of E2 adds the kinds it can produce; a
-    /// declared kind that never occurs across the matrix is the sentinel's `Never`.
+    /// Kinds the systems so far can produce **without anyone ordering anything**: none —
+    /// movement needs an order (E3 agents), attrition needs an unsupplied unit. A declared
+    /// kind that never occurs across the matrix is the sentinel's `Never`; registering
+    /// kinds that only orders can cause would flag the absence of agents, not a defect.
     fn possible_kinds(&self) -> Vec<String> {
         Vec::new()
     }

@@ -69,6 +69,12 @@ pub struct Params {
     pub population_pull_to_capacity_ppm: i64,
     /// E0 П1: people per km² by land, as thousandths so capacity is integer arithmetic.
     pub capacity_milli_per_km2: [(Land, i64); 4],
+    /// E0 А8: soldiers 1 000 inhabitants can supply.
+    pub supply_soldiers_per_1000: i64,
+    /// E0 А7: share of the unsupplied soldiers lost per tick, parts per million.
+    pub army_attrition_unsupplied_ppm_per_tick: i64,
+    /// E0 А5 (в): edges a unit crosses per tick.
+    pub movement_provinces_per_tick: u32,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -121,7 +127,18 @@ impl Params {
             (Land::Steppe, milli("capacity.steppe")?),
             (Land::Desert, milli("capacity.desert")?),
         ];
-        Ok(Params { population_pull_to_capacity_ppm: (pull * 1_000_000.0).round() as i64, capacity_milli_per_km2, entries })
+        let supply = value("supply.soldiers_per_1000_people")?;
+        let attrition_year = value("army.attrition_unsupplied_per_year")?;
+        let moves = value("movement.provinces_per_tick")?;
+        Ok(Params {
+            population_pull_to_capacity_ppm: (pull * 1_000_000.0).round() as i64,
+            capacity_milli_per_km2,
+            supply_soldiers_per_1000: supply.round() as i64,
+            // Two ticks a year: half the yearly share per tick.
+            army_attrition_unsupplied_ppm_per_tick: (attrition_year / 2.0 * 1_000_000.0).round() as i64,
+            movement_provinces_per_tick: moves.round() as u32,
+            entries,
+        })
     }
 }
 
@@ -174,6 +191,9 @@ mod tests {
         assert_eq!(p.population_pull_to_capacity_ppm, 1000);
         assert_eq!(p.capacity(250, Land::Arable), 10_000);
         assert_eq!(p.capacity(1000, Land::Steppe), 1000);
+        assert_eq!(p.supply_soldiers_per_1000, 150);
+        assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
+        assert_eq!(p.movement_provinces_per_tick, 1);
     }
 
     #[test]

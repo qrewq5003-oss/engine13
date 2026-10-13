@@ -4,22 +4,27 @@
 //!
 //! The generator produces **scenario data**, not a world: it goes through the same schema,
 //! `compile` and `from_facts` as an authored scenario, so it cannot bypass a check an author
-//! is held to (population ≤ capacity, closed land list, no rule numbers).
+//! is held to (population ≤ capacity, closed land list, symmetric graphs, no rule numbers).
 //!
 //! **Irregular graphs (owner's review of PR #280).** A system of movement and supply proven
 //! only on a rectangular grid silently assumes "at most four neighbours" and "there is always
 //! a way round". So the map is a grid with sea carved out of it, diagonal links added, a
 //! chokepoint (one passage between two parts) carved on purpose, and holdings without a land
 //! link — an overseas island, an enclave — handed to a polity across the water. Degrees run
-//! from 1 to 7. Sizes run up to ~15 polities and ~85 provinces: the scale the engine must
+//! from 1 to 7. Sizes run up to ~15 polities and ~90 provinces: the scale the engine must
 //! carry, and the first check of speed.
+//!
+//! **Sea links (plan §14).** Two coasts are linked if a path of at most `SEA_REACH` sea cells
+//! joins them; every landmass beyond the main one is guaranteed a link to it, so no island or
+//! colony is unreachable by design. Each polity gets a capital (its most populous province)
+//! and a starting army there, sized by E0 А11 and kept within the capital's supply (E0 А8).
 //!
 //! Everything drawn comes from the bands of E0 §5 where E0 has a row; what E0 has no row for
 //! is a model choice (kind (в)) and is said so at the constant. The fingerprint of
 //! `generate(1)` is pinned: an update of `rand` that changed every world would break
 //! "fails on seed 12" silently otherwise.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -40,6 +45,8 @@ const REVENUE_PER_HEAD_KG: (f64, f64) = (15.0, 160.0);
 /// Treasury as years of revenue: from empty to two years in reserve (E0 Э7 gives debt
 /// ceilings, not reserves — this end is a model choice, kind (в)).
 const TREASURY_YEARS: (f64, f64) = (0.0, 2.0);
+/// Standing army as a share of the polity's people: E0 А11, peacetime 0.5–1.5 %.
+const ARMY_SHARE: (f64, f64) = (0.005, 0.015);
 /// Mix of land types, kind (в): E0 П1 gives the density of each type, not how much of a
 /// map is which; checked through П7 and Э8 once the systems exist.
 const LAND_WEIGHTS: [(Land, u32); 4] = [(Land::Arable, 55), (Land::Hills, 25), (Land::Steppe, 12), (Land::Desert, 8)];
@@ -50,9 +57,11 @@ const HEIGHT: (u64, u64) = (4, 10);
 const SEA_SHARE: (f64, f64) = (0.05, 0.30);
 /// Probability that a diagonal pair of land cells is linked, kind (в). Raises degrees to 7.
 const DIAGONAL_LINK: f64 = 0.35;
+/// Sea cells a crossing may span, kind (в): coasts further apart are not linked.
+const SEA_REACH: u32 = 4;
 /// Polities, bounded by one per three land cells.
 const STATES: (u64, u64) = (3, 15);
-/// Maximum neighbours a province may have.
+/// Maximum land neighbours a province may have.
 const MAX_DEGREE: usize = 7;
 
 fn pick<R: Rng>(rng: &mut R, (lo, hi): (u64, u64)) -> u64 {
@@ -90,7 +99,7 @@ struct Cell {
     start_share: f64,
 }
 
-/// A map under construction: cells on a grid, some of them sea, with an explicit graph.
+/// A map under construction: cells on a grid, some of them sea, with explicit graphs.
 struct Map {
     width: u32,
     height: u32,
@@ -98,9 +107,15 @@ struct Map {
     cells: Vec<Option<Cell>>,
     /// Land graph, symmetric, by cell index.
     links: BTreeMap<u32, BTreeSet<u32>>,
+    /// Sea graph, symmetric, by cell index, coastal cells only.
+    sea_links: BTreeMap<u32, BTreeSet<u32>>,
 }
 
 impl Map {
+    fn new(width: u32, height: u32, cells: Vec<Option<Cell>>) -> Map {
+        Map { width, height, cells, links: BTreeMap::new(), sea_links: BTreeMap::new() }
+    }
+
     fn xy(&self, i: u32) -> (u32, u32) {
         (i % self.width, i / self.width)
     }
@@ -126,6 +141,13 @@ impl Map {
         self.links.entry(b).or_default().insert(a);
     }
 
+    fn sea_link(&mut self, a: u32, b: u32) {
+        if a != b {
+            self.sea_links.entry(a).or_default().insert(b);
+            self.sea_links.entry(b).or_default().insert(a);
+        }
+    }
+
     fn degree(&self, i: u32) -> usize {
         self.links.get(&i).map_or(0, BTreeSet::len)
     }
@@ -134,20 +156,35 @@ impl Map {
         self.links.get(&i).into_iter().flatten().copied().collect()
     }
 
+    /// Orthogonal grid neighbours of any cell, land or sea.
+    fn around(&self, i: u32) -> Vec<u32> {
+        let (x, y) = self.xy(i);
+        let mut out = Vec::new();
+        if x > 0 {
+            out.push(i - 1);
+        }
+        if x + 1 < self.width {
+            out.push(i + 1);
+        }
+        if y > 0 {
+            out.push(i - self.width);
+        }
+        if y + 1 < self.height {
+            out.push(i + self.width);
+        }
+        out
+    }
+
     /// Orthogonal links between land cells.
     fn build_orthogonal_links(&mut self) {
         self.links.clear();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let i = self.index(x, y);
-                if !self.is_land(i) {
-                    continue;
-                }
-                if x + 1 < self.width && self.is_land(i + 1) {
-                    self.link(i, i + 1);
-                }
-                if y + 1 < self.height && self.is_land(i + self.width) {
-                    self.link(i, i + self.width);
+        for i in 0..self.cells.len() as u32 {
+            if !self.is_land(i) {
+                continue;
+            }
+            for j in self.around(i) {
+                if j > i && self.is_land(j) {
+                    self.link(i, j);
                 }
             }
         }
@@ -169,6 +206,34 @@ impl Map {
                     let j = self.index(nx as u32, y + 1);
                     if self.is_land(j) && rng.gen_bool(DIAGONAL_LINK) && self.degree(i) < MAX_DEGREE && self.degree(j) < MAX_DEGREE {
                         self.link(i, j);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Sea links: from every coastal cell, breadth-first over sea cells up to `SEA_REACH`;
+    /// every land cell touching a reached sea cell is a coast faced across the water.
+    fn build_sea_links(&mut self) {
+        self.sea_links.clear();
+        let land_cells: Vec<u32> = (0..self.cells.len() as u32).filter(|i| self.is_land(*i)).collect();
+        for c in land_cells {
+            let mut depth: BTreeMap<u32, u32> = BTreeMap::new();
+            let mut queue = VecDeque::new();
+            for s in self.around(c) {
+                if !self.is_land(s) {
+                    depth.insert(s, 1);
+                    queue.push_back(s);
+                }
+            }
+            while let Some(s) = queue.pop_front() {
+                let d = depth[&s];
+                for t in self.around(s) {
+                    if self.is_land(t) {
+                        self.sea_link(c, t);
+                    } else if d < SEA_REACH && !depth.contains_key(&t) {
+                        depth.insert(t, d + 1);
+                        queue.push_back(t);
                     }
                 }
             }
@@ -200,21 +265,46 @@ impl Map {
         out
     }
 
-    /// Mark the coast: a land cell next to sea or to the map's edge.
-    fn mark_coast(&mut self) {
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let i = self.index(x, y);
-                if !self.is_land(i) {
-                    continue;
-                }
-                let edge = x == 0 || y == 0 || x + 1 == self.width || y + 1 == self.height;
-                let sea_next = [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)].iter().any(|(dx, dy)| {
-                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                    nx >= 0 && ny >= 0 && nx < self.width as i64 && ny < self.height as i64 && !self.is_land(self.index(nx as u32, ny as u32))
-                });
-                self.cell_mut(i).coastal = edge || sea_next;
+    /// Every landmass beyond the main one gets a sea link to the main one if the reach gave
+    /// it none: an island nobody can sail to is not a shape worth testing.
+    fn guarantee_sea_links(&mut self, comps: &[Vec<u32>]) {
+        let main: BTreeSet<u32> = comps[0].iter().copied().collect();
+        for comp in &comps[1..] {
+            let linked = comp.iter().any(|c| self.sea_links.get(c).into_iter().flatten().any(|t| main.contains(t)));
+            if linked {
+                continue;
             }
+            // Nearest pair by grid distance, ties by lower ids.
+            let mut best: Option<(u32, u32, u32)> = None;
+            for c in comp {
+                let (cx, cy) = self.xy(*c);
+                for m in &main {
+                    let (mx, my) = self.xy(*m);
+                    let d = cx.abs_diff(mx) + cy.abs_diff(my);
+                    if best.is_none_or(|(bd, bc, bm)| (d, *c, *m) < (bd, bc, bm)) {
+                        best = Some((d, *c, *m));
+                    }
+                }
+            }
+            if let Some((_, c, m)) = best {
+                self.cell_mut(c).coastal = true;
+                self.cell_mut(m).coastal = true;
+                self.sea_link(c, m);
+            }
+        }
+    }
+
+    /// Mark the coast: a land cell next to sea or to the map's edge, or with a sea link.
+    fn mark_coast(&mut self) {
+        for i in 0..self.cells.len() as u32 {
+            if !self.is_land(i) {
+                continue;
+            }
+            let (x, y) = self.xy(i);
+            let edge = x == 0 || y == 0 || x + 1 == self.width || y + 1 == self.height;
+            let sea_next = self.around(i).iter().any(|j| !self.is_land(*j));
+            let linked = self.sea_links.get(&i).is_some_and(|s| !s.is_empty());
+            self.cell_mut(i).coastal = edge || sea_next || linked;
         }
     }
 
@@ -233,7 +323,6 @@ impl Map {
         }
         while !free.is_empty() {
             if frontier.iter().all(Vec::is_empty) {
-                // Cells unreachable from every frontier: never on one component, but never spin.
                 for c in &free {
                     self.cell_mut(*c).owner = first;
                 }
@@ -259,19 +348,27 @@ impl Map {
 
     /// Scenario data: capacity is left to the engine; population is `share × area ×
     /// density`, computed with the same params the compile check uses, so a generated world
-    /// never starts above capacity. Province ids are cell indices, so the map stays legible.
+    /// never starts above capacity. The capital is the most populous province (ties: lowest
+    /// id); the army is E0 А11's share of the polity's people, kept within the capital's
+    /// supply (E0 А8). Province ids are cell indices, so the map stays legible.
     fn into_scenario(self, id: String, states: usize, params: &Params) -> ScenarioData {
         let pid = |i: u32| format!("p{i:03}");
         let sid = |a: usize| format!("s{a:02}");
         let mut provinces = BTreeMap::new();
         let mut pop_by_state: BTreeMap<usize, u64> = BTreeMap::new();
+        let mut capital: BTreeMap<usize, (u64, u32)> = BTreeMap::new();
         for (i, cell) in self.cells.iter().enumerate() {
             let Some(cell) = cell else { continue };
             let i = i as u32;
             let capacity = params.capacity(cell.area_km2, cell.land);
             let population = ((capacity as f64) * cell.start_share).floor() as u64;
             *pop_by_state.entry(cell.owner).or_insert(0) += population;
+            let best = capital.entry(cell.owner).or_insert((population, i));
+            if population > best.0 {
+                *best = (population, i);
+            }
             let neighbours = self.neighbours(i).into_iter().map(pid).collect();
+            let sea_neighbours = self.sea_links.get(&i).into_iter().flatten().map(|j| pid(*j)).collect();
             provinces.insert(
                 pid(i),
                 ProvinceData {
@@ -282,15 +379,20 @@ impl Map {
                     coastal: cell.coastal,
                     population,
                     neighbours,
+                    sea_neighbours,
                 },
             );
         }
         let mut rng = ChaCha8Rng::seed_from_u64(fnv(id.as_bytes()) ^ 0x7ea5_u64);
         let mut actors = BTreeMap::new();
         for s in 0..states {
-            let pop = pop_by_state.get(&s).copied().unwrap_or(0) as f64;
-            let kg = pop * pick_f(&mut rng, REVENUE_PER_HEAD_KG) * pick_f(&mut rng, TREASURY_YEARS);
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64 });
+            let pop = pop_by_state.get(&s).copied().unwrap_or(0);
+            let kg = pop as f64 * pick_f(&mut rng, REVENUE_PER_HEAD_KG) * pick_f(&mut rng, TREASURY_YEARS);
+            let (cap_pop, cap_i) = capital.get(&s).copied().unwrap_or((0, 0));
+            let supply = cap_pop as i64 * params.supply_soldiers_per_1000 / 1000;
+            let wanted = (pop as f64 * pick_f(&mut rng, ARMY_SHARE)).floor() as i64;
+            let soldiers = wanted.min(supply * 9 / 10).max(0) as u64;
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers });
         }
         let verbs = VerbId::ALL.iter().map(|v| (v.key().to_string(), v.key().replace('_', " "))).collect();
         ScenarioData {
@@ -319,7 +421,7 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
     let width = pick(&mut rng, WIDTH) as u32;
     let height = pick(&mut rng, HEIGHT) as u32;
     let n = width * height;
-    let mut map = Map { width, height, cells: (0..n).map(|_| Some(fresh_cell(&mut rng))).collect(), links: BTreeMap::new() };
+    let mut map = Map::new(width, height, (0..n).map(|_| Some(fresh_cell(&mut rng))).collect());
 
     // Sea: carve a share of cells, biased to the edges so coasts, peninsulas and islands appear.
     let sea_share = pick_f(&mut rng, SEA_SHARE);
@@ -358,11 +460,13 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
     }
     map.build_orthogonal_links();
     map.add_diagonal_links(&mut rng);
+    map.build_sea_links();
+    let comps = map.components();
+    map.guarantee_sea_links(&comps);
     map.mark_coast();
 
     // Polities: grow blobs over the largest landmass; smaller landmasses (islands) go either
     // to a new polity of their own or overseas to an existing one.
-    let comps = map.components();
     let main = comps[0].clone();
     let max_states = (STATES.1 as usize).min((main.len() / 3).max(1));
     let mut settled_states = pick(&mut rng, (STATES.0.min(max_states as u64), max_states as u64)) as usize;
@@ -393,8 +497,20 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
             map.grow(&mut rng, comp, states, 1);
             states += 1;
         } else {
-            // Overseas holding of an existing polity: a coastal power across the water.
-            let owner = rng.gen_range(0..states);
+            // Overseas holding of an existing polity: the power whose coast faces it across
+            // the water (so the colony is reachable by the rules), or any polity if none does.
+            // Only coasts already assigned count (seed 56: a facing island not yet handed
+            // out would hand down its unset owner).
+            let mut facing: Vec<usize> = comp
+                .iter()
+                .flat_map(|c| map.sea_links.get(c).into_iter().flatten().copied().collect::<Vec<_>>())
+                .filter(|t| !comp.contains(t))
+                .map(|t| map.owner(t))
+                .filter(|o| *o != usize::MAX)
+                .collect();
+            facing.sort();
+            facing.dedup();
+            let owner = if facing.is_empty() { rng.gen_range(0..states) } else { facing[rng.gen_range(0..facing.len())] };
             for i in comp {
                 map.cell_mut(*i).owner = owner;
             }
@@ -423,7 +539,7 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
 }
 
 /// A hand-made map from an ASCII sketch: `.` is sea, a letter is the owning polity
-/// (`a` = 0); orthogonal links only. For the extreme worlds.
+/// (`a` = 0); orthogonal land links, sea links by reach. For the extreme worlds.
 fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, share: f64, params: &Params) -> ScenarioData {
     let height = rows.len() as u32;
     let width = rows[0].len() as u32;
@@ -441,8 +557,11 @@ fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, s
             }
         })
         .collect();
-    let mut map = Map { width, height, cells, links: BTreeMap::new() };
+    let mut map = Map::new(width, height, cells);
     map.build_orthogonal_links();
+    map.build_sea_links();
+    let comps = map.components();
+    map.guarantee_sea_links(&comps);
     map.mark_coast();
     map.into_scenario(id.to_string(), states, params)
 }
@@ -460,8 +579,9 @@ pub fn extreme_worlds(params: &Params) -> Vec<(&'static str, ScenarioData)> {
         ("nomads_at_edge", sketch("x_nomads_at_edge", &["aaaadd", "aaaadd", "bbbbdd", "bbbbdd", "ccccdd", "ccccdd"], |o| if o == 3 { Land::Steppe } else { Land::Arable }, 9_000, 0.75, params)),
         // A chokepoint: two halves joined by a single passage, and a peninsula on the east.
         ("chokepoint", sketch("x_chokepoint", &["aaa.bbb", "aaa.bbb", "aaaabbb", "aaa.bbb", "aaa.b..", "....b..", "....b.."], |_| Land::Arable, 6_000, 0.8, params)),
-        // An overseas colony and an enclave: `b` holds an island and a cell inside `a`.
-        ("colony_and_enclave", sketch("x_colony_and_enclave", &["aaaa..", "abaa.b", "aaaa.b", "aaaa..", "cccc..", "cccc.."], |_| Land::Arable, 6_000, 0.8, params)),
+        // An overseas colony and an enclave: `b` holds a coastal strip (its capital), an
+        // island across the bay and a cell inside `a`.
+        ("colony_and_enclave", sketch("x_colony_and_enclave", &["bb....", "aaaa.b", "abaa.b", "aaaa..", "cccc..", "cccc.."], |_| Land::Arable, 6_000, 0.8, params)),
     ]
 }
 
@@ -482,7 +602,7 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on first implementation of the irregular generator. If this changes, every
+    /// Pinned on the sea-links version of the generator (E2 step 2). If this changes, every
     /// seed plays a different world and "fails on seed N" stops reproducing: bump it only
     /// with a deliberate change of the generator, never with a dependency update.
     #[test]
@@ -491,7 +611,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 13_861_495_800_295_043_542;
+    const PINNED_WORLD_ONE: u64 = 16_130_146_076_271_241_423;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -512,12 +632,18 @@ mod tests {
                 for nb in &pr.neighbours {
                     assert!(s.provinces[nb].neighbours.contains(k), "seed {seed}: link {k}–{nb} not symmetric");
                 }
+                for nb in &pr.sea_neighbours {
+                    assert!(pr.coastal && s.provinces[nb].coastal, "seed {seed}: sea link {k}–{nb} off the coast");
+                    assert!(s.provinces[nb].sea_neighbours.contains(k), "seed {seed}: sea link {k}–{nb} not symmetric");
+                }
             }
-            for a in s.actors.keys() {
+            for (a, actor) in &s.actors {
                 assert!(s.provinces.values().any(|pr| &pr.owner == a), "seed {seed}: {a} owns nothing");
+                assert_eq!(&s.provinces[&actor.capital].owner, a, "seed {seed}: capital of {a} not its own");
+                let people: u64 = s.provinces.values().filter(|pr| &pr.owner == a).map(|pr| pr.population).sum();
+                assert!(actor.soldiers as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
             }
         }
-        // The scale the engine must carry is reached somewhere in the family.
         assert!(max_states >= 12, "largest world has only {max_states} states");
         assert!(max_provinces >= 70, "largest world has only {max_provinces} provinces");
     }
@@ -531,7 +657,8 @@ mod tests {
         let empire = get("empire_vs_small");
         assert_eq!(empire.provinces.values().filter(|p| p.owner == "s00").count(), 32);
         let island = get("isolated_island");
-        assert!(island.provinces.values().any(|p| p.neighbours.is_empty() && p.coastal && p.owner == "s03"));
+        let d = island.provinces.values().find(|p| p.owner == "s03").unwrap();
+        assert!(d.neighbours.is_empty() && d.coastal && !d.sea_neighbours.is_empty(), "the island is linked by sea");
         let no_arable = get("no_arable");
         assert!(no_arable.provinces.values().filter(|p| p.owner == "s00").all(|p| p.land != Land::Arable));
         let nomads = get("nomads_at_edge");
@@ -539,6 +666,7 @@ mod tests {
         let choke = get("chokepoint");
         assert_eq!(choke.provinces.len(), 31);
         let colony = get("colony_and_enclave");
+        assert_eq!(colony.actors["s01"].capital, "p000", "the capital is the coastal strip, not the enclave");
         assert!(colony.provinces.values().any(|p| p.owner == "s01" && !p.neighbours.is_empty() && p.neighbours.iter().all(|n| colony.provinces[n].owner == "s00")));
     }
 }

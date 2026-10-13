@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ActorId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
+use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
 
@@ -52,9 +53,15 @@ pub enum Event {
     Peace { a: ActorId, b: ActorId },
     RulerDied { actor: ActorId, person: PersonId, cause: Cause },
     ActorDied { actor: ActorId },
-    /// A stock crossed zero or a bound; the ledger refused the posting. Kept as an event so
-    /// the sentinel sees bound hits without reading engine internals.
+    /// A stock was clamped at zero: the ledger posted what there was and stopped. Kept as an
+    /// event so the sentinel sees bound hits without reading engine internals.
     BoundHit { account: Account, source: Source },
+    /// A unit took one step along its path.
+    UnitMoved { unit: UnitId, from: ProvinceId, to: ProvinceId, way: Way },
+    /// A unit's order had no passable path and was dropped.
+    NoPath { unit: UnitId, to: ProvinceId },
+    /// A unit lost men for want of supply; `unsupplied` is how many stood beyond it.
+    Attrition { unit: UnitId, unsupplied: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

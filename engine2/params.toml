@@ -8,8 +8,6 @@
 #   kind = "c"  model parameter without a source: `value` and `checked_by` naming the `e0`
 #               of a (b) row in this file.
 # Units are written out; the engine converts to per-tick and to thousandths itself.
-#
-# E1: only what the empty world reads. Systems add their rows in E2, each with its E0 §5 line.
 
 # E0 П1 — land capacity, people per km² (Scheidel 2007 via Frier; Russell; Khazanov).
 [capacity.arable]
@@ -40,6 +38,7 @@ band = [0.1, 1.0]
 unit = "people per km²"
 e0 = "П1"
 
+# Stand-in of E1 until the population system: share of the gap to capacity closed per tick.
 [population.pull_to_capacity]
 kind = "c"
 value = 0.001
@@ -51,3 +50,44 @@ kind = "b"
 band = [-0.002, 0.005]
 unit = "share per year"
 e0 = "П7"
+
+# E0 А8 — soldiers the polity's economy can sustain per 1 000 inhabitants (Э8 × Э2, with
+# Roth 1999 for the ration): a polity-wide ratio. Until the economy exists it stands in for
+# local supply by the province a unit occupies — a placeholder, not the design (plan §14).
+[supply.soldiers_per_1000_people]
+kind = "a"
+value = 150.0
+band = [90.0, 200.0]
+unit = "soldiers per 1 000 inhabitants"
+e0 = "А8"
+
+# E0 А7 — attrition of an unsupplied unit (Parker 1972: 2–3 % a month in the field).
+[army.attrition_unsupplied_per_year]
+kind = "a"
+value = 0.30
+band = [0.25, 0.35]
+unit = "share of the unsupplied soldiers, per year"
+e0 = "А7"
+
+# E0 А11 — standing army as a share of population (Jones; Treadgold; Mallett–Hale).
+[army.observed_share_of_population]
+kind = "b"
+band = [0.005, 0.03]
+unit = "soldiers per inhabitant"
+e0 = "А11"
+
+# E0 А12 — share of years a polity spends at war (Ammianus; Mallett).
+[war.observed_share_of_years]
+kind = "b"
+band = [0.2, 0.9]
+unit = "share of years"
+e0 = "А12"
+
+# E0 А5 — provinces a unit crosses per tick. A placeholder: 1 per half-year tick makes the
+# march the main brake on war; the war system derives the value from А5 (15–25 km a day,
+# a 6–8 month season) and the province area (owner's note on PR #281). Checked through А12.
+[movement.provinces_per_tick]
+kind = "c"
+value = 1.0
+unit = "provinces per tick"
+checked_by = "А12"

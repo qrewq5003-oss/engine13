@@ -29,3 +29,7 @@ required-features = ["sentinel"]
 [[test]]
 name = "worldgen"
 required-features = ["sentinel", "worldgen"]
+
+[[test]]
+name = "units"
+required-features = ["worldgen"]
