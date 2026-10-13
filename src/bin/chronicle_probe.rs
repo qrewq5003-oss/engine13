@@ -198,8 +198,8 @@ fn check(livedir: &str, outdir: &str) {
         let p: Vec<&str> = stem.split('_').collect();
         games.entry((p[0].to_string(), p[1][1..].parse().unwrap())).or_default().push(p[3][1..].parse().unwrap());
     }
-    println!("| game | ticks | L1 alliances | L1 vassalages | L2 crises | L2 league | L2 defeats | L3 chronology | L5 old not recent | L5 old summed | L4 dossier lines | L6 stop-list (mean) | 7 words of the book: brought by the book / quoting the prompt | prompt before mean / max | after mean / max | window lines | actor ids before / after | event keys before / after | other Latin tokens before / after | digits before / after | tag ids before / after | era code names before / after | debug reasons before / after |");
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("| game | ticks | L1 alliances | L1 vassalages | L2 crises | L2 league | L2 defeats | L3 past facts in their blocks | L5 old not recent | L5 old summed | L4 dossier lines | L6 stop-list (mean) | chronology lines standing (must be 0) | 7 words of the book: brought by the book / quoting the prompt | prompt before mean / max | after mean / max | window lines | actor ids before / after | event keys before / after | other Latin tokens before / after | digits before / after | tag ids before / after | era code names before / after | debug reasons before / after |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for ((world, seed), mut ticks) in games {
         ticks.sort();
         let (mut st, db, strategy) = new_game(&world, seed);
@@ -258,21 +258,38 @@ fn check(livedir: &str, outdir: &str) {
                 let e = name(a.common_enemy.as_ref().unwrap());
                 t[3].check(stories.iter().any(|l| l.contains(&format!("против общего врага ({e})"))), || format!("t{tick} league vs {e}"));
             }
-            // L3: every death, vassalage change, milestone and player decision has its line.
+            // L3: every past fact has its line in its own block — a death, an ended vassalage and a
+            // power entering the stage in the chronology, a vassalage in force in the relations, a
+            // milestone in «Что изменилось», a player decision in the policy — and the chronology
+            // holds nothing that still stands (no alliance, decision, milestone, vassalage in force).
             let recent_from = period.saturating_sub(CHRONOLOGY_RECENT_TICKS - 1);
-            let mut fact_ticks: Vec<(u32, String)> = ws.dead_actors.iter().map(|d| (d.tick_death, format!("death {}", d.id))).collect();
-            for e in st.event_log.events.iter().filter(|e| e.tick <= period) {
-                let kind = matches!(e.event_type, engine13::core::EventType::PlayerAction) || (e.id.starts_with("vassalage_") && !e.id.starts_with("vassalage_tribute_"))
-                    || ws.milestone_events_fired.contains(&e.id);
-                if kind { fact_ticks.push((e.tick, e.id.clone())); }
+            let in_chron = |ft: u32| if ft >= recent_from {
+                chron.iter().any(|l| l.starts_with(&format!("- {} —", date(ft))))
+            } else {
+                chron.iter().any(|l| l.starts_with(&format!("- {}-е:", year(ft) / 10 * 10)))
+            };
+            let changed = block(&prompt, "=== ЧТО ИЗМЕНИЛОСЬ С НАЧАЛА СЦЕНАРИЯ ===");
+            let policy: Vec<&str> = block(&prompt, "Решения последних двух лет:").into_iter().chain(block(&prompt, "Прежние решения")).collect();
+            for d in &ws.dead_actors {
+                t[5].check(in_chron(d.tick_death), || format!("t{tick} death {}", d.id));
             }
-            for (ft, what) in fact_ticks {
-                let ok = if ft >= recent_from {
-                    chron.iter().any(|l| l.starts_with(&format!("- {} —", date(ft))))
-                } else {
-                    chron.iter().any(|l| l.starts_with(&format!("- {}-е:", year(ft) / 10 * 10)))
-                };
-                t[5].check(ok, || format!("t{tick} {what}@{ft}"));
+            for e in st.event_log.events.iter().filter(|e| e.tick <= period) {
+                if matches!(e.event_type, engine13::core::EventType::PlayerAction) {
+                    let n = e.description.trim_start_matches("Действие игрока: ");
+                    t[5].check(policy.iter().any(|l| l.contains(n)), || format!("t{tick} {} not in the policy", e.id));
+                } else if ws.milestone_events_fired.contains(&e.id) {
+                    t[5].check(changed.iter().any(|l| l.starts_with(&format!("- {} год:", e.year))), || format!("t{tick} {} not in «что изменилось»", e.id));
+                } else if e.id.starts_with("vassalage_") && !e.id.starts_with("vassalage_tribute_") {
+                    let held = ws.vassalages.iter().any(|v| v.vassal_id == e.actor_id && v.formed_tick == e.tick);
+                    t[5].check(if held { rel.iter().any(|l| l.contains(&format!("{} — вассал", name(&e.actor_id)))) } else { in_chron(e.tick) }, || format!("t{tick} {}@{}", e.id, e.tick));
+                } else if e.id.starts_with("spawn_") {
+                    t[5].check(in_chron(e.tick), || format!("t{tick} {}", e.id));
+                }
+            }
+            for l in &chron {
+                let standing = l.contains("союз:") || l.contains("решения игрока") || l.contains("веха:")
+                    || ws.vassalages.iter().any(|v| l.contains(&format!("{} — вассал", name(&v.vassal_id))));
+                t[8].check(!standing, || format!("t{tick} standing in the chronology: {l}"));
             }
             // L5
             let recent = block(&prompt, "Решения последних двух лет:");
@@ -307,9 +324,9 @@ fn check(livedir: &str, outdir: &str) {
         }
         let mm = |v: &Vec<usize>| format!("{} / {}", v.iter().sum::<usize>() / v.len(), v.iter().max().unwrap());
         let n = ticks.len();
-        println!("| {world} s{seed} | {}–{} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.1} | {leak} / {quoted} | {} | {} | {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} |",
+        println!("| {world} s{seed} | {}–{} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.1} | {} | {leak} / {quoted} | {} | {} | {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} | {} / {} |",
             ticks[0], ticks[n - 1], t[0].cell(), t[1].cell(), t[2].cell(), t[3].cell(), t[4].cell(), t[5].cell(), t[6].cell(), t[7].cell(),
-            dossier as f64 / n as f64, stop as f64 / n as f64, mm(&before), mm(&after), wa[0], wb[1], wa[1], wb[2], wa[2], wb[3], wa[3], wb[4], wa[4], wb[5], wa[5], wb[6], wa[6], wb[7], wa[7]);
+            dossier as f64 / n as f64, stop as f64 / n as f64, t[8].missing, mm(&before), mm(&after), wa[0], wb[1], wa[1], wb[2], wa[2], wb[3], wa[3], wb[4], wa[4], wb[5], wa[5], wb[6], wa[6], wb[7], wa[7]);
         for x in &t { for e in &x.examples { eprintln!("  missing: {e}"); } }
     }
 }

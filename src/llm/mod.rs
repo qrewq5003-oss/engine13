@@ -183,14 +183,17 @@ pub fn chronicler_description(event: &crate::core::Event, scenario: &Scenario) -
     } else if event.id.starts_with("era_") {
         d.strip_suffix(" эру")
             .and_then(|r| r.rsplit_once(" в "))
-            .and_then(|(r, new)| r.rsplit_once(" перешёл из ").map(|(name, old)| (name, old, new)))
+            // «переходит» since the template stopped depending on gender; «перешёл» in older saves.
+            .and_then(|(r, new)| r.rsplit_once(" переходит из ").or_else(|| r.rsplit_once(" перешёл из ")).map(|(name, old)| (name, old, new)))
             .and_then(|(name, old, new)| {
                 let (from, _) = era_words(&era_named(old)?);
                 let (_, into) = era_words(&era_named(new)?);
                 Some(format!("{name} переходит из {from} в {into}"))
             })
     } else if event.id.starts_with("foreground_") {
-        d.split_once(" вышел на передний план").map(|(name, _)| format!("{name} выходит на передний план"))
+        d.split_once(" выходит на передний план")
+            .or_else(|| d.split_once(" вышел на передний план"))
+            .map(|(name, _)| format!("{name} выходит на передний план"))
     } else {
         None
     };

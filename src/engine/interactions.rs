@@ -596,7 +596,7 @@ fn record_war_result(world: &mut WorldState, winner: &str, loser: &str, s_w: f64
         loser.to_string(),
         EventType::Diplomatic,
         true,
-        format!("{} подчинился {} после поражений", loser, winner),
+        format!("{} подчиняется {} после поражений", loser, winner),
     ));
 }
 
@@ -1294,7 +1294,7 @@ pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog, band_fo
                 vassal_id.clone(),
                 EventType::Diplomatic,
                 true,
-                format!("{} вышел из-под власти {}", vassal_id, overlord_id),
+                format!("{} выходит из-под власти {}", vassal_id, overlord_id),
             );
             event_log.add(event);
         }
@@ -1397,7 +1397,7 @@ pub fn check_vassalage(world: &mut WorldState, event_log: &mut EventLog, band_fo
             actor_id.clone(),
             EventType::Diplomatic,
             true,
-            format!("{} признал сюзеренитет {}", actor_id, overlord_id),
+            format!("{} признаёт сюзеренитет {}", actor_id, overlord_id),
         );
         event_log.add(event);
     }
@@ -1462,7 +1462,7 @@ pub fn calculate_vassalage_interaction(
                 overlord_id.clone(),
                 EventType::Diplomatic,
                 false,
-                format!("{} выплатил дань {} ({:.1})", vassal_id, overlord_id, tribute),
+                format!("{} выплачивает дань {} ({:.1})", vassal_id, overlord_id, tribute),
             );
             event_log.add(event);
         }
