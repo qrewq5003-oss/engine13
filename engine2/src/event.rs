@@ -111,6 +111,8 @@ pub enum Event {
     /// The ruler moved the tax rate (parts per million of production) for a price in
     /// legitimacy (E2 step 6b).
     TaxRateChanged { actor: ActorId, from_ppm: i64, to_ppm: i64 },
+    /// The ruler bought legitimacy with the treasury (`enforce_order`, E2 step 6b).
+    OrderEnforced { actor: ActorId, kg: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

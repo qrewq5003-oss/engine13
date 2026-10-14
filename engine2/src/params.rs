@@ -141,6 +141,9 @@ pub struct Params {
     /// (в) What raising the tax costs in legitimacy; what lowering it gives.
     pub legitimacy_cost_raise_tax: f64,
     pub legitimacy_gain_lower_tax: f64,
+    /// (в) `enforce_order`: its price as parts per million of yearly revenue, and its gain.
+    pub order_cost_share_ppm: i64,
+    pub order_gain: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -252,6 +255,8 @@ impl Params {
         let tax_step = value("tax.step")?;
         let cost_raise_tax = value("legitimacy.cost_raise_tax")?;
         let gain_lower_tax = value("legitimacy.gain_lower_tax")?;
+        let order_cost = value("order.cost_share_of_revenue")?;
+        let order_gain = value("order.gain")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -293,6 +298,8 @@ impl Params {
             tax_step_ppm: (tax_step * 1_000_000.0).round() as i64,
             legitimacy_cost_raise_tax: cost_raise_tax,
             legitimacy_gain_lower_tax: gain_lower_tax,
+            order_cost_share_ppm: (order_cost * 1_000_000.0).round() as i64,
+            order_gain,
             entries,
         })
     }

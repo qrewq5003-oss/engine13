@@ -108,7 +108,7 @@ impl World {
         (self.debt_ceiling(a, params) - self.debt(a)).max(0)
     }
 
-    fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
+    pub(crate) fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
         self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000
     }
 
@@ -207,7 +207,7 @@ impl World {
             return Err(VerbError::Fallen(a));
         }
         match call.verb {
-            VerbId::RaiseTax | VerbId::LowerTax => self.apply_politics_verb(call, a, params),
+            VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => self.apply_politics_verb(call, a, params),
             VerbId::DeclareWar | VerbId::MakePeace => Err(VerbError::NotAvailable(call.verb, "awaits diplomacy: a war without a price is a degeneration (plan §17)")),
             VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => self.apply_army_verb(call, a, params),
             VerbId::TakeLoan => {

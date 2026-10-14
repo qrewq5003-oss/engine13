@@ -113,6 +113,7 @@ impl Observed for Game {
                 Event::RegencyEnded { .. } => ObsEvent::Other("RegencyEnded".into()),
                 Event::GovernorChanged { .. } => ObsEvent::Other("GovernorChanged".into()),
                 Event::TaxRateChanged { actor, .. } => ObsEvent::Other(format!("TaxRateChanged@{}", self.actor_id(*actor).0)),
+                Event::OrderEnforced { actor, .. } => ObsEvent::Other(format!("OrderEnforced@{}", self.actor_id(*actor).0)),
             })
             .collect()
     }

@@ -98,7 +98,18 @@ impl Game {
                 let mut cost_legitimacy = 0;
                 let (available, why) = match (verb, who) {
                     (_, ActorRef::Ruler(_)) if fallen => (false, Some("the polity has fallen")),
-                    (VerbId::RaiseTax | VerbId::LowerTax, ActorRef::House(_)) => (false, Some("a house does not rule the polity")),
+                    (VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder, ActorRef::House(_)) => (false, Some("a house does not rule the polity")),
+                    (VerbId::EnforceOrder, ActorRef::Ruler(a)) => {
+                        cost_kg = self.world.order_cost(a, &self.params);
+                        cost_legitimacy = -(self.params.order_gain.round() as i64);
+                        if cost_kg <= 0 {
+                            (false, Some("no revenue to pay from"))
+                        } else if self.world.treasury(a) < cost_kg {
+                            (false, Some("cannot pay"))
+                        } else {
+                            (true, None)
+                        }
+                    }
                     (VerbId::RaiseTax, ActorRef::Ruler(a)) => {
                         cost_legitimacy = self.params.legitimacy_cost_raise_tax.round() as i64;
                         match self.world.tax_room(a, VerbId::RaiseTax, &self.params) {

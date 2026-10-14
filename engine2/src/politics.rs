@@ -47,7 +47,9 @@
 //! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
 //! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
 //! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
-//! reason. Legitimacy stays inside 0–100.
+//! reason. `enforce_order` buys legitimacy with the treasury: `order.cost_share_of_revenue`
+//! of a year's revenue (`Source::Verb`) for `order.gain`; closed when the treasury cannot
+//! pay. Legitimacy stays inside 0–100.
 //!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
@@ -355,14 +357,19 @@ impl World {
         }
     }
 
+    /// What `enforce_order` costs now: the share of a year's revenue, kg.
+    pub fn order_cost(&self, a: ActorId, params: &Params) -> i64 {
+        self.yearly_income(a, params) * params.order_cost_share_ppm / 1_000_000
+    }
+
     /// Pay or receive legitimacy, kept inside 0–100.
     fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
         let actor = self.actors.get_mut(&a).unwrap();
         actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
     }
 
-    /// The verbs of internal politics: `raise_tax` / `lower_tax` (no target). Called by
-    /// `apply_verb` for a living ruler.
+    /// The verbs of internal politics: `raise_tax` / `lower_tax` / `enforce_order` (no
+    /// target). Called by `apply_verb` for a living ruler.
     pub(crate) fn apply_politics_verb(&mut self, call: &VerbCall, a: ActorId, params: &Params) -> Result<(), VerbError> {
         match call.verb {
             VerbId::RaiseTax | VerbId::LowerTax => {
@@ -379,6 +386,22 @@ impl World {
                 self.actors.get_mut(&a).unwrap().tax_rate_ppm = to_ppm;
                 self.pay_legitimacy(a, cost);
                 self.emit(Event::TaxRateChanged { actor: a, from_ppm, to_ppm });
+                Ok(())
+            }
+            VerbId::EnforceOrder => {
+                if call.target != Target::None {
+                    return Err(VerbError::BadTarget(call.verb, "enforce_order takes no target"));
+                }
+                let cost = self.order_cost(a, params);
+                if cost <= 0 {
+                    return Err(VerbError::NotAvailable(call.verb, "no revenue to pay from"));
+                }
+                if self.treasury(a) < cost {
+                    return Err(VerbError::NotAvailable(call.verb, "cannot pay"));
+                }
+                self.post(Account::Treasury(a), Source::Verb, -cost * 1000).map_err(|_| VerbError::NotAvailable(call.verb, "ledger"))?;
+                self.pay_legitimacy(a, -params.order_gain);
+                self.emit(Event::OrderEnforced { actor: a, kg: cost as u64 });
                 Ok(())
             }
             _ => Err(VerbError::NotAvailable(call.verb, "not a verb of internal politics")),

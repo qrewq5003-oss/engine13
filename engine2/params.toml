@@ -531,3 +531,17 @@ kind = "c"
 value = 5.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+
+# (в) `enforce_order`: the treasury buys legitimacy — this share of a year's revenue for the
+# gain below. Checked through В6.
+[order.cost_share_of_revenue]
+kind = "c"
+value = 0.1
+unit = "share of yearly revenue per call"
+checked_by = "В6"
+
+[order.gain]
+kind = "c"
+value = 10.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
