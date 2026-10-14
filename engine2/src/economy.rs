@@ -32,7 +32,9 @@
 //! `legitimacy.cost_default`, and the bank lends nothing — not for the pay, not to the verb
 //! — for `default.years_without_credit` (`Actor::credit_closed_until`; `CreditRestored`
 //! when the term ends). The owner's choice on §18: a write-off with the credit closed, not
-//! a suspension of interest.
+//! a suspension of interest. **The price lasts** (review of #286): the legitimacy norm sits
+//! `legitimacy.norm_penalty_in_default` lower for the whole term, and a polity that
+//! defaulted once pays the top of Э6 on every later loan (`Actor::defaulted`).
 //!
 //! The tax verbs are priced by internal politics (`politics.rs`, E2 step 6b: a step of the
 //! rate inside Э4 for a price in legitimacy); `take_loan` needs the bank institution and
@@ -117,6 +119,15 @@ impl World {
         (self.debt_ceiling(a, params) - self.debt(a)).max(0)
     }
 
+    /// The interest this polity pays per tick: the band's top ever after a default.
+    pub fn interest_ppm_per_tick(&self, a: ActorId, params: &Params) -> i64 {
+        if self.actors[&a].defaulted {
+            params.loan_interest_after_default_ppm_per_tick
+        } else {
+            params.loan_interest_ppm_per_tick
+        }
+    }
+
     /// Whether the bank lends nothing to this polity after its default.
     pub fn credit_closed(&self, a: ActorId) -> bool {
         self.actors[&a].credit_closed_until.is_some_and(|t| self.tick < t)
@@ -129,6 +140,7 @@ impl World {
         let actor = self.actors.get_mut(&a).unwrap();
         actor.legitimacy = (actor.legitimacy - params.legitimacy_cost_default).clamp(0.0, 100.0);
         actor.credit_closed_until = Some(crate::time::Tick(self.tick.0 + params.default_ticks_without_credit));
+        actor.defaulted = true;
         self.emit(Event::Default { actor: a, written_off_kg: debt as u64 });
         Ok(())
     }
@@ -190,7 +202,7 @@ impl World {
             }
             // Interest on the debt carried in: from the treasury as far as it reaches, the
             // rest onto the debt.
-            let interest = self.debt(a) * params.loan_interest_ppm_per_tick / 1_000_000;
+            let interest = self.debt(a) * self.interest_ppm_per_tick(a, params) / 1_000_000;
             if interest > 0 {
                 let from_treasury = interest.min(self.treasury(a));
                 if from_treasury > 0 {

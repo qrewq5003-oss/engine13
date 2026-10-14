@@ -151,6 +151,12 @@ pub struct Params {
     pub usurpation_per_tick: f64,
     /// (в) The legitimacy norm of a usurper.
     pub legitimacy_norm_usurper: f64,
+    /// (в) The norm falls by this per step of the tax rate above the tithe (rises below).
+    pub legitimacy_norm_per_tax_step: f64,
+    /// (в) The norm sits this much lower while the credit is closed after a default.
+    pub legitimacy_norm_penalty_in_default: f64,
+    /// E0 Э6: the interest a defaulter pays afterwards — the top of the band, per tick.
+    pub loan_interest_after_default_ppm_per_tick: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -268,6 +274,9 @@ impl Params {
         let years_without_credit = value("default.years_without_credit")?;
         let usurpation = value("usurpation.per_year")?;
         let norm_usurper = value("legitimacy.norm_usurper")?;
+        let norm_per_tax_step = value("legitimacy.norm_per_tax_step")?;
+        let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
+        let interest_band = band("loan.interest_per_year")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -315,6 +324,9 @@ impl Params {
             default_ticks_without_credit: (years_without_credit * 2.0).round() as u32,
             usurpation_per_tick: usurpation / 2.0,
             legitimacy_norm_usurper: norm_usurper,
+            legitimacy_norm_per_tax_step: norm_per_tax_step,
+            legitimacy_norm_penalty_in_default: norm_penalty_in_default,
+            loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
             entries,
         })
     }
@@ -363,6 +375,16 @@ fn validate(name: &str, e: &Entry) -> Result<(), ParamsError> {
 mod tests {
     use super::*;
 
+    /// Money and legitimacy must not be convertible at a profit (review of #286): a step
+    /// of the tax gives 0.2 of a year's revenue a year and lowers the norm by one step's
+    /// worth; buying that back costs 0.2 × step × price / gain a year.
+    #[test]
+    fn prices_leave_no_arbitrage() {
+        let p = Params::load().unwrap();
+        let price_years = p.order_cost_share_ppm as f64 / 1_000_000.0;
+        assert!(price_years * p.legitimacy_norm_per_tax_step >= p.order_gain, "order at {price_years} years of revenue for {} against a norm shift of {} per step: tax up and order back is a profit", p.order_gain, p.legitimacy_norm_per_tax_step);
+    }
+
     #[test]
     fn shipped_file_loads() {
         let p = Params::load().unwrap();
@@ -379,6 +401,7 @@ mod tests {
         assert_eq!(p.court_share_ppm, 400_000);
         assert_eq!(p.pay_per_soldier_kg_per_year, 2100);
         assert_eq!(p.loan_interest_ppm_per_tick, 40_000);
+        assert_eq!(p.loan_interest_after_default_ppm_per_tick, 75_000);
         assert_eq!(p.loan_ceiling_years_milli, 5000);
         assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
         assert_eq!(p.march_km_per_tick, 2100);

@@ -58,9 +58,14 @@
 //! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
 //! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
 //! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
-//! reason. `enforce_order` buys legitimacy with the treasury: `order.cost_share_of_revenue`
-//! of a year's revenue (`Source::Verb`) for `order.gain`; closed when the treasury cannot
-//! pay. Legitimacy stays inside 0–100.
+//! reason. **A lasting decision shifts the norm** (brief §2; review of #286): the norm falls
+//! by `legitimacy.norm_per_tax_step` for every step of the rate above the tithe and rises
+//! for every step below, as long as the rate holds — a high tax is never paid for once. A
+//! default lowers the norm by `legitimacy.norm_penalty_in_default` for the whole term of
+//! the closed credit (`economy.rs`). `enforce_order` buys legitimacy with the treasury:
+//! `order.cost_share_of_revenue` of a year's revenue (`Source::Verb`) for `order.gain` — a
+//! lift above the norm that decays back; closed when the treasury cannot pay. Legitimacy
+//! stays inside 0–100.
 //!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
@@ -158,16 +163,21 @@ impl World {
     /// ruler is a minor (E0 §1.7, kind (в) checked through В5).
     pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
         let actor = &self.actors[&a];
-        if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
-            return params.legitimacy_norm_regency;
-        }
-        match actor.standing {
-            Standing::Hereditary => params.legitimacy_norm_hereditary,
-            Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
-            Standing::Elected => params.legitimacy_norm_elected,
-            Standing::Acclaimed => params.legitimacy_norm_acclaimed,
-            Standing::Usurper => params.legitimacy_norm_usurper,
-        }
+        let by_standing = if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
+            params.legitimacy_norm_regency
+        } else {
+            match actor.standing {
+                Standing::Hereditary => params.legitimacy_norm_hereditary,
+                Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
+                Standing::Elected => params.legitimacy_norm_elected,
+                Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+                Standing::Usurper => params.legitimacy_norm_usurper,
+            }
+        };
+        // Lasting decisions shift the norm: the tax above the tithe, the closed credit.
+        let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
+        let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
+        (by_standing - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default).clamp(0.0, 100.0)
     }
 
     /// Who would take the throne by force: the regent, else a governor, else the eldest

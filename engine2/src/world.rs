@@ -146,6 +146,8 @@ pub struct Actor {
     pub standing: Standing,
     /// After a default the bank lends nothing until this tick (E2 step 6b).
     pub credit_closed_until: Option<Tick>,
+    /// The polity defaulted once: the bank lends at the top of Э6 ever after.
+    pub defaulted: bool,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -458,6 +460,7 @@ impl World {
                     succession: a.succession,
                     standing,
                     credit_closed_until: None,
+                    defaulted: false,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;

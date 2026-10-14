@@ -533,10 +533,16 @@ unit = "legitimacy, 0–100"
 checked_by = "В6"
 
 # (в) `enforce_order`: the treasury buys legitimacy — this share of a year's revenue for the
-# gain below. Checked through В6.
+# gain below. Checked through В6. **No arbitrage between money and legitimacy** (review of
+# #286, measured in `tests/legitimacy.rs`): a step of the tax gives 0.2 of a year's revenue a
+# year and lowers the norm by `legitimacy.norm_per_tax_step`; holding legitimacy up against
+# that costs 0.2 × step × (price / gain) a year. The round trip loses only while
+# `order.cost_share_of_revenue × legitimacy.norm_per_tax_step ≥ order.gain` — the guard
+# `prices_leave_no_arbitrage` holds the inequality. At 0.1 a year's revenue the order was a
+# machine: tax to the top, order every tick — income doubled and legitimacy 90.
 [order.cost_share_of_revenue]
 kind = "c"
-value = 0.1
+value = 1.5
 unit = "share of yearly revenue per call"
 checked_by = "В6"
 
@@ -581,5 +587,27 @@ checked_by = "В6"
 [legitimacy.norm_usurper]
 kind = "c"
 value = 30.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+# (в) A lasting decision shifts the norm, a blow is one-off (brief §2; owner's review of
+# #286: a one-off price for a permanent gain is an arbitrage — legitimacy returns to the
+# norm in a few years, the rate stays). The legitimacy norm falls by this much for every
+# step of the tax rate above the tithe (`tax.default_rate`) and rises by it for every step
+# below, as long as the rate holds: the tithe doubled (+5 steps) puts a hereditary king
+# below a usurper (70 − 50 = 20). Checked through В6; bound to the price of order by the
+# no-arbitrage guard above.
+[legitimacy.norm_per_tax_step]
+kind = "c"
+value = 10.0
+unit = "legitimacy per step of the tax rate above the tithe"
+checked_by = "В6"
+
+# (в) The lasting price of a default: the norm sits this much lower for the whole term of
+# the closed credit; afterwards the bank lends at the top of Э6, never at the old rate
+# (`loan.interest_per_year` band). Checked through В6.
+[legitimacy.norm_penalty_in_default]
+kind = "c"
+value = 20.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"

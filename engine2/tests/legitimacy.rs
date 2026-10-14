@@ -3,6 +3,12 @@
 //! - the tax verbs move the rate by one step inside the band of Э4, the offer carries the
 //!   price in legitimacy, raising costs it and lowering gives some back, the take follows
 //!   the rate, and at the edge of the band the verb is closed with its reason;
+//! - a lasting decision shifts the norm (review of #286): every step of the rate above the
+//!   tithe lowers the norm while the rate holds, every step below raises it; a default
+//!   lowers the norm for the term of the closed credit and the interest stays at the top of
+//!   Э6 afterwards; paired runs — a greedy ruler (tax to the top, order whenever below the
+//!   norm) and a borrower who defaults do not beat the plain ruler on both income and
+//!   legitimacy over 100 ticks;
 //! - `enforce_order` takes its share of a year's revenue from the treasury for its gain in
 //!   legitimacy, as one posting signed `Verb`; a treasury that cannot pay closes it;
 //! - a debt past the ceiling whose interest the treasury cannot meet is a default: written
@@ -221,6 +227,7 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     let until = g.world().actors[&a].credit_closed_until.expect("the term is set");
     assert_eq!(until.0, g.world().tick.0 - 1 + p.default_ticks_without_credit);
     let mut restored_at = None;
+    let (mut norm_closed, mut ruler_closed, mut standing_closed) = (0.0, g.world().actors[&a].ruler, g.world().actors[&a].standing);
     for i in 1..=(p.default_ticks_without_credit + 2) {
         let r = g.tick(&[]).unwrap();
         if r.events.iter().any(|e| matches!(e.event, Event::CreditRestored { actor } if actor == a)) {
@@ -229,6 +236,15 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
         }
         assert!(!r.postings.iter().any(|q| q.source == Source::Loan), "a loan while the credit is closed");
         assert_eq!(g.world().debt(a), 0);
+        if g.world().credit_closed(a) {
+            let w = g.world();
+            if w.actors[&a].standing == Standing::Hereditary && w.is_adult(w.actors[&a].ruler, &p) {
+                assert!((w.legitimacy_norm(a, &p) - (p.legitimacy_norm_hereditary - p.legitimacy_norm_penalty_in_default)).abs() < 1e-9, "the norm sits lower for the whole term");
+            }
+            norm_closed = w.legitimacy_norm(a, &p);
+            ruler_closed = w.actors[&a].ruler;
+            standing_closed = w.actors[&a].standing;
+        }
         // Closed up to the tick of the term; open from it, before its economy says so.
         assert_eq!(g.world().credit_closed(a), g.world().tick < until);
         assert_eq!(offer(&g).available, g.world().tick >= until);
@@ -236,8 +252,21 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     assert_eq!(restored_at, Some(p.default_ticks_without_credit), "the credit opens exactly when the term ends");
     assert!(!g.world().credit_closed(a));
     assert!(offer(&g).available, "with the credit open the loan is on offer again");
+    // The price lasts: the norm was lower for the whole term and is back now; the interest
+    // stays at the top of Э6.
+    let w = g.world();
+    if w.actors[&a].ruler == ruler_closed && w.actors[&a].standing == standing_closed {
+        assert!((w.legitimacy_norm(a, &p) - (norm_closed + p.legitimacy_norm_penalty_in_default)).abs() < 1e-9, "the norm is back after the term");
+    }
+    assert!(w.actors[&a].defaulted);
+    assert_eq!(w.interest_ppm_per_tick(a, &p), p.loan_interest_after_default_ppm_per_tick);
+    assert!(p.loan_interest_after_default_ppm_per_tick > p.loan_interest_ppm_per_tick);
     g.tick(&[loan]).unwrap();
-    assert!(g.world().debt(a) > 0);
+    let debt = g.world().debt(a);
+    assert!(debt > 0);
+    let r = g.tick(&[]).unwrap();
+    let interest: i64 = r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum();
+    assert_eq!(interest / 1000, debt * p.loan_interest_after_default_ppm_per_tick / 1_000_000, "interest at the top of the band");
 }
 
 #[test]
@@ -333,4 +362,106 @@ fn on_generated_worlds_usurpations_per_century_per_polity_lie_in_b6_neither_neve
     assert!(usurpations > 0, "never");
     assert!(quiet_centuries > 0, "always: every polity saw a usurpation in its first century");
     assert!((band[0]..=band[1]).contains(&per_century), "В6 {per_century:.1} outside {band:?}");
+}
+
+#[test]
+fn every_step_of_the_tax_above_the_tithe_lowers_the_norm_while_the_rate_holds_and_every_step_below_raises_it() {
+    let p = params();
+    let mut w = world();
+    let a = ActorId(0);
+    let raise = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+    let lower = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::LowerTax, target: Target::None };
+    let base = w.legitimacy_norm(a, &p);
+    assert!((base - p.legitimacy_norm_hereditary).abs() < 1e-9);
+    w.apply_verb(&raise, &p).unwrap();
+    assert!((w.legitimacy_norm(a, &p) - (base - p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "one step up: the norm one step lower");
+    w.apply_verb(&raise, &p).unwrap();
+    assert!((w.legitimacy_norm(a, &p) - (base - 2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9);
+    // Legitimacy drifts to the shifted norm and stays there as long as the rate holds: the
+    // one-off blow is never recovered above it.
+    for _ in 0..60 {
+        w.tick(&p).unwrap();
+        if w.actors[&a].standing != Standing::Hereditary || !w.is_adult(w.actors[&a].ruler, &p) {
+            return; // the draws changed the throne: the shape is covered by the paired run
+        }
+    }
+    let shifted = base - 2.0 * p.legitimacy_norm_per_tax_step;
+    assert!((w.actors[&a].legitimacy - shifted).abs() < 1.0, "{} vs {shifted}", w.actors[&a].legitimacy);
+    // Down below the tithe: the norm rises above the standing's.
+    for _ in 0..4 {
+        w.apply_verb(&lower, &p).unwrap();
+    }
+    assert!((w.legitimacy_norm(a, &p) - (base + 2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "two steps below the tithe: the norm two steps higher");
+    assert!(w.legitimacy_norm(a, &p) <= 100.0);
+}
+
+/// One ruler plays each strategy over 100 ticks on the same world with the same draws.
+/// Returns (net income over the run: tax collected less kg spent through verbs; mean
+/// legitimacy; legitimacy at the end; kg spent through verbs; net worth at the end).
+fn play_strategy(strategy: &str, p: &Params) -> (i64, f64, f64, i64, i64) {
+    let mut w = world();
+    let a = ActorId(0);
+    w.actors.get_mut(&a).unwrap().institutions.insert(engine2::Institution::Bank);
+    let who = ActorRef::Ruler(a);
+    let call = |v: VerbId| VerbCall { actor: who, verb: v, target: Target::None };
+    let (mut income, mut legit_sum, mut spent) = (0i64, 0.0f64, 0i64);
+    for _ in 0..100 {
+        match strategy {
+            "plain" => {}
+            "greedy" => {
+                if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
+                    w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
+                }
+                if w.actors[&a].legitimacy < w.legitimacy_norm(a, p) && w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
+                    spent += w.order_cost(a, p);
+                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+                }
+            }
+            "order every tick" => {
+                if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
+                    w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
+                }
+                if w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
+                    spent += w.order_cost(a, p);
+                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+                }
+            }
+            "borrow and default" => {
+                let _ = w.apply_verb(&call(VerbId::TakeLoan), p);
+                let mut n = 0;
+                while w.order_cost(a, p) > 0 && w.treasury(a) >= w.order_cost(a, p) && n < 50 {
+                    spent += w.order_cost(a, p);
+                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+                    n += 1;
+                }
+            }
+            _ => unreachable!(),
+        }
+        let r = w.tick(p).unwrap();
+        income += r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
+        legit_sum += w.actors[&a].legitimacy;
+    }
+    (income - spent, legit_sum / 100.0, w.actors[&a].legitimacy, spent, w.treasury(a) - w.debt(a))
+}
+
+#[test]
+fn paired_runs_a_greedy_ruler_and_a_defaulter_do_not_beat_the_plain_ruler_on_both_income_and_legitimacy_over_100_ticks() {
+    let p = params();
+    let plain = play_strategy("plain", &p);
+    let greedy = play_strategy("greedy", &p);
+    let every = play_strategy("order every tick", &p);
+    let defaulter = play_strategy("borrow and default", &p);
+    eprintln!("plain: net income {} mean legitimacy {:.1} end {:.1} net worth {}", plain.0, plain.1, plain.2, plain.4);
+    eprintln!("greedy (tax to the top, order when below the norm): net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", greedy.0, greedy.1, greedy.2, greedy.3, greedy.4);
+    eprintln!("order whenever affordable at the top tax: net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", every.0, every.1, every.2, every.3, every.4);
+    eprintln!("borrow to the ceiling, spend, default: net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", defaulter.0, defaulter.1, defaulter.2, defaulter.3, defaulter.4);
+    assert!(greedy.0 > plain.0, "the greedy ruler does collect more");
+    for (name, run) in [("greedy", &greedy), ("order whenever affordable", &every)] {
+        assert!(!(run.0 > plain.0 && run.1 > plain.1), "{name}: beats the plain ruler on both net income and mean legitimacy");
+        assert!(!(run.0 > plain.0 && run.2 > plain.2), "{name}: beats the plain ruler on both net income and legitimacy at the end");
+    }
+    // Resources the defaulter commanded: what it spent plus what it holds net of debt.
+    let (plain_resources, defaulter_resources) = (plain.3 + plain.4, defaulter.3 + defaulter.4);
+    assert!(!(defaulter_resources > plain_resources && defaulter.1 > plain.1), "the defaulter beats the plain ruler on both resources and mean legitimacy");
+    assert!(!(defaulter_resources > plain_resources && defaulter.2 > plain.2), "… and on both resources and legitimacy at the end");
 }
