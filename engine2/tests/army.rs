@@ -3,8 +3,8 @@
 //! a landless polity, foraging with its cost, the levy, the disbanding and the hire — on
 //! the test world and on the generated worlds with scripted wars.
 //!
-//! `declare_war` is closed to the player and the agents («awaits diplomacy»); the tests
-//! open wars through `World::declare_war` (feature `testing`).
+//! `declare_war` is priced by diplomacy (E2 step 7); the tests open wars without a price
+//! through `World::declare_war` (feature `testing`).
 
 use engine2::event::{Outcome, Transfer};
 use engine2::sim::{Game, SimError, Simulation};
@@ -29,23 +29,21 @@ fn set_soldiers(w: &mut World, u: UnitId, n: i64) {
 }
 
 #[test]
-fn war_is_closed_in_the_offers_and_only_the_tests_open_it() {
+fn war_is_priced_in_the_offers_and_the_tests_open_it_without_a_price() {
+    // Diplomacy (E2 step 7) opened the verb: the offer carries its price in legitimacy; the
+    // tests still open wars without a price through `World::declare_war`.
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("declare_war".to_string(), "Declare war".to_string());
     let mut g = Game::new(&s, params(), 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
     let war = g.verbs(who).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
-    assert!(!war.available);
-    assert_eq!(war.why.as_deref(), Some("awaits diplomacy"));
-    let err = g.tick(&[VerbCall { actor: who, verb: VerbId::DeclareWar, target: Target::Actor(ActorId(1)) }]).unwrap_err();
-    assert!(matches!(err, SimError::Verb(_)), "{err}");
-    assert!(g.world().wars.is_empty());
-    let mut w = testworld::world(1);
+    assert!(war.available);
+    assert_eq!(war.cost_legitimacy, params().legitimacy_cost_declare_war.round() as i64);
+    let w = g.world_mut();
     w.declare_war(ActorId(1), ActorId(0)).unwrap();
     assert!(w.at_war(ActorId(0), ActorId(1)) && w.at_war(ActorId(1), ActorId(0)));
     assert!(!w.at_war(ActorId(0), ActorId(2)));
-    let r = w.tick(&params()).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::War { a: ActorId(0), b: ActorId(1) })));
+    assert!(matches!(w.declare_war(ActorId(0), ActorId(0)), Err(engine2::world::WorldError::WarWithSelf(_))));
 }
 
 #[test]

@@ -124,6 +124,21 @@ pub enum Event {
     Released { vassal: ActorId, lord: ActorId },
     /// A vassal's treasury did not cover the tribute due (E0 Д2).
     TributeShort { vassal: ActorId, lord: ActorId, unpaid_kg: u64 },
+    /// An alliance made, running to `until` (E0 Д1).
+    Alliance { a: ActorId, b: ActorId, until: Tick },
+    /// A proposal the other side did not accept: the relation was below the threshold, or
+    /// the state of the pair forbade it; the embassy's gifts are spent all the same.
+    Refused { actor: ActorId, verb: VerbId, target: ActorId },
+    /// A treaty broken by a declaration of war before its term: priced as a breach.
+    TreatyBroken { a: ActorId, b: ActorId, kind: TreatyKind },
+    /// An embassy sent: gifts spent for a push of the relation.
+    Embassy { from: ActorId, to: ActorId, kg: u64 },
+    /// A gift to another polity's treasury (E0 Д2, the subsidy).
+    Gift { from: ActorId, to: ActorId, kg: u64 },
+    /// Two houses bound by a marriage, with the dowry that went with it.
+    Marriage { a: PersonId, b: PersonId, dowry_kg: u64 },
+    /// A peace of submission: the loser of the war became the winner's vassal.
+    Submission { vassal: ActorId, lord: ActorId },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

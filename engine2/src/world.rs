@@ -221,6 +221,12 @@ pub struct War {
     pub since: Tick,
     /// Provinces taken in this war: by the lower-id side from the other, and the reverse.
     pub taken: (u32, u32),
+    /// Provinces each side held when the war began (the lower id first): a loser down to
+    /// half of them submits at the peace.
+    pub held: (u32, u32),
+    /// The principal pair this war is an obligation of (an ally's, a lord's, a vassal's
+    /// entry); it ends with their peace. None for a war of its own.
+    pub of: Option<(ActorId, ActorId)>,
 }
 
 /// What a treaty binds a pair to (E2 step 7).
@@ -679,7 +685,9 @@ impl World {
             if a == b {
                 return Err(WorldError::WarWithSelf(a));
             }
-            world.wars.insert(crate::army::pair(a, b), War { since: tick, taken: (0, 0) });
+            let (lo, hi) = crate::army::pair(a, b);
+            let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

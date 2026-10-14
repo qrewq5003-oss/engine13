@@ -453,7 +453,7 @@ impl World {
     }
 
     /// Pay or receive legitimacy, kept inside 0–100.
-    fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
+    pub(crate) fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
         let actor = self.actors.get_mut(&a).unwrap();
         actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
     }

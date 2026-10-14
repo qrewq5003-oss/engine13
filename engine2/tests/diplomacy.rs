@@ -17,7 +17,16 @@
 //!   price, no breach, no chain (the owner's test: A attacks B, each with an ally — three
 //!   fight, not four); a peace in force keeps an ally out;
 //! - bound polities march through each other's land and are supplied there by their pay,
-//!   never by foraging.
+//!   never by foraging;
+//! - the verbs: `declare_war` costs legitimacy, a breach the factor and the treaty, a
+//!   vassal fights only its lord; `make_peace` is accepted by the state of the war — the
+//!   loser always, the winner at the threshold — closes the obligations, binds for the term,
+//!   and settles the loser (submission at half its land, release of a vassal that won);
+//!   `propose_alliance` spends the embassy's gifts accepted or not and is accepted at the
+//!   threshold; `send_embassy` and `bribe` push with saturation, the gift staying in the
+//!   world and worth more to the poor; `propose_marriage` is open to every house, the dowry
+//!   out of the house treasury, the threshold across polities only; every offer shows the
+//!   threshold a proposal needs.
 
 use std::collections::BTreeMap;
 
@@ -355,4 +364,277 @@ fn bound_polities_march_through_each_others_land_and_are_supplied_there_by_their
     w.order_move(unit, at(0, 3)).unwrap();
     w.tick(&p).unwrap();
     assert_eq!(w.units[&unit].position, at(0, 3));
+}
+
+fn scenario_with_verbs() -> ScenarioData {
+    let mut s = testworld::five_states_scenario();
+    for v in engine2::VerbId::ALL {
+        s.verbs.insert(v.key().to_string(), v.key().replace('_', " "));
+    }
+    s
+}
+
+fn call(a: ActorId, verb: engine2::VerbId, b: ActorId) -> engine2::VerbCall {
+    engine2::VerbCall { actor: engine2::ActorRef::Ruler(a), verb, target: engine2::Target::Actor(b) }
+}
+
+fn on(r: &engine2::TickReport, account: engine2::Account, src: engine2::Source) -> i64 {
+    r.postings.iter().filter(|q| q.account == account && q.source == src).map(|q| q.milli).sum::<i64>() / 1000
+}
+
+/// `a`'s unit takes the undefended enemy province `p`: first to its own province next to
+/// `p` (so the march meets no other contact), then across — no battle, a siege within the
+/// tick.
+fn take(w: &mut World, a: ActorId, p: engine2::ProvinceId, params: &Params) {
+    let unit = w.units_of(a)[0];
+    let here = w.units[&unit].position;
+    let staging = if w.provinces[&here].neighbours.contains(&p) { here } else { w.actors[&a].provinces.iter().copied().find(|q| w.provinces[q].neighbours.contains(&p)).expect("an own province next to the target") };
+    if here != staging {
+        w.order_move(unit, staging).unwrap();
+        w.tick(params).unwrap();
+        assert_eq!(w.units[&unit].position, staging, "the staging march");
+    }
+    w.order_move(unit, p).unwrap();
+    let r = w.tick(params).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, to, .. } if province == p && to == a)), "{p:?} not taken");
+}
+
+#[test]
+fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_and_a_vassal_fights_only_its_lord() {
+    use engine2::VerbId;
+    let p = params();
+    let mut g = Game::new(&scenario_with_verbs(), params(), 11).unwrap();
+    let (s0, s1, s2, s3, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
+    let offer = g.verbs(engine2::ActorRef::Ruler(s0)).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
+    assert!(offer.available && offer.cost_legitimacy == p.legitimacy_cost_declare_war.round() as i64 && offer.threshold.is_none());
+    let l0 = g.world().actors[&s0].legitimacy;
+    let r = g.tick(&[call(s0, VerbId::DeclareWar, s1)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::War { a, b } if (a, b) == (s0, s1))));
+    assert!(g.world().at_war(s0, s1));
+    let paid = l0 - g.world().actors[&s0].legitimacy;
+    let drift = p.legitimacy_rate_per_tick * (g.world().legitimacy_norm(s0, &p) - (l0 - p.legitimacy_cost_declare_war));
+    assert!((paid - (p.legitimacy_cost_declare_war - drift)).abs() < 1e-6, "the exact price, then the tick's drift: paid {paid}");
+    // A breach: twice the price, the treaty gone, the victim's allies' relations to nothing.
+    g.world_mut().ally_now(s0, s2, &p).unwrap();
+    g.world_mut().ally_now(s2, s3, &p).unwrap();
+    assert!(g.world().relation(s0, s3) > 0.0);
+    let l0 = g.world().actors[&s0].legitimacy;
+    let norm_before = g.world().legitimacy_norm(s0, &p);
+    assert!((g.world().war_price(s0, s2, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9);
+    let r = g.tick(&[call(s0, VerbId::DeclareWar, s2)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::TreatyBroken { a, b, kind: TreatyKind::Alliance } if (a, b) == (s0, s2))));
+    assert!(g.world().treaty(s0, s2).is_none() && g.world().at_war(s0, s2));
+    let after_price = l0 - p.legitimacy_cost_declare_war * p.treaty_breach_factor;
+    let expected = after_price + p.legitimacy_rate_per_tick * (norm_before - after_price);
+    assert!((g.world().actors[&s0].legitimacy - expected).abs() < 1e-6, "the breach costs the factor");
+    let drifted = p.relation_rate_per_tick * g.world().relation_norm(s0, s3, &p);
+    assert!(g.world().relation(s0, s3) <= drifted + 1e-6, "the relation with the victim's ally is pushed to nothing, then the tick's drift: {}", g.world().relation(s0, s3));
+    assert!(g.world().at_war(s3, s0), "and the ally entered all the same");
+    // A vassal fights only its lord.
+    g.world_mut().make_vassal(s4, s3).unwrap();
+    let err = g.tick(&[call(s4, VerbId::DeclareWar, s1)]).unwrap_err();
+    assert!(err.to_string().contains("a vassal fights only its lord"), "{err}");
+    let offer = g.verbs(engine2::ActorRef::Ruler(s4)).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
+    assert!(offer.available, "the lord is a target");
+    g.tick(&[call(s4, VerbId::DeclareWar, s3)]).unwrap();
+    assert!(g.world().at_war(s4, s3), "the way out is open");
+    assert_eq!(g.world().lord_of(s4), Some(s3), "still a vassal until the peace");
+    let offer = g.verbs(engine2::ActorRef::Ruler(s4)).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
+    assert!(!offer.available && offer.why.as_deref() == Some("a vassal fights only its lord"), "{:?}", offer.why);
+}
+
+#[test]
+fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_the_loser() {
+    use engine2::VerbId;
+    let p = params();
+    let (s0, s1, s2, s3) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3));
+    // Nothing taken either way: a status quo both accept; the peace binds for the term and
+    // a new war before it is a breach.
+    let mut w = testworld::world(12);
+    w.declare_war(s0, s1).unwrap();
+    assert!(w.losing_side(s0, s1).is_none());
+    assert!(w.peace_room(s0, s1, &p).is_ok() && w.peace_room(s1, s0, &p).is_ok());
+    w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
+    assert!(!w.at_war(s0, s1) && w.peace_in_force(s0, s1));
+    assert_eq!(w.treaty(s0, s1).unwrap().until, Tick(w.tick.0 + p.treaty_term_ticks));
+    assert!((w.war_price(s0, s1, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9, "war again before the term is a breach");
+    assert_eq!(w.peace_room(s0, s1, &p), Err("not at war"));
+    // The winner takes a province: the loser's proposal is refused at the norm of war, the
+    // winner's accepted; the loser accepts at the threshold.
+    let mut w = testworld::world(13);
+    w.ally_now(s1, s3, &p).unwrap();
+    w.declare_war(s0, s1).unwrap();
+    assert!(w.at_war(s0, s3), "the ally entered");
+    take(&mut w, s0, at(1, 4), &p);
+    assert_eq!(w.wars[&(s0, s1)].taken, (1, 0));
+    assert_eq!(w.losing_side(s0, s1), Some(s1));
+    assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
+    let err = w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap_err();
+    assert!(err.to_string().contains("the winner wants more"), "{err}");
+    assert!(w.at_war(s0, s1));
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(w.peace_room(s1, s0, &p).is_ok(), "at the threshold the winner accepts");
+    w.relations.insert((s0, s1), 20.0);
+    let before = w.tick;
+    w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
+    assert!(!w.at_war(s0, s1), "the loser accepts the winner's peace always");
+    assert!(!w.at_war(s0, s3), "the ally's war was an obligation of this one and closed with it");
+    assert_eq!(w.treaty(s0, s1).map(|t| t.kind), Some(TreatyKind::Peace));
+    assert_eq!(w.lord_of(s1), None, "one province of five lost: no submission");
+    assert_eq!(w.actors[&s1].provinces.len(), 4, "what was taken stays taken");
+    let _ = before;
+    // Down to half its land the loser submits.
+    let mut w = testworld::world(14);
+    w.declare_war(s0, s1).unwrap();
+    for y in [4, 3, 2] {
+        take(&mut w, s0, at(1, y), &p);
+    }
+    assert_eq!(w.actors[&s1].provinces.len(), 2);
+    let r = {
+        w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
+        w.tick(&p).unwrap()
+    };
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Submission { vassal, lord } if (vassal, lord) == (s1, s0))));
+    assert_eq!(w.lord_of(s1), Some(s0));
+    assert!(on(&r, engine2::Account::Treasury(s0), engine2::Source::Tribute) > 0, "and the tribute flows");
+    // A vassal that beat its lord is released.
+    let mut w = testworld::world(15);
+    w.make_vassal(s1, s0).unwrap();
+    w.declare_war(s1, s0).unwrap();
+    take(&mut w, s1, at(0, 4), &p);
+    assert_eq!(w.losing_side(s0, s1), Some(s0));
+    w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
+    assert_eq!(w.lord_of(s1), None, "released");
+    assert!(!w.at_war(s0, s1));
+    // A rebel that lost stays a vassal.
+    let mut w = testworld::world(16);
+    w.make_vassal(s1, s0).unwrap();
+    w.declare_war(s1, s0).unwrap();
+    take(&mut w, s0, at(1, 4), &p);
+    w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
+    assert_eq!(w.lord_of(s1), Some(s0), "the rebel lost: still a vassal");
+    let _ = s2;
+}
+
+#[test]
+fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accepted_at_the_threshold() {
+    use engine2::VerbId;
+    let p = params();
+    let mut g = Game::new(&scenario_with_verbs(), params(), 17).unwrap();
+    let (s0, s1, s2, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(4));
+    let who = engine2::ActorRef::Ruler(s0);
+    let cost = g.world().embassy_cost(s0, &p);
+    assert!(cost > 0);
+    g.world_mut().post(engine2::Account::Treasury(s0), engine2::Source::Test, 20 * cost * 1000).unwrap();
+    let offer = g.verbs(who).into_iter().find(|o| o.verb == VerbId::ProposeAlliance).unwrap();
+    assert!(!offer.available && offer.cost_kg == cost && offer.threshold == Some(p.treaty_accept_at_relation.round() as i64));
+    assert!(offer.why.as_deref().unwrap().contains("threshold 60"), "{:?}", offer.why);
+    // Refused below the threshold: the gifts are spent all the same.
+    let r0 = g.world().relation(s0, s1);
+    assert!(r0 < p.treaty_accept_at_relation);
+    let r = g.tick(&[call(s0, VerbId::ProposeAlliance, s1)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Refused { actor, verb: VerbId::ProposeAlliance, target } if (actor, target) == (s0, s1))));
+    assert_eq!(on(&r, engine2::Account::Treasury(s0), engine2::Source::Verb), -cost);
+    assert!(!g.world().allied(s0, s1));
+    // Embassies push with saturation: each push smaller than the last; four reach the
+    // threshold from the border norm, and the proposal in the same tick is accepted.
+    let before = g.world().relation(s0, s1);
+    let cost = g.world().embassy_cost(s0, &p);
+    let r = g.tick(&[call(s0, VerbId::SendEmbassy, s1)]).unwrap();
+    assert_eq!(on(&r, engine2::Account::Treasury(s0), engine2::Source::Verb), -cost);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Embassy { from, to, kg } if (from, to) == (s0, s1) && kg == cost as u64)));
+    let pushed = before + p.embassy_gain * (100.0 - before) / 100.0;
+    let after_tick = pushed + p.relation_rate_per_tick * (g.world().relation_norm(s0, s1, &p) - pushed);
+    assert!((g.world().relation(s0, s1) - after_tick).abs() < 1e-6, "push with saturation, then the tick's drift");
+    let embassies: Vec<engine2::VerbCall> = (0..4).map(|_| call(s0, VerbId::SendEmbassy, s1)).chain([call(s0, VerbId::ProposeAlliance, s1)]).collect();
+    let r = g.tick(&embassies).unwrap();
+    let until = r.events.iter().find_map(|e| match e.event {
+        Event::Alliance { a, b, until } if (a, b) == (s0, s1) => Some(until),
+        _ => None,
+    });
+    assert!(until.is_some(), "accepted at the threshold");
+    assert!(g.world().allied(s0, s1));
+    assert_eq!(g.world().treaty(s0, s1).unwrap().until, until.unwrap());
+    assert!((g.world().relation_norm(s0, s1, &p) - (p.relation_base + p.relation_norm_alliance - p.relation_norm_border)).abs() < 1e-9);
+    // A vassal makes no alliance; at war with the other's ally — refused.
+    g.world_mut().make_vassal(s4, s2).unwrap();
+    let err = g.tick(&[call(s4, VerbId::ProposeAlliance, s0)]).unwrap_err();
+    assert!(err.to_string().contains("a vassal makes no alliance"), "{err}");
+    g.world_mut().declare_war(s2, s1).unwrap();
+    g.world_mut().relations.insert((s0, s2), 100.0);
+    let r = g.tick(&[call(s0, VerbId::ProposeAlliance, s2)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Refused { actor, target, .. } if (actor, target) == (s0, s2))), "at war with the proposer's ally");
+}
+
+#[test]
+fn a_gift_moves_between_treasuries_and_pushes_in_proportion_to_what_it_is_worth_to_the_receiver() {
+    use engine2::VerbId;
+    let p = params();
+    let mut g = Game::new(&scenario_with_verbs(), params(), 18).unwrap();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let gift = g.world().gift_size(s0, &p);
+    assert!(gift > 0 && (0.01..=0.02).contains(&(p.bribe_share_ppm as f64 / 1e6)), "inside Д2");
+    let worth = gift as f64 / g.world().yearly_income(s1, &p) as f64;
+    let before = g.world().relation(s0, s1);
+    let r = g.tick(&[call(s0, VerbId::Bribe, s1)]).unwrap();
+    assert_eq!(on(&r, engine2::Account::Treasury(s0), engine2::Source::Gift), -gift);
+    assert_eq!(on(&r, engine2::Account::Treasury(s1), engine2::Source::Gift), gift, "the money stays in the world");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Gift { from, to, kg } if (from, to) == (s0, s1) && kg == gift as u64)));
+    let pushed = before + p.bribe_gain_per_share * worth * (100.0 - before) / 100.0;
+    let after_tick = pushed + p.relation_rate_per_tick * (g.world().relation_norm(s0, s1, &p) - pushed);
+    assert!((g.world().relation(s0, s1) - after_tick).abs() < 1e-6, "the push is the gift's worth to the receiver");
+    let offer = g.verbs(engine2::ActorRef::Ruler(s0)).into_iter().find(|o| o.verb == VerbId::Bribe).unwrap();
+    assert!(offer.available && offer.cost_kg == g.world().gift_size(s0, &p));
+    // A house does not send gifts or embassies.
+    let house = g.verbs(engine2::ActorRef::House(engine2::HouseId(0))).into_iter().find(|o| o.verb == VerbId::SendEmbassy).unwrap();
+    assert!(!house.available && house.why.as_deref() == Some("a house does not rule the polity"));
+}
+
+#[test]
+fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open_to_every_house_of_a_polity() {
+    use engine2::{ActorRef, HouseId, Target, VerbCall, VerbId};
+    let p = params();
+    let mut g = Game::new(&scenario_with_verbs(), params(), 19).unwrap();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let (h0, h1, h2, o0) = (HouseId(0), HouseId(1), HouseId(2), HouseId(5));
+    assert_eq!(g.world().houses[&o0].polity, s0, "the other house of polity 0");
+    let marry = |who: ActorRef, g: HouseId| VerbCall { actor: who, verb: VerbId::ProposeMarriage, target: Target::House(g) };
+    // Across polities the threshold applies.
+    let err = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap_err();
+    assert!(err.to_string().contains("below the threshold"), "{err}");
+    g.world_mut().relations.insert((s0, s1), p.treaty_accept_at_relation);
+    let r = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap();
+    let (a, b) = r.events.iter().find_map(|e| match e.event {
+        Event::Marriage { a, b, dowry_kg: 0 } => Some((a, b)),
+        _ => None,
+    }).expect("a marriage with no dowry: the house has nothing yet");
+    let w = g.world();
+    assert_eq!((w.persons[&a].house, w.persons[&b].house), (h0, h1));
+    assert_eq!(w.persons[&a].spouse, Some(b));
+    assert_eq!(w.persons[&b].spouse, Some(a));
+    assert_eq!(a, w.actors[&s0].ruler, "the eldest unmarried adult of the house: the ruler");
+    assert!(w.married_across(s0, s1));
+    assert!((w.relation_norm(s0, s1, &p) - (p.relation_base + p.relation_norm_marriage - p.relation_norm_border)).abs() < 1e-9);
+    // The ruler's offer carries the dowry its house would give and the threshold.
+    let offer = g.verbs(ActorRef::Ruler(s0)).into_iter().find(|o| o.verb == VerbId::ProposeMarriage).unwrap();
+    assert!(offer.available && offer.cost_kg == g.world().dowry(h0, &p) && offer.threshold == Some(p.treaty_accept_at_relation.round() as i64));
+    // A house that does not rule marries its members into the ruling house of its own
+    // polity without a threshold — its way up — for a dowry out of its own treasury, and
+    // then has nobody left to marry.
+    g.world_mut().post(engine2::Account::HouseTreasury(o0), engine2::Source::Test, 1000 * 1000).unwrap();
+    let dowry = g.world().dowry(o0, &p);
+    assert_eq!(dowry, 1000 * p.dowry_share_ppm / 1_000_000, "a house without a seat has only what it was given");
+    let offer = g.verbs(ActorRef::House(o0)).into_iter().find(|o| o.verb == VerbId::ProposeMarriage).unwrap();
+    assert!(offer.available && offer.cost_kg == dowry, "{:?}", offer.why);
+    let err = g.tick(&[marry(ActorRef::House(o0), HouseId(3))]).unwrap_err();
+    assert!(err.to_string().contains("below the threshold"), "{err}");
+    let r = g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)));
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -dowry);
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), dowry);
+    let _ = h2;
+    let offer = g.verbs(ActorRef::House(o0)).into_iter().find(|o| o.verb == VerbId::ProposeMarriage).unwrap();
+    assert!(!offer.available && offer.why.as_deref() == Some("no unmarried adult to marry"), "{:?}", offer.why);
+    let err = g.tick(&[marry(ActorRef::House(o0), h1)]).unwrap_err();
+    assert!(err.to_string().contains("no unmarried adult"), "{err}");
 }

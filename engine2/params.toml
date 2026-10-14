@@ -717,3 +717,77 @@ kind = "c"
 value = 0.1
 unit = "share of the gap to the norm per tick"
 checked_by = "Д3"
+
+# (в) The verbs of diplomacy (plan §19.3). Acceptance is a rule of the engine's state, the
+# same for the player and the agents (brief §3, rule 8): a proposal is accepted when the
+# relation of the pair is at this or above and the state of the pair allows it; the offer
+# shows the relation and the threshold (owner's rule on §19). At the norm of war (about 20)
+# a peace from the losing side is refused: in effect peace comes when the winner proposes
+# it. Checked through Д3.
+[treaty.accept_at_relation]
+kind = "c"
+value = 60.0
+unit = "relation, 0–100"
+checked_by = "Д3"
+
+# (в) A war declared on a polity with a treaty in force — alliance or peace — is a breach:
+# a price, not a prohibition (owner's rule on §19): the legitimacy price times this, the
+# treaty gone, and the relations with the victim's allies pushed to nothing.
+[treaty.breach_factor]
+kind = "c"
+value = 2.0
+unit = "multiplier of the price of a declaration"
+checked_by = "Д3"
+
+# (в) What a declaration of war costs in legitimacy: the price of the tax raised once (a
+# verb without a price is a degeneration, decision on #284).
+[legitimacy.cost_declare_war]
+kind = "c"
+value = 10.0
+unit = "legitimacy, 0–100"
+checked_by = "Д3"
+
+# (в) An embassy: gifts worth this share of a year's revenue, spent (`Source::Verb`), for a
+# push of the relation by `embassy.gain` with saturation; the same gifts open a proposal of
+# alliance, accepted or not.
+[embassy.cost_share_of_revenue]
+kind = "c"
+value = 0.05
+unit = "share of yearly revenue"
+checked_by = "Д3"
+
+[embassy.gain]
+kind = "c"
+value = 10.0
+unit = "relation, pushed once with saturation"
+checked_by = "Д3"
+
+# E0 Д2 — the other way round: the subsidy of the strong to the weak, 1–2 % of revenue
+# (Rome's payments to the Huns, 700–2 100 pounds of gold a year against the East's income —
+# by memory). The verb `bribe` is this gift: a transfer to the other treasury (`Source::Gift`),
+# the money stays in the world; buying a house's favour waits for factions.
+[bribe.share_of_revenue]
+kind = "a"
+value = 0.015
+band = [0.01, 0.02]
+unit = "share of the giver's yearly revenue"
+e0 = "Д2"
+
+# (в) The push of a gift per share of the receiver's yearly revenue it is worth: a gift of a
+# twentieth of the receiver's revenue pushes as an embassy does (200 × 0.05 = 10), with the
+# same saturation — a gift means more to the poor than to the rich.
+[bribe.gain_per_share_of_income]
+kind = "c"
+value = 200.0
+unit = "relation per share of the receiver's yearly revenue"
+checked_by = "Д3"
+
+# (в) The dowry: a share of the proposing house's treasury to the other house
+# (`Source::Dowry`) — measured by the house's wealth, not the polity's revenue (owner's rule
+# on §19: a house earns Х1, a dowry of half a year of the polity's revenue would take it
+# decades); the first expense a house has.
+[marriage.dowry_share_of_house]
+kind = "c"
+value = 0.5
+unit = "share of the house's treasury"
+checked_by = "Д3"

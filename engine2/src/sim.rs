@@ -83,8 +83,8 @@ impl Game {
     /// The one availability-and-cost function (lesson B42), the same for the player and
     /// for agents. Internal politics (E2 step 6b) prices the tax verbs in legitimacy, the
     /// economy (E2 step 4) decides the loan, the army (E2 step 5) the levy, the disbanding
-    /// and the hire; war and peace wait for diplomacy to price them (a verb without a price
-    /// is a degeneration), the rest for their systems and for the agents of E3.
+    /// and the hire, diplomacy (E2 step 7) war, peace, alliance, marriage, the embassy and
+    /// the gift — a proposal's offer carries the threshold the other side needs.
     fn offers(&self, who: ActorRef) -> Vec<VerbOffer> {
         self.display
             .verbs
@@ -94,6 +94,10 @@ impl Game {
                     ActorRef::Ruler(a) => !self.world.alive(a),
                     ActorRef::House(_) => false,
                 };
+                if !fallen && crate::diplomacy::is_diplomatic(*verb) {
+                    let o = self.world.diplomacy_offer(*verb, who, &self.params);
+                    return VerbOffer { verb: *verb, available: o.available, cost_kg: o.cost_kg, cost_legitimacy: o.cost_legitimacy, why: o.why, threshold: o.threshold };
+                }
                 let mut cost_kg = 0;
                 let mut cost_legitimacy = 0;
                 let (available, why) = match (verb, who) {
@@ -124,7 +128,6 @@ impl Game {
                             Err(why) => (false, Some(why)),
                         }
                     }
-                    (VerbId::DeclareWar | VerbId::MakePeace, _) => (false, Some("awaits diplomacy")),
                     (VerbId::Recruit, ActorRef::Ruler(a)) => {
                         if self.world.recruit_per_tick(a, &self.params) > 0 {
                             (true, None)
@@ -164,7 +167,7 @@ impl Game {
                     (VerbId::TakeLoan, ActorRef::House(_)) => (false, Some("a house does not borrow for the polity")),
                     _ => (false, Some("not implemented until its system (E2) and the agents (E3)")),
                 };
-                VerbOffer { verb: *verb, available, cost_kg, cost_legitimacy, why: why.map(str::to_string) }
+                VerbOffer { verb: *verb, available, cost_kg, cost_legitimacy, why: why.map(str::to_string), threshold: None }
             })
             .collect()
     }

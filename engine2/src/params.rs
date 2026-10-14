@@ -175,6 +175,22 @@ pub struct Params {
     pub relation_norm_border: f64,
     /// (в) The share of the gap to the norm a relation closes per tick.
     pub relation_rate_per_tick: f64,
+    /// (в) The relation a proposal needs to be accepted (plan §19.3).
+    pub treaty_accept_at_relation: f64,
+    /// (в) A war declared on a treaty in force costs this many times the price.
+    pub treaty_breach_factor: f64,
+    /// (в) What declaring a war costs in legitimacy.
+    pub legitimacy_cost_declare_war: f64,
+    /// (в) An embassy's gifts as parts per million of yearly revenue, and its push.
+    pub embassy_cost_share_ppm: i64,
+    pub embassy_gain: f64,
+    /// E0 Д2: a gift to another polity as parts per million of the giver's yearly revenue
+    /// (the subsidy of the strong to the weak), and (в) its push per share of the
+    /// receiver's yearly revenue.
+    pub bribe_share_ppm: i64,
+    pub bribe_gain_per_share: f64,
+    /// (в) The dowry as parts per million of the proposing house's treasury.
+    pub dowry_share_ppm: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -306,6 +322,14 @@ impl Params {
         let relation_norm_vassalage = value("relation.norm_vassalage")?;
         let relation_norm_border = value("relation.norm_border")?;
         let relation_rate = value("relation.rate_per_tick")?;
+        let accept_at = value("treaty.accept_at_relation")?;
+        let breach_factor = value("treaty.breach_factor")?;
+        let cost_declare_war = value("legitimacy.cost_declare_war")?;
+        let embassy_cost = value("embassy.cost_share_of_revenue")?;
+        let embassy_gain = value("embassy.gain")?;
+        let bribe_share = value("bribe.share_of_revenue")?;
+        let bribe_gain = value("bribe.gain_per_share_of_income")?;
+        let dowry_share = value("marriage.dowry_share_of_house")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -367,6 +391,14 @@ impl Params {
             relation_norm_vassalage,
             relation_norm_border,
             relation_rate_per_tick: relation_rate,
+            treaty_accept_at_relation: accept_at,
+            treaty_breach_factor: breach_factor,
+            legitimacy_cost_declare_war: cost_declare_war,
+            embassy_cost_share_ppm: (embassy_cost * 1_000_000.0).round() as i64,
+            embassy_gain,
+            bribe_share_ppm: (bribe_share * 1_000_000.0).round() as i64,
+            bribe_gain_per_share: bribe_gain,
+            dowry_share_ppm: (dowry_share * 1_000_000.0).round() as i64,
             entries,
         })
     }

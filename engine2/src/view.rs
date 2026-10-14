@@ -29,6 +29,9 @@ pub struct ActorView {
     /// The ruler's name, and the regent's while the ruler is a minor.
     pub ruler: String,
     pub regent: Option<String>,
+    /// The relation with every other polity, by its id (E2 step 7): what a proposal is
+    /// measured against (`VerbOffer::threshold`).
+    pub relations: Vec<(String, f64)>,
 }
 
 /// The world as shown.
@@ -80,6 +83,7 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
                 legitimacy: a.legitimacy,
                 ruler: w.names.persons[a.ruler.index()].1.clone(),
                 regent: a.regent.map(|r| w.names.persons[r.index()].1.clone()),
+                relations: w.actors.keys().filter(|b| *b != id).map(|b| (w.names.actors[b.index()].0.clone(), w.relation(*id, *b))).collect(),
             }
         })
         .collect();

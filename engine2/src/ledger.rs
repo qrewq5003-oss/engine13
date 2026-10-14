@@ -93,8 +93,13 @@ pub enum Source {
     Repayment,
     /// Default: the debt written off — `−` on the debt alone (E2 step 6b).
     Default,
-    /// A verb's own cost, e.g. a bribe.
+    /// A verb's own cost: order, an embassy's gifts.
     Verb,
+    /// A gift to another polity (`bribe`, E0 Д2 the subsidy): `−` on the giver's treasury
+    /// and `+` on the receiver's, the same figure — the money stays in the world.
+    Gift,
+    /// A dowry: `−` on the proposing house's treasury and `+` on the other house's.
+    Dowry,
     /// Used by tests of the ledger itself.
     Test,
 }

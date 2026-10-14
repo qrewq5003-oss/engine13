@@ -157,7 +157,7 @@ impl World {
         Ok(())
     }
 
-    pub(crate) fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
+    pub fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
         self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000 * self.collection_share_ppm(a, params) / 1_000_000
     }
 
@@ -287,13 +287,15 @@ impl World {
     /// year of revenue within the ceiling — on both accounts, so the polity's net worth
     /// does not change.
     pub fn apply_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
+        if crate::diplomacy::is_diplomatic(call.verb) {
+            return self.apply_diplomacy_verb(call, params);
+        }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
         if !self.alive(a) {
             return Err(VerbError::Fallen(a));
         }
         match call.verb {
             VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => self.apply_politics_verb(call, a, params),
-            VerbId::DeclareWar | VerbId::MakePeace => Err(VerbError::NotAvailable(call.verb, "awaits diplomacy: a war without a price is a degeneration (plan §17)")),
             VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => self.apply_army_verb(call, a, params),
             VerbId::TakeLoan => {
                 if !self.actors[&a].institutions.contains(&Institution::Bank) {
