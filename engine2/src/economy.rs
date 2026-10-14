@@ -7,9 +7,13 @@
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
 //!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) × **the share
 //!   collected** (E2 step 6b, review of #286): the share falls by
-//!   `tax.evasion_per_legitimacy_point` for every point of legitimacy below
-//!   `tax.full_collection_at_legitimacy` — evasion, arrears, refusal; a polity at the top
-//!   of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
+//!   `tax.evasion_per_legitimacy_point` for every point of legitimacy below **the norm of
+//!   lawful rule** (`World::lawful_norm`: the ruler's standing before the ruler's own
+//!   decisions shift it; for a usurper the standing the polity's rule of succession gives)
+//!   — evasion, arrears, refusal. Lawful rule of any kind collects everything: an elected
+//!   or an acclaimed ruler at its norm is not poorer than a hereditary one (the owner's
+//!   correction on #286 — Venice must not be poorer than every monarchy); a polity at the
+//!   top of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
 //!   collected all they assigned → `Source::Tax`;
 //! - **seats** (E0 Х1, `house.income_share_of_seat`): the ruling house takes its share of
 //!   the tax, a governor's house its share of the province's tax — transfers to the houses'
@@ -155,10 +159,12 @@ impl World {
     }
 
     /// The share of the assigned tax a polity collects, parts per million: everything at
-    /// `tax.full_collection_at_legitimacy` and above, less by
-    /// `tax.evasion_per_legitimacy_point` for every point of legitimacy below it.
+    /// the norm of lawful rule and above, less by `tax.evasion_per_legitimacy_point` for
+    /// every point of legitimacy below it. The gap is taken from the norm before the
+    /// ruler's decisions shift it, so a tax above the tithe keeps costing collection: the
+    /// greedy ruler sits at its shifted norm, far below the norm of lawful rule.
     pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
-        let gap = (params.tax_full_collection_at_legitimacy - self.actors[&a].legitimacy).max(0.0);
+        let gap = (self.lawful_norm(a, params) - self.actors[&a].legitimacy).max(0.0);
         (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
     }
 

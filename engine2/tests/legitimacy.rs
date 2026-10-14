@@ -8,7 +8,12 @@
 //!   lowers the norm for the term of the closed credit and the interest stays at the top of
 //!   Э6 afterwards;
 //! - the tax collected is the assigned tax times a share that falls with legitimacy below
-//!   full collection (review of #286: legitimacy costs the polity, not only the ruler);
+//!   the norm of lawful rule (review of #286: legitimacy costs the polity, not only the
+//!   ruler; owner's correction: lawful rule of any kind — elected, acclaimed — collects
+//!   everything at its own norm, the gap is from the norm before the ruler's decisions
+//!   shift it, so the greedy ruler stays punished; a usurper's gap is from the norm of the
+//!   polity's own rule of succession, else the greedy ruler, soon usurped, collects nearly
+//!   everything at the top rate);
 //!   paired runs are judged by the outcome of brief §1 — income, provinces, the houses'
 //!   seats and members — never by legitimacy as a number: a greedy ruler (tax to the top,
 //!   order whenever below the norm) gains at most a quarter over the plain one in net
@@ -504,11 +509,13 @@ fn play_strategy(strategy: &str, p: &Params) -> Outcome {
 }
 
 #[test]
-fn the_tax_collected_falls_with_legitimacy_below_full_collection() {
+fn the_tax_collected_falls_with_legitimacy_below_the_norm_of_the_standing_and_lawful_rule_of_any_kind_collects_everything() {
     let p = params();
     let mut w = world();
     let a = ActorId(0);
-    let full = p.tax_full_collection_at_legitimacy;
+    assert_eq!(w.actors[&a].standing, Standing::Hereditary);
+    let full = w.lawful_norm(a, &p);
+    assert!((full - p.legitimacy_norm_hereditary).abs() < 1e-9);
     for (legitimacy, expected_ppm) in [(full, 1_000_000), (full + 20.0, 1_000_000), (full - 25.0, 1_000_000 - 25 * p.tax_evasion_ppm_per_legitimacy_point), (0.0, 1_000_000 - (full as i64) * p.tax_evasion_ppm_per_legitimacy_point)] {
         w.actors.get_mut(&a).unwrap().legitimacy = legitimacy.min(100.0);
         assert_eq!(w.collection_share_ppm(a, &p), expected_ppm, "at legitimacy {legitimacy}");
@@ -519,6 +526,39 @@ fn the_tax_collected_falls_with_legitimacy_below_full_collection() {
         assert_eq!(tax / 1000, production * rate / 1_000_000 * expected_ppm / 1_000_000, "at legitimacy {legitimacy}");
     }
     assert!(w.collection_share_ppm(a, &p) > 0, "even at zero legitimacy something is collected");
+    // The owner's correction: every lawful standing at its own norm collects everything —
+    // an elected republic is not poorer than a monarchy for being elected — and 25 points
+    // below its norm every standing loses the same share.
+    for standing in [Standing::Hereditary, Standing::Confirmed, Standing::Elected, Standing::Acclaimed] {
+        w.actors.get_mut(&a).unwrap().standing = standing;
+        let norm = w.lawful_norm(a, &p);
+        assert!((norm - w.standing_norm(a, &p)).abs() < 1e-9);
+        w.actors.get_mut(&a).unwrap().legitimacy = norm;
+        assert_eq!(w.collection_share_ppm(a, &p), 1_000_000, "{standing:?} at its norm {norm}");
+        w.actors.get_mut(&a).unwrap().legitimacy = norm - 25.0;
+        assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - 25 * p.tax_evasion_ppm_per_legitimacy_point, "{standing:?} 25 below its norm");
+    }
+    assert!(p.legitimacy_norm_elected < p.legitimacy_norm_hereditary, "the case exists: the elected norm is the lower one");
+    // A usurper is measured against the lawful rule of the polity, not against its own
+    // norm: at the usurper's norm it is short by the whole gap to the rule's standing.
+    w.actors.get_mut(&a).unwrap().standing = Standing::Usurper;
+    let lawful = World::norm_of_standing(engine2::politics::standing_of_rule(w.actors[&a].succession), &p);
+    assert!((w.lawful_norm(a, &p) - lawful).abs() < 1e-9);
+    assert!((w.standing_norm(a, &p) - p.legitimacy_norm_usurper).abs() < 1e-9, "the usurper's own norm stays its own: В6 works through it");
+    w.actors.get_mut(&a).unwrap().legitimacy = p.legitimacy_norm_usurper;
+    let usurper_gap = (lawful - p.legitimacy_norm_usurper).round() as i64;
+    assert!(usurper_gap > 0);
+    assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - usurper_gap * p.tax_evasion_ppm_per_legitimacy_point, "a usurper at its norm is short of the collection");
+    // The gap is from the norm of lawful rule, not from the shifted norm: a ruler at the
+    // top of the tax band, settled at its shifted norm, still loses the collection.
+    w.actors.get_mut(&a).unwrap().standing = Standing::Hereditary;
+    let raise = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+    while w.apply_verb(&raise, &p).is_ok() {}
+    let shifted = w.legitimacy_norm(a, &p);
+    w.actors.get_mut(&a).unwrap().legitimacy = shifted;
+    let gap = (w.lawful_norm(a, &p) - shifted).round() as i64;
+    assert!(gap > 0, "the tax at the top of the band shifts the norm down");
+    assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - gap * p.tax_evasion_ppm_per_legitimacy_point, "the greedy ruler at its shifted norm is still short of the collection");
 }
 
 #[test]

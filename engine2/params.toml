@@ -616,20 +616,19 @@ checked_by = "В6"
 
 # (в) Collection (review of #286: legitimacy must cost the polity, not only the person on
 # the throne): collected = rate × production × share, and the share falls by this per point
-# of legitimacy below `tax.full_collection_at_legitimacy` — evasion, arrears, refusal. At
-# the greedy equilibrium (the top of Э4, legitimacy 20) the share is 0.6 and the take 12 %
-# of production: inside Э8, a fifth above the tithe, never double it. Checked through Э8.
+# of legitimacy below **the norm of lawful rule** (`legitimacy.norm_*` of the ruler's
+# standing before the ruler's decisions shift it; for a usurper — of the standing the
+# polity's rule of succession gives) — evasion, arrears, refusal. Lawful rule of any kind
+# collects everything: an elected (60) or an acclaimed (50) ruler at its norm is not poorer
+# than a hereditary one (the owner's correction on #286 — tied to an absolute 70 the share
+# left Venice 8 % poorer than any monarchy for ever). At the greedy equilibrium (the top of
+# Э4: the norm shifted five steps down, legitimacy 50 below lawful rule) the share is 0.6
+# and the take 12 % of production: inside Э8, a fifth above the tithe, never double it. The
+# usurper's gap is from lawful rule, not from its own norm of 30: measured with its own
+# norm, the greedy ruler — soon usurped — collected 0.86 and gained a third over the plain
+# one, above the ceiling of the acceptance. Checked through Э8.
 [tax.evasion_per_legitimacy_point]
 kind = "c"
 value = 0.008
-unit = "share of the assigned tax lost per point of legitimacy below full collection"
-checked_by = "Э8"
-
-# (в) The legitimacy at which everything assigned is collected: the norm of a hereditary
-# ruler. Below it the share falls; a usurper at his own norm (30) collects 0.68 — contested
-# rule is poorer rule. Checked through Э8.
-[tax.full_collection_at_legitimacy]
-kind = "c"
-value = 70.0
-unit = "legitimacy, 0–100"
+unit = "share of the assigned tax lost per point of legitimacy below the norm of lawful rule"
 checked_by = "Э8"
