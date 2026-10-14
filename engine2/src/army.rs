@@ -54,7 +54,8 @@ use crate::rng::DrawPoint;
 use crate::verbs::{Target, VerbCall, VerbId};
 use crate::world::{Unit, World, WorldError};
 
-fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
+/// A pair of polities as the maps of wars, treaties and relations key it: lower id first.
+pub(crate) fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
     if a < b {
         (a, b)
     } else {
@@ -70,7 +71,7 @@ impl World {
     }
 
     pub fn at_war(&self, a: ActorId, b: ActorId) -> bool {
-        a != b && self.wars.contains(&pair(a, b))
+        a != b && self.wars.contains_key(&pair(a, b))
     }
 
     /// Open a war. For the tests only: the verb is closed until diplomacy prices it.
@@ -84,8 +85,9 @@ impl World {
                 return Err(WorldError::UnknownActor(x));
             }
         }
-        if self.wars.insert(pair(a, b)) {
-            let (a, b) = pair(a, b);
+        let (a, b) = pair(a, b);
+        if !self.wars.contains_key(&(a, b)) {
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0) });
             self.emit(Event::War { a, b });
         }
         Ok(())
@@ -246,6 +248,16 @@ impl World {
         let t = self.actors.get_mut(&to).unwrap();
         t.provinces.push(p);
         t.provinces.sort();
+        // The war's record: who has taken what in it (peace reads it, `diplomacy.rs`).
+        if how == Transfer::Conquest {
+            if let Some(war) = self.wars.get_mut(&pair(from, to)) {
+                if to < from {
+                    war.taken.0 += 1;
+                } else {
+                    war.taken.1 += 1;
+                }
+            }
+        }
         self.emit(Event::ProvinceChangedHands { province: p, from, to, how });
         if self.actors[&from].provinces.is_empty() {
             self.fall(from)?;
@@ -264,7 +276,13 @@ impl World {
         for u in self.units_of(a) {
             self.disband_unit(u)?;
         }
-        self.wars.retain(|(x, y)| *x != a && *y != a);
+        self.wars.retain(|(x, y), _| *x != a && *y != a);
+        self.treaties.retain(|(x, y), _| *x != a && *y != a);
+        // A fallen lord frees its vassals (plan §19.2 p. 3).
+        for v in self.vassals_of(a) {
+            self.actors.get_mut(&v).unwrap().vassal_of = None;
+            self.emit(Event::Released { vassal: v, lord: a });
+        }
         self.emit(Event::ActorDied { actor: a });
         Ok(())
     }

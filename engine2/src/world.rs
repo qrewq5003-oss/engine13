@@ -92,6 +92,9 @@ pub struct Person {
     pub born: i32,
     /// The parent, for the line of blood; none for the founders of the starting facts.
     pub parent: Option<PersonId>,
+    /// The spouse, if married (E2 step 7): a bond of two houses that holds the relation of
+    /// their polities while both live; a starting fact or `propose_marriage`.
+    pub spouse: Option<PersonId>,
     /// The tick of death, once dead.
     pub died: Option<Tick>,
 }
@@ -148,6 +151,93 @@ pub struct Actor {
     pub credit_closed_until: Option<Tick>,
     /// The polity defaulted once: the bank lends at the top of Э6 ever after.
     pub defaulted: bool,
+    /// The lord this polity is a vassal of, if any (E2 step 7): a fact of the scenario or
+    /// the outcome of a peace; tribute by E0 Д2 (`economy.rs`), the lord's wars are its
+    /// wars (`army.rs`), a war on the lord is the way out.
+    pub vassal_of: Option<ActorId>,
+}
+
+/// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
+/// has no tuple keys, so it is saved as a sequence of `(a, b, value)`; a save with a pair
+/// out of order or twice is refused.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairMap<V>(pub BTreeMap<(ActorId, ActorId), V>);
+
+impl<V> Default for PairMap<V> {
+    fn default() -> Self {
+        PairMap(BTreeMap::new())
+    }
+}
+
+impl<V> std::ops::Deref for PairMap<V> {
+    type Target = BTreeMap<(ActorId, ActorId), V>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<V> std::ops::DerefMut for PairMap<V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a, V> IntoIterator for &'a PairMap<V> {
+    type Item = (&'a (ActorId, ActorId), &'a V);
+    type IntoIter = std::collections::btree_map::Iter<'a, (ActorId, ActorId), V>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<V: Serialize> Serialize for PairMap<V> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(self.0.iter().map(|((a, b), v)| (a, b, v)))
+    }
+}
+
+impl<'de, V: Deserialize<'de>> Deserialize<'de> for PairMap<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let items: Vec<(ActorId, ActorId, V)> = Vec::deserialize(d)?;
+        let mut map = BTreeMap::new();
+        for (a, b, v) in items {
+            if a >= b {
+                return Err(serde::de::Error::custom(format!("pair {a:?}-{b:?} is not ordered")));
+            }
+            if map.insert((a, b), v).is_some() {
+                return Err(serde::de::Error::custom(format!("pair {a:?}-{b:?} twice")));
+            }
+        }
+        Ok(PairMap(map))
+    }
+}
+
+/// A war between two polities (E2 step 7): when it began and what each side has taken in
+/// it, so that a peace can tell who is losing (owner's rule on §19: by the outcome of the
+/// war, not by having lost anything at all).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct War {
+    pub since: Tick,
+    /// Provinces taken in this war: by the lower-id side from the other, and the reverse.
+    pub taken: (u32, u32),
+}
+
+/// What a treaty binds a pair to (E2 step 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TreatyKind {
+    /// Defensive: a war declared on one brings the other in (`army.rs`); right of passage.
+    Alliance,
+    /// The war is over; declaring it again before the term is a breach, priced as such.
+    Peace,
+}
+
+/// A treaty in force between two polities, running to a tick (E0 Д1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Treaty {
+    pub kind: TreatyKind,
+    pub until: Tick,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -257,6 +347,19 @@ pub struct PersonFact {
     pub house: HouseId,
     pub born: i32,
     pub parent: Option<PersonId>,
+    /// The spouse at the start, mutual and of another house.
+    pub spouse: Option<PersonId>,
+}
+
+/// Starting relations between polities (E2 step 7): facts, as the scenario shows them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct RelationFacts {
+    /// Pairs at war.
+    pub wars: Vec<(ActorId, ActorId)>,
+    /// Alliances with the year each runs to.
+    pub alliances: Vec<(ActorId, ActorId, i32)>,
+    /// `(vassal, lord)`.
+    pub vassals: Vec<(ActorId, ActorId)>,
 }
 
 /// The starting facts the world is built from — the compiled scenario (`scenario.rs`).
@@ -276,6 +379,7 @@ pub struct Facts {
     pub houses: Vec<HouseFact>,
     /// Index = `PersonId`.
     pub persons: Vec<PersonFact>,
+    pub relations: RelationFacts,
 }
 
 impl Facts {
@@ -307,9 +411,13 @@ pub struct World {
     pub units: BTreeMap<UnitId, Unit>,
     /// Next unit id; units born in play (recruitment, E2) number on from here.
     pub next_unit: u32,
-    /// Polities at war, as pairs with the lower id first (`army.rs`). Opened only by the
-    /// tests until diplomacy prices the declaration; closed by the fall of a side.
-    pub wars: std::collections::BTreeSet<(ActorId, ActorId)>,
+    /// Polities at war, as pairs with the lower id first (`army.rs`), with the war's
+    /// record (E2 step 7). Closed by a peace or by the fall of a side.
+    pub wars: PairMap<War>,
+    /// Treaties in force, by pair with the lower id first (`diplomacy.rs`).
+    pub treaties: PairMap<Treaty>,
+    /// The relation of every pair of polities, 0–100, lower id first (`diplomacy.rs`).
+    pub relations: PairMap<f64>,
     pub houses: BTreeMap<HouseId, House>,
     pub persons: BTreeMap<PersonId, Person>,
     /// Next person id; persons born in play number on from here.
@@ -363,6 +471,8 @@ pub enum WorldError {
     UnknownActor(ActorId),
     #[error("a polity cannot be at war with itself: {0:?}")]
     WarWithSelf(ActorId),
+    #[error("a polity cannot be bound to itself: {0:?}")]
+    RelationWithSelf(ActorId),
     #[error("unknown person {0:?}")]
     UnknownPerson(PersonId),
     #[error("house {0:?} belongs to unknown polity {1:?}")]
@@ -427,7 +537,12 @@ impl World {
                     return Err(WorldError::ParentNotOlder(parent, id));
                 }
             }
-            persons.insert(id, Person { house: p.house, born: p.born, parent: p.parent, died: None });
+            if let Some(spouse) = p.spouse {
+                if facts.persons.get(spouse.index()).is_none() {
+                    return Err(WorldError::UnknownPerson(spouse));
+                }
+            }
+            persons.insert(id, Person { house: p.house, born: p.born, parent: p.parent, spouse: p.spouse, died: None });
         }
         // A seat of a polity is held by a person of one of its houses.
         let seat = |person: PersonId, polity: ActorId| -> Result<(), WorldError> {
@@ -461,6 +576,7 @@ impl World {
                     standing,
                     credit_closed_until: None,
                     defaulted: false,
+                    vassal_of: None,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -529,7 +645,9 @@ impl World {
             provinces,
             units,
             next_unit,
-            wars: std::collections::BTreeSet::new(),
+            wars: PairMap::default(),
+            treaties: PairMap::default(),
+            relations: PairMap::default(),
             houses,
             persons,
             next_person,
@@ -543,9 +661,48 @@ impl World {
         // Legitimacy starts at the norm of the ruler's standing (a minor on the throne
         // starts at the regency norm).
         let ids: Vec<ActorId> = world.actors.keys().copied().collect();
-        for a in ids {
-            let norm = world.legitimacy_norm(a, params);
-            world.actors.get_mut(&a).unwrap().legitimacy = norm;
+        for a in &ids {
+            let norm = world.legitimacy_norm(*a, params);
+            world.actors.get_mut(a).unwrap().legitimacy = norm;
+        }
+        // Starting relations (E2 step 7): wars, alliances to a year, vassals; then every
+        // pair's relation at its norm.
+        let known = |x: ActorId| -> Result<(), WorldError> {
+            if x.0 >= n_actors {
+                return Err(WorldError::UnknownActor(x));
+            }
+            Ok(())
+        };
+        for &(a, b) in &facts.relations.wars {
+            known(a)?;
+            known(b)?;
+            if a == b {
+                return Err(WorldError::WarWithSelf(a));
+            }
+            world.wars.insert(crate::army::pair(a, b), War { since: tick, taken: (0, 0) });
+        }
+        for &(a, b, year) in &facts.relations.alliances {
+            known(a)?;
+            known(b)?;
+            if a == b {
+                return Err(WorldError::RelationWithSelf(a));
+            }
+            let until = Tick((year - facts.start_year).max(0) as u32 * 2);
+            world.treaties.insert(crate::army::pair(a, b), Treaty { kind: TreatyKind::Alliance, until });
+        }
+        for &(vassal, lord) in &facts.relations.vassals {
+            known(vassal)?;
+            known(lord)?;
+            if vassal == lord {
+                return Err(WorldError::RelationWithSelf(vassal));
+            }
+            world.actors.get_mut(&vassal).unwrap().vassal_of = Some(lord);
+        }
+        for (i, a) in ids.iter().enumerate() {
+            for b in &ids[i + 1..] {
+                let norm = world.relation_norm(*a, *b, params);
+                world.relations.insert((*a, *b), norm);
+            }
         }
         Ok(world)
     }
@@ -601,7 +758,8 @@ impl World {
     /// Play one tick: one decision draw per actor (stand-in for E3), units move
     /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
     /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
-    /// (`politics.rs`), people grow, starve, sicken and migrate (`population.rs`), then
+    /// (`politics.rs`), treaties run out and relations move to their norms
+    /// (`diplomacy.rs`), people grow, starve, sicken and migrate (`population.rs`), then
     /// `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
@@ -612,6 +770,7 @@ impl World {
         let _ = self.phase_economy(params)?;
         self.phase_supply(params)?;
         self.phase_people(params)?;
+        self.phase_diplomacy(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);

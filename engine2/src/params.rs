@@ -160,6 +160,19 @@ pub struct Params {
     /// (в) Collection: the share of the assigned tax lost per point of legitimacy below
     /// the norm of lawful rule (`World::lawful_norm`), parts per million.
     pub tax_evasion_ppm_per_legitimacy_point: i64,
+    /// E0 Д1: the term of a treaty, ticks; and the band in years the generator draws from.
+    pub treaty_term_ticks: u32,
+    pub treaty_term_years_band: [f64; 2],
+    /// (в) The relation of a pair (E2 step 7, plan §19.2): the base norm and its shifts by
+    /// the state of the pair.
+    pub relation_base: f64,
+    pub relation_norm_war: f64,
+    pub relation_norm_alliance: f64,
+    pub relation_norm_marriage: f64,
+    pub relation_norm_vassalage: f64,
+    pub relation_norm_border: f64,
+    /// (в) The share of the gap to the norm a relation closes per tick.
+    pub relation_rate_per_tick: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -281,6 +294,15 @@ impl Params {
         let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
         let interest_band = band("loan.interest_per_year")?;
         let evasion = value("tax.evasion_per_legitimacy_point")?;
+        let treaty_term = value("treaty.term_years")?;
+        let treaty_term_band = band("treaty.term_years")?;
+        let relation_base = value("relation.base")?;
+        let relation_norm_war = value("relation.norm_war")?;
+        let relation_norm_alliance = value("relation.norm_alliance")?;
+        let relation_norm_marriage = value("relation.norm_marriage")?;
+        let relation_norm_vassalage = value("relation.norm_vassalage")?;
+        let relation_norm_border = value("relation.norm_border")?;
+        let relation_rate = value("relation.rate_per_tick")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -332,6 +354,15 @@ impl Params {
             legitimacy_norm_penalty_in_default: norm_penalty_in_default,
             loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
             tax_evasion_ppm_per_legitimacy_point: (evasion * 1_000_000.0).round() as i64,
+            treaty_term_ticks: (treaty_term * 2.0).round() as u32,
+            treaty_term_years_band: treaty_term_band,
+            relation_base,
+            relation_norm_war,
+            relation_norm_alliance,
+            relation_norm_marriage,
+            relation_norm_vassalage,
+            relation_norm_border,
+            relation_rate_per_tick: relation_rate,
             entries,
         })
     }

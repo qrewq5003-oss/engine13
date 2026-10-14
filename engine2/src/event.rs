@@ -12,7 +12,7 @@ use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
-use crate::world::Standing;
+use crate::world::{Standing, TreatyKind};
 
 /// Outcome of a battle for the attacker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +118,10 @@ pub enum Event {
     Default { actor: ActorId, written_off_kg: u64 },
     /// The term after a default ended: the bank lends again.
     CreditRestored { actor: ActorId },
+    /// A treaty ran out at its term (E0 Д1; E2 step 7).
+    TreatyExpired { a: ActorId, b: ActorId, kind: TreatyKind },
+    /// A vassal is a vassal no more: its lord fell, or made the peace that set it free.
+    Released { vassal: ActorId, lord: ActorId },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

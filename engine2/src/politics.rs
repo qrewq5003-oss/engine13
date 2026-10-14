@@ -377,7 +377,7 @@ impl World {
             self.next_person += 1;
             self.names.persons.push((format!("{hsid}.{}", i + 1), format!("{hname} {}", i + 1)));
             let age = FOUNDER_AGE + if i == 0 { 0 } else { HOUSEHOLD_AGE_OFFSETS[(i - 1) % HOUSEHOLD_AGE_OFFSETS.len()] };
-            self.persons.insert(id, Person { house, born: self.year() - age, parent: None, died: None });
+            self.persons.insert(id, Person { house, born: self.year() - age, parent: None, spouse: None, died: None });
         }
         self.emit(Event::NewDynasty { actor: a, house, founder, from, household: persons - 1 });
         Ok(Some(founder))
@@ -432,7 +432,7 @@ impl World {
         let k = self.persons.values().filter(|p| p.house == house).count() + 1;
         let (hsid, hname) = &self.names.houses[house.index()];
         self.names.persons.push((format!("{hsid}.{k}"), format!("{hname} {k}")));
-        self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), died: None });
+        self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), spouse: None, died: None });
         self.emit(Event::PersonBorn { person: id, house, parent });
         id
     }

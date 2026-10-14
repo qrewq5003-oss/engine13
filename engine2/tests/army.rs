@@ -408,7 +408,7 @@ fn scripted_wars_on_generated_worlds_keep_the_books_change_owners_and_the_strong
             for u in w.units_of(*a) {
                 assert!(w.alive(*a), "seed {seed}: a fallen polity keeps unit {u:?}");
             }
-            for (x, y) in &w.wars {
+            for (x, y) in w.wars.keys() {
                 assert!(w.alive(*x) && w.alive(*y), "seed {seed}: a war with a fallen polity");
             }
         }

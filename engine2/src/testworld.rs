@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::scenario::{ActorData, DisplayCurrency, HouseData, PersonData, ProvinceData, ScenarioData};
-use crate::world::{ActorFact, Facts, HouseFact, Land, Names, PersonFact, ProvinceFact, Succession, World};
+use crate::world::{ActorFact, Facts, HouseFact, Land, Names, PersonFact, ProvinceFact, RelationFacts, Succession, World};
 
 /// Five states, each a column of the 5×5 grid; all land arable; province `i` has an area
 /// of `250 + 25·i` km², which at the arable density of `params.toml` (40 people per km²,
@@ -73,7 +73,7 @@ pub fn five_states() -> (Facts, Names) {
     person_list.push(("o0a".to_string(), "Other 0 adult".to_string(), "o0".to_string(), 1437, None));
     person_list.sort_by(|x, y| x.0.cmp(&y.0));
     let person_index = |sid: &str| PersonId(person_list.iter().position(|(k, ..)| k == sid).unwrap() as u32);
-    let persons: Vec<PersonFact> = person_list.iter().map(|(_, _, h, born, parent)| PersonFact { house: house_index(h), born: *born, parent: parent.as_deref().map(person_index) }).collect();
+    let persons: Vec<PersonFact> = person_list.iter().map(|(_, _, h, born, parent)| PersonFact { house: house_index(h), born: *born, parent: parent.as_deref().map(person_index), spouse: None }).collect();
     let houses: Vec<HouseFact> = house_list.iter().map(|(_, _, a)| HouseFact { polity: ActorId(*a), treasury_kg: 0 }).collect();
     provinces[5].governor = Some(person_index("b0"));
     const RULES: [Succession; 5] = [Succession::Blood, Succession::Acclamation, Succession::Election, Succession::Mixed, Succession::Blood];
@@ -89,7 +89,7 @@ pub fn five_states() -> (Facts, Names) {
             succession: RULES[a as usize],
         })
         .collect();
-    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors, houses, persons };
+    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors, houses, persons, relations: RelationFacts::default() };
     let names = Names {
         actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(),
         provinces: province_names,
@@ -137,7 +137,7 @@ pub fn five_states_scenario() -> ScenarioData {
     let mut persons = BTreeMap::new();
     for (i, p) in facts.persons.iter().enumerate() {
         let (sid, name) = &names.persons[i];
-        persons.insert(sid.clone(), PersonData { name: name.clone(), house: names.houses[p.house.index()].0.clone(), born: p.born, parent: p.parent.as_ref().map(person) });
+        persons.insert(sid.clone(), PersonData { name: name.clone(), house: names.houses[p.house.index()].0.clone(), born: p.born, parent: p.parent.as_ref().map(person), spouse: p.spouse.as_ref().map(person) });
     }
     let mut provinces = BTreeMap::new();
     for (i, f) in facts.provinces.iter().enumerate() {
@@ -170,6 +170,7 @@ pub fn five_states_scenario() -> ScenarioData {
         provinces,
         houses,
         persons,
+        relations: None,
         verbs,
     }
 }

@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 pub mod army;
+pub mod diplomacy;
 pub mod economy;
 pub mod event;
 pub mod ids;
@@ -57,4 +58,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{ActorFact, Disease, Facts, House, HouseFact, Institution, Land, Names, Person, PersonFact, ProvinceFact, Siege, Standing, Succession, TickReport, Unit, World};
+pub use world::{ActorFact, Disease, Facts, House, HouseFact, Institution, Land, Names, Person, PairMap, PersonFact, ProvinceFact, RelationFacts, Siege, Standing, Succession, TickReport, Treaty, TreatyKind, Unit, War, World};

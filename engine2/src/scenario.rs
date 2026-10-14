@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, Succession};
+use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, RelationFacts, Succession};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -49,8 +49,36 @@ pub struct ScenarioData {
     pub houses: BTreeMap<String, HouseData>,
     /// Keyed by the scenario's string id of the person.
     pub persons: BTreeMap<String, PersonData>,
+    /// Starting relations between polities (E2 step 7): wars, alliances, vassals — facts,
+    /// a column of their own (E0 §6); absent means none.
+    pub relations: Option<RelationsData>,
     /// Enabled verbs and their display names, keyed by `VerbId::key`.
     pub verbs: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationsData {
+    /// Pairs of actor ids at war.
+    pub wars: Vec<[String; 2]>,
+    pub alliances: Vec<AllianceData>,
+    pub vassals: Vec<VassalData>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllianceData {
+    pub a: String,
+    pub b: String,
+    /// The year the alliance runs to (a fact: Lodi was made for 25 years).
+    pub until_year: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VassalData {
+    pub vassal: String,
+    pub lord: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -72,6 +100,8 @@ pub struct PersonData {
     pub born: i32,
     /// The parent, for the line of blood; absent for a founder.
     pub parent: Option<String>,
+    /// The spouse at the start: named on both, of another house.
+    pub spouse: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -168,6 +198,24 @@ pub enum SchemaError {
     UnknownPerson(String, String),
     #[error("'{0}' gives a seat to '{1}', who belongs to a house of another polity")]
     SeatOutsidePolity(String, String),
+    #[error("person '{0}' names unknown spouse '{1}'")]
+    UnknownSpouse(String, String),
+    #[error("person '{0}' names spouse '{1}', who does not name '{0}' back")]
+    SpouseNotMutual(String, String),
+    #[error("person '{0}' and spouse '{1}' are of one house: a marriage binds two houses")]
+    SpouseInSameHouse(String, String),
+    #[error("relations name unknown actor '{0}'")]
+    UnknownRelationActor(String),
+    #[error("actor '{0}' is bound to itself")]
+    RelationWithSelf(String),
+    #[error("actors '{0}' and '{1}' are bound twice")]
+    DuplicateRelation(String, String),
+    #[error("alliance of '{0}' and '{1}' runs to {2}, not after the start year")]
+    TreatyOverAtStart(String, String, i32),
+    #[error("actor '{0}' has two lords")]
+    TwoLords(String),
+    #[error("actor '{0}' is a vassal and a lord at once")]
+    VassalWithVassals(String),
 }
 
 /// Everything a scenario compiles to.
@@ -222,7 +270,19 @@ impl ScenarioData {
                     Some(id)
                 }
             };
-            persons.push(PersonFact { house, born: p.born, parent });
+            persons.push(PersonFact { house, born: p.born, parent, spouse: None });
+        }
+        // Marriages: named on both sides, between two houses.
+        for (i, (key, p)) in self.persons.iter().enumerate() {
+            let Some(name) = &p.spouse else { continue };
+            let s = *person_index.get(name.as_str()).ok_or_else(|| SchemaError::UnknownSpouse(key.clone(), name.clone()))?;
+            if self.persons[name].spouse.as_deref() != Some(key.as_str()) {
+                return Err(SchemaError::SpouseNotMutual(key.clone(), name.clone()));
+            }
+            if persons[s.index()].house == persons[i].house {
+                return Err(SchemaError::SpouseInSameHouse(key.clone(), name.clone()));
+            }
+            persons[i].spouse = Some(s);
         }
         // A seat of a polity goes to a person of one of its houses.
         let seat = |holder: &str, name: &str, polity: ActorId| -> Result<PersonId, SchemaError> {
@@ -297,6 +357,48 @@ impl ScenarioData {
             actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions, ruler, heir, regent, succession: a.succession });
         }
 
+        // Starting relations: every actor known, nobody bound to itself, each pair bound
+        // once (so nobody both allied and at war), a treaty still running, one lord a
+        // vassal, no vassal a lord.
+        let mut relations = RelationFacts::default();
+        if let Some(r) = &self.relations {
+            let actor = |name: &str| -> Result<ActorId, SchemaError> { actor_index.get(name).copied().ok_or_else(|| SchemaError::UnknownRelationActor(name.to_string())) };
+            let mut bound: Vec<(ActorId, ActorId)> = Vec::new();
+            let mut pair = |x: &str, y: &str| -> Result<(ActorId, ActorId), SchemaError> {
+                let (a, b) = (actor(x)?, actor(y)?);
+                if a == b {
+                    return Err(SchemaError::RelationWithSelf(x.to_string()));
+                }
+                let key = (a.min(b), a.max(b));
+                if bound.contains(&key) {
+                    return Err(SchemaError::DuplicateRelation(x.to_string(), y.to_string()));
+                }
+                bound.push(key);
+                Ok(key)
+            };
+            for [x, y] in &r.wars {
+                relations.wars.push(pair(x, y)?);
+            }
+            for al in &r.alliances {
+                let key = pair(&al.a, &al.b)?;
+                if al.until_year <= self.start_year {
+                    return Err(SchemaError::TreatyOverAtStart(al.a.clone(), al.b.clone(), al.until_year));
+                }
+                relations.alliances.push((key.0, key.1, al.until_year));
+            }
+            for v in &r.vassals {
+                pair(&v.vassal, &v.lord)?;
+                let (vassal, lord) = (actor(&v.vassal)?, actor(&v.lord)?);
+                if relations.vassals.iter().any(|(x, _)| *x == vassal) {
+                    return Err(SchemaError::TwoLords(v.vassal.clone()));
+                }
+                if relations.vassals.iter().any(|(x, l)| *x == lord || *l == vassal) {
+                    return Err(SchemaError::VassalWithVassals(if relations.vassals.iter().any(|(x, _)| *x == lord) { v.lord.clone() } else { v.vassal.clone() }));
+                }
+                relations.vassals.push((vassal, lord));
+            }
+        }
+
         let mut verbs = Vec::new();
         for (key, name) in &self.verbs {
             let id = VerbId::from_key(key).ok_or_else(|| SchemaError::UnknownVerb(key.clone()))?;
@@ -305,7 +407,7 @@ impl ScenarioData {
         verbs.sort_by_key(|(id, _)| *id);
 
         Ok(Compiled {
-            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors, houses, persons },
+            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors, houses, persons, relations },
             names: Names {
                 actors: self.actors.iter().map(|(k, a)| (k.clone(), a.name.clone())).collect(),
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
@@ -425,7 +527,7 @@ raise_tax = "Поднять налог"
         assert_eq!(c.names.houses, vec![("ha".to_string(), "House A".to_string()), ("hb".to_string(), "House B".to_string())]);
         assert_eq!(c.names.persons[0].0, "ann");
         assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5 });
-        assert_eq!(c.facts.persons[1], PersonFact { house: HouseId(0), born: 1470, parent: Some(PersonId(0)) });
+        assert_eq!(c.facts.persons[1], PersonFact { house: HouseId(0), born: 1470, parent: Some(PersonId(0)), spouse: None });
         assert_eq!(c.facts.actors[0].ruler, PersonId(0));
         assert_eq!(c.facts.actors[0].heir, Some(PersonId(1)));
         assert_eq!(c.facts.actors[0].succession, Succession::Blood);
