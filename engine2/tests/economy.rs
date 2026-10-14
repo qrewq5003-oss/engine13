@@ -3,14 +3,18 @@
 //! - **А11 at the budget's limit** (the measure the owner set): on the generated worlds the
 //!   army a polity can keep paid — tax × (1 − court) ÷ pay — lies inside А11 as a share of
 //!   its people; an army above the limit melts down to it.
-//! - **Without a bank the treasury never goes below zero**; the unpaid share melts. With a
-//!   bank the treasury goes into debt down to the ceiling and pays interest.
+//! - **No treasury ever goes below zero**; without a bank the unpaid share melts. With a
+//!   bank the polity borrows up to the ceiling and pays interest on the debt.
+//! - **Debt is explicit (review of PR #283):** a loan is the same figure on the treasury and
+//!   on the debt, so the net worth (treasury − debt) never grows from borrowing; repeated
+//!   loans stop at the ceiling; and no source but the tax puts wheat into a treasury
+//!   without a matching entry elsewhere.
 //! - **Verbs:** the tax verbs are closed (no price yet), `take_loan` needs a bank.
 //! - **Wheat accounting:** every treasury posting is signed by source and the ledger
 //!   balances every tick; Э8 and Э9 are measured and reported, not asserted (plan §16).
 
 use engine2::sim::{Game, SimError, Simulation};
-use engine2::{testworld, worldgen, ActorId, ActorRef, Event, Institution, Params, Source, Target, UnitId, VerbCall, VerbId, World};
+use engine2::{testworld, worldgen, Account, ActorId, ActorRef, Event, Institution, Params, Source, Target, UnitId, VerbCall, VerbId, World};
 
 fn params() -> Params {
     Params::load().unwrap()
@@ -69,30 +73,115 @@ fn an_army_above_the_budget_melts_to_the_limit_and_the_treasury_never_goes_below
 }
 
 #[test]
-fn with_a_bank_the_treasury_goes_into_debt_to_the_ceiling_and_pays_interest() {
+fn with_a_bank_the_polity_borrows_to_the_ceiling_pays_interest_and_its_treasury_stays_at_or_above_zero() {
     let p = params();
     let mut w = testworld::world(2);
     let a = ActorId(0);
     w.actors.get_mut(&a).unwrap().institutions.insert(Institution::Bank);
     let unit = w.units_of(a)[0];
     let limit = w.sustainable_soldiers(a, &p);
-    w.post(engine2::Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
+    w.post(Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
     let t = w.treasury(a);
-    w.post(engine2::Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
+    w.post(Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
     let ceiling = w.debt_ceiling(a, &p);
     assert!(ceiling > 0);
-    let mut went_negative = false;
-    let mut interest_paid = 0i64;
+    let mut borrowed = false;
+    let mut interest = 0i64;
     for _ in 0..80 {
         let r = w.tick(&p).unwrap();
-        went_negative |= w.treasury(a) < 0;
-        interest_paid += r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| -q.milli).sum::<i64>();
-        // Debt never passes the ceiling by more than the interest of the tick.
-        assert!(w.treasury(a) >= -(w.debt_ceiling(a, &p) + w.debt_ceiling(a, &p) * p.loan_interest_ppm_per_tick / 1_000_000 + 1), "debt {} past the ceiling {}", w.treasury(a), w.debt_ceiling(a, &p));
+        assert!(w.treasury(a) >= 0, "treasury {} below zero", w.treasury(a));
+        borrowed |= w.debt(a) > 0;
+        interest += r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum::<i64>();
+        // Interest alone carries the debt past the ceiling, by at most the interest of a tick.
+        let c = w.debt_ceiling(a, &p);
+        assert!(w.debt(a) <= c + c * p.loan_interest_ppm_per_tick / 1_000_000 + 1, "debt {} past the ceiling {c}", w.debt(a));
     }
-    assert!(went_negative, "a bank lets the treasury borrow");
-    assert!(interest_paid > 0, "debt costs interest");
+    assert!(borrowed, "a bank lets the polity borrow");
+    assert!(interest > 0, "debt costs interest");
     assert!(w.soldiers(unit) < limit * 3, "the army still melts once the ceiling is reached");
+}
+
+#[test]
+fn a_loan_does_not_change_the_net_worth_and_repeated_loans_stop_at_the_ceiling() {
+    let p = params();
+    let mut w = testworld::world(2);
+    let a = ActorId(0);
+    w.actors.get_mut(&a).unwrap().institutions.insert(Institution::Bank);
+    // An army well over the budget, so that no surplus repays the debt between loans.
+    let unit = w.units_of(a)[0];
+    let limit = w.sustainable_soldiers(a, &p);
+    w.post(Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
+    let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::TakeLoan, target: Target::None };
+    let before = (w.treasury(a), w.debt(a));
+    w.apply_verb(&call, &p).unwrap();
+    let after = (w.treasury(a), w.debt(a));
+    assert!(after.0 > before.0 && after.1 > before.1, "the loan lands on both accounts: {before:?} → {after:?}");
+    assert_eq!(after.0 - after.1, before.0 - before.1, "the net worth does not grow from borrowing");
+    assert_eq!(after.0 - before.0, after.1 - before.1, "the same figure on both accounts");
+    // Borrow every tick: the debt climbs to the ceiling and stops there. The ceiling itself
+    // creeps up with the people (years of revenue), so at the ceiling the verb either refuses
+    // or hands out only the room that creep opened — never a year of revenue again.
+    let mut at_ceiling_ticks = 0;
+    for _ in 0..40 {
+        let room_before = w.loan_room(a, &p);
+        let debt_before = w.debt(a);
+        match w.apply_verb(&call, &p) {
+            Ok(()) => assert!(w.debt(a) - debt_before <= room_before, "a loan past the room"),
+            Err(engine2::economy::VerbError::NotAvailable(VerbId::TakeLoan, why)) => assert_eq!(why, "at the debt ceiling"),
+            Err(e) => panic!("{e}"),
+        }
+        if room_before <= w.debt_ceiling(a, &p) / 100 {
+            at_ceiling_ticks += 1;
+        }
+        w.tick(&p).unwrap();
+        let c = w.debt_ceiling(a, &p);
+        assert!(w.debt(a) <= c + c * p.loan_interest_ppm_per_tick / 1_000_000 + 1, "debt {} past the ceiling {c}", w.debt(a));
+        assert!(w.treasury(a) >= 0);
+    }
+    assert!(at_ceiling_ticks >= 20, "the debt reached the ceiling and stayed: {at_ceiling_ticks} ticks");
+}
+
+#[test]
+fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
+    let p = params();
+    let mut loans = 0;
+    for seed in 1..=20u64 {
+        let s = worldgen::generate(seed, &p);
+        let c = s.compile(&p).unwrap();
+        let mut w = World::from_facts(&c.facts, c.names, &p, 1).unwrap();
+        // Push every polity over its budget: the ones with a bank borrow, the others melt.
+        let ids: Vec<ActorId> = w.actors.keys().copied().collect();
+        for a in &ids {
+            let unit = w.units_of(*a)[0];
+            let limit = w.sustainable_soldiers(*a, &p);
+            w.post(Account::Soldiers(unit), Source::Recruit, (limit * 2 - w.soldiers(unit)).max(0) * 1000).unwrap();
+        }
+        for _ in 0..60 {
+            let r = w.tick(&p).unwrap();
+            for a in &ids {
+                let sum = |account: Account, src: Source| r.postings.iter().filter(|q| q.account == account && q.source == src).map(|q| q.milli).sum::<i64>();
+                let (t, d) = (Account::Treasury(*a), Account::Debt(*a));
+                for q in r.postings.iter().filter(|q| q.account == t) {
+                    match q.source {
+                        Source::Tax => assert!(q.milli >= 0),
+                        Source::Court | Source::Upkeep | Source::Interest | Source::Repayment => assert!(q.milli <= 0, "seed {seed}: {:?} put wheat into a treasury", q.source),
+                        Source::Loan => assert!(q.milli >= 0),
+                        other => panic!("seed {seed}: treasury moved by {other:?}"),
+                    }
+                }
+                // The counter-entries: the same figure on the debt.
+                assert_eq!(sum(t, Source::Loan), sum(d, Source::Loan), "seed {seed} actor {a:?}: a loan without its debt");
+                assert_eq!(sum(t, Source::Repayment), sum(d, Source::Repayment), "seed {seed} actor {a:?}: a repayment without its debt");
+                assert!(sum(d, Source::Interest) >= 0);
+                assert!(w.treasury(*a) >= 0 && w.debt(*a) >= 0);
+                if !w.actors[a].institutions.contains(&Institution::Bank) {
+                    assert_eq!(w.debt(*a), 0, "seed {seed}: debt without a bank");
+                }
+                loans += (sum(t, Source::Loan) > 0) as u32;
+            }
+        }
+    }
+    assert!(loans > 0, "no polity on any world ever borrowed: the test proves nothing");
 }
 
 #[test]
@@ -113,11 +202,11 @@ fn tax_verbs_are_closed_and_a_loan_needs_a_bank() {
     g.world_mut().actors.get_mut(&ActorId(0)).unwrap().institutions.insert(Institution::Bank);
     let loan = g.verbs(who).into_iter().find(|o| o.verb == VerbId::TakeLoan).unwrap();
     assert!(loan.available, "with a bank the loan is on offer");
-    let before = g.world().treasury(ActorId(0));
     let r = g.tick(&[VerbCall { actor: who, verb: VerbId::TakeLoan, target: Target::None }]).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Loan { actor, .. } if actor == ActorId(0))));
-    assert!(r.postings.iter().any(|q| q.source == Source::Loan && q.milli > 0));
-    assert!(g.world().treasury(ActorId(0)) > before, "the loan landed in the treasury");
+    let on = |account: Account| r.postings.iter().filter(|q| q.account == account && q.source == Source::Loan).map(|q| q.milli).sum::<i64>();
+    assert!(on(Account::Treasury(ActorId(0))) > 0, "the loan landed in the treasury");
+    assert_eq!(on(Account::Treasury(ActorId(0))), on(Account::Debt(ActorId(0))), "and the same figure on the debt");
 }
 
 #[test]
@@ -146,7 +235,7 @@ fn wheat_is_accounted_by_source_and_the_observed_shares_are_reported() {
         military_shares.push(pay as f64 / (pay + court) as f64);
         // Every treasury movement is one of the economy's sources.
         for src in by_source.keys() {
-            assert!(matches!(src, Source::Tax | Source::Court | Source::Upkeep | Source::Interest | Source::Loan), "seed {seed}: treasury moved by {src:?}");
+            assert!(matches!(src, Source::Tax | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment), "seed {seed}: treasury moved by {src:?}");
         }
     }
     let mean = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;

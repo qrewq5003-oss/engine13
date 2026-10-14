@@ -22,6 +22,9 @@ pub struct ActorView {
     pub treasury_kg: i64,
     /// Treasury in the scenario's display currency, for showing only.
     pub treasury_display: f64,
+    pub debt_kg: i64,
+    /// Debt in the scenario's display currency, for showing only.
+    pub debt_display: f64,
     pub legitimacy: f64,
 }
 
@@ -61,6 +64,7 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
         .map(|(id, a)| {
             let (sid, name) = &w.names.actors[id.index()];
             let treasury_kg = w.treasury(*id);
+            let debt_kg = w.debt(*id);
             ActorView {
                 id: sid.clone(),
                 name: name.clone(),
@@ -68,6 +72,8 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
                 population: a.provinces.iter().map(|p| w.population(*p)).sum(),
                 treasury_kg,
                 treasury_display: treasury_kg as f64 / currency.kg_per_unit,
+                debt_kg,
+                debt_display: debt_kg as f64 / currency.kg_per_unit,
                 legitimacy: a.legitimacy,
             }
         })

@@ -25,6 +25,7 @@ impl Game {
             Account::Population(p) => (self.province_id(p), "population".into()),
             Account::Soldiers(u) => (self.unit_id(u), "soldiers".into()),
             Account::Treasury(a) => (self.actor_id(a), "treasury".into()),
+            Account::Debt(a) => (self.actor_id(a), "debt".into()),
             Account::HouseTreasury(h) => (ObsId(format!("house{}", h.0)), "treasury".into()),
         }
     }

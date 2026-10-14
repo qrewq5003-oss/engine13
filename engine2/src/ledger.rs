@@ -15,11 +15,13 @@
 //! The ledger keeps the period's opening balances itself, so a posting made between two
 //! ticks (a verb's cost, a famine the test injects) is covered like one made inside a tick.
 //!
-//! **Sign by kind of account (owner's rule, E1b).** People and soldiers never go below
-//! zero: a posting that would take them there is **clamped** — the stock stops at zero,
-//! the amount that actually left is what gets journaled, and [`Posted::clamped`] tells the
-//! caller so the world can emit a `BoundHit` (brief §2: a bound is a sentinel flag, not a
-//! crash). Treasuries may be negative — that is debt.
+//! **No stock goes below zero (owner's rule, E1b; debt made explicit on the review of
+//! PR #283).** A posting that would take a stock below zero is **clamped** — the stock stops
+//! at zero, the amount that actually left is what gets journaled, and [`Posted::clamped`]
+//! tells the caller so the world can emit a `BoundHit` (brief §2: a bound is a sentinel
+//! flag, not a crash). A treasury is never negative: what a polity owes is a stock of its
+//! own, [`Account::Debt`], so that a loan is two entries (+treasury, +debt) and no source
+//! but the tax can put wheat into a treasury without a matching entry elsewhere.
 
 use std::collections::BTreeMap;
 
@@ -36,18 +38,13 @@ pub enum Account {
     Population(ProvinceId),
     /// Soldiers of a unit.
     Soldiers(UnitId),
-    /// A polity's treasury, kilograms of wheat-equivalent; may go negative (debt).
+    /// A polity's treasury, kilograms of wheat-equivalent; never negative.
     Treasury(ActorId),
+    /// What a polity owes its creditors, kilograms of wheat-equivalent: grows by loans and
+    /// by interest the treasury could not pay, shrinks by repayment (E0 Э6, Э7).
+    Debt(ActorId),
     /// A house's own treasury, kilograms of wheat-equivalent.
     HouseTreasury(HouseId),
-}
-
-impl Account {
-    /// Whether the stock may be negative. Only money can: a debt is a negative treasury;
-    /// people and soldiers cannot be owed.
-    pub const fn may_be_negative(self) -> bool {
-        matches!(self, Account::Treasury(_) | Account::HouseTreasury(_))
-    }
 }
 
 /// Why a stock changed. The closed list of the engine's flows; systems of E2 use these,
@@ -73,8 +70,12 @@ pub enum Source {
     Desertion,
     BattleLoss,
     Tribute,
+    /// Borrowing: `+` on the treasury and `+` on the debt, the same amount.
     Loan,
+    /// Interest on the debt: `−` on the treasury when it can pay, else `+` on the debt.
     Interest,
+    /// Paying the debt down: `−` on the treasury and `−` on the debt, the same amount.
+    Repayment,
     /// A verb's own cost, e.g. a bribe.
     Verb,
     /// Used by tests of the ledger itself.
@@ -193,14 +194,14 @@ impl Ledger {
     }
 
     /// Post a signed change in thousandths. The only way a stock moves. A posting that would
-    /// take people or soldiers below zero is clamped: the stock and its carry go to zero,
-    /// the journaled amount is what actually left, and the result says `clamped`.
+    /// take a stock below zero is clamped: the stock and its carry go to zero, the journaled
+    /// amount is what actually left, and the result says `clamped`.
     pub fn post(&mut self, tick: Tick, account: Account, source: Source, milli: i64) -> Result<Posted, LedgerError> {
         let b = self.balances.get_mut(&account).ok_or(LedgerError::NotOpen(account))?;
         let total = b.carry + milli;
         // Euclidean division keeps the carry in 0..1000 for negative totals too.
         let whole = b.whole + total.div_euclid(1000);
-        let posted = if whole < 0 && !account.may_be_negative() {
+        let posted = if whole < 0 {
             // Everything there was leaves; nothing more can.
             let applied = -(b.whole * 1000 + b.carry);
             b.whole = 0;
@@ -303,11 +304,12 @@ mod tests {
         l.check().unwrap();
         let exact = l.post(Tick(1), P, Source::Famine, 0).unwrap();
         assert!(!exact.clamped);
+        // A treasury is clamped like any stock: debt is its own account, not a minus here.
         let t = Account::Treasury(ActorId(0));
         l.open(Tick(0), t, 10).unwrap();
-        let debt = l.post(Tick(1), t, Source::Upkeep, -25_000).unwrap();
-        assert_eq!(debt, Posted { applied_milli: -25_000, clamped: false });
-        assert_eq!(l.stock(t), Some(-15));
+        let overdrawn = l.post(Tick(1), t, Source::Upkeep, -25_000).unwrap();
+        assert_eq!(overdrawn, Posted { applied_milli: -10_000, clamped: true });
+        assert_eq!(l.stock(t), Some(0));
     }
 
     #[test]

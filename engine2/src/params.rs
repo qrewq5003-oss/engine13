@@ -88,7 +88,7 @@ pub struct Params {
     pub court_share_ppm: i64,
     /// E0 А3: pay per soldier per year, kg (outputs × output per head).
     pub pay_per_soldier_kg_per_year: i64,
-    /// E0 Э6: interest per tick on a negative treasury, parts per million.
+    /// E0 Э6: interest per tick on the debt, parts per million.
     pub loan_interest_ppm_per_tick: i64,
     /// E0 Э7: debt ceiling in thousandths of a year of revenue.
     pub loan_ceiling_years_milli: i64,

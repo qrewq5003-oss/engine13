@@ -63,8 +63,10 @@ impl Game {
         &self.world
     }
 
-    /// Mutable access for orders (movement) until the verbs and agents of E3 give orders
-    /// through the contract.
+    /// Mutable access for the acceptance tests (orders, injected stocks) until the verbs and
+    /// agents of E3 give orders through the contract. Behind the `testing` feature so that
+    /// nothing in a game build can change the world past the rules (review of PR #283).
+    #[cfg(feature = "testing")]
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
     }
@@ -89,10 +91,12 @@ impl Game {
                 let (available, why) = match (verb, who) {
                     (VerbId::RaiseTax | VerbId::LowerTax, _) => (false, Some("awaits internal politics")),
                     (VerbId::TakeLoan, ActorRef::Ruler(a)) => {
-                        if self.world.actors.get(&a).is_some_and(|x| x.institutions.contains(&Institution::Bank)) {
-                            (true, None)
-                        } else {
+                        if !self.world.actors.get(&a).is_some_and(|x| x.institutions.contains(&Institution::Bank)) {
                             (false, Some("no bank"))
+                        } else if self.world.loan_room(a, &self.params) <= 0 {
+                            (false, Some("at the debt ceiling"))
+                        } else {
+                            (true, None)
                         }
                     }
                     (VerbId::TakeLoan, ActorRef::House(_)) => (false, Some("a house does not borrow for the polity")),

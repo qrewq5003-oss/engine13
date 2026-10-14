@@ -21,6 +21,9 @@ sentinel = ["dep:sentinel"]
 # The world generator is a measuring instrument for E2 acceptance, not a game mode (the
 # brief has none): behind a feature, out of the game's build.
 worldgen = []
+# `Game::world_mut` for the acceptance tests that inject stocks and give orders before the
+# verbs of E3 exist; never on in a game build.
+testing = []
 
 [[test]]
 name = "sentinel_short_run"
@@ -32,12 +35,12 @@ required-features = ["sentinel", "worldgen"]
 
 [[test]]
 name = "units"
-required-features = ["worldgen"]
+required-features = ["worldgen", "testing"]
 
 [[test]]
 name = "population"
-required-features = ["sentinel", "worldgen"]
+required-features = ["sentinel", "worldgen", "testing"]
 
 [[test]]
 name = "economy"
-required-features = ["worldgen"]
+required-features = ["worldgen", "testing"]

@@ -257,6 +257,7 @@ impl World {
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
+            ledger.open(tick, Account::Debt(id), 0)?;
         }
         let mut provinces: BTreeMap<ProvinceId, Province> = BTreeMap::new();
         let n = facts.provinces.len() as u32;
@@ -401,6 +402,11 @@ impl World {
 
     pub fn treasury(&self, a: ActorId) -> i64 {
         self.ledger.stock(Account::Treasury(a)).unwrap_or(0)
+    }
+
+    /// What the polity owes (E0 Э6, Э7); zero without a bank.
+    pub fn debt(&self, a: ActorId) -> i64 {
+        self.ledger.stock(Account::Debt(a)).unwrap_or(0)
     }
 
     pub fn soldiers(&self, u: UnitId) -> i64 {
