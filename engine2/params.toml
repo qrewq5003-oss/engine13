@@ -140,14 +140,117 @@ band = [0.2, 0.9]
 unit = "share of years"
 e0 = "А12"
 
-# E0 А5 — provinces a unit crosses per tick. A placeholder: 1 per half-year tick makes the
-# march the main brake on war; the war system derives the value from А5 (15–25 km a day,
-# a 6–8 month season) and the province area (owner's note on PR #281). Checked through А12.
-[movement.provinces_per_tick]
+# E0 А5 — the day's march: 20 Roman miles by the manual (Vegetius I.9), 15–25 km in
+# practice (Roth 1999, ch. 4). With the campaign days of a tick it gives the reach of a unit;
+# on the scale of a half-year tick the march is no brake: a unit stops at contact (army.rs).
+[march.km_per_day]
+kind = "a"
+value = 20.0
+band = [15.0, 25.0]
+unit = "km per day"
+e0 = "А5"
+
+# E0 А5 — campaign days in a half-year tick: armies leave winter quarters in March–April
+# and stop in October, 6–8 months a year (Vegetius; Mallett 1974 ch. 7 on wintering).
+[march.days_per_tick]
+kind = "a"
+value = 105.0
+band = [90.0, 120.0]
+unit = "campaign days per tick"
+e0 = "А5"
+
+# (в) The exponent k in P(A wins) = s_A^k / (s_A^k + s_B^k) with s = soldiers × quality
+# factor. Checked through А13: the share of battles the stronger side wins. The value 0.8 is
+# provisional: it was calibrated on the scripted wars of tests/army.rs, whose battles are
+# very unequal; it is recalibrated at E3 on the agents' battles (owner's rule on PR #284).
+[battle.strength_exponent]
 kind = "c"
+value = 0.8
+unit = "exponent"
+checked_by = "А13"
+
+# E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
+# Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003), on Dupuy's
+# base of 625 battles 1600–1973: numbers raise the chance of victory but decide far from
+# always — about two thirds for the larger side (по памяти; the source is to be opened
+# before E3, owner's rule on PR #284).
+[battle.observed_win_share_of_the_stronger]
+kind = "b"
+band = [0.6, 0.8]
+unit = "share of battles"
+e0 = "А13"
+
+# E0 А6 — the winner's losses as a share of its participants (Krentz 1985: 3–10 %, mean 5;
+# Rosenstein 2004: 4.2 % in victory).
+[battle.losses_winner]
+kind = "a"
+value = 0.05
+band = [0.02, 0.05]
+unit = "share of the winner's soldiers per battle"
+e0 = "А6"
+
+# E0 А6 — the loser's losses (Krentz 1985: 10–20 %, mean 14; Rosenstein: 16 % in defeat).
+[battle.losses_loser]
+kind = "a"
+value = 0.14
+band = [0.04, 0.20]
+unit = "share of the loser's soldiers per battle"
+e0 = "А6"
+
+# E0 А9 — a capital holds out this many consecutive ticks of siege; an ordinary province is
+# stormed within the tick (Amida 359: 73 days; Otranto 1480: 15 days; Constantinople 1453:
+# 53 days — all inside a half-year; only the blockade of a great city runs 1–16 ticks).
+[siege.capital_ticks]
+kind = "a"
+value = 4.0
+band = [1.0, 16.0]
+unit = "ticks"
+e0 = "А9"
+
+# (в) Soldiers a foreign province feeds a unit by foraging per 1 000 inhabitants: 2–3 × А8
+# for a short while (Roth 1999 on the ration; Erdkamp 1998), at the cost of П6. Foreign land
+# only: at home the unpaid share melts (А7), the budget stays the limit. Checked through П7.
+[forage.soldiers_per_1000_people]
+kind = "c"
+value = 400.0
+unit = "soldiers per 1 000 inhabitants"
+checked_by = "П7"
+
+# (в) E0 П6 — people a province loses per tick of foraging at full load (foragers equal to
+# what it can feed); scaled by the load (owner's rule: ten men do not ruin like ten thousand).
+# No honest source (E0 §5.1); checked through П7.
+[ruin.population_loss_per_tick_at_full_load]
+kind = "c"
+value = 0.02
+unit = "share of the province's people per tick at full load"
+checked_by = "П7"
+
+# E0 А1 — the ceiling of the levy as a share of the polity's people: a settled state 2–5 %
+# (Venice 1509: ~40 000 on ~1.6 million; Heather 1996 for a migrating people up to 20 % —
+# a scenario fact of «устройство», E4).
+[recruit.ceiling_share]
+kind = "a"
+value = 0.03
+band = [0.02, 0.05]
+unit = "soldiers per inhabitant"
+e0 = "А1"
+
+# (в) E0 А2 — the share of the levy ceiling a polity can raise in one tick. Checked
+# through А11.
+[recruit.rate_per_tick]
+kind = "c"
+value = 0.25
+unit = "share of the ceiling per tick"
+checked_by = "А11"
+
+# E0 А4 — the advance paid to hire a mercenary: 30 ducats per lance of three in 1448
+# (Mallett & Hale 1984) ≈ one yearly output per head in wheat (E0 §5.3).
+[mercenaries.advance_outputs]
+kind = "a"
 value = 1.0
-unit = "provinces per tick"
-checked_by = "А12"
+band = [0.7, 1.5]
+unit = "yearly outputs per head (Э2) per hired soldier"
+e0 = "А4"
 
 # ---- economy (E2 step 4, plan §16) ----
 

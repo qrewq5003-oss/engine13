@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, HouseId, ProvinceId};
+use crate::ids::{ActorId, HouseId, ProvinceId, UnitId};
 
 /// Who acts: a ruler of a polity or a house inside one (the two roles of E0 §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -82,6 +82,7 @@ pub enum Target {
     Actor(ActorId),
     Province(ProvinceId),
     House(HouseId),
+    Unit(UnitId),
 }
 
 /// A call: who, what, at whom.

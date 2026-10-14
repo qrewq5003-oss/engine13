@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::world::World;
 
 /// Bump on any incompatible change of [`World`] or its parts.
-pub const SAVE_FORMAT: u32 = 6;
+pub const SAVE_FORMAT: u32 = 7;
 
 /// Written envelope: borrows the world, no copy.
 #[derive(Debug, Serialize)]

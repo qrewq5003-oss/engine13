@@ -94,8 +94,26 @@ pub struct Params {
     pub loan_ceiling_years_milli: i64,
     /// E0 А7: share of the unsupplied soldiers lost per tick, parts per million.
     pub army_attrition_unsupplied_ppm_per_tick: i64,
-    /// E0 А5 (в): edges a unit crosses per tick.
-    pub movement_provinces_per_tick: u32,
+    /// E0 А5: the reach of a unit in a tick, km (day's march × campaign days).
+    pub march_km_per_tick: i64,
+    /// (в) The exponent of the strengths in the chance of victory.
+    pub battle_strength_exponent: f64,
+    /// E0 А6: the winner's losses, parts per million of its soldiers.
+    pub battle_losses_winner_ppm: i64,
+    /// E0 А6: the loser's losses, parts per million of its soldiers.
+    pub battle_losses_loser_ppm: i64,
+    /// E0 А9: consecutive ticks of siege a capital holds out.
+    pub siege_capital_ticks: u32,
+    /// (в) Soldiers a province feeds by foraging per 1 000 inhabitants.
+    pub forage_soldiers_per_1000: i64,
+    /// (в) E0 П6: people lost per tick of foraging at full load, parts per million.
+    pub ruin_loss_ppm_at_full_load: i64,
+    /// E0 А1: the levy ceiling, parts per million of the polity's people.
+    pub recruit_ceiling_ppm: i64,
+    /// (в) E0 А2: the share of the ceiling raised per tick, parts per million.
+    pub recruit_rate_ppm_per_tick: i64,
+    /// E0 А4: the advance per hired mercenary, kg (outputs × output per head).
+    pub mercenary_advance_kg: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -165,7 +183,17 @@ impl Params {
         let interest = value("loan.interest_per_year")?;
         let ceiling_years = value("loan.ceiling_years_of_revenue")?;
         let attrition_year = value("army.attrition_unsupplied_per_year")?;
-        let moves = value("movement.provinces_per_tick")?;
+        let km_per_day = value("march.km_per_day")?;
+        let days_per_tick = value("march.days_per_tick")?;
+        let exponent = value("battle.strength_exponent")?;
+        let losses_winner = value("battle.losses_winner")?;
+        let losses_loser = value("battle.losses_loser")?;
+        let capital_ticks = value("siege.capital_ticks")?;
+        let forage = value("forage.soldiers_per_1000_people")?;
+        let ruin = value("ruin.population_loss_per_tick_at_full_load")?;
+        let levy_ceiling = value("recruit.ceiling_share")?;
+        let levy_rate = value("recruit.rate_per_tick")?;
+        let advance_outputs = value("mercenaries.advance_outputs")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -182,7 +210,16 @@ impl Params {
             loan_ceiling_years_milli: (ceiling_years * 1000.0).round() as i64,
             // Two ticks a year: half the yearly share per tick.
             army_attrition_unsupplied_ppm_per_tick: (attrition_year / 2.0 * 1_000_000.0).round() as i64,
-            movement_provinces_per_tick: moves.round() as u32,
+            march_km_per_tick: (km_per_day * days_per_tick).round() as i64,
+            battle_strength_exponent: exponent,
+            battle_losses_winner_ppm: (losses_winner * 1_000_000.0).round() as i64,
+            battle_losses_loser_ppm: (losses_loser * 1_000_000.0).round() as i64,
+            siege_capital_ticks: capital_ticks.round() as u32,
+            forage_soldiers_per_1000: forage.round() as i64,
+            ruin_loss_ppm_at_full_load: (ruin * 1_000_000.0).round() as i64,
+            recruit_ceiling_ppm: (levy_ceiling * 1_000_000.0).round() as i64,
+            recruit_rate_ppm_per_tick: (levy_rate * 1_000_000.0).round() as i64,
+            mercenary_advance_kg: (advance_outputs * output).round() as i64,
             entries,
         })
     }
@@ -249,7 +286,9 @@ mod tests {
         assert_eq!(p.loan_interest_ppm_per_tick, 40_000);
         assert_eq!(p.loan_ceiling_years_milli, 5000);
         assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
-        assert_eq!(p.movement_provinces_per_tick, 1);
+        assert_eq!(p.march_km_per_tick, 2100);
+        assert_eq!(p.siege_capital_ticks, 4);
+        assert_eq!(p.mercenary_advance_kg, 700);
     }
 
     #[test]

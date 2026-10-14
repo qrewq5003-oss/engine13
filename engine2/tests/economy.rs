@@ -54,6 +54,7 @@ fn an_army_above_the_budget_melts_to_the_limit_and_the_treasury_never_goes_below
     let a = ActorId(0);
     assert!(!w.actors[&a].institutions.contains(&Institution::Bank));
     let unit = w.units_of(a)[0];
+    let home = w.units[&unit].position;
     let limit = w.sustainable_soldiers(a, &p);
     w.post(engine2::Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
     // Spend the treasury down so the budget, not the reserve, is the limit from the start.
@@ -64,6 +65,9 @@ fn an_army_above_the_budget_melts_to_the_limit_and_the_treasury_never_goes_below
         let r = w.tick(&p).unwrap();
         assert!(w.treasury(a) >= 0, "treasury {} below zero without a bank", w.treasury(a));
         shortfalls += r.events.iter().filter(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == a)).count();
+        // An unpaid army at home deserts; it does not live off its own people (plan §17).
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == home)));
+        assert!(r.postings.iter().all(|q| q.source != Source::Ruin));
     }
     let soldiers = w.soldiers(unit);
     let limit_now = w.sustainable_soldiers(a, &p);
@@ -251,7 +255,7 @@ fn a_shortfall_is_shared_pro_rata_among_the_polity_s_units() {
     let home = w.units[&first].position;
     let second = UnitId(w.next_unit);
     w.next_unit += 1;
-    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None });
+    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None, mercenary: false });
     w.ledger.open(w.tick, engine2::Account::Soldiers(second), 0).unwrap();
     let limit = w.sustainable_soldiers(a, &p);
     let (big, small) = (limit * 3 / 2, limit / 2);

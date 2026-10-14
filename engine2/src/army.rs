@@ -1,0 +1,342 @@
+//! The army (brief §2 «Армия», §2a, plan §17): war as the minimal relation a battle needs,
+//! the battle with a winner and an end, the siege that changes a province's owner, the fall
+//! of a polity without land, and the verbs of the levy, the disbanding and the hire.
+//!
+//! **War** is a set of pairs of polities. Nothing in a game build opens one: `declare_war`
+//! is closed in the offers («awaits diplomacy» — a verb without a price is a degeneration,
+//! the same rule as the tax), and the tests open wars through [`World::declare_war`] behind
+//! the `testing` feature. A war closes by itself when a side falls; peace with its terms and
+//! its term (E0 Д1) is diplomacy's.
+//!
+//! **Battle** (phase after the march): in every province where units of two polities at war
+//! stand, one battle a tick between those two sides — all their units there. Strength of a
+//! side = Σ soldiers × (0.5 + quality / 100). The attacker wins with probability
+//! `s_A^k / (s_A^k + s_B^k)` (k = `battle.strength_exponent`, a model parameter checked
+//! through А13), by a keyed draw at `DrawPoint::Battle` on the province. Losses by E0 А6,
+//! the winner's and the loser's share, pro rata over each side's units, through the ledger
+//! (`Source::BattleLoss`). The loser's units fall back to the nearest province of their own
+//! through passable land; a unit with nowhere to go is destroyed. The defender is the
+//! province's owner when it takes part, else the lower id.
+//!
+//! **Siege** (phase after the battle): an enemy standing in a province with no unit of the
+//! owner's besieges it. An ordinary province is stormed within the tick and changes hands at
+//! once (E0 А9); a capital holds `siege.capital_ticks` consecutive ticks. Until diplomacy,
+//! occupation is annexation — a simplification the owner recorded: with treaties, «held»
+//! and «ceded» part ways. A polity that loses its capital moves it to its most populous
+//! province; a polity that loses its last province **falls**: its levies join the people of
+//! the province they stand in and its mercenaries leave the world (`Source::Disband`), its
+//! wars close, its record stays (no dangling ids) with no land, and `alive` is false.
+//!
+//! **Verbs.** `recruit` moves people of one own province into soldiers — a transfer, the
+//! sum of people and soldiers unchanged — within the levy ceiling (E0 А1, a share of the
+//! polity's people) and the rate of a tick (А2); the men join a levy unit standing there or
+//! form a new one. `disband` sends a levy back to the people of the province it stands in;
+//! mercenaries leave the world. `hire_mercenaries` is open to every polity (E0, second
+//! round: the market existed in all three ages, so it is no institution): the advance (А4)
+//! leaves the treasury and the men come from outside the world (`Source::Hire`), as many as
+//! the advance covers within the ceiling, into a unit of their own at the capital. Because
+//! verbs apply before the tick, a loan taken and an advance paid in the same tick meet before
+//! the economy sweeps the surplus into repayment (owner's note on #283).
+//!
+//! Supply at war is in `movement.rs`: pay at home, foraging with its cost (E0 П6) on foreign
+//! land only — an unpaid army at home melts, it does not live off its own people.
+//!
+//! Quality stays at 50 — its dynamics (experience, idleness) are this system's line for E3.
+
+use std::collections::BTreeMap;
+
+use crate::economy::VerbError;
+use crate::event::{Event, Outcome, Transfer};
+use crate::ids::{ActorId, ProvinceId, UnitId};
+use crate::ledger::{Account, Source};
+use crate::params::Params;
+use crate::rng::DrawPoint;
+use crate::verbs::{Target, VerbCall, VerbId};
+use crate::world::{Unit, World, WorldError};
+
+fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+impl World {
+    /// A polity is alive while it holds land.
+    pub fn alive(&self, a: ActorId) -> bool {
+        self.actors.get(&a).is_some_and(|x| !x.provinces.is_empty())
+    }
+
+    pub fn at_war(&self, a: ActorId, b: ActorId) -> bool {
+        a != b && self.wars.contains(&pair(a, b))
+    }
+
+    /// Open a war. For the tests only: the verb is closed until diplomacy prices it.
+    #[cfg(feature = "testing")]
+    pub fn declare_war(&mut self, a: ActorId, b: ActorId) -> Result<(), WorldError> {
+        if a == b {
+            return Err(WorldError::WarWithSelf(a));
+        }
+        for x in [a, b] {
+            if !self.actors.contains_key(&x) {
+                return Err(WorldError::UnknownActor(x));
+            }
+        }
+        if self.wars.insert(pair(a, b)) {
+            let (a, b) = pair(a, b);
+            self.emit(Event::War { a, b });
+        }
+        Ok(())
+    }
+
+    /// All soldiers of a polity, levies and mercenaries.
+    pub fn army_size(&self, a: ActorId) -> i64 {
+        self.units_of(a).iter().map(|u| self.soldiers(*u)).sum()
+    }
+
+    /// The levy ceiling (E0 А1): a share of the polity's people — those at home and those
+    /// already under arms, so that raising a levy does not lower the ceiling it counts against.
+    pub fn recruit_ceiling(&self, a: ActorId, params: &Params) -> i64 {
+        let people: i64 = self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum::<i64>() + self.army_size(a);
+        people * params.recruit_ceiling_ppm / 1_000_000
+    }
+
+    /// Room under the ceiling.
+    pub fn recruit_room(&self, a: ActorId, params: &Params) -> i64 {
+        (self.recruit_ceiling(a, params) - self.army_size(a)).max(0)
+    }
+
+    /// Men a levy can raise this tick: the rate of a tick (А2) within the room.
+    pub fn recruit_per_tick(&self, a: ActorId, params: &Params) -> i64 {
+        (self.recruit_ceiling(a, params) * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.recruit_room(a, params))
+    }
+
+    /// Mercenaries the treasury's advance covers within the room.
+    pub fn hire_count(&self, a: ActorId, params: &Params) -> i64 {
+        if params.mercenary_advance_kg <= 0 {
+            return 0;
+        }
+        (self.treasury(a) / params.mercenary_advance_kg).min(self.recruit_room(a, params)).max(0)
+    }
+
+    fn strength(&self, units: &[UnitId]) -> f64 {
+        units.iter().map(|u| self.soldiers(*u) as f64 * (0.5 + self.units[u].quality / 100.0)).sum()
+    }
+
+    /// Units standing in `p`, grouped by owner in canonical order.
+    fn units_in(&self, p: ProvinceId) -> BTreeMap<ActorId, Vec<UnitId>> {
+        let mut out: BTreeMap<ActorId, Vec<UnitId>> = BTreeMap::new();
+        for (id, u) in &self.units {
+            if u.position == p {
+                out.entry(u.owner).or_default().push(*id);
+            }
+        }
+        out
+    }
+
+    /// The battle phase: one battle per province between the first pair of sides at war.
+    pub(crate) fn phase_battle(&mut self, params: &Params) -> Result<(), WorldError> {
+        let provinces: Vec<ProvinceId> = self.provinces.keys().copied().collect();
+        for p in provinces {
+            let present = self.units_in(p);
+            let owners: Vec<ActorId> = present.keys().copied().collect();
+            let Some((x, y)) = owners.iter().enumerate().find_map(|(i, a)| owners[i + 1..].iter().find(|b| self.at_war(*a, **b)).map(|b| (*a, *b))) else {
+                continue;
+            };
+            let holder = self.provinces[&p].owner;
+            let (defender, attacker) = if y == holder { (y, x) } else { (x, y) };
+            let men = |side: ActorId| present[&side].iter().map(|u| self.soldiers(*u)).sum::<i64>() as u64;
+            let soldiers = (men(attacker), men(defender));
+            let (s_att, s_def) = (self.strength(&present[&attacker]), self.strength(&present[&defender]));
+            if s_att <= 0.0 && s_def <= 0.0 {
+                continue;
+            }
+            let k = params.battle_strength_exponent;
+            let p_att = s_att.powf(k) / (s_att.powf(k) + s_def.powf(k));
+            let u = (self.draw(DrawPoint::Battle, p.0) >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+            let attacker_won = u < p_att;
+            let (winner, loser) = if attacker_won { (attacker, defender) } else { (defender, attacker) };
+            let mut lost = BTreeMap::new();
+            for (side, share) in [(winner, params.battle_losses_winner_ppm), (loser, params.battle_losses_loser_ppm)] {
+                let mut sum = 0i64;
+                for u in &present[&side] {
+                    let soldiers = self.soldiers(*u);
+                    let milli = soldiers * share / 1000;
+                    if milli > 0 {
+                        self.post(Account::Soldiers(*u), Source::BattleLoss, -milli)?;
+                    }
+                    sum += soldiers - self.soldiers(*u);
+                }
+                lost.insert(side, sum as u64);
+            }
+            self.emit(Event::Battle {
+                province: p,
+                attacker,
+                defender,
+                outcome: if attacker_won { Outcome::AttackerWon } else { Outcome::DefenderWon },
+                soldiers,
+                losses: (lost[&attacker], lost[&defender]),
+            });
+            for u in &present[&loser] {
+                self.retreat(*u)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A beaten unit falls back to the nearest province of its own; with none reachable it
+    /// is destroyed.
+    fn retreat(&mut self, unit: UnitId) -> Result<(), WorldError> {
+        let (owner, at) = (self.units[&unit].owner, self.units[&unit].position);
+        match self.nearest_own(owner, at) {
+            Some(to) => {
+                let u = self.units.get_mut(&unit).unwrap();
+                u.position = to;
+                u.destination = None;
+                self.emit(Event::Retreat { unit, to });
+            }
+            None => {
+                let soldiers = self.soldiers(unit);
+                if soldiers > 0 {
+                    self.post(Account::Soldiers(unit), Source::BattleLoss, -soldiers * 1000)?;
+                }
+                self.units.remove(&unit);
+                self.emit(Event::UnitDestroyed { unit });
+            }
+        }
+        Ok(())
+    }
+
+    /// The siege phase: an unopposed enemy takes a province — at once, or a capital after
+    /// `siege.capital_ticks` consecutive ticks.
+    pub(crate) fn phase_siege(&mut self, params: &Params) -> Result<(), WorldError> {
+        let provinces: Vec<ProvinceId> = self.provinces.keys().copied().collect();
+        for p in provinces {
+            let owner = self.provinces[&p].owner;
+            let present = self.units_in(p);
+            let defended = present.contains_key(&owner);
+            let besieger = present.keys().copied().find(|a| self.at_war(*a, owner));
+            let Some(by) = besieger.filter(|_| !defended) else {
+                self.provinces.get_mut(&p).unwrap().siege = None;
+                continue;
+            };
+            if self.actors[&owner].capital == p {
+                let ticks = match self.provinces[&p].siege {
+                    Some(s) if s.by == by => s.ticks + 1,
+                    _ => 1,
+                };
+                if ticks < params.siege_capital_ticks {
+                    self.provinces.get_mut(&p).unwrap().siege = Some(crate::world::Siege { by, ticks });
+                    continue;
+                }
+            }
+            self.transfer(p, owner, by, Transfer::Conquest)?;
+        }
+        Ok(())
+    }
+
+    /// A province changes hands; the loser's capital moves or the loser falls.
+    fn transfer(&mut self, p: ProvinceId, from: ActorId, to: ActorId, how: Transfer) -> Result<(), WorldError> {
+        self.provinces.get_mut(&p).unwrap().siege = None;
+        self.provinces.get_mut(&p).unwrap().owner = to;
+        let f = self.actors.get_mut(&from).unwrap();
+        f.provinces.retain(|x| *x != p);
+        let t = self.actors.get_mut(&to).unwrap();
+        t.provinces.push(p);
+        t.provinces.sort();
+        self.emit(Event::ProvinceChangedHands { province: p, from, to, how });
+        if self.actors[&from].provinces.is_empty() {
+            self.fall(from)?;
+        } else if self.actors[&from].capital == p {
+            // The most populous province left; the lowest id among equals.
+            let new_capital = *self.actors[&from].provinces.iter().max_by_key(|x| (self.population(**x), std::cmp::Reverse(**x))).unwrap();
+            self.actors.get_mut(&from).unwrap().capital = new_capital;
+            self.emit(Event::CapitalMoved { actor: from, to: new_capital });
+        }
+        Ok(())
+    }
+
+    /// A polity without land falls: levies join the people where they stand, mercenaries
+    /// leave the world, wars close, the record stays.
+    fn fall(&mut self, a: ActorId) -> Result<(), WorldError> {
+        for u in self.units_of(a) {
+            self.disband_unit(u)?;
+        }
+        self.wars.retain(|(x, y)| *x != a && *y != a);
+        self.emit(Event::ActorDied { actor: a });
+        Ok(())
+    }
+
+    /// Disband a unit: a levy back to the people of the province it stands in, mercenaries
+    /// out of the world. Both legs signed `Disband`.
+    fn disband_unit(&mut self, unit: UnitId) -> Result<u64, WorldError> {
+        let (at, mercenary) = (self.units[&unit].position, self.units[&unit].mercenary);
+        let soldiers = self.soldiers(unit);
+        if soldiers > 0 {
+            self.post(Account::Soldiers(unit), Source::Disband, -soldiers * 1000)?;
+            if !mercenary {
+                self.post(Account::Population(at), Source::Disband, soldiers * 1000)?;
+            }
+        }
+        self.units.remove(&unit);
+        self.emit(Event::Disbanded { unit, soldiers: soldiers as u64 });
+        Ok(soldiers as u64)
+    }
+
+    fn new_unit(&mut self, owner: ActorId, at: ProvinceId, mercenary: bool) -> Result<UnitId, WorldError> {
+        let id = UnitId(self.next_unit);
+        self.next_unit += 1;
+        self.units.insert(id, Unit { owner, position: at, quality: 50.0, destination: None, mercenary });
+        self.ledger.open(self.tick, Account::Soldiers(id), 0)?;
+        Ok(id)
+    }
+
+    /// The army's verbs: `recruit` (target: an own province), `disband` (target: an own
+    /// unit), `hire_mercenaries` (no target). Called by `apply_verb` for a living ruler.
+    pub(crate) fn apply_army_verb(&mut self, call: &VerbCall, a: ActorId, params: &Params) -> Result<(), VerbError> {
+        let ledger = |_: WorldError| VerbError::NotAvailable(call.verb, "ledger");
+        match call.verb {
+            VerbId::Recruit => {
+                let Target::Province(p) = call.target else { return Err(VerbError::BadTarget(call.verb, "a province to levy from")) };
+                if self.provinces.get(&p).map(|x| x.owner) != Some(a) {
+                    return Err(VerbError::BadTarget(call.verb, "not the polity's own province"));
+                }
+                let n = self.recruit_per_tick(a, params).min(self.population(p));
+                if n <= 0 {
+                    return Err(VerbError::NotAvailable(call.verb, "at the levy ceiling"));
+                }
+                let unit = match self.units.iter().find(|(_, u)| u.owner == a && u.position == p && !u.mercenary) {
+                    Some((id, _)) => *id,
+                    None => self.new_unit(a, p, false).map_err(ledger)?,
+                };
+                self.post(Account::Population(p), Source::Recruit, -n * 1000).map_err(ledger)?;
+                self.post(Account::Soldiers(unit), Source::Recruit, n * 1000).map_err(ledger)?;
+                self.emit(Event::Recruited { unit, soldiers: n as u64 });
+                Ok(())
+            }
+            VerbId::Disband => {
+                let Target::Unit(u) = call.target else { return Err(VerbError::BadTarget(call.verb, "a unit to disband")) };
+                if self.units.get(&u).map(|x| x.owner) != Some(a) {
+                    return Err(VerbError::BadTarget(call.verb, "not the polity's own unit"));
+                }
+                self.disband_unit(u).map_err(ledger)?;
+                Ok(())
+            }
+            VerbId::HireMercenaries => {
+                let n = self.hire_count(a, params);
+                if n <= 0 {
+                    return Err(VerbError::NotAvailable(call.verb, if self.recruit_room(a, params) <= 0 { "at the levy ceiling" } else { "cannot pay an advance" }));
+                }
+                let advance = n * params.mercenary_advance_kg;
+                let capital = self.actors[&a].capital;
+                let unit = self.new_unit(a, capital, true).map_err(ledger)?;
+                self.post(Account::Treasury(a), Source::Hire, -advance * 1000).map_err(ledger)?;
+                self.post(Account::Soldiers(unit), Source::Hire, n * 1000).map_err(ledger)?;
+                self.emit(Event::Hired { unit, soldiers: n as u64, advance_kg: advance as u64 });
+                Ok(())
+            }
+            _ => Err(VerbError::NotAvailable(call.verb, "not an army verb")),
+        }
+    }
+}

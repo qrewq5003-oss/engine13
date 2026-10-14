@@ -34,7 +34,7 @@ impl Game {
 impl Observed for Game {
     fn observe(&self) -> Observation {
         let w = self.world();
-        let alive = w.actors.keys().map(|a| self.actor_id(*a)).collect();
+        let alive = w.actors.keys().filter(|a| w.alive(**a)).map(|a| self.actor_id(*a)).collect();
         let owners = w.provinces.iter().map(|(p, pr)| (self.province_id(*p), self.actor_id(pr.owner))).collect();
         let ratings = w
             .actors
@@ -66,11 +66,11 @@ impl Observed for Game {
                 },
                 Event::Battle { province, attacker, defender, outcome, .. } => ObsEvent::Battle {
                     place: self.province_id(*province),
-                    a: self.unit_id(*attacker),
-                    b: self.unit_id(*defender),
+                    a: self.actor_id(*attacker),
+                    b: self.actor_id(*defender),
                     winner: match outcome {
-                        crate::event::Outcome::AttackerWon => Some(self.unit_id(*attacker)),
-                        crate::event::Outcome::DefenderWon => Some(self.unit_id(*defender)),
+                        crate::event::Outcome::AttackerWon => Some(self.actor_id(*attacker)),
+                        crate::event::Outcome::DefenderWon => Some(self.actor_id(*defender)),
                         crate::event::Outcome::Drawn => None,
                     },
                 },
@@ -93,6 +93,13 @@ impl Observed for Game {
                 Event::Migration { .. } => ObsEvent::Other("Migration".into()),
                 Event::PayShortfall { actor, .. } => ObsEvent::Other(format!("PayShortfall@{}", self.actor_id(*actor).0)),
                 Event::Loan { .. } => ObsEvent::Other("Loan".into()),
+                Event::Retreat { .. } => ObsEvent::Other("Retreat".into()),
+                Event::UnitDestroyed { .. } => ObsEvent::Other("UnitDestroyed".into()),
+                Event::CapitalMoved { .. } => ObsEvent::Other("CapitalMoved".into()),
+                Event::Ruin { province, .. } => ObsEvent::Other(format!("Ruin@{}", self.province_id(*province).0)),
+                Event::Recruited { .. } => ObsEvent::Other("Recruited".into()),
+                Event::Disbanded { .. } => ObsEvent::Other("Disbanded".into()),
+                Event::Hired { .. } => ObsEvent::Other("Hired".into()),
             })
             .collect()
     }

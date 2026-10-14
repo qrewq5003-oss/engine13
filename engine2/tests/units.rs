@@ -67,7 +67,7 @@ fn the_enclave_is_unreachable_without_passage_but_its_garrison_is_paid_like_the_
     // budget it keeps its men without any land link home.
     let garrison = UnitId(w.next_unit);
     w.next_unit += 1;
-    w.units.insert(garrison, engine2::world::Unit { owner: b, position: enclave, quality: 50.0, destination: None });
+    w.units.insert(garrison, engine2::world::Unit { owner: b, position: enclave, quality: 50.0, destination: None, mercenary: false });
     let room = w.sustainable_soldiers(b, &params()) - w.units_of(b).iter().map(|u| w.soldiers(*u)).sum::<i64>();
     let size = (room / 2).max(1);
     w.ledger.open(w.tick, engine2::Account::Soldiers(garrison), size).unwrap();
@@ -79,13 +79,16 @@ fn the_enclave_is_unreachable_without_passage_but_its_garrison_is_paid_like_the_
 }
 
 #[test]
-fn a_foreign_unit_melts_at_the_attrition_rate_until_zero() {
+fn a_foreign_unit_beyond_what_the_land_feeds_melts_at_the_attrition_rate() {
     let p = params();
     let mut w = testworld::world(3);
     let a = ActorId(0);
     let unit = w.units_of(a)[0];
-    // On foreign land nothing is supplied: the whole unit melts, down to zero and a BoundHit.
+    // On foreign land a unit forages (tests/army.rs); on emptied land nothing feeds it and
+    // the whole unit melts, down to zero and a BoundHit.
     let foreign = w.actors[&ActorId(1)].capital;
+    let people = w.population(foreign);
+    w.post(engine2::Account::Population(foreign), engine2::Source::Test, -people * 1000).unwrap();
     w.units.get_mut(&unit).unwrap().position = foreign;
     let before = w.soldiers(unit);
     let r = w.tick(&p).unwrap();
@@ -93,14 +96,9 @@ fn a_foreign_unit_melts_at_the_attrition_rate_until_zero() {
     let expected = (before * 150 + 999) / 1000; // 0.30 a year → 0.15 a tick, ceiling of the thousandths
     assert_eq!(lost, expected, "lost {lost}, expected {expected}");
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Attrition { unit: u, unsupplied } if u == unit && unsupplied == before as u64)));
-    let mut ticks = 0;
-    while w.soldiers(unit) > 0 && ticks < 200 {
-        w.tick(&p).unwrap();
-        ticks += 1;
-    }
-    assert_eq!(w.soldiers(unit), 0);
-    assert!(ticks < 200);
-    // At home an army the treasury cannot pay melts by the unpaid share (tests/economy.rs).
+    // (Migration refills the emptied province from its neighbours, so the unit forages again
+    // after a few ticks; the melt to zero with a BoundHit is the ledger's own test.)
+    // At home an army the treasury cannot pay forages its own province (tests/economy.rs).
 }
 
 #[test]

@@ -89,6 +89,8 @@ pub struct Province {
     /// Coasts this coast faces across the water, sorted, no duplicates; only on coastal
     /// provinces. The link that makes an island or a colony reachable.
     pub sea_neighbours: Vec<ProvinceId>,
+    /// The siege on it, if an enemy stands here unopposed (`army.rs`).
+    pub siege: Option<Siege>,
 }
 
 /// An army on the graph: owner, position, quality, and where it is ordered to go. Its
@@ -98,9 +100,21 @@ pub struct Province {
 pub struct Unit {
     pub owner: ActorId,
     pub position: ProvinceId,
-    /// Quality rating, 0..100; dynamics come with the army system.
+    /// Quality rating, 0..100: a multiplier of strength in battle. Its dynamics (experience,
+    /// idleness) are the army's line for E3 (plan §17).
     pub quality: f64,
     pub destination: Option<ProvinceId>,
+    /// Hired men (E0 А4): they came from outside the world and leave it when disbanded;
+    /// a levy goes back to the people.
+    pub mercenary: bool,
+}
+
+/// A siege in progress: who besieges and for how many consecutive ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Siege {
+    pub by: ActorId,
+    pub ticks: u32,
 }
 
 /// The names the presentation layer shows, indexed by id. Part of the world and of the
@@ -182,6 +196,9 @@ pub struct World {
     pub units: BTreeMap<UnitId, Unit>,
     /// Next unit id; units born in play (recruitment, E2) number on from here.
     pub next_unit: u32,
+    /// Polities at war, as pairs with the lower id first (`army.rs`). Opened only by the
+    /// tests until diplomacy prices the declaration; closed by the fall of a side.
+    pub wars: std::collections::BTreeSet<(ActorId, ActorId)>,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -222,6 +239,10 @@ pub enum WorldError {
     UnknownProvince(ProvinceId),
     #[error("unknown unit {0:?}")]
     UnknownUnit(UnitId),
+    #[error("unknown actor {0:?}")]
+    UnknownActor(ActorId),
+    #[error("a polity cannot be at war with itself: {0:?}")]
+    WarWithSelf(ActorId),
     #[error("ledger: {0}")]
     Ledger(#[from] LedgerError),
 }
@@ -285,6 +306,7 @@ impl World {
                     capacity,
                     neighbours: f.neighbours.clone(),
                     sea_neighbours: f.sea_neighbours.clone(),
+                    siege: None,
                 },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
@@ -299,7 +321,7 @@ impl World {
             if a.soldiers > 0 {
                 let uid = UnitId(next_unit);
                 next_unit += 1;
-                units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None });
+                units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None, mercenary: false });
                 ledger.open(tick, Account::Soldiers(uid), a.soldiers as i64)?;
             }
         }
@@ -316,6 +338,7 @@ impl World {
             provinces,
             units,
             next_unit,
+            wars: std::collections::BTreeSet::new(),
             names,
             ledger,
             draws: Vec::new(),
@@ -377,6 +400,8 @@ impl World {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
         self.phase_movement(params)?;
+        self.phase_battle(params)?;
+        self.phase_siege(params)?;
         let _ = self.phase_economy(params)?;
         self.phase_supply(params)?;
         self.phase_population(params)?;

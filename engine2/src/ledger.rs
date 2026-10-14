@@ -65,8 +65,16 @@ pub enum Source {
     /// The army's pay (E0 А3).
     Upkeep,
     Loot,
+    /// The levy: `−` on a province's people and `+` on a unit's soldiers, the same figure.
     Recruit,
+    /// Disbanding: a levy goes back to the people of the province (`−` soldiers, `+`
+    /// people); mercenaries leave the world (`−` soldiers only, owner's rule on §17).
     Disband,
+    /// Mercenaries hired: `+` soldiers from outside the world and `−` the advance on the
+    /// treasury (E0 А4) — the one inflow of men without people behind it, signed as such.
+    Hire,
+    /// A province's people lost to foraging armies (E0 П6).
+    Ruin,
     Desertion,
     BattleLoss,
     Tribute,
