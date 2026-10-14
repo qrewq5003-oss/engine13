@@ -11,15 +11,17 @@
 //!    (`DrawPoint::Violence`, keyed by polity) against `В3/2 × (100 − L)/50`: at legitimacy
 //!    50 the base rate, at 100 none, at 0 twice the base. The rule of succession acts
 //!    through the legitimacy norm, never as a multiplier (E0 §5.4).
-//! 2b. **Usurpation (E0 В6):** one draw per living polity whose ruler is still alive
-//!    (`DrawPoint::Usurpation`, keyed by polity) against `В6_base/2 × (100 − L)/50`, the
-//!    same shape as В3. The usurper is an adult of **any house of the polity** (owner's rule
-//!    on §18): the regent first (Lodovico), then a governor, then the eldest adult; with no
-//!    candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
-//!    executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
-//!    standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
-//!    usurper's norm if it was above it. The rule of succession acts through the norm,
-//!    never as a multiplier (E0 §5.4).
+//!
+//! **2b. Usurpation (E0 В6):** one draw per living polity whose ruler is still alive
+//! (`DrawPoint::Usurpation`, keyed by polity) against `В6_base/2 × (100 − L)/50`, the
+//! same shape as В3. The usurper is an adult of **any house of the polity** (owner's rule
+//! on §18): the regent first (Lodovico), then a governor, then the eldest adult; with no
+//! candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
+//! executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
+//! standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
+//! usurper's norm if it was above it. The rule of succession acts through the norm,
+//! never as a multiplier (E0 §5.4).
+//!
 //! 3. **Succession:** a polity whose ruler died this tick gets its next ruler — the
 //!    designated heir if alive, else by the rule ([`Succession`]): by blood the line by
 //!    seniority (descendants first, elder lines first, then the nearest collateral line);
