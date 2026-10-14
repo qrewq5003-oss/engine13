@@ -21,6 +21,10 @@ jobs:
       # The sentinel (brief §6) measures engine2 behind a feature, so the game's build never
       # carries it; this line is the short run in CI (plan §8).
       - run: cargo test -p engine2 --all-features
+      # The full matrix of generated worlds — 200 seeds × 300 ticks — was a manual step
+      # before every merge and caught defects three times; in release it costs 18 s with
+      # the build (owner on #285), so it runs here and depends on nobody's memory.
+      - run: cargo test --release -p engine2 --all-features --test worldgen -- --ignored
       - run: cargo clippy --workspace --all-features -- -D warnings
       - run: cargo clippy --workspace -- -D warnings
       # The B44 census (`core::census`, `dead_read_probe`) builds only with its feature;
