@@ -13,7 +13,7 @@
 //! - **Wheat accounting:** every treasury posting is signed by source and the ledger
 //!   balances every tick; Э8 and Э9 are measured and reported, not asserted (plan §16).
 
-use engine2::sim::{Game, SimError, Simulation};
+use engine2::sim::{Game, Simulation};
 use engine2::{testworld, worldgen, Account, ActorId, ActorRef, Event, Institution, Params, Source, Target, UnitId, VerbCall, VerbId, World};
 
 fn params() -> Params {
@@ -193,18 +193,12 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
 }
 
 #[test]
-fn tax_verbs_are_closed_and_a_loan_needs_a_bank() {
+fn a_loan_needs_a_bank() {
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("take_loan".to_string(), "Take a loan".to_string());
     let mut g = Game::new(&s, p, 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
-    let offers = g.verbs(who);
-    let raise = offers.iter().find(|o| o.verb == VerbId::RaiseTax).unwrap();
-    assert!(!raise.available);
-    assert_eq!(raise.why.as_deref(), Some("awaits internal politics"));
-    let err = g.tick(&[VerbCall { actor: who, verb: VerbId::RaiseTax, target: Target::None }]).unwrap_err();
-    assert!(matches!(err, SimError::Verb(_)), "{err}");
     // No bank in the test world: the loan is refused.
     assert!(g.verbs(who).iter().all(|o| o.verb != VerbId::TakeLoan || !o.available));
     g.world_mut().actors.get_mut(&ActorId(0)).unwrap().institutions.insert(Institution::Bank);

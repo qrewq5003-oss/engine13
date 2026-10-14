@@ -29,9 +29,10 @@
 //! as the limit). Nothing stops interest from carrying the debt past the ceiling: default
 //! as an event is for internal politics (plan §16).
 //!
-//! The tax verbs are closed until internal politics gives them a price (plan §16 item 2);
-//! `take_loan` needs the bank institution and borrows up to a year of revenue within the
-//! ceiling — to spend on the same tick, since the surplus is swept into repayment.
+//! The tax verbs are priced by internal politics (`politics.rs`, E2 step 6b: a step of the
+//! rate inside Э4 for a price in legitimacy); `take_loan` needs the bank institution and
+//! borrows up to a year of revenue within the ceiling — to spend on the same tick, since
+//! the surplus is swept into repayment.
 //!
 //! What this replaces: the E2 step 2 stand-in «the province feeds the unit» (plan §14). А8
 //! stays as the polity-wide observed band; the measure of this system is the army a polity
@@ -196,9 +197,9 @@ impl World {
         Ok(out)
     }
 
-    /// Apply a verb's effect (the systems compute it; E3 gives the agents). The tax verbs are
-    /// closed until internal politics prices them; `take_loan` needs a bank and borrows up
-    /// to a year of revenue within the ceiling — on both accounts, so the polity's net worth
+    /// Apply a verb's effect (the systems compute it; E3 gives the agents). The tax verbs
+    /// are internal politics' (`politics.rs`); `take_loan` needs a bank and borrows up to a
+    /// year of revenue within the ceiling — on both accounts, so the polity's net worth
     /// does not change.
     pub fn apply_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
@@ -206,7 +207,7 @@ impl World {
             return Err(VerbError::Fallen(a));
         }
         match call.verb {
-            VerbId::RaiseTax | VerbId::LowerTax => Err(VerbError::NotAvailable(call.verb, "awaits internal politics: a tax without a price is a degeneration (plan §16)")),
+            VerbId::RaiseTax | VerbId::LowerTax => self.apply_politics_verb(call, a, params),
             VerbId::DeclareWar | VerbId::MakePeace => Err(VerbError::NotAvailable(call.verb, "awaits diplomacy: a war without a price is a degeneration (plan §17)")),
             VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => self.apply_army_verb(call, a, params),
             VerbId::TakeLoan => {

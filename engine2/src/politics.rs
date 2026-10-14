@@ -43,6 +43,12 @@
 //!    elected, acclaimed; regency while the ruler is a minor) at `legitimacy.rate_per_tick`
 //!    of the gap. The only dynamics of legitimacy in 6a; the prices come with 6b.
 //!
+//! **Legitimacy as a price (6b, plan §18.3).** The tax verbs: `raise_tax` moves the rate up
+//! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
+//! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
+//! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
+//! reason. Legitimacy stays inside 0–100.
+//!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
 //! `Source::Seat` from the treasury to the house's treasury. **A house's treasury has no
@@ -54,7 +60,9 @@ use crate::event::{Cause, Event};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::ledger::{Account, Source};
 use crate::params::Params;
+use crate::economy::VerbError;
 use crate::rng::{unit, Draw, DrawPoint};
+use crate::verbs::{Target, VerbCall, VerbId};
 use crate::world::{House, Person, Standing, Succession, World, WorldError};
 
 /// The fertile window in years of age: the unit of `births.per_adult_per_year` (E0 В4 gives
@@ -335,6 +343,46 @@ impl World {
         self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), died: None });
         self.emit(Event::PersonBorn { person: id, house, parent });
         id
+    }
+
+    /// Whether a tax verb has room inside the band of Э4; the reason when it has not.
+    pub fn tax_room(&self, a: ActorId, verb: VerbId, params: &Params) -> Result<(), &'static str> {
+        let rate = self.actors[&a].tax_rate_ppm;
+        match verb {
+            VerbId::RaiseTax if rate + params.tax_step_ppm > params.tax_band_ppm.1 => Err("at the top of the tax band (Э4)"),
+            VerbId::LowerTax if rate - params.tax_step_ppm < params.tax_band_ppm.0 => Err("at the bottom of the tax band (Э4)"),
+            _ => Ok(()),
+        }
+    }
+
+    /// Pay or receive legitimacy, kept inside 0–100.
+    fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
+        let actor = self.actors.get_mut(&a).unwrap();
+        actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
+    }
+
+    /// The verbs of internal politics: `raise_tax` / `lower_tax` (no target). Called by
+    /// `apply_verb` for a living ruler.
+    pub(crate) fn apply_politics_verb(&mut self, call: &VerbCall, a: ActorId, params: &Params) -> Result<(), VerbError> {
+        match call.verb {
+            VerbId::RaiseTax | VerbId::LowerTax => {
+                if call.target != Target::None {
+                    return Err(VerbError::BadTarget(call.verb, "the tax verbs take no target"));
+                }
+                self.tax_room(a, call.verb, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
+                let from_ppm = self.actors[&a].tax_rate_ppm;
+                let (to_ppm, cost) = if call.verb == VerbId::RaiseTax {
+                    (from_ppm + params.tax_step_ppm, params.legitimacy_cost_raise_tax)
+                } else {
+                    (from_ppm - params.tax_step_ppm, -params.legitimacy_gain_lower_tax)
+                };
+                self.actors.get_mut(&a).unwrap().tax_rate_ppm = to_ppm;
+                self.pay_legitimacy(a, cost);
+                self.emit(Event::TaxRateChanged { actor: a, from_ppm, to_ppm });
+                Ok(())
+            }
+            _ => Err(VerbError::NotAvailable(call.verb, "not a verb of internal politics")),
+        }
     }
 
     /// The phase of the house and the throne.

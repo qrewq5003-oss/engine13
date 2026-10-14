@@ -310,7 +310,8 @@ unit = "years of revenue"
 e0 = "Э7"
 
 # E0 Э8 — observed: the polity's revenue as a share of production. Measured, not an acceptance
-# while the take depends on the rate alone (plan §16).
+# while nothing moves the rate on the generated worlds: the tax verbs are priced (6b), the
+# agents of E3 will move it, and the take becomes the measure then (plan §16, §18.3).
 [tax.observed_share_of_production]
 kind = "b"
 band = [0.03, 0.16]
@@ -494,3 +495,39 @@ kind = "b"
 band = [0.005, 0.05]
 unit = "share of the polities' tax going to the great houses"
 e0 = "Х4"
+
+# ---- legitimacy as a price (E2 step 6b, plan §18.3) ----
+
+# E0 В6 — observed: usurpations and coups per century per polity. Rome 284–395: 26 usurpers by
+# the strict definition (37 claimants) ≈ 23 a century for the empire (Omissi A., Emperors and
+# Usurpers in the Later Roman Empire, 2018, introduction — открыл (вторичное)); Italy of the
+# 15th century: Milan 1476, the Pazzi 1478, Genoa 1478, the barons 1485 ≈ 2–4 a century per
+# polity (Mallett 1974, ch. 1; Lubkin 1994 — по памяти). One wide band; the rule of
+# succession spreads the polities inside it through the legitimacy norm (E0 §5.4).
+[usurpation.observed_per_century]
+kind = "b"
+band = [2.0, 25.0]
+unit = "usurpations per century per polity"
+e0 = "В6"
+
+# (в) The step of the tax verbs: one call moves the rate by this much inside the band of Э4.
+# Checked through Э8 — the take the rate gives.
+[tax.step]
+kind = "c"
+value = 0.02
+unit = "share of production per call"
+checked_by = "Э8"
+
+# (в) The prices in legitimacy: raising the tax costs it, lowering gives half back. Checked
+# through В6 — the coups legitimacy lets in.
+[legitimacy.cost_raise_tax]
+kind = "c"
+value = 10.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+[legitimacy.gain_lower_tax]
+kind = "c"
+value = 5.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"

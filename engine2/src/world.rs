@@ -126,7 +126,8 @@ pub struct Actor {
     /// The polity's institutions (facts of the scenario).
     pub institutions: std::collections::BTreeSet<Institution>,
     /// Tax as parts per million of production; starts at `tax.default_rate` (E0 Э4). The
-    /// verbs that change it are closed until internal politics prices them (plan §16).
+    /// tax verbs move it by `tax.step` inside the band of Э4 for a price in legitimacy
+    /// (`politics.rs`, E2 step 6b).
     pub tax_rate_ppm: i64,
     /// Share of the army's pay met this tick, parts per million: the share of the army that
     /// is supplied at home (`movement.rs`).

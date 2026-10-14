@@ -108,6 +108,9 @@ pub enum Event {
     RegencyEnded { actor: ActorId, ruler: PersonId },
     /// A governorship passed within the house (`to` is `None` when the seat fell vacant).
     GovernorChanged { province: ProvinceId, from: PersonId, to: Option<PersonId> },
+    /// The ruler moved the tax rate (parts per million of production) for a price in
+    /// legitimacy (E2 step 6b).
+    TaxRateChanged { actor: ActorId, from_ppm: i64, to_ppm: i64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

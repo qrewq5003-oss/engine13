@@ -52,3 +52,7 @@ required-features = ["worldgen", "testing"]
 [[test]]
 name = "politics"
 required-features = ["worldgen", "testing"]
+
+[[test]]
+name = "legitimacy"
+required-features = ["worldgen", "testing"]

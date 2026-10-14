@@ -81,10 +81,10 @@ impl Game {
     }
 
     /// The one availability-and-cost function (lesson B42), the same for the player and
-    /// for agents. The economy (E2 step 4) decides the tax verbs and the loan, the army (E2
-    /// step 5) the levy, the disbanding and the hire; war and peace wait for diplomacy to
-    /// price them (a verb without a price is a degeneration), the rest for their systems and
-    /// for the agents of E3.
+    /// for agents. Internal politics (E2 step 6b) prices the tax verbs in legitimacy, the
+    /// economy (E2 step 4) decides the loan, the army (E2 step 5) the levy, the disbanding
+    /// and the hire; war and peace wait for diplomacy to price them (a verb without a price
+    /// is a degeneration), the rest for their systems and for the agents of E3.
     fn offers(&self, who: ActorRef) -> Vec<VerbOffer> {
         self.display
             .verbs
@@ -95,9 +95,24 @@ impl Game {
                     ActorRef::House(_) => false,
                 };
                 let mut cost_kg = 0;
+                let mut cost_legitimacy = 0;
                 let (available, why) = match (verb, who) {
                     (_, ActorRef::Ruler(_)) if fallen => (false, Some("the polity has fallen")),
-                    (VerbId::RaiseTax | VerbId::LowerTax, _) => (false, Some("awaits internal politics")),
+                    (VerbId::RaiseTax | VerbId::LowerTax, ActorRef::House(_)) => (false, Some("a house does not rule the polity")),
+                    (VerbId::RaiseTax, ActorRef::Ruler(a)) => {
+                        cost_legitimacy = self.params.legitimacy_cost_raise_tax.round() as i64;
+                        match self.world.tax_room(a, VerbId::RaiseTax, &self.params) {
+                            Ok(()) => (true, None),
+                            Err(why) => (false, Some(why)),
+                        }
+                    }
+                    (VerbId::LowerTax, ActorRef::Ruler(a)) => {
+                        cost_legitimacy = -(self.params.legitimacy_gain_lower_tax.round() as i64);
+                        match self.world.tax_room(a, VerbId::LowerTax, &self.params) {
+                            Ok(()) => (true, None),
+                            Err(why) => (false, Some(why)),
+                        }
+                    }
                     (VerbId::DeclareWar | VerbId::MakePeace, _) => (false, Some("awaits diplomacy")),
                     (VerbId::Recruit, ActorRef::Ruler(a)) => {
                         if self.world.recruit_per_tick(a, &self.params) > 0 {
@@ -136,7 +151,7 @@ impl Game {
                     (VerbId::TakeLoan, ActorRef::House(_)) => (false, Some("a house does not borrow for the polity")),
                     _ => (false, Some("not implemented until its system (E2) and the agents (E3)")),
                 };
-                VerbOffer { verb: *verb, available, cost_kg, why: why.map(str::to_string) }
+                VerbOffer { verb: *verb, available, cost_kg, cost_legitimacy, why: why.map(str::to_string) }
             })
             .collect()
     }

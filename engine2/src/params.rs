@@ -134,6 +134,13 @@ pub struct Params {
     pub legitimacy_rate_per_tick: f64,
     /// E0 Х1: a house's share of its seat's tax, parts per million.
     pub seat_income_share_ppm: i64,
+    /// E0 Э4: the band the tax verbs move the rate inside, parts per million.
+    pub tax_band_ppm: (i64, i64),
+    /// (в) One call of a tax verb moves the rate by this, parts per million.
+    pub tax_step_ppm: i64,
+    /// (в) What raising the tax costs in legitimacy; what lowering it gives.
+    pub legitimacy_cost_raise_tax: f64,
+    pub legitimacy_gain_lower_tax: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -182,6 +189,9 @@ impl Params {
         }
         let value = |key: &str| -> Result<f64, ParamsError> {
             entries.get(key).and_then(|e| e.value).ok_or_else(|| ParamsError::Missing(key.to_string()))
+        };
+        let band = |key: &str| -> Result<[f64; 2], ParamsError> {
+            entries.get(key).and_then(|e| e.band).ok_or_else(|| ParamsError::Missing(key.to_string()))
         };
         let growth = value("population.growth_per_year")?;
         let famine = value("famine.mortality_per_year")?;
@@ -238,6 +248,10 @@ impl Params {
         let norm_regency = value("legitimacy.norm_regency")?;
         let legitimacy_rate = value("legitimacy.rate_per_tick")?;
         let seat_share = value("house.income_share_of_seat")?;
+        let tax_band = band("tax.default_rate")?;
+        let tax_step = value("tax.step")?;
+        let cost_raise_tax = value("legitimacy.cost_raise_tax")?;
+        let gain_lower_tax = value("legitimacy.gain_lower_tax")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -275,6 +289,10 @@ impl Params {
             legitimacy_norm_regency: norm_regency,
             legitimacy_rate_per_tick: legitimacy_rate,
             seat_income_share_ppm: (seat_share * 1_000_000.0).round() as i64,
+            tax_band_ppm: ((tax_band[0] * 1_000_000.0).round() as i64, (tax_band[1] * 1_000_000.0).round() as i64),
+            tax_step_ppm: (tax_step * 1_000_000.0).round() as i64,
+            legitimacy_cost_raise_tax: cost_raise_tax,
+            legitimacy_gain_lower_tax: gain_lower_tax,
             entries,
         })
     }
@@ -353,6 +371,8 @@ mod tests {
         assert_eq!(p.majority_age, 18);
         assert!((p.violent_death_per_tick - 0.01).abs() < 1e-12);
         assert_eq!(p.seat_income_share_ppm, 20_000);
+        assert_eq!(p.tax_band_ppm, (50_000, 200_000));
+        assert_eq!(p.tax_step_ppm, 20_000);
     }
 
     #[test]

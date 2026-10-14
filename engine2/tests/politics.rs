@@ -231,13 +231,12 @@ fn a_house_with_the_throne_and_a_governorship_gets_x1_from_both_as_an_exact_tran
 }
 
 #[test]
-fn tax_verbs_stay_closed_until_6b_and_a_house_is_offered_nothing_it_can_do() {
+fn a_house_is_offered_nothing_it_can_do_until_diplomacy() {
     let s = testworld::five_states_scenario();
     let g = Game::new(&s, params(), 1).unwrap();
     let offers = g.verbs(ActorRef::House(house(&s, "h0")));
-    assert!(offers.iter().all(|o| !o.available));
-    let ruler = g.verbs(ActorRef::Ruler(ActorId(0)));
-    assert!(ruler.iter().filter(|o| matches!(o.verb, VerbId::RaiseTax | VerbId::LowerTax)).all(|o| o.why.as_deref() == Some("awaits internal politics")));
+    assert!(offers.iter().all(|o| !o.available && o.why.is_some()));
+    let _ = VerbId::RaiseTax; // priced for the ruler in 6b: `tests/legitimacy.rs`
 }
 
 /// Reigns, deaths, births and houses on the generated worlds.
