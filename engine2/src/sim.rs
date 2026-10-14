@@ -8,8 +8,10 @@
 //! the hash of the compiled facts — so a run of one scenario cannot continue as another
 //! (AGENTS §8, owner's review of PR #278).
 
+use crate::economy::VerbError;
 use crate::event::{Event, Stamped};
 use crate::params::Params;
+use crate::world::Institution;
 use crate::save::{self, SaveError};
 use crate::scenario::{Display, ScenarioData, SchemaError};
 use crate::verbs::{ActorRef, VerbCall, VerbId, VerbOffer};
@@ -28,6 +30,8 @@ pub enum SimError {
     WrongScenario { save: String, save_hash: u64, scenario: String, scenario_hash: u64 },
     #[error("verb {0:?} is not enabled by the scenario")]
     VerbNotEnabled(VerbId),
+    #[error("{0}")]
+    Verb(#[from] VerbError),
 }
 
 pub trait Simulation: Sized {
@@ -59,8 +63,10 @@ impl Game {
         &self.world
     }
 
-    /// Mutable access for orders (movement) until the verbs and agents of E3 give orders
-    /// through the contract.
+    /// Mutable access for the acceptance tests (orders, injected stocks) until the verbs and
+    /// agents of E3 give orders through the contract. Behind the `testing` feature so that
+    /// nothing in a game build can change the world past the rules (review of PR #283).
+    #[cfg(feature = "testing")]
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
     }
@@ -74,10 +80,31 @@ impl Game {
         &self.last_events
     }
 
-    /// The one availability-and-cost function (lesson B42). E1b: every enabled verb is on
-    /// offer at no cost and has no effect; E3 computes both from the state.
-    fn offers(&self, _who: ActorRef) -> Vec<VerbOffer> {
-        self.display.verbs.iter().map(|(verb, _)| VerbOffer { verb: *verb, available: true, cost_kg: 0 }).collect()
+    /// The one availability-and-cost function (lesson B42), the same for the player and
+    /// for agents. The economy (E2 step 4) decides the tax verbs and the loan; the rest wait
+    /// for their systems and for the agents of E3.
+    fn offers(&self, who: ActorRef) -> Vec<VerbOffer> {
+        self.display
+            .verbs
+            .iter()
+            .map(|(verb, _)| {
+                let (available, why) = match (verb, who) {
+                    (VerbId::RaiseTax | VerbId::LowerTax, _) => (false, Some("awaits internal politics")),
+                    (VerbId::TakeLoan, ActorRef::Ruler(a)) => {
+                        if !self.world.actors.get(&a).is_some_and(|x| x.institutions.contains(&Institution::Bank)) {
+                            (false, Some("no bank"))
+                        } else if self.world.loan_room(a, &self.params) <= 0 {
+                            (false, Some("at the debt ceiling"))
+                        } else {
+                            (true, None)
+                        }
+                    }
+                    (VerbId::TakeLoan, ActorRef::House(_)) => (false, Some("a house does not borrow for the polity")),
+                    _ => (false, Some("not implemented until its system (E2) and the agents (E3)")),
+                };
+                VerbOffer { verb: *verb, available, cost_kg: 0, why: why.map(str::to_string) }
+            })
+            .collect()
     }
 
     fn enabled(&self, verb: VerbId) -> bool {
@@ -99,6 +126,7 @@ impl Simulation for Game {
             return Err(SimError::VerbNotEnabled(bad.verb));
         }
         for call in player {
+            self.world.apply_verb(call, &self.params)?;
             self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target });
         }
         let report = self.world.tick(&self.params)?;

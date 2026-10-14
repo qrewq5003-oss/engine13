@@ -1,4 +1,4 @@
-//! Units on the province graph: movement, supply, attrition (brief §2a, plan §14).
+//! Units on the province graph: movement and supply (brief §2a, plan §14, §16).
 //!
 //! **Edges.** A province has land neighbours and sea neighbours; both are facts of the
 //! scenario (which coasts face each other), never derived from a flag. Sea edges are what
@@ -11,17 +11,12 @@
 //! arrive (E0 А10). A unit moves `movement.provinces_per_tick` edges a tick along the
 //! shortest passable path; with no path the order is dropped with a `NoPath` event.
 //!
-//! **Supply — a stand-in until the economy, not the design (owner's review of PR #281).**
-//! Until the economy exists, a unit is fed by the province it stands in: `population ×
-//! supply.soldiers_per_1000_people / 1000` soldiers of its owner can stand there. That is a
-//! placeholder with a known wrong consequence: an army cannot be concentrated even at home
-//! (10 000 soldiers do not fit a capital of 50 000 people). The design, due with the economy
-//! and the army system (plan §14): at home the **treasury** keeps the army — pay per soldier
-//! (E0 А3) and the budget as the limit, with А8 (Э8 × Э2) the polity-wide ratio the economy
-//! can sustain; **foraging** off the local province is for foreign land or unpaid troops, at
-//! the cost of ruining the province (П6). What stays from this step: an enclave or a colony
-//! feeds its own garrison without a land link home, and a shortfall is **shared pro rata**
-//! among the units standing there — not "lower ids eat first". Unsupplied soldiers melt at
+//! **Supply is pay (E2 step 4, replacing the step 2 stand-in).** At home a unit is supplied
+//! to the share of the army its polity paid this tick (`economy.rs`): the budget is the
+//! limit, and the shortfall is shared pro rata among the polity's units — not "lower ids eat
+//! first". An enclave or a colony is as supplied as the rest of the army: pay reaches it
+//! without a land link. Any unit on foreign land is unsupplied until the army system brings
+//! foraging with its cost (E0 П6). Unsupplied soldiers melt at
 //! `army.attrition_unsupplied_per_year / 2` a tick (E0 А7) through the ledger; a stock that
 //! reaches zero is a `BoundHit` like any other.
 //!
@@ -95,16 +90,9 @@ impl World {
         None
     }
 
-    /// Soldiers the province can supply for `owner` this tick.
-    pub fn supply_capacity(&self, p: ProvinceId, params: &Params) -> i64 {
-        self.population(p) * params.supply_soldiers_per_1000 / 1000
-    }
-
-    /// The movement phase of a tick: every ordered unit takes its steps; then supply and
-    /// attrition for every unit where it now stands.
-    pub(crate) fn phase_units(&mut self, params: &Params) -> Result<(), WorldError> {
+    /// The movement phase of a tick: every ordered unit takes its steps.
+    pub(crate) fn phase_movement(&mut self, params: &Params) -> Result<(), WorldError> {
         let ids: Vec<UnitId> = self.units.keys().copied().collect();
-        // Movement, in canonical order.
         for id in &ids {
             let (owner, mut at, dest) = {
                 let u = &self.units[id];
@@ -129,31 +117,20 @@ impl World {
                 }
             }
         }
-        // Supply: per province and owner, the shortfall is shared pro rata among the units
-        // standing there (owner's rule: not "lower ids eat first").
-        let mut standing: BTreeMap<(ProvinceId, ActorId), i64> = BTreeMap::new();
-        for id in &ids {
-            let u = &self.units[id];
-            *standing.entry((u.position, u.owner)).or_insert(0) += self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0);
-        }
+        Ok(())
+    }
+
+    /// The supply phase of a tick, after the economy paid: at home a unit keeps the paid
+    /// share of its men supplied; on foreign land none. The rest melts by А7.
+    pub(crate) fn phase_supply(&mut self, params: &Params) -> Result<(), WorldError> {
+        let ids: Vec<UnitId> = self.units.keys().copied().collect();
         for id in &ids {
             let (owner, at) = {
                 let u = &self.units[id];
                 (u.owner, u.position)
             };
             let soldiers = self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0);
-            let supplied = if self.provinces[&at].owner == owner {
-                let cap = self.supply_capacity(at, params);
-                let total = standing[&(at, owner)];
-                if total <= cap {
-                    soldiers
-                } else {
-                    // Each unit keeps the same share of its men: soldiers × cap / total.
-                    soldiers * cap / total
-                }
-            } else {
-                0
-            };
+            let supplied = if self.provinces[&at].owner == owner { soldiers * self.actors[&owner].paid_share_ppm / 1_000_000 } else { 0 };
             let unsupplied = soldiers - supplied;
             if unsupplied > 0 {
                 // Thousandths of soldiers lost: unsupplied × rate per tick.

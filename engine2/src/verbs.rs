@@ -102,6 +102,8 @@ pub struct VerbOffer {
     pub available: bool,
     /// Cost in kg of wheat-equivalent, if the verb costs treasury.
     pub cost_kg: i64,
+    /// Why it is not available, when it is not.
+    pub why: Option<String>,
 }
 
 #[cfg(test)]

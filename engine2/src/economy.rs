@@ -1,0 +1,192 @@
+//! The economy (brief §2 «Экономика», plan §16): the treasury as a flow in kilograms of
+//! wheat-equivalent — production from people, tax, the court, the army's pay, loans and
+//! interest — every entry through the ledger and signed with its source.
+//!
+//! Per polity, per tick, in canonical order of actors:
+//! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2);
+//! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
+//!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) → `Source::Tax`;
+//! - **court** = tax × `court.share_of_revenue` (E0 Э5) → `Source::Court`;
+//! - **interest** on the debt at `loan.interest_per_year` / 2 (E0 Э6) → `Source::Interest`:
+//!   paid from the treasury when it can; what it cannot pay is added to the debt;
+//! - **pay due** = soldiers × `army.pay_per_soldier_outputs` × output per head / 2 (E0 А3);
+//!   the polity pays what the treasury holds, and — **only with a bank** — borrows the
+//!   shortfall while the debt is under `loan.ceiling_years_of_revenue` × yearly revenue
+//!   (E0 Э7). The paid share is the share of the army that is supplied at home
+//!   (`movement.rs`); the rest melts by А7;
+//! - **repayment**: what is left in the treasury after the pay goes against the debt
+//!   (`Source::Repayment`), so a loan lives as long as it is needed and a polity never sits
+//!   on a reserve while paying interest.
+//!
+//! **Debt is explicit (review of PR #283).** No treasury is ever negative; what a polity
+//! owes is the stock `Account::Debt`. A loan is two entries of the same amount — `+treasury`,
+//! `+debt` — so the polity's net worth (treasury − debt) never grows from borrowing, and the
+//! ceiling and the interest apply to the debt. Without a bank there is no debt at all
+//! (owner's rule: a pay debt without a bank would be a free loan and would void the budget
+//! as the limit). Nothing stops interest from carrying the debt past the ceiling: default
+//! as an event is for internal politics (plan §16).
+//!
+//! The tax verbs are closed until internal politics gives them a price (plan §16 item 2);
+//! `take_loan` needs the bank institution and borrows up to a year of revenue within the
+//! ceiling — to spend on the same tick, since the surplus is swept into repayment.
+//!
+//! What this replaces: the E2 step 2 stand-in «the province feeds the unit» (plan §14). А8
+//! stays as the polity-wide observed band; the measure of this system is the army a polity
+//! can keep at the limit of its budget, which must fall inside А11 (owner's rule).
+
+use crate::event::Event;
+use crate::ids::ActorId;
+use crate::ledger::{Account, Source};
+use crate::params::Params;
+use crate::verbs::{ActorRef, VerbCall, VerbId};
+use crate::world::{Institution, World, WorldError};
+
+/// A polity's budget of the tick, as the economy computed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budget {
+    /// Production of the tick, kg.
+    pub production: i64,
+    /// Tax taken, kg.
+    pub income: i64,
+    /// Court and administration, kg.
+    pub court: i64,
+    /// Pay the army asked for, kg.
+    pub pay_due: i64,
+    /// Pay actually given, kg.
+    pub paid: i64,
+    /// Borrowed this tick to meet the pay, kg (bank only).
+    pub borrowed: i64,
+    /// Interest of the tick, kg: paid from the treasury or added to the debt.
+    pub interest: i64,
+    /// Debt paid down from the surplus, kg.
+    pub repaid: i64,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum VerbError {
+    #[error("verb {0:?} is not available: {1}")]
+    NotAvailable(VerbId, &'static str),
+    #[error("{0:?} is not a ruler")]
+    NotARuler(ActorRef),
+}
+
+impl World {
+    /// Production of a polity per tick (half a year), kg of wheat-equivalent.
+    pub fn production_per_tick(&self, a: ActorId, params: &Params) -> i64 {
+        self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum::<i64>() * params.output_per_head_kg / 2
+    }
+
+    /// Soldiers a polity's budget keeps paid: the revenue left after the court, over the pay
+    /// of one soldier — per year, so the halves cancel. The measure of the economy (plan §16).
+    pub fn sustainable_soldiers(&self, a: ActorId, params: &Params) -> i64 {
+        let for_army = self.yearly_income(a, params) * (1_000_000 - params.court_share_ppm) / 1_000_000;
+        if params.pay_per_soldier_kg_per_year == 0 {
+            0
+        } else {
+            for_army / params.pay_per_soldier_kg_per_year
+        }
+    }
+
+    /// The debt a polity may carry: a bank's ceiling in years of revenue, nothing without one.
+    pub fn debt_ceiling(&self, a: ActorId, params: &Params) -> i64 {
+        if !self.actors[&a].institutions.contains(&Institution::Bank) {
+            return 0;
+        }
+        self.yearly_income(a, params) * params.loan_ceiling_years_milli / 1000
+    }
+
+    /// How much more a polity may borrow: the ceiling less the debt it carries.
+    pub fn loan_room(&self, a: ActorId, params: &Params) -> i64 {
+        (self.debt_ceiling(a, params) - self.debt(a)).max(0)
+    }
+
+    fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
+        self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000
+    }
+
+    /// Borrow `amount` from the bank: the same figure on both accounts.
+    fn borrow(&mut self, a: ActorId, amount: i64) -> Result<(), WorldError> {
+        self.post(Account::Treasury(a), Source::Loan, amount * 1000)?;
+        self.post(Account::Debt(a), Source::Loan, amount * 1000)?;
+        self.emit(Event::Loan { actor: a, kg: amount as u64 });
+        Ok(())
+    }
+
+    /// The economy phase of a tick. Returns each polity's budget; the paid share is stored
+    /// on the actor for the supply phase.
+    pub(crate) fn phase_economy(&mut self, params: &Params) -> Result<Vec<(ActorId, Budget)>, WorldError> {
+        let ids: Vec<ActorId> = self.actors.keys().copied().collect();
+        let mut out = Vec::with_capacity(ids.len());
+        for a in ids {
+            let treasury = Account::Treasury(a);
+            let production = self.production_per_tick(a, params);
+            let income = production * self.actors[&a].tax_rate_ppm / 1_000_000;
+            if income > 0 {
+                self.post(treasury, Source::Tax, income * 1000)?;
+            }
+            let court = income * params.court_share_ppm / 1_000_000;
+            if court > 0 {
+                self.post(treasury, Source::Court, -court * 1000)?;
+            }
+            // Interest on the debt carried in: from the treasury as far as it reaches, the
+            // rest onto the debt.
+            let interest = self.debt(a) * params.loan_interest_ppm_per_tick / 1_000_000;
+            if interest > 0 {
+                let from_treasury = interest.min(self.treasury(a));
+                if from_treasury > 0 {
+                    self.post(treasury, Source::Interest, -from_treasury * 1000)?;
+                }
+                if interest > from_treasury {
+                    self.post(Account::Debt(a), Source::Interest, (interest - from_treasury) * 1000)?;
+                }
+            }
+            let soldiers: i64 = self.units_of(a).iter().map(|u| self.soldiers(*u)).sum();
+            let pay_due = soldiers * params.pay_per_soldier_kg_per_year / 2;
+            let shortfall = (pay_due - self.treasury(a)).max(0);
+            let borrowed = shortfall.min(self.loan_room(a, params));
+            if borrowed > 0 {
+                self.borrow(a, borrowed)?;
+            }
+            let paid = pay_due.min(self.treasury(a));
+            if paid > 0 {
+                self.post(treasury, Source::Upkeep, -paid * 1000)?;
+            }
+            let share = if pay_due == 0 { 1_000_000 } else { paid * 1_000_000 / pay_due };
+            self.actors.get_mut(&a).unwrap().paid_share_ppm = share;
+            if paid < pay_due {
+                self.emit(Event::PayShortfall { actor: a, unpaid_kg: (pay_due - paid) as u64 });
+            }
+            // The surplus goes against the debt.
+            let repaid = self.treasury(a).min(self.debt(a));
+            if repaid > 0 {
+                self.post(treasury, Source::Repayment, -repaid * 1000)?;
+                self.post(Account::Debt(a), Source::Repayment, -repaid * 1000)?;
+            }
+            out.push((a, Budget { production, income, court, pay_due, paid, borrowed, interest, repaid }));
+        }
+        Ok(out)
+    }
+
+    /// Apply a verb's effect (the systems compute it; E3 gives the agents). The tax verbs are
+    /// closed until internal politics prices them; `take_loan` needs a bank and borrows up
+    /// to a year of revenue within the ceiling — on both accounts, so the polity's net worth
+    /// does not change.
+    pub fn apply_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
+        let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
+        match call.verb {
+            VerbId::RaiseTax | VerbId::LowerTax => Err(VerbError::NotAvailable(call.verb, "awaits internal politics: a tax without a price is a degeneration (plan §16)")),
+            VerbId::TakeLoan => {
+                if !self.actors[&a].institutions.contains(&Institution::Bank) {
+                    return Err(VerbError::NotAvailable(call.verb, "no bank: the polity has no institution to borrow from"));
+                }
+                let amount = self.yearly_income(a, params).min(self.loan_room(a, params));
+                if amount <= 0 {
+                    return Err(VerbError::NotAvailable(call.verb, "at the debt ceiling"));
+                }
+                self.borrow(a, amount).map_err(|_| VerbError::NotAvailable(call.verb, "ledger"))?;
+                Ok(())
+            }
+            _ => Err(VerbError::NotAvailable(call.verb, "not implemented until its system (E2) and the agents (E3)")),
+        }
+    }
+}

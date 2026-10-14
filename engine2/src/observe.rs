@@ -25,6 +25,7 @@ impl Game {
             Account::Population(p) => (self.province_id(p), "population".into()),
             Account::Soldiers(u) => (self.unit_id(u), "soldiers".into()),
             Account::Treasury(a) => (self.actor_id(a), "treasury".into()),
+            Account::Debt(a) => (self.actor_id(a), "debt".into()),
             Account::HouseTreasury(h) => (ObsId(format!("house{}", h.0)), "treasury".into()),
         }
     }
@@ -90,6 +91,8 @@ impl Observed for Game {
                 Event::Famine { province, .. } => ObsEvent::Other(format!("Famine@{}", self.province_id(*province).0)),
                 Event::Plague { .. } => ObsEvent::Other("Plague".into()),
                 Event::Migration { .. } => ObsEvent::Other("Migration".into()),
+                Event::PayShortfall { actor, .. } => ObsEvent::Other(format!("PayShortfall@{}", self.actor_id(*actor).0)),
+                Event::Loan { .. } => ObsEvent::Other("Loan".into()),
             })
             .collect()
     }

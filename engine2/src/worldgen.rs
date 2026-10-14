@@ -32,7 +32,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::params::Params;
 use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
 use crate::verbs::VerbId;
-use crate::world::{Disease, Land};
+use crate::world::{Disease, Institution, Land};
 
 /// Province area, km². E0 §2a: tens of provinces per scenario; Italy's ~300 000 km² over
 /// ~25 provinces is ~12 000; the band leaves room for small city territories.
@@ -351,7 +351,7 @@ impl Map {
     /// never starts above capacity. The capital is the most populous province (ties: lowest
     /// id); the army is E0 А11's share of the polity's people, kept within the capital's
     /// supply (E0 А8). Province ids are cell indices, so the map stays legible.
-    fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, params: &Params) -> ScenarioData {
+    fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, bank_for: &dyn Fn(usize) -> bool, params: &Params) -> ScenarioData {
         let pid = |i: u32| format!("p{i:03}");
         let sid = |a: usize| format!("s{a:02}");
         let mut provinces = BTreeMap::new();
@@ -388,11 +388,16 @@ impl Map {
         for s in 0..states {
             let pop = pop_by_state.get(&s).copied().unwrap_or(0);
             let kg = pop as f64 * pick_f(&mut rng, REVENUE_PER_HEAD_KG) * pick_f(&mut rng, TREASURY_YEARS);
-            let (cap_pop, cap_i) = capital.get(&s).copied().unwrap_or((0, 0));
-            let supply = cap_pop as i64 * params.supply_soldiers_per_1000 / 1000;
+            let (_, cap_i) = capital.get(&s).copied().unwrap_or((0, 0));
+            // The army the budget keeps paid at the starting tax rate (economy.rs), per year:
+            // people × output × tax × (1 − court) ÷ pay per soldier.
+            let yearly_income = pop as i64 * params.output_per_head_kg * params.tax_default_ppm / 1_000_000;
+            let for_army = yearly_income * (1_000_000 - params.court_share_ppm) / 1_000_000;
+            let budget_limit = if params.pay_per_soldier_kg_per_year == 0 { 0 } else { for_army / params.pay_per_soldier_kg_per_year };
             let wanted = (pop as f64 * pick_f(&mut rng, ARMY_SHARE)).floor() as i64;
-            let soldiers = wanted.min(supply * 9 / 10).max(0) as u64;
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers });
+            let soldiers = wanted.min(budget_limit * 9 / 10).max(0) as u64;
+            let institutions = if bank_for(s) { vec![Institution::Bank] } else { Vec::new() };
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers, institutions });
         }
         let verbs = VerbId::ALL.iter().map(|v| (v.key().to_string(), v.key().replace('_', " "))).collect();
         ScenarioData {
@@ -538,12 +543,14 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
     }
     // Plague in the world's pool of diseases: a fact drawn by seed, half the worlds have it.
     let diseases = if rng.gen_bool(0.5) { vec![Disease::Plague] } else { Vec::new() };
-    map.into_scenario(format!("gen{seed}"), states, diseases, params)
+    // Institutions: a bank for some polities and not others (E0 §4, constraint 4).
+    let banks: Vec<bool> = (0..states).map(|_| rng.gen_bool(0.5)).collect();
+    map.into_scenario(format!("gen{seed}"), states, diseases, &|s| banks.get(s).copied().unwrap_or(false), params)
 }
 
 /// A hand-made map from an ASCII sketch: `.` is sea, a letter is the owning polity
 /// (`a` = 0); orthogonal land links, sea links by reach. For the extreme worlds.
-fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, share: f64, params: &Params) -> ScenarioData {
+fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, share: f64, bank_for: &dyn Fn(usize) -> bool, params: &Params) -> ScenarioData {
     let height = rows.len() as u32;
     let width = rows[0].len() as u32;
     let mut states = 0usize;
@@ -566,25 +573,30 @@ fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, s
     let comps = map.components();
     map.guarantee_sea_links(&comps);
     map.mark_coast();
-    map.into_scenario(id.to_string(), states, Vec::new(), params)
+    map.into_scenario(id.to_string(), states, Vec::new(), bank_for, params)
 }
 
 /// The hand-made extreme worlds (owner, plan §12 item 11): each with its name.
 pub fn extreme_worlds(params: &Params) -> Vec<(&'static str, ScenarioData)> {
+    let none = |_: usize| false;
+    let all = |_: usize| true;
     vec![
         // One empire against small polities: the empire holds everything but the corners.
-        ("empire_vs_small", sketch("x_empire_vs_small", &["baaaac", "aaaaaa", "aaaaaa", "aaaaaa", "aaaaaa", "daaaae"], |_| Land::Arable, 8_000, 0.8, params)),
+        ("empire_vs_small", sketch("x_empire_vs_small", &["baaaac", "aaaaaa", "aaaaaa", "aaaaaa", "aaaaaa", "daaaae"], |_| Land::Arable, 8_000, 0.8, &none, params)),
         // An isolated island: a mainland of three polities and an island with no land link.
-        ("isolated_island", sketch("x_isolated_island", &["aabb..", "aabb..", "cccc..", "cccc.d"], |o| if o == 3 { Land::Hills } else { Land::Arable }, 6_000, 0.7, params)),
+        ("isolated_island", sketch("x_isolated_island", &["aabb..", "aabb..", "cccc..", "cccc.d"], |o| if o == 3 { Land::Hills } else { Land::Arable }, 6_000, 0.7, &none, params)),
         // A polity without arable land: polity `a` on the top rows is all hills.
-        ("no_arable", sketch("x_no_arable", &["aaaaa", "aaaaa", "bcbcb", "bcbcb", "bcbcb"], |o| if o == 0 { Land::Hills } else { Land::Arable }, 7_000, 0.8, params)),
+        ("no_arable", sketch("x_no_arable", &["aaaaa", "aaaaa", "bcbcb", "bcbcb", "bcbcb"], |o| if o == 0 { Land::Hills } else { Land::Arable }, 7_000, 0.8, &none, params)),
         // Nomads at the edge: three settled polities west, a steppe polity on the two eastern columns.
-        ("nomads_at_edge", sketch("x_nomads_at_edge", &["aaaadd", "aaaadd", "bbbbdd", "bbbbdd", "ccccdd", "ccccdd"], |o| if o == 3 { Land::Steppe } else { Land::Arable }, 9_000, 0.75, params)),
+        ("nomads_at_edge", sketch("x_nomads_at_edge", &["aaaadd", "aaaadd", "bbbbdd", "bbbbdd", "ccccdd", "ccccdd"], |o| if o == 3 { Land::Steppe } else { Land::Arable }, 9_000, 0.75, &none, params)),
         // A chokepoint: two halves joined by a single passage, and a peninsula on the east.
-        ("chokepoint", sketch("x_chokepoint", &["aaa.bbb", "aaa.bbb", "aaaabbb", "aaa.bbb", "aaa.b..", "....b..", "....b.."], |_| Land::Arable, 6_000, 0.8, params)),
+        ("chokepoint", sketch("x_chokepoint", &["aaa.bbb", "aaa.bbb", "aaaabbb", "aaa.bbb", "aaa.b..", "....b..", "....b.."], |_| Land::Arable, 6_000, 0.8, &none, params)),
         // An overseas colony and an enclave: `b` holds a coastal strip (its capital), an
         // island across the bay and a cell inside `a`.
-        ("colony_and_enclave", sketch("x_colony_and_enclave", &["bb....", "aaaa.b", "abaa.b", "aaaa..", "cccc..", "cccc.."], |_| Land::Arable, 6_000, 0.8, params)),
+        ("colony_and_enclave", sketch("x_colony_and_enclave", &["bb....", "aaaa.b", "abaa.b", "aaaa..", "cccc..", "cccc.."], |_| Land::Arable, 6_000, 0.8, &none, params)),
+        // Institutions at both ends (E0 §4, constraint 4): nobody has a bank (the worlds above),
+        // everybody has one.
+        ("banks_everywhere", sketch("x_banks_everywhere", &["aaabbb", "aaabbb", "cccddd", "cccddd"], |_| Land::Arable, 7_000, 0.8, &all, params)),
     ]
 }
 
@@ -614,7 +626,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 9_511_406_158_875_466_560;
+    const PINNED_WORLD_ONE: u64 = 7_126_929_595_064_441_416;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -655,7 +667,9 @@ mod tests {
     fn extreme_worlds_are_what_their_names_say() {
         let p = Params::load().unwrap();
         let worlds = extreme_worlds(&p);
-        assert_eq!(worlds.len(), 6);
+        assert_eq!(worlds.len(), 7);
+        assert!(worlds.iter().find(|(n, _)| *n == "banks_everywhere").unwrap().1.actors.values().all(|a| a.institutions == vec![Institution::Bank]));
+        assert!(worlds.iter().filter(|(n, _)| *n != "banks_everywhere").all(|(_, s)| s.actors.values().all(|a| a.institutions.is_empty())));
         let get = |name: &str| worlds.iter().find(|(n, _)| *n == name).map(|(_, s)| s).unwrap();
         let empire = get("empire_vs_small");
         assert_eq!(empire.provinces.values().filter(|p| p.owner == "s00").count(), 32);

@@ -16,10 +16,14 @@ fn verbs_are_offered_journaled_and_have_no_effect_yet() {
     let mut g = game(1);
     let who = ActorRef::Ruler(ActorId(0));
     let offers = g.verbs(who);
-    assert!(offers.iter().any(|o| o.verb == VerbId::RaiseTax && o.available));
+    // The tax verbs are enabled by the scenario but closed by the economy until internal
+    // politics prices them (plan §16); the offer says why.
+    let raise = offers.iter().find(|o| o.verb == VerbId::RaiseTax).unwrap();
+    assert!(!raise.available && raise.why.is_some());
     let call = VerbCall { actor: who, verb: VerbId::RaiseTax, target: Target::Province(ProvinceId(0)) };
-    let r = g.tick(&[call]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Verb { verb: VerbId::RaiseTax, .. })));
+    let err = g.tick(&[call]).unwrap_err();
+    assert!(matches!(err, SimError::Verb(_)), "{err}");
+    let r = g.tick(&[]).unwrap();
     assert!(matches!(r.events.last().unwrap().event, Event::TickPlayed));
     // A verb not enabled by the scenario is an error, and nothing is played.
     let tick_before = g.world().tick;

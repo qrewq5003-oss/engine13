@@ -109,12 +109,11 @@ band = [-0.002, 0.005]
 unit = "share per year"
 e0 = "П7"
 
-# E0 А8 — soldiers the polity's economy can sustain per 1 000 inhabitants (Э8 × Э2, with
-# Roth 1999 for the ration): a polity-wide ratio. Until the economy exists it stands in for
-# local supply by the province a unit occupies — a placeholder, not the design (plan §14).
-[supply.soldiers_per_1000_people]
-kind = "a"
-value = 150.0
+# E0 А8 — soldiers the polity's economy can sustain per 1 000 inhabitants (Э8 × Э2, Roth 1999
+# for the ration): a polity-wide observed band. Until E2 step 4 it stood in for local supply;
+# now the budget itself is the limit (economy.rs) and this row is measured, never read.
+[army.observed_soldiers_per_1000_people]
+kind = "b"
 band = [90.0, 200.0]
 unit = "soldiers per 1 000 inhabitants"
 e0 = "А8"
@@ -149,3 +148,75 @@ kind = "c"
 value = 1.0
 unit = "provinces per tick"
 checked_by = "А12"
+
+# ---- economy (E2 step 4, plan §16) ----
+
+# E0 Э2 — output per head per year, kg of wheat-equivalent (Lo Cascio & Malanima 2011:
+# Rome 520–620, Roman Italy ≈ 870, Italy 1350–1750 ≈ 1 000).
+[production.output_per_head_kg]
+kind = "a"
+value = 700.0
+band = [500.0, 1000.0]
+unit = "kg of wheat-equivalent per head per year"
+e0 = "Э2"
+
+# E0 Э4 — the tax rate a polity starts with: the tithe as the norm of an agrarian tax —
+# Ottoman öşür, one tenth of the harvest (Inalcik 1994, by memory); the Roman land tax of the
+# order of a tenth to an eighth of the crop (Jones 1964, ch. XIII, by memory). An input row of
+# its own (owner's rule): the observed share Э8 is never read as an input.
+[tax.default_rate]
+kind = "a"
+value = 0.10
+band = [0.05, 0.20]
+unit = "share of production taken as tax"
+e0 = "Э4"
+
+# E0 Э5 — court and administration as a share of revenue (Duncan-Jones 1994 via Lo Cascio &
+# Malanima: 28 % in 150 AD; Treadgold 1995: 40–50 % in the 5th-century East).
+[court.share_of_revenue]
+kind = "a"
+value = 0.40
+band = [0.25, 0.50]
+unit = "share of revenue"
+e0 = "Э5"
+
+# E0 А3 — a soldier's pay in outputs per head per year (E0 §5: 1.6–5 for Rome, 2–4.4 for
+# 15th-century infantry, in bread; Treadgold 2014; Mallett & Hale 1984).
+[army.pay_per_soldier_outputs]
+kind = "a"
+value = 3.0
+band = [2.0, 4.0]
+unit = "yearly outputs per head (Э2) per soldier per year"
+e0 = "А3"
+
+# E0 Э6 — interest where a bank exists (de Roover 1963; Pezzolo 2003; Molho 1971: Monte
+# 4–5 %, deposits 7–8 %, loans to princes 10–15 %). An institution's row, not an era's.
+[loan.interest_per_year]
+kind = "a"
+value = 0.08
+band = [0.05, 0.15]
+unit = "share of the debt per year"
+e0 = "Э6"
+
+# E0 Э7 — the debt a bank lends, in years of revenue (Venice 1423 ≈ 5.5; Florence 1427 ≈ 10).
+[loan.ceiling_years_of_revenue]
+kind = "a"
+value = 5.0
+band = [5.0, 10.0]
+unit = "years of revenue"
+e0 = "Э7"
+
+# E0 Э8 — observed: the polity's revenue as a share of production. Measured, not an acceptance
+# while the take depends on the rate alone (plan §16).
+[tax.observed_share_of_production]
+kind = "b"
+band = [0.03, 0.16]
+unit = "share of production"
+e0 = "Э8"
+
+# E0 Э9 — observed: the army's share of spending.
+[budget.observed_military_share]
+kind = "b"
+band = [0.50, 0.75]
+unit = "share of spending"
+e0 = "Э9"

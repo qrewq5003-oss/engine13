@@ -68,6 +68,10 @@ pub enum Event {
     Plague { province: ProvinceId, dead: u64 },
     /// People moved to an emptier neighbour; the sum of people is unchanged.
     Migration { from: ProvinceId, to: ProvinceId, people: u64 },
+    /// The treasury could not meet the army's pay in full.
+    PayShortfall { actor: ActorId, unpaid_kg: u64 },
+    /// A polity with a bank borrowed.
+    Loan { actor: ActorId, kg: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

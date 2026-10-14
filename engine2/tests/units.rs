@@ -1,6 +1,7 @@
-//! E2 step 2 acceptance (plan §14): units reach islands and colonies by the sea links, an
-//! enclave is unreachable without passage but feeds its own garrison, foreign land is closed,
-//! an unsupplied unit melts through the ledger, and all of it holds on the generated worlds.
+//! E2 step 2 acceptance (plan §14), updated for step 4 (plan §16): units reach islands and
+//! colonies by the sea links, an enclave is unreachable without passage but its garrison is
+//! paid like the rest of the army, foreign land is closed, an unpaid or foreign unit melts
+//! through the ledger, and all of it holds on the generated worlds.
 
 use engine2::sim::{Game, Simulation};
 use engine2::{testworld, worldgen, ActorId, Event, Params, ProvinceId, UnitId, World};
@@ -32,7 +33,6 @@ fn a_unit_crosses_the_sea_to_the_colony_and_the_island_is_reachable_by_sea_only(
     let mut w = world_of(&s);
     let b = actor_by_name(&s, "s01");
     let unit = w.units_of(b)[0];
-    // b's island: the two cells in the eastern column.
     let island = s.provinces.iter().filter(|(_, p)| p.owner == "s01" && p.coastal && p.neighbours.len() <= 1).map(|(k, _)| by_name(&s, k)).next().unwrap();
     assert!(w.provinces[&island].sea_neighbours.iter().any(|n| w.provinces[n].owner == b), "the generator must link the island by sea");
     let path = w.path(b, w.units[&unit].position, island).expect("a sea path exists");
@@ -52,7 +52,7 @@ fn a_unit_crosses_the_sea_to_the_colony_and_the_island_is_reachable_by_sea_only(
 }
 
 #[test]
-fn the_enclave_is_unreachable_without_passage_but_feeds_its_own_garrison() {
+fn the_enclave_is_unreachable_without_passage_but_its_garrison_is_paid_like_the_rest() {
     let s = extreme("colony_and_enclave");
     let mut w = world_of(&s);
     let b = actor_by_name(&s, "s01");
@@ -63,72 +63,44 @@ fn the_enclave_is_unreachable_without_passage_but_feeds_its_own_garrison() {
     let r = w.tick(&params()).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::NoPath { unit: u, to } if u == unit && to == enclave)));
     assert!(w.units[&unit].destination.is_none(), "a dropped order is not retried forever");
-    // A garrison inside the enclave lives off the enclave itself: place one and watch it keep its men.
+    // A garrison inside the enclave is paid from the treasury like any unit: within the
+    // budget it keeps its men without any land link home.
     let garrison = UnitId(w.next_unit);
     w.next_unit += 1;
     w.units.insert(garrison, engine2::world::Unit { owner: b, position: enclave, quality: 50.0, destination: None });
-    let cap = w.supply_capacity(enclave, &params());
-    w.ledger.open(w.tick, engine2::Account::Soldiers(garrison), cap).unwrap();
+    let room = w.sustainable_soldiers(b, &params()) - w.units_of(b).iter().map(|u| w.soldiers(*u)).sum::<i64>();
+    let size = (room / 2).max(1);
+    w.ledger.open(w.tick, engine2::Account::Soldiers(garrison), size).unwrap();
     for _ in 0..5 {
         let r = w.tick(&params()).unwrap();
         assert!(!r.events.iter().any(|e| matches!(e.event, Event::Attrition { unit, .. } if unit == garrison)));
     }
-    assert_eq!(w.soldiers(garrison), cap);
+    assert_eq!(w.soldiers(garrison), size);
 }
 
 #[test]
-fn an_unsupplied_unit_melts_at_the_attrition_rate_until_zero() {
+fn a_foreign_unit_melts_at_the_attrition_rate_until_zero() {
+    let p = params();
     let mut w = testworld::world(3);
     let a = ActorId(0);
     let unit = w.units_of(a)[0];
-    let home = w.units[&unit].position;
-    // Over the supply of its province: the overflow melts at the yearly rate halved per tick.
-    let cap = w.supply_capacity(home, &params());
-    let extra = 2_000i64;
-    w.post(engine2::Account::Soldiers(unit), engine2::Source::Recruit, (cap + extra - w.soldiers(unit)) * 1000).unwrap();
-    let before = w.soldiers(unit);
-    let r = w.tick(&params()).unwrap();
-    let lost = before - w.soldiers(unit);
-    let expected = extra * 150 / 1000; // 0.30 a year → 0.15 a tick, on the unsupplied part only
-    assert_eq!(lost, expected, "lost {lost}, expected {expected}");
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Attrition { unit: u, unsupplied } if u == unit && unsupplied == extra as u64)));
     // On foreign land nothing is supplied: the whole unit melts, down to zero and a BoundHit.
     let foreign = w.actors[&ActorId(1)].capital;
     w.units.get_mut(&unit).unwrap().position = foreign;
+    let before = w.soldiers(unit);
+    let r = w.tick(&p).unwrap();
+    let lost = before - w.soldiers(unit);
+    let expected = (before * 150 + 999) / 1000; // 0.30 a year → 0.15 a tick, ceiling of the thousandths
+    assert_eq!(lost, expected, "lost {lost}, expected {expected}");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Attrition { unit: u, unsupplied } if u == unit && unsupplied == before as u64)));
     let mut ticks = 0;
     while w.soldiers(unit) > 0 && ticks < 200 {
-        w.tick(&params()).unwrap();
+        w.tick(&p).unwrap();
         ticks += 1;
     }
     assert_eq!(w.soldiers(unit), 0);
     assert!(ticks < 200);
-}
-
-#[test]
-fn a_shortfall_is_shared_pro_rata_not_by_unit_id() {
-    let mut w = testworld::world(8);
-    let a = ActorId(0);
-    let first = w.units_of(a)[0];
-    let home = w.units[&first].position;
-    let cap = w.supply_capacity(home, &params());
-    // Two units of different sizes, together twice the province's supply.
-    let second = UnitId(w.next_unit);
-    w.next_unit += 1;
-    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None });
-    w.ledger.open(w.tick, engine2::Account::Soldiers(second), 0).unwrap();
-    let (big, small) = (cap * 3 / 2, cap / 2);
-    w.post(engine2::Account::Soldiers(first), engine2::Source::Recruit, (big - w.soldiers(first)) * 1000).unwrap();
-    w.post(engine2::Account::Soldiers(second), engine2::Source::Recruit, small * 1000).unwrap();
-    w.tick(&params()).unwrap();
-    let lost_big = big - w.soldiers(first);
-    let lost_small = small - w.soldiers(second);
-    // Each keeps cap/total = 1/2 of its men supplied; the unsupplied half melts at 15 % a
-    // tick. The ledger carries the fraction, so the whole part that left is the ceiling.
-    let melt = |unsupplied: i64| (unsupplied * 150 + 999) / 1000;
-    assert_eq!(lost_big, melt(big - big * cap / (big + small)));
-    assert_eq!(lost_small, melt(small - small * cap / (big + small)));
-    // Same share, whatever the id: the ratio of losses equals the ratio of sizes.
-    assert_eq!(lost_big * small, lost_small * big, "{lost_big}:{big} vs {lost_small}:{small}");
+    // At home an army the treasury cannot pay melts by the unpaid share (tests/economy.rs).
 }
 
 #[test]
@@ -138,10 +110,8 @@ fn foreign_land_is_closed_and_own_land_is_open_through_the_chokepoint() {
     let a = actor_by_name(&s, "s00");
     let b = actor_by_name(&s, "s01");
     let ua = w.units_of(a)[0];
-    // a's land is the western block including the passage cell; the far end of its own land is reachable.
     let far_a = s.provinces.iter().filter(|(_, p)| p.owner == "s00").map(|(k, _)| by_name(&s, k)).max().unwrap();
     assert!(w.path(a, w.units[&ua].position, far_a).is_some());
-    // b's land is closed to a.
     let b_home = w.actors[&b].capital;
     assert!(w.path(a, w.units[&ua].position, b_home).is_none());
     w.order_move(ua, far_a).unwrap();
@@ -155,27 +125,23 @@ fn foreign_land_is_closed_and_own_land_is_open_through_the_chokepoint() {
 }
 
 #[test]
-fn on_generated_worlds_every_unit_starts_supplied_and_unreachable_provinces_are_enclaves_by_land_and_sea() {
+fn on_generated_worlds_every_unit_starts_within_the_budget_and_unreachable_provinces_are_enclaves_by_land_and_sea() {
     let p = params();
     let mut overseas_reached = 0;
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let w = world_of(&s);
         for (id, u) in &w.units {
-            assert!(w.soldiers(*id) <= w.supply_capacity(u.position, &p), "seed {seed}: unit {id:?} starts unsupplied");
+            assert!(w.soldiers(*id) <= w.sustainable_soldiers(u.owner, &p), "seed {seed}: unit {id:?} starts over its polity's budget");
             let mine = &w.actors[&u.owner].provinces;
             let reachable: Vec<ProvinceId> = mine.iter().copied().filter(|t| w.path(u.owner, u.position, *t).is_some()).collect();
             for target in mine {
                 if reachable.contains(target) {
-                    // A province on another landmass reached from the capital: the colony works.
                     if w.path(u.owner, u.position, *target).unwrap().iter().any(|(_, way)| *way == engine2::movement::Way::Sea) {
                         overseas_reached += 1;
                     }
                     continue;
                 }
-                // Unreachable: then no land or sea neighbour of it is a reachable province of
-                // the owner — an enclave by land, by sea, or both. Anything else is a hole in
-                // the path search.
                 let pr = &w.provinces[target];
                 let touches_reachable = pr.neighbours.iter().chain(pr.sea_neighbours.iter()).any(|n| reachable.contains(n));
                 assert!(!touches_reachable, "seed {seed}: province {target:?} of {:?} touches reachable land yet is unreachable", u.owner);

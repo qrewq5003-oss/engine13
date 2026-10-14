@@ -55,7 +55,7 @@ pub fn five_states() -> (Facts, Names) {
             province_names.push((format!("p{i:02}"), format!("Province {i}")));
         }
     }
-    let actors = (0..SIDE).map(|a| ActorFact { treasury_kg: 100_000, capital: ProvinceId(a), soldiers: 600 }).collect();
+    let actors = (0..SIDE).map(|a| ActorFact { treasury_kg: 100_000, capital: ProvinceId(a), soldiers: 600, institutions: Vec::new() }).collect();
     let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors };
     let names = Names { actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(), provinces: province_names };
     (facts, names)
@@ -75,7 +75,7 @@ pub fn five_states_scenario() -> ScenarioData {
     let mut actors = BTreeMap::new();
     for (i, a) in facts.actors.iter().enumerate() {
         let (sid, name) = &names.actors[i];
-        actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: a.treasury_kg, capital: pname(&a.capital), soldiers: a.soldiers });
+        actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: a.treasury_kg, capital: pname(&a.capital), soldiers: a.soldiers, institutions: a.institutions.clone() });
     }
     let mut provinces = BTreeMap::new();
     for (i, f) in facts.provinces.iter().enumerate() {
