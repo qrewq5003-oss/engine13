@@ -29,7 +29,7 @@ use crate::event::Event;
 use crate::ids::ProvinceId;
 use crate::ledger::{Account, Source};
 use crate::params::Params;
-use crate::rng::{draw_unit, Draw, DrawPoint};
+use crate::rng::{Draw, DrawPoint};
 use crate::world::{Disease, World, WorldError};
 
 impl World {
@@ -72,7 +72,7 @@ impl World {
                     let d = Draw { point: DrawPoint::Event, tick: self.tick, id: p.0, n: self.draw_ordinal(DrawPoint::Event, p.0) };
                     let value = crate::rng::draw(self.seed, d);
                     self.journal_draw(d, value);
-                    draw_unit(self.seed, d)
+                    crate::rng::unit(value)
                 };
                 if u < params.plague_outbreak_probability_per_tick {
                     let account = Account::Population(*p);

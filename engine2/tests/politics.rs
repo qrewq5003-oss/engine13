@@ -5,14 +5,16 @@
 //!   by seniority (the eldest child's line before a younger child), by acclamation the
 //!   eldest adult; a child on the throne gets a regent and the regency ends at majority;
 //! - when the ruling house dies out the throne passes to another house of the polity
-//!   (owner's rule on §18); only a polity with no house left falls — with its land, its
-//!   economy stopped, its verbs closed;
+//!   (owner's rule on §18); a polity with no house left raises a new one from the people of
+//!   its capital, through the ledger, and lives on (owner's rule on #285) — nothing falls
+//!   without war;
 //! - a house holding the throne and a governorship gets Х1 from both, as an exact transfer;
 //!   a house without a seat gets nothing; the house's treasury has no outlet in E2;
 //! - legitimacy moves toward the norm of the ruler's standing;
 //! - on 20 generated worlds over 300 ticks: reigns end by natural and by violent death,
 //!   their mean length lies in В5; births keep the houses neither exploding nor always
-//!   dying out; Х4 is measured and reported; the run is deterministic through a save.
+//!   dying out; no polity falls without war; the great houses' share of the tax lies in
+//!   the Х4 band as redefined on Х1; the run is deterministic through a save.
 
 use std::collections::BTreeMap;
 
@@ -142,34 +144,54 @@ fn house_of(s: &ScenarioData, sid: &str) -> HouseId {
 }
 
 #[test]
-fn a_polity_with_no_house_left_falls_with_its_land_its_economy_stops_and_its_verbs_close() {
+fn a_polity_with_no_house_left_raises_a_new_house_from_the_people_of_its_capital_and_lives_on() {
     let p = params();
     let s = testworld::five_states_scenario();
     let mut g = Game::new(&s, params(), 1).unwrap();
     let s4 = ActorId(4);
     let (r4, c4) = (person(&s, "r4"), person(&s, "c4"));
+    let capital = g.world().actors[&s4].capital;
     let provinces = g.world().actors[&s4].provinces.clone();
-    let units = g.world().units_of(s4);
-    assert!(!units.is_empty());
-    let people_before: i64 = provinces.iter().map(|x| g.world().population(*x)).sum::<i64>() + units.iter().map(|u| g.world().soldiers(*u)).sum::<i64>();
+    let (houses_before, persons_before) = (g.world().houses.len(), g.world().persons.len());
     g.world_mut().kill(c4, Cause::Natural, &p).unwrap();
     g.world_mut().kill(r4, Cause::Natural, &p).unwrap();
     let r = g.tick(&[]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::ActorDied { actor } if actor == s4)));
-    assert!(succession_of(&r, s4).is_none(), "a ruler out of nothing is forbidden");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::HouseExtinct { house } if house == house_of(&s, "h4"))));
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorDied { .. })), "the extinction of a dynasty does not kill a polity");
+    let (house, founder) = r
+        .events
+        .iter()
+        .find_map(|e| match e.event {
+            Event::NewDynasty { actor, house, founder, from } if actor == s4 => {
+                assert_eq!(from, capital, "the founder comes from the capital");
+                Some((house, founder))
+            }
+            _ => None,
+        })
+        .expect("a new dynasty");
+    assert_eq!(succession_of(&r, s4), Some((r4, founder, Standing::Acclaimed)));
+    // One person, through the ledger, off the people of the capital — not out of nothing.
+    let risen: Vec<_> = r.postings.iter().filter(|q| q.source == Source::Rise).collect();
+    assert_eq!(risen.len(), 1);
+    assert_eq!((risen[0].account, risen[0].milli), (Account::Population(capital), -1000));
     let w = g.world();
-    assert!(!w.alive(s4));
-    assert_eq!(w.actors[&s4].provinces, provinces, "the land stays with the record until the collapse system");
-    assert!(w.units_of(s4).is_empty(), "the levies joined the people");
-    let people_after: i64 = provinces.iter().map(|x| w.population(*x)).sum();
-    assert!(people_after >= people_before, "{people_before} -> {people_after}");
-    let treasury = w.treasury(s4);
+    assert!(w.alive(s4));
+    assert_eq!(w.actors[&s4].ruler, founder);
+    assert_eq!(w.actors[&s4].standing, Standing::Acclaimed);
+    assert_eq!(w.actors[&s4].provinces, provinces);
+    assert_eq!((w.houses.len(), w.persons.len()), (houses_before + 1, persons_before + 1));
+    assert_eq!(w.houses[&house].polity, s4);
+    assert_eq!(w.persons[&founder].house, house);
+    assert!(w.is_adult(founder, &p) && w.persons[&founder].parent.is_none());
+    assert_eq!(w.names.houses.len(), w.houses.len());
+    assert_eq!(w.names.persons.len(), w.persons.len());
+    assert_eq!(w.house_treasury(house), 0);
     let offers = g.verbs(ActorRef::Ruler(s4));
-    assert!(offers.iter().all(|o| !o.available && o.why.as_deref() == Some("the polity has fallen")));
+    assert!(offers.iter().all(|o| o.why.as_deref() != Some("the polity has fallen")));
+    // The polity plays on: the economy runs, the new house draws Х1 from the throne.
     let r = g.tick(&[]).unwrap();
-    assert!(!r.postings.iter().any(|q| q.account == Account::Treasury(s4)), "no economy for a fallen polity");
-    assert_eq!(g.world().treasury(s4), treasury);
-    assert!(g.world().alive(ActorId(0)), "the others play on");
+    assert!(r.postings.iter().any(|q| q.account == Account::Treasury(s4) && q.source == Source::Tax));
+    assert!(g.world().house_treasury(house) > 0, "the new house holds the throne");
     let _ = VerbId::Recruit;
 }
 
@@ -213,13 +235,17 @@ fn tax_verbs_stay_closed_until_6b_and_a_house_is_offered_nothing_it_can_do() {
 
 /// Reigns, deaths, births and houses on the generated worlds.
 #[test]
-fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_neither_explode_nor_always_die_out_and_x4_is_measured() {
+fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_neither_explode_nor_always_die_out_nothing_falls_without_war_and_x4_lies_in_its_band() {
     let p = params();
     let reign_band = p.entries["reign.observed_years"].band.unwrap();
+    let x4_band = p.entries["house.observed_share_of_income"].band.unwrap();
     let mut reigns: Vec<f64> = Vec::new();
-    let (mut natural, mut murders, mut births, mut extinct, mut successions_across_houses, mut falls) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut natural, mut murders, mut births, mut extinct, mut successions_across_houses, mut falls, mut dynasties) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    // The houses of the start are measured at the end apart from the houses risen in play,
+    // which start from one founder and would pull the median down.
     let mut sizes_end: Vec<usize> = Vec::new();
     let mut sizes_start: Vec<usize> = Vec::new();
+    let mut sizes_risen: Vec<usize> = Vec::new();
     let (mut tax_total, mut seat_total) = (0i64, 0i64);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
@@ -249,6 +275,7 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
                     Event::PersonBorn { .. } => births += 1,
                     Event::HouseExtinct { .. } => extinct += 1,
                     Event::ActorDied { .. } => falls += 1,
+                    Event::NewDynasty { .. } => dynasties += 1,
                     _ => {}
                 }
             }
@@ -261,8 +288,13 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
             }
         }
         let w = g.world();
+        let at_start = s.houses.len();
         for h in w.houses.keys() {
-            sizes_end.push(w.members(*h).len());
+            if h.index() < at_start {
+                sizes_end.push(w.members(*h).len());
+            } else {
+                sizes_risen.push(w.members(*h).len());
+            }
         }
         // Every seat is held by a living person of the polity's own houses, or is vacant.
         for (a, actor) in &w.actors {
@@ -282,15 +314,15 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
     let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
     let median = |v: &mut Vec<usize>| {
         v.sort();
-        v[v.len() / 2]
+        v.get(v.len() / 2).copied().unwrap_or(0)
     };
     let x4 = seat_total as f64 / tax_total as f64;
-    let (m_start, m_end) = (median(&mut sizes_start), median(&mut sizes_end));
+    let (m_start, m_end, m_risen) = (median(&mut sizes_start), median(&mut sizes_end), median(&mut sizes_risen));
     eprintln!(
-        "В5 mean reign {:.1} years over {} reigns ({natural} natural, {murders} violent); {births} births; houses {} of which {extinct} extinct, median size {m_start} -> {m_end}; {successions_across_houses} successions across houses, {falls} polities fell; Х4 houses' share of the tax {x4:.4}",
+        "В5 mean reign {:.1} years over {} reigns ({natural} natural, {murders} violent); {births} births; houses {} of which {extinct} extinct, median size {m_start} -> {m_end}; {successions_across_houses} successions across houses, {dynasties} new dynasties (risen houses: median size {m_risen} at the end), {falls} polities fell; Х4 great houses' share of the tax {x4:.4}",
         mean(&reigns),
         reigns.len(),
-        sizes_end.len()
+        sizes_end.len() + sizes_risen.len()
     );
     assert!(reigns.len() >= 100, "too few reigns ended: {}", reigns.len());
     assert!((reign_band[0]..=reign_band[1]).contains(&mean(&reigns)), "mean reign {:.1} outside В5 {reign_band:?}", mean(&reigns));
@@ -301,6 +333,10 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
     assert!(m_end >= 1, "houses die out in the median: {m_start} -> {m_end}");
     assert!(extinct > 0 && (extinct as usize) < sizes_end.len(), "extinction: {extinct} of {}", sizes_end.len());
     assert!(successions_across_houses > 0, "the throne never passed to another house");
+    // Without war nothing falls: a polity whose houses all die out raises a new one.
+    assert_eq!(falls, 0, "{falls} polities fell without war");
+    assert!(dynasties > 0, "no house ever rose from the people");
+    assert!((x4_band[0]..=x4_band[1]).contains(&x4), "Х4 {x4:.4} outside {x4_band:?}");
 }
 
 #[test]

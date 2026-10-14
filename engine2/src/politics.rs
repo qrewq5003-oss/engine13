@@ -19,9 +19,15 @@
 //!    **another house of the polity** (owner's rule on §18: the house role must be able to
 //!    take the throne): governors first, then the eldest adult, then the eldest living
 //!    member of any house of the polity; the standing is `Acclaimed` (or `Elected` under
-//!    election). Only when no house of the polity has a living person does the polity
-//!    **fall** (`ActorDied`, the rules of §17): a ruler out of nothing is forbidden; the
-//!    land stays with the record, masterless, until the collapse system gives it heirs.
+//!    election). When no house of the polity has a living person, **a new house rises from
+//!    the people** (owner's rule on #285: the extinction of a dynasty never killed a state —
+//!    someone of the nobility or the army took the throne; a masterless land would be a
+//!    `ReadAbsent`): one person is posted off the population of the capital (`Source::Rise`,
+//!    the one place a person leaves the stocks for the records — no one out of nothing),
+//!    becomes the founder of a house of the polity and takes the throne `Acclaimed`
+//!    (`NewDynasty`). A polity falls only by conquest (§17) and, later, by collapse. The one
+//!    exception: a polity with nobody in any of its provinces has no people to rise from
+//!    and falls.
 //! 4. **Regency (E0 В1):** a ruler under `majority.age` has a regent — the eldest adult of
 //!    the ruler's house, else of any house of the polity; the regency ends at majority
 //!    (`RegencyEnded`) or passes on the regent's death. A general mechanism, no dates: who
@@ -45,13 +51,19 @@
 
 use crate::event::{Cause, Event};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
+use crate::ledger::{Account, Source};
 use crate::params::Params;
-use crate::rng::{draw_unit, Draw, DrawPoint};
-use crate::world::{Person, Standing, Succession, World, WorldError};
+use crate::rng::{unit, Draw, DrawPoint};
+use crate::world::{House, Person, Standing, Succession, World, WorldError};
 
 /// The fertile window in years of age: the unit of `births.per_adult_per_year` (E0 В4 gives
 /// children per couple over a reproductive life), not a tunable.
 const FERTILE_AGE: (i32, i32) = (16, 45);
+
+/// The age of the founder of a house risen from the people: the middle of the fertile
+/// window — an adult with a reproductive life ahead, so the new house can last. Not a
+/// tunable: no row of E0 gives the age of a usurper.
+const FOUNDER_AGE: i32 = (FERTILE_AGE.0 + FERTILE_AGE.1) / 2;
 
 /// The standing a succession by rule gives.
 pub fn standing_of_rule(rule: Succession) -> Standing {
@@ -131,13 +143,14 @@ impl World {
     }
 
     /// One keyed draw of a point that draws **once per id per tick** by construction (each
-    /// loop of the phase visits an id once), as a fraction in `[0, 1)`. The ordinal is
-    /// therefore 0 without a scan of the journal — the scan is quadratic in the persons of
-    /// the world; `draws_once_per_person` in the tests holds the claim.
+    /// loop of the phase visits an id once), as a fraction in `[0, 1)`; the ordinal is
+    /// therefore 0, and `draws_once_per_person` in the tests holds the claim.
     fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
-        let d = Draw { point, tick: self.tick, id, n: 0 };
-        self.journal_draw(d, crate::rng::draw(self.seed, d));
-        draw_unit(self.seed, d)
+        let d = Draw { point, tick: self.tick, id, n: self.draw_ordinal(point, id) };
+        debug_assert_eq!(d.n, 0, "{point:?} draws once per id per tick");
+        let value = crate::rng::draw(self.seed, d);
+        self.journal_draw(d, value);
+        unit(value)
     }
 
     /// Kill a person before a tick. For the tests only: the succession of the tick then
@@ -231,7 +244,34 @@ impl World {
         children.into_iter().find_map(|c| self.first_living_in_line(c, skip))
     }
 
-    /// Seat the next ruler of `a` after the death of its ruler, or let the polity fall.
+    /// A new house rises from the people of the polity: one person leaves the population
+    /// of the capital (the first province of the polity with anybody in it) through the
+    /// ledger and becomes the founder of a house of the polity. `None` when no province of
+    /// the polity has a person left.
+    fn raise_house(&mut self, a: ActorId) -> Result<Option<PersonId>, WorldError> {
+        let capital = self.actors[&a].capital;
+        let provinces = self.actors[&a].provinces.clone();
+        let Some(from) = std::iter::once(capital).chain(provinces.into_iter().filter(|p| *p != capital)).find(|p| self.population(*p) >= 1) else {
+            return Ok(None);
+        };
+        self.post(Account::Population(from), Source::Rise, -1000)?;
+        let house = HouseId(self.houses.len() as u32);
+        let k = self.houses_of(a).len() + 1;
+        let (asid, aname) = &self.names.actors[a.index()];
+        let (hsid, hname) = (format!("{asid}.h{k}"), format!("{aname} new house {k}"));
+        self.names.houses.push((hsid.clone(), hname.clone()));
+        self.houses.insert(house, House { polity: a });
+        self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
+        let founder = PersonId(self.next_person);
+        self.next_person += 1;
+        self.names.persons.push((format!("{hsid}.1"), format!("{hname} 1")));
+        self.persons.insert(founder, Person { house, born: self.year() - FOUNDER_AGE, parent: None, died: None });
+        self.emit(Event::NewDynasty { actor: a, house, founder, from });
+        Ok(Some(founder))
+    }
+
+    /// Seat the next ruler of `a` after the death of its ruler; with no house left, raise
+    /// one from the people. The polity falls only when it has no people at all.
     fn succeed(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
         let dead = self.actors[&a].ruler;
         let rule = self.actors[&a].succession;
@@ -247,10 +287,13 @@ impl World {
             let pick = self.eldest(&governors, true, params).or_else(|| self.eldest(&people, true, params));
             match pick {
                 Some(p) => (p, if rule == Succession::Election { Standing::Elected } else { Standing::Acclaimed }),
-                None => {
-                    self.fall(a)?;
-                    return Ok(());
-                }
+                None => match self.raise_house(a)? {
+                    Some(founder) => (founder, Standing::Acclaimed),
+                    None => {
+                        self.fall(a)?;
+                        return Ok(());
+                    }
+                },
             }
         };
         {

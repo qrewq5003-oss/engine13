@@ -88,8 +88,15 @@ pub fn draw(seed: u64, draw: Draw) -> u64 {
 
 /// A draw as a fraction in `[0, 1)`, for probability checks.
 pub fn draw_unit(seed: u64, d: Draw) -> f64 {
+    unit(draw(seed, d))
+}
+
+/// The fraction in `[0, 1)` of a value already drawn: the systems that journal the value
+/// take the fraction from it instead of running the cipher a second time (a tick with a
+/// thousand persons ran it four thousand times: #285 review).
+pub fn unit(value: u64) -> f64 {
     // 53 bits of mantissa, the standard open-interval construction.
-    (draw(seed, d) >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+    (value >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
 }
 
 #[cfg(test)]

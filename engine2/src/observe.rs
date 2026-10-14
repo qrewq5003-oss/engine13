@@ -107,6 +107,7 @@ impl Observed for Game {
                 Event::PersonDied { .. } => ObsEvent::Other("PersonDied".into()),
                 Event::PersonBorn { .. } => ObsEvent::Other("PersonBorn".into()),
                 Event::HouseExtinct { house } => ObsEvent::Other(format!("HouseExtinct@{}", self.house_id(*house).0)),
+                Event::NewDynasty { actor, .. } => ObsEvent::Other(format!("NewDynasty@{}", self.actor_id(*actor).0)),
                 Event::Succession { actor, .. } => ObsEvent::Other(format!("Succession@{}", self.actor_id(*actor).0)),
                 Event::Regency { .. } => ObsEvent::Other("Regency".into()),
                 Event::RegencyEnded { .. } => ObsEvent::Other("RegencyEnded".into()),

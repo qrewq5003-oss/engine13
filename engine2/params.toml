@@ -483,11 +483,14 @@ band = [0.005, 0.05]
 unit = "share of the seat's tax, per tick"
 e0 = "Х1"
 
-# E0 Х4 — observed: the share of the nobility in the polity's income (Scheidel & Friesen
-# 2009 — по памяти: 1.5 % of households, 15–25 % of income). Measured, not an acceptance:
-# the engine's houses are the few great ones of Х1, not the whole nobility.
+# E0 Х4 — observed: the whole nobility takes 15–25 % of a polity's income (Scheidel &
+# Friesen 2009 — по памяти: 1.5 % of households). The engine holds only the few great houses
+# of Х1, so that figure could never be met and checked nothing (owner, review of #285). The
+# bound the engine answers for is the great houses' share of the tax: at least the throne's
+# share, at most the throne's and the governorships' — the band of Х1. Acceptance on the
+# generated worlds (`tests/politics.rs`); measured 0.021.
 [house.observed_share_of_income]
 kind = "b"
-band = [0.15, 0.25]
-unit = "share of the polities' tax going to houses"
+band = [0.005, 0.05]
+unit = "share of the polities' tax going to the great houses"
 e0 = "Х4"

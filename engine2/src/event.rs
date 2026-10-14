@@ -96,6 +96,10 @@ pub enum Event {
     PersonBorn { person: PersonId, house: HouseId, parent: PersonId },
     /// A house has no living member left: the subject is lost (E0 §2.3).
     HouseExtinct { house: HouseId },
+    /// No house of the polity has a living member: a new house rose from the people of
+    /// `from` and its founder took the throne (owner's rule on #285: the extinction of a
+    /// dynasty does not kill a polity).
+    NewDynasty { actor: ActorId, house: HouseId, founder: PersonId, from: ProvinceId },
     /// The throne passed; `how` is the standing the new ruler holds it by.
     Succession { actor: ActorId, from: PersonId, to: PersonId, how: Standing },
     /// A minor on the throne got a regent.

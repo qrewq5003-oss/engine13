@@ -310,9 +310,14 @@ pub struct World {
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
-    /// draw is its count among the earlier draws of the tick with the same point and id,
-    /// so the journal itself is the counter and nothing else needs saving.
+    /// draw is its count among the earlier draws of the tick with the same point and id.
     draws: Vec<RngDraw>,
+    /// The ordinals: how many draws of each point and id the tick has made. Cleared with
+    /// the journal, so between ticks — where a save is taken — it is empty; it is saved
+    /// as that empty map because `serde(skip)` is forbidden here (guard). Counting by a
+    /// scan of the journal was quadratic in the draws of a tick (thousands once every
+    /// person draws twice: #285 review).
+    draw_counts: BTreeMap<DrawPoint, BTreeMap<u32, u32>>,
     /// Events of the tick being played; drained into the tick report.
     events: Vec<Stamped>,
     /// Next event sequence number; saved, so numbering continues across a load.
@@ -522,6 +527,7 @@ impl World {
             names,
             ledger,
             draws: Vec::new(),
+            draw_counts: BTreeMap::new(),
             events: Vec::new(),
             next_seq: 0,
         };
@@ -553,11 +559,14 @@ impl World {
 
     /// The ordinal the next draw of `(point, id)` gets this tick.
     pub(crate) fn draw_ordinal(&self, point: DrawPoint, id: u32) -> u32 {
-        self.draws.iter().filter(|r| r.draw.point == point && r.draw.id == id).count() as u32
+        self.draw_counts.get(&point).and_then(|m| m.get(&id)).copied().unwrap_or(0)
     }
 
-    /// Journal a draw made with [`rng::draw`] on a key built from [`draw_ordinal`].
+    /// Journal a draw made with [`rng::draw`] on a key built from [`draw_ordinal`]; the
+    /// next draw of the same `(point, id)` gets the next ordinal.
     pub(crate) fn journal_draw(&mut self, d: Draw, value: u64) {
+        debug_assert_eq!(d.n, self.draw_ordinal(d.point, d.id), "a draw journaled out of order");
+        *self.draw_counts.entry(d.point).or_default().entry(d.id).or_insert(0) += 1;
         self.draws.push(RngDraw { draw: d, value });
     }
 
@@ -603,6 +612,7 @@ impl World {
             postings: self.ledger.drain_postings(),
             draws: std::mem::take(&mut self.draws),
         };
+        self.draw_counts.clear();
         self.tick = self.tick.next();
         Ok(report)
     }

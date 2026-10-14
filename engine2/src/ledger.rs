@@ -78,6 +78,9 @@ pub enum Source {
     Hire,
     /// A province's people lost to foraging armies (E0 П6).
     Ruin,
+    /// A new house rises from the people: `−` one person on a province's population; the
+    /// founder is a record of the house, not a stock (owner's rule on #285).
+    Rise,
     Desertion,
     BattleLoss,
     Tribute,
