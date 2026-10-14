@@ -68,6 +68,10 @@ pub enum VerbError {
     NotAvailable(VerbId, &'static str),
     #[error("{0:?} is not a ruler")]
     NotARuler(ActorRef),
+    #[error("verb {0:?}: wrong target — {1}")]
+    BadTarget(VerbId, &'static str),
+    #[error("polity {0:?} has fallen")]
+    Fallen(ActorId),
 }
 
 impl World {
@@ -173,8 +177,13 @@ impl World {
     /// does not change.
     pub fn apply_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
+        if !self.alive(a) {
+            return Err(VerbError::Fallen(a));
+        }
         match call.verb {
             VerbId::RaiseTax | VerbId::LowerTax => Err(VerbError::NotAvailable(call.verb, "awaits internal politics: a tax without a price is a degeneration (plan §16)")),
+            VerbId::DeclareWar | VerbId::MakePeace => Err(VerbError::NotAvailable(call.verb, "awaits diplomacy: a war without a price is a degeneration (plan §17)")),
+            VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => self.apply_army_verb(call, a, params),
             VerbId::TakeLoan => {
                 if !self.actors[&a].institutions.contains(&Institution::Bank) {
                     return Err(VerbError::NotAvailable(call.verb, "no bank: the polity has no institution to borrow from"));

@@ -22,6 +22,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod army;
 pub mod economy;
 pub mod event;
 pub mod ids;
@@ -53,4 +54,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact, TickReport, Unit, World};
+pub use world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact, Siege, TickReport, Unit, World};

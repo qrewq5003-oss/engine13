@@ -47,7 +47,10 @@ pub enum Event {
     /// A verb was called by the player or an agent. Its effect is in the postings and in
     /// the other events of the tick, never a number in the event itself.
     Verb { actor: ActorRef, verb: VerbId, target: Target },
-    Battle { province: ProvinceId, attacker: UnitId, defender: UnitId, outcome: Outcome, losses: (u64, u64) },
+    /// One battle in a province between two polities at war (all their units there); the
+    /// defender is the province's owner if it took part, else the lower id.
+    /// `soldiers` are the sides' men before the battle, `losses` what each lost.
+    Battle { province: ProvinceId, attacker: ActorId, defender: ActorId, outcome: Outcome, soldiers: (u64, u64), losses: (u64, u64) },
     ProvinceChangedHands { province: ProvinceId, from: ActorId, to: ActorId, how: Transfer },
     War { a: ActorId, b: ActorId },
     Peace { a: ActorId, b: ActorId },
@@ -72,6 +75,20 @@ pub enum Event {
     PayShortfall { actor: ActorId, unpaid_kg: u64 },
     /// A polity with a bank borrowed.
     Loan { actor: ActorId, kg: u64 },
+    /// A beaten unit fell back to the nearest province of its own.
+    Retreat { unit: UnitId, to: ProvinceId },
+    /// A beaten unit with nowhere to fall back to was destroyed.
+    UnitDestroyed { unit: UnitId },
+    /// A polity lost its capital and moved it to its most populous province.
+    CapitalMoved { actor: ActorId, to: ProvinceId },
+    /// Foraging armies took from a province's people; `foragers` are the soldiers it fed.
+    Ruin { province: ProvinceId, foragers: u64 },
+    /// A levy was raised from a province into a unit.
+    Recruited { unit: UnitId, soldiers: u64 },
+    /// A unit was disbanded: a levy back to the people, mercenaries out of the world.
+    Disbanded { unit: UnitId, soldiers: u64 },
+    /// Mercenaries were hired against an advance.
+    Hired { unit: UnitId, soldiers: u64, advance_kg: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

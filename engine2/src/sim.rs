@@ -81,15 +81,49 @@ impl Game {
     }
 
     /// The one availability-and-cost function (lesson B42), the same for the player and
-    /// for agents. The economy (E2 step 4) decides the tax verbs and the loan; the rest wait
-    /// for their systems and for the agents of E3.
+    /// for agents. The economy (E2 step 4) decides the tax verbs and the loan, the army (E2
+    /// step 5) the levy, the disbanding and the hire; war and peace wait for diplomacy to
+    /// price them (a verb without a price is a degeneration), the rest for their systems and
+    /// for the agents of E3.
     fn offers(&self, who: ActorRef) -> Vec<VerbOffer> {
         self.display
             .verbs
             .iter()
             .map(|(verb, _)| {
+                let fallen = match who {
+                    ActorRef::Ruler(a) => !self.world.alive(a),
+                    ActorRef::House(_) => false,
+                };
+                let mut cost_kg = 0;
                 let (available, why) = match (verb, who) {
+                    (_, ActorRef::Ruler(_)) if fallen => (false, Some("the polity has fallen")),
                     (VerbId::RaiseTax | VerbId::LowerTax, _) => (false, Some("awaits internal politics")),
+                    (VerbId::DeclareWar | VerbId::MakePeace, _) => (false, Some("awaits diplomacy")),
+                    (VerbId::Recruit, ActorRef::Ruler(a)) => {
+                        if self.world.recruit_per_tick(a, &self.params) > 0 {
+                            (true, None)
+                        } else {
+                            (false, Some("at the levy ceiling"))
+                        }
+                    }
+                    (VerbId::Disband, ActorRef::Ruler(a)) => {
+                        if self.world.units_of(a).is_empty() {
+                            (false, Some("no unit to disband"))
+                        } else {
+                            (true, None)
+                        }
+                    }
+                    (VerbId::HireMercenaries, ActorRef::Ruler(a)) => {
+                        let n = self.world.hire_count(a, &self.params);
+                        if n > 0 {
+                            cost_kg = n * self.params.mercenary_advance_kg;
+                            (true, None)
+                        } else if self.world.recruit_room(a, &self.params) <= 0 {
+                            (false, Some("at the levy ceiling"))
+                        } else {
+                            (false, Some("cannot pay an advance"))
+                        }
+                    }
                     (VerbId::TakeLoan, ActorRef::Ruler(a)) => {
                         if !self.world.actors.get(&a).is_some_and(|x| x.institutions.contains(&Institution::Bank)) {
                             (false, Some("no bank"))
@@ -102,7 +136,7 @@ impl Game {
                     (VerbId::TakeLoan, ActorRef::House(_)) => (false, Some("a house does not borrow for the polity")),
                     _ => (false, Some("not implemented until its system (E2) and the agents (E3)")),
                 };
-                VerbOffer { verb: *verb, available, cost_kg: 0, why: why.map(str::to_string) }
+                VerbOffer { verb: *verb, available, cost_kg, why: why.map(str::to_string) }
             })
             .collect()
     }
