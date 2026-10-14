@@ -162,27 +162,34 @@ fn a_polity_with_no_house_left_raises_a_new_house_from_the_people_of_its_capital
         .events
         .iter()
         .find_map(|e| match e.event {
-            Event::NewDynasty { actor, house, founder, from } if actor == s4 => {
+            Event::NewDynasty { actor, house, founder, from, household } if actor == s4 => {
                 assert_eq!(from, capital, "the founder comes from the capital");
+                assert!((2..=3).contains(&household), "a household of two or three adults, got {household}");
                 Some((house, founder))
             }
             _ => None,
         })
         .expect("a new dynasty");
     assert_eq!(succession_of(&r, s4), Some((r4, founder, Standing::Acclaimed)));
-    // One person, through the ledger, off the people of the capital — not out of nothing.
+    let w = g.world();
+    let risen_persons = w.persons.len() - persons_before;
+    assert!((3..=4).contains(&risen_persons), "founder and household: {risen_persons}");
+    // The founder and the household, through the ledger, off the people of the capital —
+    // not out of nothing.
     let risen: Vec<_> = r.postings.iter().filter(|q| q.source == Source::Rise).collect();
     assert_eq!(risen.len(), 1);
-    assert_eq!((risen[0].account, risen[0].milli), (Account::Population(capital), -1000));
-    let w = g.world();
+    assert_eq!((risen[0].account, risen[0].milli), (Account::Population(capital), -(risen_persons as i64) * 1000));
     assert!(w.alive(s4));
     assert_eq!(w.actors[&s4].ruler, founder);
     assert_eq!(w.actors[&s4].standing, Standing::Acclaimed);
     assert_eq!(w.actors[&s4].provinces, provinces);
-    assert_eq!((w.houses.len(), w.persons.len()), (houses_before + 1, persons_before + 1));
+    assert_eq!(w.houses.len(), houses_before + 1);
     assert_eq!(w.houses[&house].polity, s4);
-    assert_eq!(w.persons[&founder].house, house);
-    assert!(w.is_adult(founder, &p) && w.persons[&founder].parent.is_none());
+    for (id, person) in w.persons.range(PersonId(persons_before as u32)..) {
+        assert_eq!(person.house, house, "{id:?}");
+        assert!(w.is_adult(*id, &p) && person.parent.is_none(), "{id:?}: an adult of no line");
+    }
+    assert_eq!(w.members(house).len(), risen_persons);
     assert_eq!(w.names.houses.len(), w.houses.len());
     assert_eq!(w.names.persons.len(), w.persons.len());
     assert_eq!(w.house_treasury(house), 0);

@@ -21,9 +21,11 @@
 //!
 //! **Houses (E2 step 6a, plan §18).** Every polity gets a ruling house of 3–8 persons with
 //! ages (the ruler 20–60, children and siblings around it), a rule of succession by lot, in
-//! some polities a designated heir and a governor of a province, and 0–2 houses that do not
+//! some polities a designated heir and a governor of a province, and 2–4 houses that do not
 //! rule — the owner's rule that the house role must be able to take the throne needs other
-//! houses to exist as facts of the scenario.
+//! houses to exist as facts of the scenario, and a polity's nobility must not be thinner
+//! than its ruling family (owner on #285: with 0–2 the extinction of every house was a
+//! chain of new dynasties, not an exception).
 //!
 //! Everything drawn comes from the bands of E0 §5 where E0 has a row; what E0 has no row for
 //! is a model choice (kind (в)) and is said so at the constant. The fingerprint of
@@ -76,7 +78,7 @@ const RULING_HOUSE_SIZE: (u64, u64) = (3, 8);
 /// Members of a house that does not rule, kind (в).
 const OTHER_HOUSE_SIZE: (u64, u64) = (2, 5);
 /// Houses that do not rule, per polity, kind (в).
-const OTHER_HOUSES: (u64, u64) = (0, 2);
+const OTHER_HOUSES: (u64, u64) = (2, 4);
 
 fn pick<R: Rng>(rng: &mut R, (lo, hi): (u64, u64)) -> u64 {
     rng.gen_range(lo..=hi)
@@ -705,7 +707,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 16_810_027_809_995_118_780;
+    const PINNED_WORLD_ONE: u64 = 213_264_665_699_613_513;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -743,7 +745,7 @@ mod tests {
                 let members = s.persons.values().filter(|p| p.house == ruler.house).count();
                 assert!((RULING_HOUSE_SIZE.0 as usize..=RULING_HOUSE_SIZE.1 as usize).contains(&members), "seed {seed}: ruling house of {a} has {members}");
                 let houses = s.houses.values().filter(|h| &h.polity == a).count();
-                assert!((1..=1 + OTHER_HOUSES.1 as usize).contains(&houses), "seed {seed}: {a} has {houses} houses");
+                assert!((1 + OTHER_HOUSES.0 as usize..=1 + OTHER_HOUSES.1 as usize).contains(&houses), "seed {seed}: {a} has {houses} houses");
                 if let Some(h) = &actor.heir {
                     assert_eq!(s.persons[h].parent.as_deref(), Some(actor.ruler.as_str()), "seed {seed}: the heir of {a} is not the ruler's child");
                 }

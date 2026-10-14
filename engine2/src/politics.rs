@@ -22,12 +22,13 @@
 //!    election). When no house of the polity has a living person, **a new house rises from
 //!    the people** (owner's rule on #285: the extinction of a dynasty never killed a state —
 //!    someone of the nobility or the army took the throne; a masterless land would be a
-//!    `ReadAbsent`): one person is posted off the population of the capital (`Source::Rise`,
-//!    the one place a person leaves the stocks for the records — no one out of nothing),
-//!    becomes the founder of a house of the polity and takes the throne `Acclaimed`
-//!    (`NewDynasty`). A polity falls only by conquest (§17) and, later, by collapse. The one
-//!    exception: a polity with nobody in any of its provinces has no people to rise from
-//!    and falls.
+//!    `ReadAbsent`): a founder with a household of two or three adults (`DrawPoint::Rise`;
+//!    new dynasties rose from standing families, not from one man — owner's decision after
+//!    the measured chain of one-founder houses dying out) is posted off the population of
+//!    the capital (`Source::Rise`, the one place persons leave the stocks for the records —
+//!    no one out of nothing); the founder takes the throne `Acclaimed` (`NewDynasty`). A
+//!    polity falls only by conquest (§17) and, later, by collapse. The one exception: a
+//!    polity with nobody in any of its provinces has no people to rise from and falls.
 //! 4. **Regency (E0 В1):** a ruler under `majority.age` has a regent — the eldest adult of
 //!    the ruler's house, else of any house of the polity; the regency ends at majority
 //!    (`RegencyEnded`) or passes on the regent's death. A general mechanism, no dates: who
@@ -64,6 +65,11 @@ const FERTILE_AGE: (i32, i32) = (16, 45);
 /// window — an adult with a reproductive life ahead, so the new house can last. Not a
 /// tunable: no row of E0 gives the age of a usurper.
 const FOUNDER_AGE: i32 = (FERTILE_AGE.0 + FERTILE_AGE.1) / 2;
+
+/// The household that rises with the founder: two or three adults (owner's decision on
+/// #285), their ages around the founder's.
+const HOUSEHOLD: (u64, u64) = (2, 3);
+const HOUSEHOLD_AGE_OFFSETS: [i32; 3] = [-5, 5, -10];
 
 /// The standing a succession by rule gives.
 pub fn standing_of_rule(rule: Succession) -> Standing {
@@ -244,17 +250,20 @@ impl World {
         children.into_iter().find_map(|c| self.first_living_in_line(c, skip))
     }
 
-    /// A new house rises from the people of the polity: one person leaves the population
-    /// of the capital (the first province of the polity with anybody in it) through the
-    /// ledger and becomes the founder of a house of the polity. `None` when no province of
-    /// the polity has a person left.
+    /// A new house rises from the people of the polity: a founder and a household of adults
+    /// leave the population of the capital (the first province of the polity with anybody
+    /// in it) through the ledger and become a house of the polity; the household is as
+    /// large as the province's people allow. `None` when no province of the polity has a
+    /// person left.
     fn raise_house(&mut self, a: ActorId) -> Result<Option<PersonId>, WorldError> {
         let capital = self.actors[&a].capital;
         let provinces = self.actors[&a].provinces.clone();
         let Some(from) = std::iter::once(capital).chain(provinces.into_iter().filter(|p| *p != capital)).find(|p| self.population(*p) >= 1) else {
             return Ok(None);
         };
-        self.post(Account::Population(from), Source::Rise, -1000)?;
+        let household = HOUSEHOLD.0 + self.draw(DrawPoint::Rise, a.0) % (HOUSEHOLD.1 - HOUSEHOLD.0 + 1);
+        let persons = (1 + household).min(self.population(from) as u64);
+        self.post(Account::Population(from), Source::Rise, -(persons as i64) * 1000)?;
         let house = HouseId(self.houses.len() as u32);
         let k = self.houses_of(a).len() + 1;
         let (asid, aname) = &self.names.actors[a.index()];
@@ -263,10 +272,14 @@ impl World {
         self.houses.insert(house, House { polity: a });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);
-        self.next_person += 1;
-        self.names.persons.push((format!("{hsid}.1"), format!("{hname} 1")));
-        self.persons.insert(founder, Person { house, born: self.year() - FOUNDER_AGE, parent: None, died: None });
-        self.emit(Event::NewDynasty { actor: a, house, founder, from });
+        for i in 0..persons as usize {
+            let id = PersonId(self.next_person);
+            self.next_person += 1;
+            self.names.persons.push((format!("{hsid}.{}", i + 1), format!("{hname} {}", i + 1)));
+            let age = FOUNDER_AGE + if i == 0 { 0 } else { HOUSEHOLD_AGE_OFFSETS[(i - 1) % HOUSEHOLD_AGE_OFFSETS.len()] };
+            self.persons.insert(id, Person { house, born: self.year() - age, parent: None, died: None });
+        }
+        self.emit(Event::NewDynasty { actor: a, house, founder, from, household: persons - 1 });
         Ok(Some(founder))
     }
 

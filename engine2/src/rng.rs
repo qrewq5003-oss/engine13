@@ -43,6 +43,8 @@ pub enum DrawPoint {
     Violence = 5,
     /// A birth to a person.
     Birth = 6,
+    /// The household of a house rising from the people (keyed by polity).
+    Rise = 7,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.
