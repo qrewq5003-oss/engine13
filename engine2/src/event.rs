@@ -122,6 +122,8 @@ pub enum Event {
     TreatyExpired { a: ActorId, b: ActorId, kind: TreatyKind },
     /// A vassal is a vassal no more: its lord fell, or made the peace that set it free.
     Released { vassal: ActorId, lord: ActorId },
+    /// A vassal's treasury did not cover the tribute due (E0 Д2).
+    TributeShort { vassal: ActorId, lord: ActorId, unpaid_kg: u64 },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

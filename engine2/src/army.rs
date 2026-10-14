@@ -74,23 +74,52 @@ impl World {
         a != b && self.wars.contains_key(&pair(a, b))
     }
 
-    /// Open a war. For the tests only: the verb is closed until diplomacy prices it.
+    /// Open a war without a price. For the tests only: the verb `declare_war` pays in
+    /// legitimacy (`diplomacy.rs`) and then comes here.
     #[cfg(feature = "testing")]
     pub fn declare_war(&mut self, a: ActorId, b: ActorId) -> Result<(), WorldError> {
-        if a == b {
-            return Err(WorldError::WarWithSelf(a));
+        self.open_war(a, b)
+    }
+
+    /// The war itself, with its obligations (E2 step 7, plan §19.2 p. 3–4, owner's rule):
+    /// the attacked side's allies, its lord and its vassals enter the war against the
+    /// attacker, and the attacker's vassals enter against the attacked — **their entry is no
+    /// declaration**: it costs nothing, breaks no treaty, and pulls nobody further in, so one
+    /// war does not light the world in a chain. An entrant whose peace with the other side
+    /// is in force stays out: the treaty holds.
+    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId) -> Result<(), WorldError> {
+        if attacker == victim {
+            return Err(WorldError::WarWithSelf(attacker));
         }
-        for x in [a, b] {
+        for x in [attacker, victim] {
             if !self.actors.contains_key(&x) {
                 return Err(WorldError::UnknownActor(x));
             }
         }
+        self.war_between(attacker, victim);
+        let mut with_victim: Vec<ActorId> = self.allies_of(victim);
+        with_victim.extend(self.lord_of(victim));
+        with_victim.extend(self.vassals_of(victim));
+        for x in with_victim {
+            if x != attacker && self.alive(x) && !self.peace_in_force(x, attacker) {
+                self.war_between(x, attacker);
+            }
+        }
+        for x in self.vassals_of(attacker) {
+            if x != victim && self.alive(x) && !self.peace_in_force(x, victim) {
+                self.war_between(x, victim);
+            }
+        }
+        Ok(())
+    }
+
+    /// Record a war between a pair if there is none, with its event.
+    fn war_between(&mut self, a: ActorId, b: ActorId) {
         let (a, b) = pair(a, b);
         if !self.wars.contains_key(&(a, b)) {
             self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0) });
             self.emit(Event::War { a, b });
         }
-        Ok(())
     }
 
     /// All soldiers of a polity, levies and mercenaries.

@@ -24,7 +24,15 @@
 //! Breaking one is a price, not a prohibition (owner's rule on §19).
 //!
 //! **Vassalage** (`Actor::vassal_of`): a fact of the scenario or the outcome of a peace;
-//! the tribute flows in the economy; a fallen lord frees its vassals (`army.rs`).
+//! the tribute flows in the economy (E0 Д2), not while the vassal is at war with its lord;
+//! the lord's wars are the vassal's and the lord defends the vassal (`army.rs::open_war`);
+//! a fallen lord frees its vassals (`army.rs`); the way out is a war on the lord.
+//!
+//! **Obligations of a bond** (`army.rs::open_war`, owner's rule on §19): a war declared on
+//! a polity brings its allies, its lord and its vassals in against the attacker, and the
+//! attacker's vassals in against the attacked; the entry is no declaration — it costs
+//! nothing, breaks no treaty and pulls nobody further in. Bound polities march through each
+//! other's land and are supplied there by their pay, never by foraging (`movement.rs`).
 //!
 //! **Phase** (after the house and the throne, before the people): treaties that have run
 //! out end; every relation of two living polities moves `relation.rate_per_tick` of the way
@@ -57,6 +65,17 @@ impl World {
 
     pub fn allied(&self, a: ActorId, b: ActorId) -> bool {
         self.treaty(a, b).is_some_and(|t| t.kind == TreatyKind::Alliance)
+    }
+
+    pub fn peace_in_force(&self, a: ActorId, b: ActorId) -> bool {
+        self.treaty(a, b).is_some_and(|t| t.kind == TreatyKind::Peace)
+    }
+
+    /// Friendly land for a polity's units: its own, an ally's, its lord's or a vassal's —
+    /// open to the march, and supplied there by the pay, not by foraging (owner's note on
+    /// #284: a paid army on an ally's land buys its food, it does not ruin the ally).
+    pub fn friendly(&self, a: ActorId, b: ActorId) -> bool {
+        a == b || self.allied(a, b) || self.bound_by_vassalage(a, b)
     }
 
     /// The polities allied with `a` by a treaty in force, in id order.

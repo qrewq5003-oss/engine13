@@ -9,7 +9,15 @@
 //! - a run with relations saves and loads bit for bit;
 //! - on generated worlds the share of polities bound at the start lies in Д3 (the row
 //!   measures the generator in E2, owner's rule on §19), and without agents the starting
-//!   treaties have all run out by the end.
+//!   treaties have all run out by the end;
+//! - a vassal sends its lord the tribute of Д2 out of its take, through the ledger, and
+//!   nothing while at war with it;
+//! - a war declared on a member of an alliance brings its allies, its lord and its vassals
+//!   in, the attacker's vassals in on the other side; the entry is no declaration — no
+//!   price, no breach, no chain (the owner's test: A attacks B, each with an ally — three
+//!   fight, not four); a peace in force keeps an ally out;
+//! - bound polities march through each other's land and are supplied there by their pay,
+//!   never by foraging.
 
 use std::collections::BTreeMap;
 
@@ -247,4 +255,104 @@ fn on_generated_worlds_the_bound_share_at_the_start_lies_in_d3_and_without_agent
     assert!((band[0]..=band[1]).contains(&mean), "Д3 mean {mean:.3} outside {band:?}");
     assert!(shares.iter().all(|s| *s > 0.0), "every generated world starts with a bond");
     let _ = PersonId(0);
+}
+
+fn at(x: u32, y: u32) -> engine2::ProvinceId {
+    engine2::ProvinceId(y * 5 + x)
+}
+
+#[test]
+fn a_vassal_sends_its_lord_the_tribute_of_d2_out_of_its_take_through_the_ledger_and_nothing_while_at_war_with_it() {
+    let p = params();
+    let mut w = testworld::world(3);
+    let (lord, vassal) = (ActorId(0), ActorId(1));
+    w.make_vassal(vassal, lord).unwrap();
+    let r = w.tick(&p).unwrap();
+    let on = |r: &engine2::TickReport, a: ActorId, src: engine2::Source| -> i64 { r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && q.source == src).map(|q| q.milli).sum() };
+    let take = on(&r, vassal, engine2::Source::Tax) / 1000;
+    let sent = on(&r, vassal, engine2::Source::Tribute);
+    let got = on(&r, lord, engine2::Source::Tribute);
+    assert!(take > 0);
+    assert_eq!(sent, -got, "the same figure on both treasuries");
+    assert_eq!(got / 1000, take * p.tribute_share_ppm / 1_000_000, "a fifth of the take");
+    assert!((0.1..=0.3).contains(&(p.tribute_share_ppm as f64 / 1e6)), "inside Д2");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::TributeShort { .. })));
+    // A rebel pays nothing.
+    w.declare_war(vassal, lord).unwrap();
+    let r = w.tick(&p).unwrap();
+    assert_eq!(on(&r, vassal, engine2::Source::Tribute), 0, "no tribute while at war with the lord");
+    assert_eq!(w.lord_of(vassal), Some(lord), "still a vassal until the peace");
+}
+
+#[test]
+fn a_war_on_a_member_of_an_alliance_brings_its_allies_lord_and_vassals_in_and_their_entry_is_no_declaration() {
+    let p = params();
+    // The owner's test: A attacks B; A and B each have an ally — three fight, not four.
+    let mut w = testworld::world(4);
+    let (a, b, c, d, e) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
+    w.ally_now(a, c, &p).unwrap();
+    w.ally_now(b, d, &p).unwrap();
+    w.ally_now(d, e, &p).unwrap();
+    let legitimacy_d = w.actors[&d].legitimacy;
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(a, b) && w.at_war(a, d), "the victim's ally enters against the attacker");
+    assert!(!w.at_war(a, c) && !w.at_war(b, c) && !w.at_war(c, d), "the attacker's ally stays out: it was not attacked");
+    assert!(!w.at_war(a, e) && !w.at_war(e, b), "the entrant's own ally stays out: entry is no declaration, there is no chain");
+    assert_eq!(w.wars.len(), 2);
+    assert!((w.actors[&d].legitimacy - legitimacy_d).abs() < 1e-9, "entry costs the entrant nothing");
+    assert!(w.allied(b, d) && w.allied(a, c), "no treaty is broken by the entry");
+    // Vassals follow their lord's wars; a lord defends its vassal.
+    let mut w = testworld::world(5);
+    w.make_vassal(c, a).unwrap();
+    w.make_vassal(e, b).unwrap();
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(c, b), "the attacker's vassal enters against the attacked");
+    assert!(w.at_war(e, a), "the attacked side's vassal enters against the attacker");
+    assert!(!w.at_war(c, e), "the vassals are not set against each other: pairwise, no chain");
+    let mut w = testworld::world(6);
+    w.make_vassal(b, d).unwrap();
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(d, a), "the lord defends its vassal");
+    // A peace in force keeps an ally out.
+    let mut w = testworld::world(7);
+    w.ally_now(b, d, &p).unwrap();
+    w.bind(a, d, TreatyKind::Peace, &p).unwrap();
+    w.declare_war(a, b).unwrap();
+    assert!(!w.at_war(a, d), "the treaty of peace holds: the ally does not enter");
+}
+
+#[test]
+fn bound_polities_march_through_each_others_land_and_are_supplied_there_by_their_pay_not_by_foraging() {
+    let p = params();
+    let (a, b) = (ActorId(0), ActorId(1));
+    // Closed without a bond.
+    let mut w = testworld::world(8);
+    let unit = w.units_of(a)[0];
+    w.order_move(unit, at(1, 2)).unwrap();
+    let r = w.tick(&p).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::NoPath { unit: u, .. } if u == unit)), "a neighbour's land is closed to the march");
+    assert_eq!(w.units[&unit].position, at(0, 0));
+    // Open to an ally, and supplied there as at home.
+    let mut w = testworld::world(8);
+    w.ally_now(a, b, &p).unwrap();
+    let unit = w.units_of(a)[0];
+    let soldiers = w.soldiers(unit);
+    w.order_move(unit, at(1, 2)).unwrap();
+    let r = w.tick(&p).unwrap();
+    assert_eq!(w.units[&unit].position, at(1, 2), "the right of passage comes with the alliance");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == at(1, 2))), "nobody forages on an ally");
+    let paid = w.actors[&a].paid_share_ppm;
+    let unsupplied = soldiers - soldiers * paid / 1_000_000;
+    let melted = r.events.iter().find_map(|e| match e.event {
+        Event::Attrition { unit: u, unsupplied } if u == unit => Some(unsupplied as i64),
+        _ => None,
+    });
+    assert_eq!(melted.unwrap_or(0), unsupplied, "the paid share is fed by the pay, the unpaid share melts as at home");
+    // The same for a vassal on its lord's land and the lord on the vassal's.
+    let mut w = testworld::world(9);
+    w.make_vassal(b, a).unwrap();
+    let unit = w.units_of(b)[0];
+    w.order_move(unit, at(0, 3)).unwrap();
+    w.tick(&p).unwrap();
+    assert_eq!(w.units[&unit].position, at(0, 3));
 }

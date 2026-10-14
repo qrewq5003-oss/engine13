@@ -15,6 +15,9 @@
 //!   correction on #286 — Venice must not be poorer than every monarchy); a polity at the
 //!   top of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
 //!   collected all they assigned → `Source::Tax`;
+//! - **tribute** (E0 Д2, E2 step 7): a vassal sends `vassal.tribute_share` of its take to
+//!   its lord, what the treasury holds of it, not while at war with the lord → a transfer
+//!   signed `Source::Tribute`;
 //! - **seats** (E0 Х1, `house.income_share_of_seat`): the ruling house takes its share of
 //!   the tax, a governor's house its share of the province's tax — transfers to the houses'
 //!   treasuries (`Source::Seat`, plan §18);
@@ -198,6 +201,22 @@ impl World {
             let income = production * rate / 1_000_000 * share / 1_000_000;
             if income > 0 {
                 self.post(treasury, Source::Tax, income * 1000)?;
+            }
+            // Tribute (E0 Д2, E2 step 7): a vassal sends its lord a share of the take, what
+            // the treasury holds of it; not while it is at war with the lord — a rebel pays
+            // nothing — and not to a lord that has fallen.
+            if let Some(lord) = self.actors[&a].vassal_of {
+                if self.alive(lord) && !self.at_war(a, lord) {
+                    let due = income * params.tribute_share_ppm / 1_000_000;
+                    let paid = due.min(self.treasury(a));
+                    if paid > 0 {
+                        self.post(treasury, Source::Tribute, -paid * 1000)?;
+                        self.post(Account::Treasury(lord), Source::Tribute, paid * 1000)?;
+                    }
+                    if paid < due {
+                        self.emit(Event::TributeShort { vassal: a, lord, unpaid_kg: (due - paid) as u64 });
+                    }
+                }
             }
             // The houses' seats: the throne's share of the tax, a governorship's share of
             // its province's tax.

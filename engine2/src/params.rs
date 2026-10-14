@@ -160,6 +160,8 @@ pub struct Params {
     /// (в) Collection: the share of the assigned tax lost per point of legitimacy below
     /// the norm of lawful rule (`World::lawful_norm`), parts per million.
     pub tax_evasion_ppm_per_legitimacy_point: i64,
+    /// E0 Д2: the share of a vassal's take that goes to its lord, parts per million.
+    pub tribute_share_ppm: i64,
     /// E0 Д1: the term of a treaty, ticks; and the band in years the generator draws from.
     pub treaty_term_ticks: u32,
     pub treaty_term_years_band: [f64; 2],
@@ -294,6 +296,7 @@ impl Params {
         let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
         let interest_band = band("loan.interest_per_year")?;
         let evasion = value("tax.evasion_per_legitimacy_point")?;
+        let tribute = value("vassal.tribute_share")?;
         let treaty_term = value("treaty.term_years")?;
         let treaty_term_band = band("treaty.term_years")?;
         let relation_base = value("relation.base")?;
@@ -354,6 +357,7 @@ impl Params {
             legitimacy_norm_penalty_in_default: norm_penalty_in_default,
             loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
             tax_evasion_ppm_per_legitimacy_point: (evasion * 1_000_000.0).round() as i64,
+            tribute_share_ppm: (tribute * 1_000_000.0).round() as i64,
             treaty_term_ticks: (treaty_term * 2.0).round() as u32,
             treaty_term_years_band: treaty_term_band,
             relation_base,

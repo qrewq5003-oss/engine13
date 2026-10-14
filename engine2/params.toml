@@ -645,6 +645,16 @@ band = [10.0, 30.0]
 unit = "years"
 e0 = "Д1"
 
+# E0 Д2 — the tribute of a vassal, share of its income: Serbia's harach 50 000 then 60 000
+# ducats against a main income of about 200 000 (Ivanović 2019 — opened); the other way —
+# a subsidy of the strong to the weak, 1–2 % — is the gift (`bribe.share_of_revenue`).
+[vassal.tribute_share]
+kind = "a"
+value = 0.2
+band = [0.1, 0.3]
+unit = "share of the take"
+e0 = "Д2"
+
 # E0 Д3 — observed: the share of polities bound by an alliance or by vassalage at a time.
 # Italy 1455: five powers of the league among eight to ten states; the Balkans 1430: Serbia,
 # Wallachia, Byzantium tributaries of the Ottomans; Rome 375: the federates. **By memory** —

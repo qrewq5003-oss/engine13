@@ -83,6 +83,7 @@ pub enum Source {
     Rise,
     Desertion,
     BattleLoss,
+    /// A vassal's tribute (E0 Д2): `−` on its treasury and `+` on the lord's, the same figure.
     Tribute,
     /// Borrowing: `+` on the treasury and `+` on the debt, the same amount.
     Loan,

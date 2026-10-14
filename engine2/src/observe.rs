@@ -118,6 +118,7 @@ impl Observed for Game {
                 Event::CreditRestored { .. } => ObsEvent::Other("CreditRestored".into()),
                 Event::TreatyExpired { a, b, .. } => ObsEvent::Other(format!("TreatyExpired@{}-{}", self.actor_id(*a).0, self.actor_id(*b).0)),
                 Event::Released { vassal, .. } => ObsEvent::Other(format!("Released@{}", self.actor_id(*vassal).0)),
+                Event::TributeShort { vassal, .. } => ObsEvent::Other(format!("TributeShort@{}", self.actor_id(*vassal).0)),
             })
             .collect()
     }
