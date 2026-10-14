@@ -441,7 +441,7 @@ e0 = "В3"
 # (в) The legitimacy norm by the ruler's standing (E0 §1.7): hereditary above elected above
 # acclaimed; a regency below them all. The mixed rule (blood confirmed by acclamation) takes
 # the mean of hereditary and acclaimed. Checked through В5 (the reign's length depends on
-# the norm through В3); the usurper's norm comes with 6b and В6.
+# the norm through В3); the usurper's norm is below (6b, checked through В6).
 [legitimacy.norm_hereditary]
 kind = "c"
 value = 70.0
@@ -562,3 +562,24 @@ kind = "c"
 value = 10.0
 unit = "years"
 checked_by = "Э9"
+
+# (в) Usurpation (E0 В6): the base chance a year at legitimacy 50 that an adult of the
+# polity's houses takes the throne by force; the rule of succession acts through the norm
+# (E0 §5.4), never as a multiplier. Checked through В6. Measured on 20 worlds × 300 ticks:
+# at 0.05 — 5.0 a century per polity (blood 4.6, acclamation 6.1), every polity saw one in
+# 150 years; at 0.03 — see `tests/legitimacy.rs`. The form caps at twice the base (legitimacy
+# 0), so the Roman end of the band (23 a century, 284–395) is out of its reach: that needs
+# civil war and co-rulers, drivers of the collapse system and E3, not a higher base.
+[usurpation.per_year]
+kind = "c"
+value = 0.03
+unit = "share per year at legitimacy 50"
+checked_by = "В6"
+
+# (в) The legitimacy norm of a usurper: below every other standing (E0 §1.7). A usurper
+# invites the next usurpation — the cascades of the third century.
+[legitimacy.norm_usurper]
+kind = "c"
+value = 30.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"

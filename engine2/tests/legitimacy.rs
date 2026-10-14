@@ -7,10 +7,21 @@
 //!   legitimacy, as one posting signed `Verb`; a treasury that cannot pay closes it;
 //! - a debt past the ceiling whose interest the treasury cannot meet is a default: written
 //!   off on the debt alone, paid in legitimacy, the credit closed for the term — no loan for
-//!   the pay, none to the verb — and open again when the term ends.
+//!   the pay, none to the verb — and open again when the term ends;
+//! - a usurper is the regent, else a governor, else the eldest adult of any house of the
+//!   polity (owner's rule on §18); the ruler is executed, the usurper holds the throne as
+//!   `Usurper` with the lowest norm; no candidate — no usurpation; on 20 generated worlds
+//!   over 300 ticks usurpations per century per polity lie in В6, neither never nor always.
 
+use std::collections::BTreeMap;
+
+use engine2::event::Cause;
 use engine2::sim::{Game, Simulation};
-use engine2::{testworld, ActorId, ActorRef, Event, Params, Source, Target, VerbCall, VerbId, World};
+use engine2::{testworld, worldgen, ActorId, ActorRef, Event, Params, PersonId, ProvinceId, ScenarioData, Source, Standing, Succession, Target, VerbCall, VerbId, World};
+
+fn person(s: &ScenarioData, sid: &str) -> PersonId {
+    PersonId(s.persons.keys().position(|k| k == sid).unwrap() as u32)
+}
 
 fn params() -> Params {
     Params::load().unwrap()
@@ -227,4 +238,99 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     assert!(offer(&g).available, "with the credit open the loan is on offer again");
     g.tick(&[loan]).unwrap();
     assert!(g.world().debt(a) > 0);
+}
+
+#[test]
+fn the_usurper_is_the_regent_else_a_governor_else_the_eldest_adult_of_any_house_and_nobody_when_there_is_no_candidate() {
+    let p = params();
+    let s = testworld::five_states_scenario();
+    let s0 = ActorId(0);
+    let (r0, c0, b0, other) = (person(&s, "r0"), person(&s, "c0"), person(&s, "b0"), person(&s, "o0a"));
+    // A governor before an elder adult of another house.
+    let mut w = testworld::world(1);
+    assert_eq!(w.provinces[&ProvinceId(5)].governor, Some(b0));
+    assert!(w.age(other) > w.age(b0), "the other house's adult is the elder");
+    assert_eq!(w.usurper_candidate(s0, &p), Some(b0));
+    let l0 = w.actors[&s0].legitimacy;
+    assert_eq!(w.usurp_now(s0, &p).unwrap(), Some(b0));
+    let r = w.tick(&p).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::RulerDied { actor, person, cause: Cause::Execution } if actor == s0 && person == r0)));
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Succession { actor, from, to, how: Standing::Usurper } if actor == s0 && from == r0 && to == b0)));
+    assert_eq!(w.actors[&s0].ruler, b0);
+    assert_eq!(w.actors[&s0].standing, Standing::Usurper);
+    assert_eq!(w.actors[&s0].heir, None, "the designated heir of the executed ruler is set aside");
+    assert_eq!(w.provinces[&ProvinceId(5)].governor, None, "one seat per person: the governorship fell vacant (the house has no adult without a seat)");
+    assert!(l0 > p.legitimacy_norm_usurper && w.actors[&s0].legitimacy <= p.legitimacy_norm_usurper + 1e-9, "legitimacy fell to the usurper's norm");
+    assert!((w.legitimacy_norm(s0, &p) - p.legitimacy_norm_usurper).abs() < 1e-9);
+    // The regent first: a child on the throne with the governor as regent.
+    let mut w = testworld::world(1);
+    w.kill(r0, Cause::Natural, &p).unwrap();
+    w.tick(&p).unwrap();
+    assert_eq!((w.actors[&s0].ruler, w.actors[&s0].regent), (c0, Some(b0)));
+    assert_eq!(w.usurper_candidate(s0, &p), Some(b0));
+    assert_eq!(w.usurp_now(s0, &p).unwrap(), Some(b0));
+    assert_eq!(w.actors[&s0].ruler, b0);
+    assert!(!w.person_alive(c0));
+    assert_eq!(w.actors[&s0].regent, None);
+    // No candidate — no usurpation: a house of one, the polity's only house.
+    let s4 = ActorId(4);
+    let (r4, c4) = (person(&s, "r4"), person(&s, "c4"));
+    let mut w = testworld::world(1);
+    assert_eq!(w.usurper_candidate(s4, &p), Some(c4), "the eldest adult of the house");
+    w.kill(c4, Cause::Natural, &p).unwrap();
+    assert_eq!(w.usurper_candidate(s4, &p), None);
+    assert_eq!(w.usurp_now(s4, &p).unwrap(), None);
+    assert_eq!(w.actors[&s4].ruler, r4);
+    assert!(w.person_alive(r4));
+    let _ = Succession::Blood;
+}
+
+/// В6 on the generated worlds: usurpations per century per polity.
+#[test]
+fn on_generated_worlds_usurpations_per_century_per_polity_lie_in_b6_neither_never_nor_always() {
+    let p = params();
+    let band = p.entries["usurpation.observed_per_century"].band.unwrap();
+    let mut by_rule: BTreeMap<Succession, (u64, u64)> = BTreeMap::new();
+    let (mut usurpations, mut polity_centuries) = (0u64, 0.0f64);
+    // «Not always»: a polity whose first century saw no usurpation.
+    let mut quiet_centuries = 0u64;
+    for seed in 1..=20u64 {
+        let s = worldgen::generate(seed, &p);
+        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut per_actor: BTreeMap<ActorId, u64> = g.world().actors.keys().map(|a| (*a, 0)).collect();
+        let mut first_century: BTreeMap<ActorId, u64> = per_actor.clone();
+        for t in 0..300u32 {
+            let r = g.tick(&[]).unwrap();
+            for e in &r.events {
+                if let Event::Succession { actor, how: Standing::Usurper, .. } = e.event {
+                    *per_actor.get_mut(&actor).unwrap() += 1;
+                    if t < 200 {
+                        *first_century.get_mut(&actor).unwrap() += 1;
+                    }
+                }
+            }
+        }
+        let w = g.world();
+        for (a, n) in &per_actor {
+            let rule = w.actors[a].succession;
+            let e = by_rule.entry(rule).or_insert((0, 0));
+            e.0 += n;
+            e.1 += 1;
+            usurpations += n;
+            polity_centuries += 1.5;
+            if first_century[a] == 0 {
+                quiet_centuries += 1;
+            }
+            // Every seat is held by a living person of the polity's own houses.
+            if w.alive(*a) {
+                assert_eq!(w.houses[&w.persons[&w.actors[a].ruler].house].polity, *a, "seed {seed}: a usurper from another polity");
+            }
+        }
+    }
+    let per_century = usurpations as f64 / polity_centuries;
+    let rules: Vec<String> = by_rule.iter().map(|(r, (n, k))| format!("{r:?} {:.1}", *n as f64 / (*k as f64 * 1.5))).collect();
+    eprintln!("В6 usurpations per century per polity {per_century:.1} ({usurpations} over {polity_centuries:.0} polity-centuries; {quiet_centuries} polities with none in their first century); by rule: {}", rules.join(", "));
+    assert!(usurpations > 0, "never");
+    assert!(quiet_centuries > 0, "always: every polity saw a usurpation in its first century");
+    assert!((band[0]..=band[1]).contains(&per_century), "В6 {per_century:.1} outside {band:?}");
 }

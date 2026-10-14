@@ -147,6 +147,10 @@ pub struct Params {
     /// (в) Default: its price in legitimacy and the ticks the credit stays closed.
     pub legitimacy_cost_default: f64,
     pub default_ticks_without_credit: u32,
+    /// (в) E0 В6: the base chance of a usurpation per tick (at legitimacy 50).
+    pub usurpation_per_tick: f64,
+    /// (в) The legitimacy norm of a usurper.
+    pub legitimacy_norm_usurper: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -262,6 +266,8 @@ impl Params {
         let order_gain = value("order.gain")?;
         let cost_default = value("legitimacy.cost_default")?;
         let years_without_credit = value("default.years_without_credit")?;
+        let usurpation = value("usurpation.per_year")?;
+        let norm_usurper = value("legitimacy.norm_usurper")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -307,6 +313,8 @@ impl Params {
             order_gain,
             legitimacy_cost_default: cost_default,
             default_ticks_without_credit: (years_without_credit * 2.0).round() as u32,
+            usurpation_per_tick: usurpation / 2.0,
+            legitimacy_norm_usurper: norm_usurper,
             entries,
         })
     }

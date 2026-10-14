@@ -11,6 +11,15 @@
 //!    (`DrawPoint::Violence`, keyed by polity) against `В3/2 × (100 − L)/50`: at legitimacy
 //!    50 the base rate, at 100 none, at 0 twice the base. The rule of succession acts
 //!    through the legitimacy norm, never as a multiplier (E0 §5.4).
+//! 2b. **Usurpation (E0 В6):** one draw per living polity whose ruler is still alive
+//!    (`DrawPoint::Usurpation`, keyed by polity) against `В6_base/2 × (100 − L)/50`, the
+//!    same shape as В3. The usurper is an adult of **any house of the polity** (owner's rule
+//!    on §18): the regent first (Lodovico), then a governor, then the eldest adult; with no
+//!    candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
+//!    executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
+//!    standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
+//!    usurper's norm if it was above it. The rule of succession acts through the norm,
+//!    never as a multiplier (E0 §5.4).
 //! 3. **Succession:** a polity whose ruler died this tick gets its next ruler — the
 //!    designated heir if alive, else by the rule ([`Succession`]): by blood the line by
 //!    seniority (descendants first, elder lines first, then the nearest collateral line);
@@ -155,7 +164,48 @@ impl World {
             Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
             Standing::Elected => params.legitimacy_norm_elected,
             Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+            Standing::Usurper => params.legitimacy_norm_usurper,
         }
+    }
+
+    /// Who would take the throne by force: the regent, else a governor, else the eldest
+    /// adult of any house of the polity; never the ruler, never a child.
+    pub fn usurper_candidate(&self, a: ActorId, params: &Params) -> Option<PersonId> {
+        let actor = &self.actors[&a];
+        if let Some(r) = actor.regent.filter(|r| self.person_alive(*r) && self.is_adult(*r, params)) {
+            return Some(r);
+        }
+        let adults = self.people_of_polity_adults(a, params);
+        let governors: Vec<PersonId> = adults.iter().copied().filter(|p| !self.governed_by(*p).is_empty()).collect();
+        self.eldest(&governors, true, params).or_else(|| self.eldest(&adults, true, params))
+    }
+
+    /// The usurpation itself: the ruler executed, the usurper seated.
+    fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
+        let dead = self.actors[&a].ruler;
+        self.die(dead, Cause::Execution, params)?;
+        {
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.ruler = usurper;
+            actor.heir = None;
+            actor.regent = None;
+            actor.standing = Standing::Usurper;
+            actor.legitimacy = actor.legitimacy.min(params.legitimacy_norm_usurper);
+        }
+        self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
+        for province in self.governed_by(usurper) {
+            self.pass_governorship(province, usurper, params)?;
+        }
+        Ok(())
+    }
+
+    /// A usurpation before a tick, by the candidate the rule names. For the tests only:
+    /// `None` when the polity has no candidate, and nothing happens then.
+    #[cfg(feature = "testing")]
+    pub fn usurp_now(&mut self, a: ActorId, params: &Params) -> Result<Option<PersonId>, WorldError> {
+        let Some(u) = self.usurper_candidate(a, params) else { return Ok(None) };
+        self.usurp(a, u, params)?;
+        Ok(Some(u))
     }
 
     /// One keyed draw of a point that draws **once per id per tick** by construction (each
@@ -431,6 +481,19 @@ impl World {
             if self.draw_once(DrawPoint::Violence, a.0) < per_tick {
                 let ruler = self.actors[a].ruler;
                 self.die(ruler, Cause::Murder, params)?;
+            }
+        }
+        // 2b. Usurpation: a living polity whose ruler survived the tick so far.
+        for a in &actors {
+            if !self.alive(*a) {
+                continue;
+            }
+            let legitimacy = self.actors[a].legitimacy;
+            let per_tick = params.usurpation_per_tick * (100.0 - legitimacy) / 50.0;
+            if self.draw_once(DrawPoint::Usurpation, a.0) < per_tick {
+                if let Some(u) = self.usurper_candidate(*a, params) {
+                    self.usurp(*a, u, params)?;
+                }
             }
         }
         // 3. Successions: a polity with land whose ruler died this tick.

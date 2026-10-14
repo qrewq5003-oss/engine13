@@ -45,6 +45,8 @@ pub enum DrawPoint {
     Birth = 6,
     /// The household of a house rising from the people (keyed by polity).
     Rise = 7,
+    /// A usurpation of the throne (keyed by polity).
+    Usurpation = 8,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.

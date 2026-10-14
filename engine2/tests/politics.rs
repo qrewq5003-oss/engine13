@@ -246,7 +246,7 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
     let reign_band = p.entries["reign.observed_years"].band.unwrap();
     let x4_band = p.entries["house.observed_share_of_income"].band.unwrap();
     let mut reigns: Vec<f64> = Vec::new();
-    let (mut natural, mut murders, mut births, mut extinct, mut successions_across_houses, mut falls, mut dynasties) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut natural, mut murders, mut executions, mut births, mut extinct, mut successions_across_houses, mut falls, mut dynasties) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     // The houses of the start are measured at the end apart from the houses risen in play,
     // which start from one founder and would pull the median down.
     let mut sizes_end: Vec<usize> = Vec::new();
@@ -265,10 +265,10 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
             for e in &r.events {
                 match e.event {
                     Event::RulerDied { actor, cause, .. } => {
-                        if cause == Cause::Murder {
-                            murders += 1;
-                        } else {
-                            natural += 1;
+                        match cause {
+                            Cause::Murder => murders += 1,
+                            Cause::Execution => executions += 1,
+                            _ => natural += 1,
                         }
                         reigns.push(f64::from(t + 1 - since[&actor]) / 2.0);
                     }
@@ -325,7 +325,7 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
     let x4 = seat_total as f64 / tax_total as f64;
     let (m_start, m_end, m_risen) = (median(&mut sizes_start), median(&mut sizes_end), median(&mut sizes_risen));
     eprintln!(
-        "В5 mean reign {:.1} years over {} reigns ({natural} natural, {murders} violent); {births} births; houses {} of which {extinct} extinct, median size {m_start} -> {m_end}; {successions_across_houses} successions across houses, {dynasties} new dynasties (risen houses: median size {m_risen} at the end), {falls} polities fell; Х4 great houses' share of the tax {x4:.4}",
+        "В5 mean reign {:.1} years over {} reigns ({natural} natural, {murders} violent, {executions} executed by a usurper); {births} births; houses {} of which {extinct} extinct, median size {m_start} -> {m_end}; {successions_across_houses} successions across houses, {dynasties} new dynasties (risen houses: median size {m_risen} at the end), {falls} polities fell; Х4 great houses' share of the tax {x4:.4}",
         mean(&reigns),
         reigns.len(),
         sizes_end.len() + sizes_risen.len()
