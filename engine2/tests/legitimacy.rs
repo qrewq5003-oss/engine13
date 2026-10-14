@@ -6,9 +6,14 @@
 //! - a lasting decision shifts the norm (review of #286): every step of the rate above the
 //!   tithe lowers the norm while the rate holds, every step below raises it; a default
 //!   lowers the norm for the term of the closed credit and the interest stays at the top of
-//!   Э6 afterwards; paired runs — a greedy ruler (tax to the top, order whenever below the
-//!   norm) and a borrower who defaults do not beat the plain ruler on both income and
-//!   legitimacy over 100 ticks;
+//!   Э6 afterwards;
+//! - the tax collected is the assigned tax times a share that falls with legitimacy below
+//!   full collection (review of #286: legitimacy costs the polity, not only the ruler);
+//!   paired runs are judged by the outcome of brief §1 — income, provinces, the houses'
+//!   seats and members — never by legitimacy as a number: a greedy ruler (tax to the top,
+//!   order whenever below the norm) gains at most a quarter over the plain one in net
+//!   income, on the test world and on generated worlds, where the greedy take stays inside
+//!   Э8; a borrower who spends the loan ends with fewer resources;
 //! - `enforce_order` takes its share of a year's revenue from the treasury for its gain in
 //!   legitimacy, as one posting signed `Verb`; a treasury that cannot pay closes it;
 //! - a debt past the ceiling whose interest the treasury cannot meet is a default: written
@@ -56,14 +61,16 @@ fn the_tax_verbs_move_the_rate_one_step_for_a_price_in_legitimacy_and_close_at_t
     let bad = VerbCall { target: Target::Actor(a), ..raise };
     assert!(matches!(w.apply_verb(&bad, &p), Err(engine2::economy::VerbError::BadTarget(VerbId::RaiseTax, _))));
     assert_eq!(w.actors[&a].tax_rate_ppm, rate0);
-    // The take follows the rate: a tick at the raised rate collects more than one at the
-    // base rate, by the step's share of production.
+    // The take follows the rate — through the share collected, which the price in
+    // legitimacy has just lowered.
     let production = w.production_per_tick(a, &p);
     w.apply_verb(&raise, &p).unwrap();
+    let share = w.collection_share_ppm(a, &p);
+    assert!(share < 1_000_000, "the blow to legitimacy costs collection at once");
     let r = w.tick(&p).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::TaxRateChanged { actor, from_ppm, to_ppm } if actor == a && from_ppm == rate0 && to_ppm == rate0 + p.tax_step_ppm)));
     let tax: i64 = r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && q.source == Source::Tax).map(|q| q.milli).sum();
-    assert_eq!(tax / 1000, production * (rate0 + p.tax_step_ppm) / 1_000_000);
+    assert_eq!(tax / 1000, production * (rate0 + p.tax_step_ppm) / 1_000_000 * share / 1_000_000);
     // Up to the top of the band and no further; down to the bottom and no further.
     let mut raised = 0;
     while w.apply_verb(&raise, &p).is_ok() {
@@ -395,73 +402,189 @@ fn every_step_of_the_tax_above_the_tithe_lowers_the_norm_while_the_rate_holds_an
     assert!(w.legitimacy_norm(a, &p) <= 100.0);
 }
 
-/// One ruler plays each strategy over 100 ticks on the same world with the same draws.
-/// Returns (net income over the run: tax collected less kg spent through verbs; mean
-/// legitimacy; legitimacy at the end; kg spent through verbs; net worth at the end).
-fn play_strategy(strategy: &str, p: &Params) -> (i64, f64, f64, i64, i64) {
+/// The greedy ruler may gain at most this over the plain one in net income: the arithmetic
+/// of the two (в) coefficients gives +22 % at the best rate inside Э4 (16 %: the norm four
+/// steps lower, the share 0.68, the take 10.9 % against the tithe's 10 % … and at the top,
+/// 20 %: the share 0.6, the take 12 %); a quarter is that gain with its margin, never a
+/// half — a hard hand pays, but it is not free and not nothing (owner on #286).
+const GREEDY_GAIN_CEILING: f64 = 0.25;
+
+/// The outcome of brief §1 for one polity: net income over the run (tax collected less kg
+/// spent through verbs), provinces at the end, seats held by its houses (throne and
+/// governorships) and their living members, kg spent through verbs, net worth at the end.
+#[derive(Debug, Clone, Copy)]
+struct Outcome {
+    net_income: i64,
+    provinces: usize,
+    seats: usize,
+    members: usize,
+    spent: i64,
+    net_worth: i64,
+    mean_legitimacy: f64,
+}
+
+fn outcome_of(w: &World, a: ActorId, income: i64, spent: i64, legit_sum: f64, ticks: u32) -> Outcome {
+    let houses: Vec<_> = w.houses_of(a);
+    let seats = houses.iter().map(|h| {
+        let mut n = 0;
+        for p in w.members(*h) {
+            if w.actors[&a].ruler == p {
+                n += 1;
+            }
+            n += w.provinces.values().filter(|pr| pr.governor == Some(p)).count();
+        }
+        n
+    }).sum();
+    Outcome {
+        net_income: income - spent,
+        provinces: w.actors[&a].provinces.len(),
+        seats,
+        members: houses.iter().map(|h| w.members(*h).len()).sum(),
+        spent,
+        net_worth: w.treasury(a) - w.debt(a),
+        mean_legitimacy: legit_sum / f64::from(ticks),
+    }
+}
+
+/// One tick of a strategy for one ruler, before the world's tick. Returns kg spent.
+fn act(w: &mut World, a: ActorId, strategy: &str, p: &Params) -> i64 {
+    let who = ActorRef::Ruler(a);
+    let call = |v: VerbId| VerbCall { actor: who, verb: v, target: Target::None };
+    let mut spent = 0;
+    if !w.alive(a) {
+        return 0;
+    }
+    match strategy {
+        "plain" => {}
+        "greedy" => {
+            if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
+                w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
+            }
+            if w.actors[&a].legitimacy < w.legitimacy_norm(a, p) && w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
+                spent += w.order_cost(a, p);
+                w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+            }
+        }
+        "order every tick" => {
+            if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
+                w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
+            }
+            if w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
+                spent += w.order_cost(a, p);
+                w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+            }
+        }
+        "borrow and default" => {
+            let _ = w.apply_verb(&call(VerbId::TakeLoan), p);
+            let mut n = 0;
+            while w.order_cost(a, p) > 0 && w.treasury(a) >= w.order_cost(a, p) && n < 50 {
+                spent += w.order_cost(a, p);
+                w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
+                n += 1;
+            }
+        }
+        _ => unreachable!(),
+    }
+    spent
+}
+
+/// One ruler plays a strategy over 100 ticks on the test world with the same draws.
+fn play_strategy(strategy: &str, p: &Params) -> Outcome {
     let mut w = world();
     let a = ActorId(0);
     w.actors.get_mut(&a).unwrap().institutions.insert(engine2::Institution::Bank);
-    let who = ActorRef::Ruler(a);
-    let call = |v: VerbId| VerbCall { actor: who, verb: v, target: Target::None };
     let (mut income, mut legit_sum, mut spent) = (0i64, 0.0f64, 0i64);
     for _ in 0..100 {
-        match strategy {
-            "plain" => {}
-            "greedy" => {
-                if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
-                    w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
-                }
-                if w.actors[&a].legitimacy < w.legitimacy_norm(a, p) && w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
-                    spent += w.order_cost(a, p);
-                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
-                }
-            }
-            "order every tick" => {
-                if w.tax_room(a, VerbId::RaiseTax, p).is_ok() {
-                    w.apply_verb(&call(VerbId::RaiseTax), p).unwrap();
-                }
-                if w.treasury(a) >= w.order_cost(a, p) && w.order_cost(a, p) > 0 {
-                    spent += w.order_cost(a, p);
-                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
-                }
-            }
-            "borrow and default" => {
-                let _ = w.apply_verb(&call(VerbId::TakeLoan), p);
-                let mut n = 0;
-                while w.order_cost(a, p) > 0 && w.treasury(a) >= w.order_cost(a, p) && n < 50 {
-                    spent += w.order_cost(a, p);
-                    w.apply_verb(&call(VerbId::EnforceOrder), p).unwrap();
-                    n += 1;
-                }
-            }
-            _ => unreachable!(),
-        }
+        spent += act(&mut w, a, strategy, p);
         let r = w.tick(p).unwrap();
         income += r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
         legit_sum += w.actors[&a].legitimacy;
     }
-    (income - spent, legit_sum / 100.0, w.actors[&a].legitimacy, spent, w.treasury(a) - w.debt(a))
+    outcome_of(&w, a, income, spent, legit_sum, 100)
 }
 
 #[test]
-fn paired_runs_a_greedy_ruler_and_a_defaulter_do_not_beat_the_plain_ruler_on_both_income_and_legitimacy_over_100_ticks() {
+fn the_tax_collected_falls_with_legitimacy_below_full_collection() {
+    let p = params();
+    let mut w = world();
+    let a = ActorId(0);
+    let full = p.tax_full_collection_at_legitimacy;
+    for (legitimacy, expected_ppm) in [(full, 1_000_000), (full + 20.0, 1_000_000), (full - 25.0, 1_000_000 - 25 * p.tax_evasion_ppm_per_legitimacy_point), (0.0, 1_000_000 - (full as i64) * p.tax_evasion_ppm_per_legitimacy_point)] {
+        w.actors.get_mut(&a).unwrap().legitimacy = legitimacy.min(100.0);
+        assert_eq!(w.collection_share_ppm(a, &p), expected_ppm, "at legitimacy {legitimacy}");
+        let production = w.production_per_tick(a, &p);
+        let rate = w.actors[&a].tax_rate_ppm;
+        let r = w.tick(&p).unwrap();
+        let tax: i64 = r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && q.source == Source::Tax).map(|q| q.milli).sum();
+        assert_eq!(tax / 1000, production * rate / 1_000_000 * expected_ppm / 1_000_000, "at legitimacy {legitimacy}");
+    }
+    assert!(w.collection_share_ppm(a, &p) > 0, "even at zero legitimacy something is collected");
+}
+
+#[test]
+fn on_generated_worlds_the_greedy_take_stays_inside_e8_and_gains_at_most_the_ceiling_over_the_plain_ruler() {
+    let p = params();
+    let band = p.entries["tax.observed_share_of_production"].band.unwrap();
+    let mut totals: BTreeMap<&str, (i64, i64, i64)> = BTreeMap::new(); // (tax, production, spent)
+    let mut worst_gain = f64::MIN;
+    let mut shares: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    for seed in 1..=10u64 {
+        let s = worldgen::generate(seed, &p);
+        let mut per_world: BTreeMap<&str, i64> = BTreeMap::new();
+        for strategy in ["plain", "greedy"] {
+            let mut g = Game::new(&s, params(), seed).unwrap();
+            let ids: Vec<ActorId> = g.world().actors.keys().copied().collect();
+            let (mut tax, mut production, mut spent) = (0i64, 0i64, 0i64);
+            for _ in 0..100 {
+                for a in &ids {
+                    spent += act(g.world_mut(), *a, strategy, &p);
+                }
+                for a in &ids {
+                    if g.world().alive(*a) {
+                        production += g.world().production_per_tick(*a, &p);
+                    }
+                }
+                let r = g.tick(&[]).unwrap();
+                tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
+            }
+            let share = tax as f64 / production as f64;
+            assert!((band[0]..=band[1]).contains(&share), "seed {seed} {strategy}: tax share of production {share:.3} outside Э8 {band:?}");
+            shares.entry(strategy).or_default().push(share);
+            let t = totals.entry(strategy).or_insert((0, 0, 0));
+            *t = (t.0 + tax, t.1 + production, t.2 + spent);
+            per_world.insert(strategy, tax - spent);
+        }
+        let gain = per_world["greedy"] as f64 / per_world["plain"] as f64 - 1.0;
+        worst_gain = worst_gain.max(gain);
+    }
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+    let (plain, greedy) = (totals["plain"], totals["greedy"]);
+    let gain = (greedy.0 - greedy.2) as f64 / (plain.0 - plain.2) as f64 - 1.0;
+    eprintln!(
+        "Э8 tax share of production: plain {:.3}, greedy {:.3}; greedy net income over plain: {:+.1}% in all, worst world {:+.1}%",
+        mean(&shares["plain"]),
+        mean(&shares["greedy"]),
+        gain * 100.0,
+        worst_gain * 100.0
+    );
+    assert!(gain <= GREEDY_GAIN_CEILING, "the greedy ruler gains {:+.1}% over the plain one: above the ceiling", gain * 100.0);
+}
+#[test]
+fn paired_runs_by_the_outcome_of_brief_1_a_greedy_ruler_gains_at_most_the_ceiling_and_a_borrower_who_spends_the_loan_ends_poorer() {
     let p = params();
     let plain = play_strategy("plain", &p);
     let greedy = play_strategy("greedy", &p);
     let every = play_strategy("order every tick", &p);
     let defaulter = play_strategy("borrow and default", &p);
-    eprintln!("plain: net income {} mean legitimacy {:.1} end {:.1} net worth {}", plain.0, plain.1, plain.2, plain.4);
-    eprintln!("greedy (tax to the top, order when below the norm): net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", greedy.0, greedy.1, greedy.2, greedy.3, greedy.4);
-    eprintln!("order whenever affordable at the top tax: net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", every.0, every.1, every.2, every.3, every.4);
-    eprintln!("borrow to the ceiling, spend, default: net income {} mean legitimacy {:.1} end {:.1} spent {} net worth {}", defaulter.0, defaulter.1, defaulter.2, defaulter.3, defaulter.4);
-    assert!(greedy.0 > plain.0, "the greedy ruler does collect more");
-    for (name, run) in [("greedy", &greedy), ("order whenever affordable", &every)] {
-        assert!(!(run.0 > plain.0 && run.1 > plain.1), "{name}: beats the plain ruler on both net income and mean legitimacy");
-        assert!(!(run.0 > plain.0 && run.2 > plain.2), "{name}: beats the plain ruler on both net income and legitimacy at the end");
+    for (name, o) in [("plain", &plain), ("greedy: tax to the top, order when below the norm", &greedy), ("order whenever affordable at the top tax", &every), ("borrow to the ceiling and spend", &defaulter)] {
+        eprintln!("{name}: net income {} provinces {} seats {} members {} spent {} net worth {} (mean legitimacy {:.1})", o.net_income, o.provinces, o.seats, o.members, o.spent, o.net_worth, o.mean_legitimacy);
     }
-    // Resources the defaulter commanded: what it spent plus what it holds net of debt.
-    let (plain_resources, defaulter_resources) = (plain.3 + plain.4, defaulter.3 + defaulter.4);
-    assert!(!(defaulter_resources > plain_resources && defaulter.1 > plain.1), "the defaulter beats the plain ruler on both resources and mean legitimacy");
-    assert!(!(defaulter_resources > plain_resources && defaulter.2 > plain.2), "… and on both resources and legitimacy at the end");
+    assert_eq!(plain.provinces, greedy.provinces, "without war no land moves: the price is in the take");
+    for (name, o) in [("greedy", &greedy), ("order whenever affordable", &every)] {
+        let gain = o.net_income as f64 / plain.net_income as f64 - 1.0;
+        assert!(gain <= GREEDY_GAIN_CEILING, "{name}: {:+.1}% net income over the plain ruler, above the ceiling", gain * 100.0);
+    }
+    // Resources the borrower commanded: what it spent plus what it holds net of debt.
+    let (plain_resources, defaulter_resources) = (plain.spent + plain.net_worth, defaulter.spent + defaulter.net_worth);
+    assert!(defaulter_resources < plain_resources, "borrowing to spend on order is not a source of resources: {defaulter_resources} vs {plain_resources}");
 }

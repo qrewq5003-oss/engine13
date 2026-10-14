@@ -92,13 +92,17 @@ fn with_a_bank_the_polity_borrows_to_the_ceiling_pays_interest_and_its_treasury_
     let mut borrowed = false;
     let mut interest = 0i64;
     for _ in 0..80 {
+        let (debt_before, room_before) = (w.debt(a), w.loan_room(a, &p));
         let r = w.tick(&p).unwrap();
         assert!(w.treasury(a) >= 0, "treasury {} below zero", w.treasury(a));
         borrowed |= w.debt(a) > 0;
-        interest += r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum::<i64>();
-        // Interest alone carries the debt past the ceiling, by at most the interest of a tick.
-        let c = w.debt_ceiling(a, &p);
-        assert!(w.debt(a) <= c + c * p.loan_interest_ppm_per_tick / 1_000_000 + 1, "debt {} past the ceiling {c}", w.debt(a));
+        let tick_interest = r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum::<i64>();
+        interest += tick_interest;
+        // Nothing but interest carries the debt past the room the ceiling left: no loan
+        // beyond it. (The ceiling itself moves with the revenue — with the people, and
+        // since 6b with legitimacy through the share collected — so the debt is compared
+        // with the room of the tick, not with the ceiling of the next.)
+        assert!(w.debt(a) - debt_before <= room_before + tick_interest / 1000 + 1, "debt {} from {debt_before}: borrowed past the room {room_before}", w.debt(a));
     }
     assert!(borrowed, "a bank lets the polity borrow");
     assert!(interest > 0, "debt costs interest");

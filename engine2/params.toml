@@ -309,9 +309,11 @@ band = [5.0, 10.0]
 unit = "years of revenue"
 e0 = "Э7"
 
-# E0 Э8 — observed: the polity's revenue as a share of production. Measured, not an acceptance
-# while nothing moves the rate on the generated worlds: the tax verbs are priced (6b), the
-# agents of E3 will move it, and the take becomes the measure then (plan §16, §18.3).
+# E0 Э8 — observed: the polity's revenue as a share of production. An acceptance since 6b
+# (review of #286): the take is the rate × the share collected, and the share falls with
+# legitimacy (`tax.evasion_per_legitimacy_point`), so a polity at the top of Э4 must stay
+# inside this band — states never collected all they assigned. Checked on the generated
+# worlds for the plain and for the greedy ruler (`tests/legitimacy.rs`).
 [tax.observed_share_of_production]
 kind = "b"
 band = [0.03, 0.16]
@@ -611,3 +613,23 @@ kind = "c"
 value = 20.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+
+# (в) Collection (review of #286: legitimacy must cost the polity, not only the person on
+# the throne): collected = rate × production × share, and the share falls by this per point
+# of legitimacy below `tax.full_collection_at_legitimacy` — evasion, arrears, refusal. At
+# the greedy equilibrium (the top of Э4, legitimacy 20) the share is 0.6 and the take 12 %
+# of production: inside Э8, a fifth above the tithe, never double it. Checked through Э8.
+[tax.evasion_per_legitimacy_point]
+kind = "c"
+value = 0.008
+unit = "share of the assigned tax lost per point of legitimacy below full collection"
+checked_by = "Э8"
+
+# (в) The legitimacy at which everything assigned is collected: the norm of a hereditary
+# ruler. Below it the share falls; a usurper at his own norm (30) collects 0.68 — contested
+# rule is poorer rule. Checked through Э8.
+[tax.full_collection_at_legitimacy]
+kind = "c"
+value = 70.0
+unit = "legitimacy, 0–100"
+checked_by = "Э8"

@@ -157,6 +157,10 @@ pub struct Params {
     pub legitimacy_norm_penalty_in_default: f64,
     /// E0 Э6: the interest a defaulter pays afterwards — the top of the band, per tick.
     pub loan_interest_after_default_ppm_per_tick: i64,
+    /// (в) Collection: the share of the assigned tax lost per point of legitimacy below
+    /// `tax_full_collection_at_legitimacy`, parts per million.
+    pub tax_evasion_ppm_per_legitimacy_point: i64,
+    pub tax_full_collection_at_legitimacy: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -277,6 +281,8 @@ impl Params {
         let norm_per_tax_step = value("legitimacy.norm_per_tax_step")?;
         let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
         let interest_band = band("loan.interest_per_year")?;
+        let evasion = value("tax.evasion_per_legitimacy_point")?;
+        let full_collection = value("tax.full_collection_at_legitimacy")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -327,6 +333,8 @@ impl Params {
             legitimacy_norm_per_tax_step: norm_per_tax_step,
             legitimacy_norm_penalty_in_default: norm_penalty_in_default,
             loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
+            tax_evasion_ppm_per_legitimacy_point: (evasion * 1_000_000.0).round() as i64,
+            tax_full_collection_at_legitimacy: full_collection,
             entries,
         })
     }

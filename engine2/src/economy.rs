@@ -5,7 +5,12 @@
 //! Per polity, per tick, in canonical order of actors:
 //! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2);
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
-//!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) → `Source::Tax`;
+//!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) × **the share
+//!   collected** (E2 step 6b, review of #286): the share falls by
+//!   `tax.evasion_per_legitimacy_point` for every point of legitimacy below
+//!   `tax.full_collection_at_legitimacy` — evasion, arrears, refusal; a polity at the top
+//!   of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
+//!   collected all they assigned → `Source::Tax`;
 //! - **seats** (E0 Х1, `house.income_share_of_seat`): the ruling house takes its share of
 //!   the tax, a governor's house its share of the province's tax — transfers to the houses'
 //!   treasuries (`Source::Seat`, plan §18);
@@ -146,7 +151,15 @@ impl World {
     }
 
     pub(crate) fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
-        self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000
+        self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000 * self.collection_share_ppm(a, params) / 1_000_000
+    }
+
+    /// The share of the assigned tax a polity collects, parts per million: everything at
+    /// `tax.full_collection_at_legitimacy` and above, less by
+    /// `tax.evasion_per_legitimacy_point` for every point of legitimacy below it.
+    pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
+        let gap = (params.tax_full_collection_at_legitimacy - self.actors[&a].legitimacy).max(0.0);
+        (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
     }
 
     /// Borrow `amount` from the bank: the same figure on both accounts.
@@ -175,7 +188,8 @@ impl World {
             let treasury = Account::Treasury(a);
             let production = self.production_per_tick(a, params);
             let rate = self.actors[&a].tax_rate_ppm;
-            let income = production * rate / 1_000_000;
+            let share = self.collection_share_ppm(a, params);
+            let income = production * rate / 1_000_000 * share / 1_000_000;
             if income > 0 {
                 self.post(treasury, Source::Tax, income * 1000)?;
             }
@@ -185,7 +199,7 @@ impl World {
             let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
             for p in self.actors[&a].provinces.clone() {
                 if let Some(g) = self.provinces[&p].governor {
-                    let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000;
+                    let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000 * share / 1_000_000;
                     seats.push((self.persons[&g].house, province_tax * params.seat_income_share_ppm / 1_000_000));
                 }
             }

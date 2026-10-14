@@ -65,7 +65,9 @@
 //! the closed credit (`economy.rs`). `enforce_order` buys legitimacy with the treasury:
 //! `order.cost_share_of_revenue` of a year's revenue (`Source::Verb`) for `order.gain` — a
 //! lift above the norm that decays back; closed when the treasury cannot pay. Legitimacy
-//! stays inside 0–100.
+//! stays inside 0–100. **Legitimacy costs the polity, not only the ruler** (review of
+//! #286): the tax collected falls with legitimacy (`economy.rs`, the share collected), so
+//! a greedy rate meets a real ceiling of income — Э8 — and not an abstract number.
 //!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
