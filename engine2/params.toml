@@ -160,7 +160,9 @@ unit = "campaign days per tick"
 e0 = "А5"
 
 # (в) The exponent k in P(A wins) = s_A^k / (s_A^k + s_B^k) with s = soldiers × quality
-# factor. Checked through А13: the share of battles the stronger side wins on the war runs.
+# factor. Checked through А13: the share of battles the stronger side wins. The value 0.8 is
+# provisional: it was calibrated on the scripted wars of tests/army.rs, whose battles are
+# very unequal; it is recalibrated at E3 on the agents' battles (owner's rule on PR #284).
 [battle.strength_exponent]
 kind = "c"
 value = 0.8
@@ -170,7 +172,8 @@ checked_by = "А13"
 # E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
 # Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003), on Dupuy's
 # base of 625 battles 1600–1973: numbers raise the chance of victory but decide far from
-# always — about two thirds for the larger side (по памяти; the owner may strike the row).
+# always — about two thirds for the larger side (по памяти; the source is to be opened
+# before E3, owner's rule on PR #284).
 [battle.observed_win_share_of_the_stronger]
 kind = "b"
 band = [0.6, 0.8]
@@ -204,8 +207,9 @@ band = [1.0, 16.0]
 unit = "ticks"
 e0 = "А9"
 
-# (в) Soldiers a province feeds by foraging per 1 000 inhabitants: 2–3 × А8 for a short
-# while (Roth 1999 on the ration; Erdkamp 1998), at the cost of П6. Checked through П7.
+# (в) Soldiers a foreign province feeds a unit by foraging per 1 000 inhabitants: 2–3 × А8
+# for a short while (Roth 1999 on the ration; Erdkamp 1998), at the cost of П6. Foreign land
+# only: at home the unpaid share melts (А7), the budget stays the limit. Checked through П7.
 [forage.soldiers_per_1000_people]
 kind = "c"
 value = 400.0

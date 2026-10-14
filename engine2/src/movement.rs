@@ -18,16 +18,18 @@
 //! tick and **stops at contact**: the first province that belongs to an enemy or holds an
 //! enemy unit ends the tick's march there, where the battle or the siege takes place.
 //!
-//! **Supply is pay at home, foraging elsewhere (E2 steps 4 and 5).** At home a unit is
+//! **Supply is pay at home, foraging abroad (E2 steps 4 and 5).** At home a unit is
 //! supplied to the share of the army its polity paid this tick (`economy.rs`); the shortfall
-//! is shared pro rata among the polity's units. What pay does not cover, and every unit on
-//! foreign land, **forages** from the province it stands in: up to
+//! is shared pro rata among the polity's units, and the unpaid share melts — an unpaid army
+//! deserts or mutinies, it does not live off its own subjects (owner's rule on PR #284: a
+//! foraging army at home would void the budget as the limit and А11 with it; requisitions
+//! at home, if ever, come with internal politics and a price in legitimacy). On **foreign
+//! land** a unit **forages** from the province it stands in: up to
 //! `forage.soldiers_per_1000_people` of its people, shared pro rata among the foragers; the
 //! province loses `ruin.population_loss_per_tick_at_full_load` of its people scaled by the
-//! load (E0 П6, `Source::Ruin`) — an unpaid army is a calamity for its own people, not a
-//! free one. Whatever foraging cannot feed melts at `army.attrition_unsupplied_per_year / 2`
-//! a tick (E0 А7) through the ledger; a stock that reaches zero is a `BoundHit` like any
-//! other.
+//! load (E0 П6, `Source::Ruin`). Whatever is neither paid nor fed melts at
+//! `army.attrition_unsupplied_per_year / 2` a tick (E0 А7) through the ledger; a stock that
+//! reaches zero is a `BoundHit` like any other.
 //!
 //! Decisions are in canonical order (ascending `UnitId`), so the ordinal of any future draw
 //! is the same whatever the caller's traversal (plan §3).
@@ -164,24 +166,22 @@ impl World {
     }
 
     /// The supply phase of a tick, after the economy paid: at home a unit keeps the paid
-    /// share of its men supplied; the rest, and every unit on foreign land, forages from the
-    /// province — up to what it can feed, at the cost of its people (E0 П6). What foraging
-    /// cannot feed melts by А7. Provinces in canonical order, units within them likewise.
+    /// share of its men and the rest melts by А7; on foreign land a unit forages from the
+    /// province — up to what it can feed, at the cost of its people (E0 П6) — and what
+    /// foraging cannot feed melts by А7. Provinces in canonical order, units within them
+    /// likewise.
     pub(crate) fn phase_supply(&mut self, params: &Params) -> Result<(), WorldError> {
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().collect();
         for p in provinces {
-            // (unit, what pay does not cover)
-            let needs: Vec<(UnitId, i64)> = self
-                .units
-                .iter()
-                .filter(|(_, u)| u.position == p)
-                .map(|(id, u)| {
-                    let soldiers = self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0);
-                    let paid = if self.provinces[&p].owner == u.owner { soldiers * self.actors[&u.owner].paid_share_ppm / 1_000_000 } else { 0 };
-                    (*id, soldiers - paid)
-                })
-                .filter(|(_, need)| *need > 0)
-                .collect();
+            let owner = self.provinces[&p].owner;
+            let here: Vec<(UnitId, ActorId, i64)> = self.units.iter().filter(|(_, u)| u.position == p).map(|(id, u)| (*id, u.owner, self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0))).collect();
+            // At home: the unpaid share melts.
+            for (id, u_owner, soldiers) in here.iter().filter(|(_, o, _)| *o == owner) {
+                let unsupplied = soldiers - soldiers * self.actors[u_owner].paid_share_ppm / 1_000_000;
+                self.melt(*id, unsupplied, params)?;
+            }
+            // Abroad: foraging, shared pro rata by need.
+            let needs: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, s)| *o != owner && *s > 0).map(|(id, _, s)| (*id, *s)).collect();
             let total_need: i64 = needs.iter().map(|(_, n)| n).sum();
             if total_need == 0 {
                 continue;
@@ -190,16 +190,7 @@ impl World {
             let capacity = people * params.forage_soldiers_per_1000 / 1000;
             let fed_total = total_need.min(capacity);
             for (id, need) in &needs {
-                let fed = need * fed_total / total_need;
-                let unsupplied = need - fed;
-                if unsupplied > 0 {
-                    // Thousandths of soldiers lost: unsupplied × rate per tick.
-                    let milli = -(unsupplied * params.army_attrition_unsupplied_ppm_per_tick / 1000);
-                    if milli != 0 {
-                        self.post(Account::Soldiers(*id), Source::Desertion, milli)?;
-                        self.emit(Event::Attrition { unit: *id, unsupplied: unsupplied as u64 });
-                    }
-                }
+                self.melt(*id, need - need * fed_total / total_need, params)?;
             }
             if fed_total > 0 && capacity > 0 {
                 // People lost in thousandths: people × rate at full load × load.
@@ -209,6 +200,19 @@ impl World {
                 }
                 self.emit(Event::Ruin { province: p, foragers: fed_total as u64 });
             }
+        }
+        Ok(())
+    }
+
+    /// Unsupplied soldiers of a unit melt by А7: thousandths lost = unsupplied × rate per tick.
+    fn melt(&mut self, id: UnitId, unsupplied: i64, params: &Params) -> Result<(), WorldError> {
+        if unsupplied <= 0 {
+            return Ok(());
+        }
+        let milli = -(unsupplied * params.army_attrition_unsupplied_ppm_per_tick / 1000);
+        if milli != 0 {
+            self.post(Account::Soldiers(id), Source::Desertion, milli)?;
+            self.emit(Event::Attrition { unit: id, unsupplied: unsupplied as u64 });
         }
         Ok(())
     }

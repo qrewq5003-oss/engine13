@@ -38,6 +38,9 @@
 //! verbs apply before the tick, a loan taken and an advance paid in the same tick meet before
 //! the economy sweeps the surplus into repayment (owner's note on #283).
 //!
+//! Supply at war is in `movement.rs`: pay at home, foraging with its cost (E0 П6) on foreign
+//! land only — an unpaid army at home melts, it does not live off its own people.
+//!
 //! Quality stays at 50 — its dynamics (experience, idleness) are this system's line for E3.
 
 use std::collections::BTreeMap;

@@ -229,7 +229,7 @@ fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
 }
 
 #[test]
-fn foraging_feeds_up_to_what_the_province_can_and_ruins_it_in_proportion_to_the_load() {
+fn foraging_on_foreign_land_feeds_up_to_what_the_province_can_and_ruins_it_in_proportion_to_the_load() {
     let p = params();
     let field = at(1, 1);
     let run = |soldiers: i64| {
@@ -298,11 +298,11 @@ fn the_levy_moves_people_into_soldiers_within_a1_and_a2_and_back_when_disbanded(
         let r = g.tick(&[VerbCall { actor: who, verb: VerbId::Recruit, target: Target::Province(field) }]).unwrap();
         raised_total += r.events.iter().filter_map(|e| if let Event::Recruited { soldiers, .. } = e.event { Some(soldiers as i64) } else { None }).sum::<i64>();
     }
-    // The ceiling creeps up with the people, so the room never quite closes: the army sits
-    // within a hundredth of the ceiling, never above it.
+    // The levy never passes the ceiling. (It does not sit at it either: the ceiling of А1 is
+    // above the budget of А11, so the unpaid share melts at home — the budget is the limit.)
     let (army, ceiling) = (g.world().army_size(s0), g.world().recruit_ceiling(s0, &p));
-    assert!(army <= ceiling && army >= ceiling - ceiling / 100, "army {army}, ceiling {ceiling}");
-    assert!(raised_total > per_tick, "several ticks of levy");
+    assert!(army <= ceiling, "army {army}, ceiling {ceiling}");
+    assert!(raised_total + 600 >= ceiling * 95 / 100, "the levy reached the ceiling over the ticks: raised {raised_total}");
     // At the ceiling the offer closes.
     g.world_mut().post(Account::Soldiers(unit), Source::Test, ceiling * 1000).unwrap();
     let offer = g.verbs(who).into_iter().find(|o| o.verb == VerbId::Recruit).unwrap();

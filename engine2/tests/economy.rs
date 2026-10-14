@@ -48,10 +48,7 @@ fn army_at_the_limit_of_the_budget_lies_inside_a11_on_generated_worlds() {
 }
 
 #[test]
-fn an_army_above_the_budget_melts_to_what_pay_and_foraging_keep_and_the_treasury_never_goes_below_zero_without_a_bank() {
-    // Since the army system (plan §17) the unpaid share forages at home, so the limit of an
-    // army at home is the budget plus what its province can feed (at the cost of П6), and
-    // only what exceeds both melts (A7). The budget alone is the limit on emptied land.
+fn an_army_above_the_budget_melts_to_the_limit_and_the_treasury_never_goes_below_zero_without_a_bank() {
     let p = params();
     let mut w = testworld::world(2);
     let a = ActorId(0);
@@ -59,8 +56,7 @@ fn an_army_above_the_budget_melts_to_what_pay_and_foraging_keep_and_the_treasury
     let unit = w.units_of(a)[0];
     let home = w.units[&unit].position;
     let limit = w.sustainable_soldiers(a, &p);
-    let capacity = w.population(home) * p.forage_soldiers_per_1000 / 1000;
-    w.post(engine2::Account::Soldiers(unit), Source::Recruit, ((limit + capacity) * 3 - w.soldiers(unit)) * 1000).unwrap();
+    w.post(engine2::Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
     // Spend the treasury down so the budget, not the reserve, is the limit from the start.
     let t = w.treasury(a);
     w.post(engine2::Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
@@ -69,37 +65,15 @@ fn an_army_above_the_budget_melts_to_what_pay_and_foraging_keep_and_the_treasury
         let r = w.tick(&p).unwrap();
         assert!(w.treasury(a) >= 0, "treasury {} below zero without a bank", w.treasury(a));
         shortfalls += r.events.iter().filter(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == a)).count();
+        // An unpaid army at home deserts; it does not live off its own people (plan §17).
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == home)));
+        assert!(r.postings.iter().all(|q| q.source != Source::Ruin));
     }
     let soldiers = w.soldiers(unit);
-    let keeps = w.sustainable_soldiers(a, &p) + w.population(home) * p.forage_soldiers_per_1000 / 1000;
+    let limit_now = w.sustainable_soldiers(a, &p);
     assert!(shortfalls > 0);
-    assert!(soldiers <= keeps * 105 / 100, "{soldiers} soldiers, pay and foraging keep {keeps}");
-    assert!(soldiers >= keeps * 80 / 100, "{soldiers} soldiers melted far below what pay and foraging keep, {keeps}");
-}
-
-#[test]
-fn an_unpaid_army_at_home_eats_its_province_instead_of_melting() {
-    // The owner's model (plan §14, §17): what pay does not cover forages, and foraging ruins
-    // the province in proportion to the load. The consequence for the budget as the limit
-    // is written in plan §17.
-    let p = params();
-    let mut w = testworld::world(2);
-    let a = ActorId(0);
-    let unit = w.units_of(a)[0];
-    let home = w.units[&unit].position;
-    let limit = w.sustainable_soldiers(a, &p);
-    w.post(engine2::Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
-    let t = w.treasury(a);
-    w.post(engine2::Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
-    let before = w.soldiers(unit);
-    let mut ruin = 0i64;
-    for _ in 0..4 {
-        let r = w.tick(&p).unwrap();
-        ruin += r.postings.iter().filter(|q| q.source == Source::Ruin && q.account == Account::Population(home)).map(|q| -q.milli).sum::<i64>();
-        assert!(r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == home)));
-    }
-    assert!(ruin > 0, "foraging costs the province people");
-    assert!(w.soldiers(unit) >= before * 95 / 100, "the province feeds the unpaid share: {} of {before}", w.soldiers(unit));
+    assert!(soldiers <= limit_now * 105 / 100, "{soldiers} soldiers, limit {limit_now}");
+    assert!(soldiers >= limit_now * 80 / 100, "{soldiers} soldiers melted far below the limit {limit_now}");
 }
 
 #[test]
@@ -289,9 +263,6 @@ fn a_shortfall_is_shared_pro_rata_among_the_polity_s_units() {
     w.post(engine2::Account::Soldiers(second), Source::Recruit, small * 1000).unwrap();
     let t = w.treasury(a);
     w.post(engine2::Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
-    // An emptied province feeds nobody by foraging: the shortfall is pay's alone.
-    let people = w.population(home);
-    w.post(engine2::Account::Population(home), Source::Test, -people * 1000).unwrap();
     w.tick(&p).unwrap();
     let lost_big = big - w.soldiers(first);
     let lost_small = small - w.soldiers(second);
