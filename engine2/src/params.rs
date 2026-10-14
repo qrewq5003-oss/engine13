@@ -134,6 +134,33 @@ pub struct Params {
     pub legitimacy_rate_per_tick: f64,
     /// E0 Х1: a house's share of its seat's tax, parts per million.
     pub seat_income_share_ppm: i64,
+    /// E0 Э4: the band the tax verbs move the rate inside, parts per million.
+    pub tax_band_ppm: (i64, i64),
+    /// (в) One call of a tax verb moves the rate by this, parts per million.
+    pub tax_step_ppm: i64,
+    /// (в) What raising the tax costs in legitimacy; what lowering it gives.
+    pub legitimacy_cost_raise_tax: f64,
+    pub legitimacy_gain_lower_tax: f64,
+    /// (в) `enforce_order`: its price as parts per million of yearly revenue, and its gain.
+    pub order_cost_share_ppm: i64,
+    pub order_gain: f64,
+    /// (в) Default: its price in legitimacy and the ticks the credit stays closed.
+    pub legitimacy_cost_default: f64,
+    pub default_ticks_without_credit: u32,
+    /// (в) E0 В6: the base chance of a usurpation per tick (at legitimacy 50).
+    pub usurpation_per_tick: f64,
+    /// (в) The legitimacy norm of a usurper.
+    pub legitimacy_norm_usurper: f64,
+    /// (в) The norm falls by this per step of the tax rate above the tithe (rises below).
+    pub legitimacy_norm_per_tax_step: f64,
+    /// (в) The norm sits this much lower while the credit is closed after a default.
+    pub legitimacy_norm_penalty_in_default: f64,
+    /// E0 Э6: the interest a defaulter pays afterwards — the top of the band, per tick.
+    pub loan_interest_after_default_ppm_per_tick: i64,
+    /// (в) Collection: the share of the assigned tax lost per point of legitimacy below
+    /// `tax_full_collection_at_legitimacy`, parts per million.
+    pub tax_evasion_ppm_per_legitimacy_point: i64,
+    pub tax_full_collection_at_legitimacy: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -182,6 +209,9 @@ impl Params {
         }
         let value = |key: &str| -> Result<f64, ParamsError> {
             entries.get(key).and_then(|e| e.value).ok_or_else(|| ParamsError::Missing(key.to_string()))
+        };
+        let band = |key: &str| -> Result<[f64; 2], ParamsError> {
+            entries.get(key).and_then(|e| e.band).ok_or_else(|| ParamsError::Missing(key.to_string()))
         };
         let growth = value("population.growth_per_year")?;
         let famine = value("famine.mortality_per_year")?;
@@ -238,6 +268,21 @@ impl Params {
         let norm_regency = value("legitimacy.norm_regency")?;
         let legitimacy_rate = value("legitimacy.rate_per_tick")?;
         let seat_share = value("house.income_share_of_seat")?;
+        let tax_band = band("tax.default_rate")?;
+        let tax_step = value("tax.step")?;
+        let cost_raise_tax = value("legitimacy.cost_raise_tax")?;
+        let gain_lower_tax = value("legitimacy.gain_lower_tax")?;
+        let order_cost = value("order.cost_share_of_revenue")?;
+        let order_gain = value("order.gain")?;
+        let cost_default = value("legitimacy.cost_default")?;
+        let years_without_credit = value("default.years_without_credit")?;
+        let usurpation = value("usurpation.per_year")?;
+        let norm_usurper = value("legitimacy.norm_usurper")?;
+        let norm_per_tax_step = value("legitimacy.norm_per_tax_step")?;
+        let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
+        let interest_band = band("loan.interest_per_year")?;
+        let evasion = value("tax.evasion_per_legitimacy_point")?;
+        let full_collection = value("tax.full_collection_at_legitimacy")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -275,6 +320,21 @@ impl Params {
             legitimacy_norm_regency: norm_regency,
             legitimacy_rate_per_tick: legitimacy_rate,
             seat_income_share_ppm: (seat_share * 1_000_000.0).round() as i64,
+            tax_band_ppm: ((tax_band[0] * 1_000_000.0).round() as i64, (tax_band[1] * 1_000_000.0).round() as i64),
+            tax_step_ppm: (tax_step * 1_000_000.0).round() as i64,
+            legitimacy_cost_raise_tax: cost_raise_tax,
+            legitimacy_gain_lower_tax: gain_lower_tax,
+            order_cost_share_ppm: (order_cost * 1_000_000.0).round() as i64,
+            order_gain,
+            legitimacy_cost_default: cost_default,
+            default_ticks_without_credit: (years_without_credit * 2.0).round() as u32,
+            usurpation_per_tick: usurpation / 2.0,
+            legitimacy_norm_usurper: norm_usurper,
+            legitimacy_norm_per_tax_step: norm_per_tax_step,
+            legitimacy_norm_penalty_in_default: norm_penalty_in_default,
+            loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
+            tax_evasion_ppm_per_legitimacy_point: (evasion * 1_000_000.0).round() as i64,
+            tax_full_collection_at_legitimacy: full_collection,
             entries,
         })
     }
@@ -323,6 +383,16 @@ fn validate(name: &str, e: &Entry) -> Result<(), ParamsError> {
 mod tests {
     use super::*;
 
+    /// Money and legitimacy must not be convertible at a profit (review of #286): a step
+    /// of the tax gives 0.2 of a year's revenue a year and lowers the norm by one step's
+    /// worth; buying that back costs 0.2 × step × price / gain a year.
+    #[test]
+    fn prices_leave_no_arbitrage() {
+        let p = Params::load().unwrap();
+        let price_years = p.order_cost_share_ppm as f64 / 1_000_000.0;
+        assert!(price_years * p.legitimacy_norm_per_tax_step >= p.order_gain, "order at {price_years} years of revenue for {} against a norm shift of {} per step: tax up and order back is a profit", p.order_gain, p.legitimacy_norm_per_tax_step);
+    }
+
     #[test]
     fn shipped_file_loads() {
         let p = Params::load().unwrap();
@@ -339,6 +409,7 @@ mod tests {
         assert_eq!(p.court_share_ppm, 400_000);
         assert_eq!(p.pay_per_soldier_kg_per_year, 2100);
         assert_eq!(p.loan_interest_ppm_per_tick, 40_000);
+        assert_eq!(p.loan_interest_after_default_ppm_per_tick, 75_000);
         assert_eq!(p.loan_ceiling_years_milli, 5000);
         assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
         assert_eq!(p.march_km_per_tick, 2100);
@@ -353,6 +424,8 @@ mod tests {
         assert_eq!(p.majority_age, 18);
         assert!((p.violent_death_per_tick - 0.01).abs() < 1e-12);
         assert_eq!(p.seat_income_share_ppm, 20_000);
+        assert_eq!(p.tax_band_ppm, (50_000, 200_000));
+        assert_eq!(p.tax_step_ppm, 20_000);
     }
 
     #[test]

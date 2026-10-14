@@ -1,10 +1,11 @@
 //! Acceptance ground of E2 (brief §0.3 item 3, plan §12 item 11, §13): generated worlds and
 //! the extreme worlds all compile through the schema, build, and play without single-run
 //! sentinel flags; and the family of generated maps contains every shape movement and
-//! supply must survive (owner's review of PR #280). In CI: 20 fixed seeds and the extreme
-//! worlds, 50 ticks. Before merging a PR that changes the world: 200 seeds, 300 ticks —
-//! `cargo test -p engine2 --all-features --test worldgen -- --ignored`. A failure names its
-//! seed.
+//! supply must survive (owner's review of PR #280). In the debug run: 20 fixed seeds and
+//! the extreme worlds, 50 ticks. The full matrix — 200 seeds, 300 ticks — is `#[ignore]`d
+//! and runs in CI as its own line in release (owner on #285: 18 s with the build, so it
+//! depends on nobody's memory): `cargo test --release -p engine2 --all-features --test
+//! worldgen -- --ignored`. A failure names its seed.
 //!
 //! Matrix flags are not in this acceptance yet: every world plays with one game seed, since
 //! no system draws randomness. The first system that does must play each world with several

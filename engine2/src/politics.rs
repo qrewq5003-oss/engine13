@@ -11,6 +11,17 @@
 //!    (`DrawPoint::Violence`, keyed by polity) against `В3/2 × (100 − L)/50`: at legitimacy
 //!    50 the base rate, at 100 none, at 0 twice the base. The rule of succession acts
 //!    through the legitimacy norm, never as a multiplier (E0 §5.4).
+//!
+//! **2b. Usurpation (E0 В6):** one draw per living polity whose ruler is still alive
+//! (`DrawPoint::Usurpation`, keyed by polity) against `В6_base/2 × (100 − L)/50`, the
+//! same shape as В3. The usurper is an adult of **any house of the polity** (owner's rule
+//! on §18): the regent first (Lodovico), then a governor, then the eldest adult; with no
+//! candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
+//! executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
+//! standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
+//! usurper's norm if it was above it. The rule of succession acts through the norm,
+//! never as a multiplier (E0 §5.4).
+//!
 //! 3. **Succession:** a polity whose ruler died this tick gets its next ruler — the
 //!    designated heir if alive, else by the rule ([`Succession`]): by blood the line by
 //!    seniority (descendants first, elder lines first, then the nearest collateral line);
@@ -43,6 +54,21 @@
 //!    elected, acclaimed; regency while the ruler is a minor) at `legitimacy.rate_per_tick`
 //!    of the gap. The only dynamics of legitimacy in 6a; the prices come with 6b.
 //!
+//! **Legitimacy as a price (6b, plan §18.3).** The tax verbs: `raise_tax` moves the rate up
+//! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
+//! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
+//! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
+//! reason. **A lasting decision shifts the norm** (brief §2; review of #286): the norm falls
+//! by `legitimacy.norm_per_tax_step` for every step of the rate above the tithe and rises
+//! for every step below, as long as the rate holds — a high tax is never paid for once. A
+//! default lowers the norm by `legitimacy.norm_penalty_in_default` for the whole term of
+//! the closed credit (`economy.rs`). `enforce_order` buys legitimacy with the treasury:
+//! `order.cost_share_of_revenue` of a year's revenue (`Source::Verb`) for `order.gain` — a
+//! lift above the norm that decays back; closed when the treasury cannot pay. Legitimacy
+//! stays inside 0–100. **Legitimacy costs the polity, not only the ruler** (review of
+//! #286): the tax collected falls with legitimacy (`economy.rs`, the share collected), so
+//! a greedy rate meets a real ceiling of income — Э8 — and not an abstract number.
+//!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
 //! `Source::Seat` from the treasury to the house's treasury. **A house's treasury has no
@@ -54,7 +80,9 @@ use crate::event::{Cause, Event};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::ledger::{Account, Source};
 use crate::params::Params;
+use crate::economy::VerbError;
 use crate::rng::{unit, Draw, DrawPoint};
+use crate::verbs::{Target, VerbCall, VerbId};
 use crate::world::{House, Person, Standing, Succession, World, WorldError};
 
 /// The fertile window in years of age: the unit of `births.per_adult_per_year` (E0 В4 gives
@@ -137,15 +165,61 @@ impl World {
     /// ruler is a minor (E0 §1.7, kind (в) checked through В5).
     pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
         let actor = &self.actors[&a];
-        if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
-            return params.legitimacy_norm_regency;
+        let by_standing = if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
+            params.legitimacy_norm_regency
+        } else {
+            match actor.standing {
+                Standing::Hereditary => params.legitimacy_norm_hereditary,
+                Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
+                Standing::Elected => params.legitimacy_norm_elected,
+                Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+                Standing::Usurper => params.legitimacy_norm_usurper,
+            }
+        };
+        // Lasting decisions shift the norm: the tax above the tithe, the closed credit.
+        let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
+        let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
+        (by_standing - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default).clamp(0.0, 100.0)
+    }
+
+    /// Who would take the throne by force: the regent, else a governor, else the eldest
+    /// adult of any house of the polity; never the ruler, never a child.
+    pub fn usurper_candidate(&self, a: ActorId, params: &Params) -> Option<PersonId> {
+        let actor = &self.actors[&a];
+        if let Some(r) = actor.regent.filter(|r| self.person_alive(*r) && self.is_adult(*r, params)) {
+            return Some(r);
         }
-        match actor.standing {
-            Standing::Hereditary => params.legitimacy_norm_hereditary,
-            Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
-            Standing::Elected => params.legitimacy_norm_elected,
-            Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+        let adults = self.people_of_polity_adults(a, params);
+        let governors: Vec<PersonId> = adults.iter().copied().filter(|p| !self.governed_by(*p).is_empty()).collect();
+        self.eldest(&governors, true, params).or_else(|| self.eldest(&adults, true, params))
+    }
+
+    /// The usurpation itself: the ruler executed, the usurper seated.
+    fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
+        let dead = self.actors[&a].ruler;
+        self.die(dead, Cause::Execution, params)?;
+        {
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.ruler = usurper;
+            actor.heir = None;
+            actor.regent = None;
+            actor.standing = Standing::Usurper;
+            actor.legitimacy = actor.legitimacy.min(params.legitimacy_norm_usurper);
         }
+        self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
+        for province in self.governed_by(usurper) {
+            self.pass_governorship(province, usurper, params)?;
+        }
+        Ok(())
+    }
+
+    /// A usurpation before a tick, by the candidate the rule names. For the tests only:
+    /// `None` when the polity has no candidate, and nothing happens then.
+    #[cfg(feature = "testing")]
+    pub fn usurp_now(&mut self, a: ActorId, params: &Params) -> Result<Option<PersonId>, WorldError> {
+        let Some(u) = self.usurper_candidate(a, params) else { return Ok(None) };
+        self.usurp(a, u, params)?;
+        Ok(Some(u))
     }
 
     /// One keyed draw of a point that draws **once per id per tick** by construction (each
@@ -337,6 +411,67 @@ impl World {
         id
     }
 
+    /// Whether a tax verb has room inside the band of Э4; the reason when it has not.
+    pub fn tax_room(&self, a: ActorId, verb: VerbId, params: &Params) -> Result<(), &'static str> {
+        let rate = self.actors[&a].tax_rate_ppm;
+        match verb {
+            VerbId::RaiseTax if rate + params.tax_step_ppm > params.tax_band_ppm.1 => Err("at the top of the tax band (Э4)"),
+            VerbId::LowerTax if rate - params.tax_step_ppm < params.tax_band_ppm.0 => Err("at the bottom of the tax band (Э4)"),
+            _ => Ok(()),
+        }
+    }
+
+    /// What `enforce_order` costs now: the share of a year's revenue, kg.
+    pub fn order_cost(&self, a: ActorId, params: &Params) -> i64 {
+        self.yearly_income(a, params) * params.order_cost_share_ppm / 1_000_000
+    }
+
+    /// Pay or receive legitimacy, kept inside 0–100.
+    fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
+        let actor = self.actors.get_mut(&a).unwrap();
+        actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
+    }
+
+    /// The verbs of internal politics: `raise_tax` / `lower_tax` / `enforce_order` (no
+    /// target). Called by `apply_verb` for a living ruler.
+    pub(crate) fn apply_politics_verb(&mut self, call: &VerbCall, a: ActorId, params: &Params) -> Result<(), VerbError> {
+        match call.verb {
+            VerbId::RaiseTax | VerbId::LowerTax => {
+                if call.target != Target::None {
+                    return Err(VerbError::BadTarget(call.verb, "the tax verbs take no target"));
+                }
+                self.tax_room(a, call.verb, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
+                let from_ppm = self.actors[&a].tax_rate_ppm;
+                let (to_ppm, cost) = if call.verb == VerbId::RaiseTax {
+                    (from_ppm + params.tax_step_ppm, params.legitimacy_cost_raise_tax)
+                } else {
+                    (from_ppm - params.tax_step_ppm, -params.legitimacy_gain_lower_tax)
+                };
+                self.actors.get_mut(&a).unwrap().tax_rate_ppm = to_ppm;
+                self.pay_legitimacy(a, cost);
+                self.emit(Event::TaxRateChanged { actor: a, from_ppm, to_ppm });
+                Ok(())
+            }
+            VerbId::EnforceOrder => {
+                if call.target != Target::None {
+                    return Err(VerbError::BadTarget(call.verb, "enforce_order takes no target"));
+                }
+                let cost = self.order_cost(a, params);
+                if cost <= 0 {
+                    return Err(VerbError::NotAvailable(call.verb, "no revenue to pay from"));
+                }
+                if self.treasury(a) < cost {
+                    return Err(VerbError::NotAvailable(call.verb, "cannot pay"));
+                }
+                self.post(Account::Treasury(a), Source::Verb, -cost * 1000).map_err(|_| VerbError::NotAvailable(call.verb, "ledger"))?;
+                self.pay_legitimacy(a, -params.order_gain);
+                self.emit(Event::OrderEnforced { actor: a, kg: cost as u64 });
+                Ok(())
+            }
+            _ => Err(VerbError::NotAvailable(call.verb, "not a verb of internal politics")),
+        }
+    }
+
     /// The phase of the house and the throne.
     pub(crate) fn phase_people(&mut self, params: &Params) -> Result<(), WorldError> {
         let year = self.year();
@@ -360,6 +495,19 @@ impl World {
             if self.draw_once(DrawPoint::Violence, a.0) < per_tick {
                 let ruler = self.actors[a].ruler;
                 self.die(ruler, Cause::Murder, params)?;
+            }
+        }
+        // 2b. Usurpation: a living polity whose ruler survived the tick so far.
+        for a in &actors {
+            if !self.alive(*a) {
+                continue;
+            }
+            let legitimacy = self.actors[a].legitimacy;
+            let per_tick = params.usurpation_per_tick * (100.0 - legitimacy) / 50.0;
+            if self.draw_once(DrawPoint::Usurpation, a.0) < per_tick {
+                if let Some(u) = self.usurper_candidate(*a, params) {
+                    self.usurp(*a, u, params)?;
+                }
             }
         }
         // 3. Successions: a polity with land whose ruler died this tick.

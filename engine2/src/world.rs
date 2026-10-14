@@ -68,7 +68,7 @@ pub enum Succession {
 }
 
 /// How the ruler came to the throne: the standing the legitimacy norm is keyed by (E0
-/// §1.7). Usurpation comes with 6b.
+/// §1.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Standing {
     /// By blood, under a rule of blood.
@@ -79,6 +79,8 @@ pub enum Standing {
     Elected,
     /// Proclaimed: by rule, or from another house when the ruling house died out.
     Acclaimed,
+    /// Took the throne by force (E0 В6, E2 step 6b): the lowest norm.
+    Usurper,
 }
 
 /// A person: a member of a house, alive or dead (the record stays: no dangling ids).
@@ -126,7 +128,8 @@ pub struct Actor {
     /// The polity's institutions (facts of the scenario).
     pub institutions: std::collections::BTreeSet<Institution>,
     /// Tax as parts per million of production; starts at `tax.default_rate` (E0 Э4). The
-    /// verbs that change it are closed until internal politics prices them (plan §16).
+    /// tax verbs move it by `tax.step` inside the band of Э4 for a price in legitimacy
+    /// (`politics.rs`, E2 step 6b).
     pub tax_rate_ppm: i64,
     /// Share of the army's pay met this tick, parts per million: the share of the army that
     /// is supplied at home (`movement.rs`).
@@ -141,6 +144,10 @@ pub struct Actor {
     pub succession: Succession,
     /// How the ruler came to the throne: keys the legitimacy norm.
     pub standing: Standing,
+    /// After a default the bank lends nothing until this tick (E2 step 6b).
+    pub credit_closed_until: Option<Tick>,
+    /// The polity defaulted once: the bank lends at the top of Э6 ever after.
+    pub defaulted: bool,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -452,6 +459,8 @@ impl World {
                     regent: a.regent,
                     succession: a.succession,
                     standing,
+                    credit_closed_until: None,
+                    defaulted: false,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -719,7 +728,7 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), w.actors.len());
-        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Birth)), "no system of the test world draws elsewhere");
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth)), "no system of the test world draws elsewhere");
         assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));

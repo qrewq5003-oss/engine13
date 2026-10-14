@@ -103,6 +103,9 @@ pub struct VerbOffer {
     pub available: bool,
     /// Cost in kg of wheat-equivalent, if the verb costs treasury.
     pub cost_kg: i64,
+    /// Cost in legitimacy (0–100), if the verb costs it; negative when the verb gives some
+    /// back (E2 step 6b: legitimacy as a price, plan §18.3).
+    pub cost_legitimacy: i64,
     /// Why it is not available, when it is not.
     pub why: Option<String>,
 }

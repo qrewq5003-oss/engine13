@@ -13,7 +13,7 @@
 //! - **Wheat accounting:** every treasury posting is signed by source and the ledger
 //!   balances every tick; Э8 and Э9 are measured and reported, not asserted (plan §16).
 
-use engine2::sim::{Game, SimError, Simulation};
+use engine2::sim::{Game, Simulation};
 use engine2::{testworld, worldgen, Account, ActorId, ActorRef, Event, Institution, Params, Source, Target, UnitId, VerbCall, VerbId, World};
 
 fn params() -> Params {
@@ -92,13 +92,17 @@ fn with_a_bank_the_polity_borrows_to_the_ceiling_pays_interest_and_its_treasury_
     let mut borrowed = false;
     let mut interest = 0i64;
     for _ in 0..80 {
+        let (debt_before, room_before) = (w.debt(a), w.loan_room(a, &p));
         let r = w.tick(&p).unwrap();
         assert!(w.treasury(a) >= 0, "treasury {} below zero", w.treasury(a));
         borrowed |= w.debt(a) > 0;
-        interest += r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum::<i64>();
-        // Interest alone carries the debt past the ceiling, by at most the interest of a tick.
-        let c = w.debt_ceiling(a, &p);
-        assert!(w.debt(a) <= c + c * p.loan_interest_ppm_per_tick / 1_000_000 + 1, "debt {} past the ceiling {c}", w.debt(a));
+        let tick_interest = r.postings.iter().filter(|q| q.source == Source::Interest).map(|q| q.milli.abs()).sum::<i64>();
+        interest += tick_interest;
+        // Nothing but interest carries the debt past the room the ceiling left: no loan
+        // beyond it. (The ceiling itself moves with the revenue — with the people, and
+        // since 6b with legitimacy through the share collected — so the debt is compared
+        // with the room of the tick, not with the ceiling of the next.)
+        assert!(w.debt(a) - debt_before <= room_before + tick_interest / 1000 + 1, "debt {} from {debt_before}: borrowed past the room {room_before}", w.debt(a));
     }
     assert!(borrowed, "a bank lets the polity borrow");
     assert!(interest > 0, "debt costs interest");
@@ -193,18 +197,12 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
 }
 
 #[test]
-fn tax_verbs_are_closed_and_a_loan_needs_a_bank() {
+fn a_loan_needs_a_bank() {
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("take_loan".to_string(), "Take a loan".to_string());
     let mut g = Game::new(&s, p, 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
-    let offers = g.verbs(who);
-    let raise = offers.iter().find(|o| o.verb == VerbId::RaiseTax).unwrap();
-    assert!(!raise.available);
-    assert_eq!(raise.why.as_deref(), Some("awaits internal politics"));
-    let err = g.tick(&[VerbCall { actor: who, verb: VerbId::RaiseTax, target: Target::None }]).unwrap_err();
-    assert!(matches!(err, SimError::Verb(_)), "{err}");
     // No bank in the test world: the loan is refused.
     assert!(g.verbs(who).iter().all(|o| o.verb != VerbId::TakeLoan || !o.available));
     g.world_mut().actors.get_mut(&ActorId(0)).unwrap().institutions.insert(Institution::Bank);

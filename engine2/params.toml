@@ -309,8 +309,11 @@ band = [5.0, 10.0]
 unit = "years of revenue"
 e0 = "Э7"
 
-# E0 Э8 — observed: the polity's revenue as a share of production. Measured, not an acceptance
-# while the take depends on the rate alone (plan §16).
+# E0 Э8 — observed: the polity's revenue as a share of production. An acceptance since 6b
+# (review of #286): the take is the rate × the share collected, and the share falls with
+# legitimacy (`tax.evasion_per_legitimacy_point`), so a polity at the top of Э4 must stay
+# inside this band — states never collected all they assigned. Checked on the generated
+# worlds for the plain and for the greedy ruler (`tests/legitimacy.rs`).
 [tax.observed_share_of_production]
 kind = "b"
 band = [0.03, 0.16]
@@ -440,7 +443,7 @@ e0 = "В3"
 # (в) The legitimacy norm by the ruler's standing (E0 §1.7): hereditary above elected above
 # acclaimed; a regency below them all. The mixed rule (blood confirmed by acclamation) takes
 # the mean of hereditary and acclaimed. Checked through В5 (the reign's length depends on
-# the norm through В3); the usurper's norm comes with 6b and В6.
+# the norm through В3); the usurper's norm is below (6b, checked through В6).
 [legitimacy.norm_hereditary]
 kind = "c"
 value = 70.0
@@ -494,3 +497,139 @@ kind = "b"
 band = [0.005, 0.05]
 unit = "share of the polities' tax going to the great houses"
 e0 = "Х4"
+
+# ---- legitimacy as a price (E2 step 6b, plan §18.3) ----
+
+# E0 В6 — observed: usurpations and coups per century per polity. Rome 284–395: 26 usurpers by
+# the strict definition (37 claimants) ≈ 23 a century for the empire (Omissi A., Emperors and
+# Usurpers in the Later Roman Empire, 2018, introduction — открыл (вторичное)); Italy of the
+# 15th century: Milan 1476, the Pazzi 1478, Genoa 1478, the barons 1485 ≈ 2–4 a century per
+# polity (Mallett 1974, ch. 1; Lubkin 1994 — по памяти). One wide band; the rule of
+# succession spreads the polities inside it through the legitimacy norm (E0 §5.4).
+[usurpation.observed_per_century]
+kind = "b"
+band = [2.0, 25.0]
+unit = "usurpations per century per polity"
+e0 = "В6"
+
+# (в) The step of the tax verbs: one call moves the rate by this much inside the band of Э4.
+# Checked through Э8 — the take the rate gives.
+[tax.step]
+kind = "c"
+value = 0.02
+unit = "share of production per call"
+checked_by = "Э8"
+
+# (в) The prices in legitimacy: raising the tax costs it, lowering gives half back. Checked
+# through В6 — the coups legitimacy lets in.
+[legitimacy.cost_raise_tax]
+kind = "c"
+value = 10.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+[legitimacy.gain_lower_tax]
+kind = "c"
+value = 5.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+# (в) `enforce_order`: the treasury buys legitimacy — this share of a year's revenue for the
+# gain below. Checked through В6. **No arbitrage between money and legitimacy** (review of
+# #286, measured in `tests/legitimacy.rs`): a step of the tax gives 0.2 of a year's revenue a
+# year and lowers the norm by `legitimacy.norm_per_tax_step`; holding legitimacy up against
+# that costs 0.2 × step × (price / gain) a year. The round trip loses only while
+# `order.cost_share_of_revenue × legitimacy.norm_per_tax_step ≥ order.gain` — the guard
+# `prices_leave_no_arbitrage` holds the inequality. At 0.1 a year's revenue the order was a
+# machine: tax to the top, order every tick — income doubled and legitimacy 90.
+[order.cost_share_of_revenue]
+kind = "c"
+value = 1.5
+unit = "share of yearly revenue per call"
+checked_by = "В6"
+
+[order.gain]
+kind = "c"
+value = 10.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+# (в) Default: a debt past the ceiling whose interest the treasury cannot meet is written off
+# (the owner's choice on §18: a write-off with the credit closed, not Venice's suspension of
+# interest — that comes if a source shows it). The price in legitimacy, checked through В6;
+# the years without credit, checked through Э9 — the army's share of spending an unbanked
+# polity can keep.
+[legitimacy.cost_default]
+kind = "c"
+value = 20.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+[default.years_without_credit]
+kind = "c"
+value = 10.0
+unit = "years"
+checked_by = "Э9"
+
+# (в) Usurpation (E0 В6): the base chance a year at legitimacy 50 that an adult of the
+# polity's houses takes the throne by force; the rule of succession acts through the norm
+# (E0 §5.4), never as a multiplier. Checked through В6. Measured on 20 worlds × 300 ticks:
+# at 0.05 — 5.0 a century per polity (blood 4.6, acclamation 6.1), every polity saw one in
+# 150 years; at 0.03 — see `tests/legitimacy.rs`. The form caps at twice the base (legitimacy
+# 0), so the Roman end of the band (23 a century, 284–395) is out of its reach: that needs
+# civil war and co-rulers, drivers of the collapse system and E3, not a higher base.
+[usurpation.per_year]
+kind = "c"
+value = 0.03
+unit = "share per year at legitimacy 50"
+checked_by = "В6"
+
+# (в) The legitimacy norm of a usurper: below every other standing (E0 §1.7). A usurper
+# invites the next usurpation — the cascades of the third century.
+[legitimacy.norm_usurper]
+kind = "c"
+value = 30.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+# (в) A lasting decision shifts the norm, a blow is one-off (brief §2; owner's review of
+# #286: a one-off price for a permanent gain is an arbitrage — legitimacy returns to the
+# norm in a few years, the rate stays). The legitimacy norm falls by this much for every
+# step of the tax rate above the tithe (`tax.default_rate`) and rises by it for every step
+# below, as long as the rate holds: the tithe doubled (+5 steps) puts a hereditary king
+# below a usurper (70 − 50 = 20). Checked through В6; bound to the price of order by the
+# no-arbitrage guard above.
+[legitimacy.norm_per_tax_step]
+kind = "c"
+value = 10.0
+unit = "legitimacy per step of the tax rate above the tithe"
+checked_by = "В6"
+
+# (в) The lasting price of a default: the norm sits this much lower for the whole term of
+# the closed credit; afterwards the bank lends at the top of Э6, never at the old rate
+# (`loan.interest_per_year` band). Checked through В6.
+[legitimacy.norm_penalty_in_default]
+kind = "c"
+value = 20.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+# (в) Collection (review of #286: legitimacy must cost the polity, not only the person on
+# the throne): collected = rate × production × share, and the share falls by this per point
+# of legitimacy below `tax.full_collection_at_legitimacy` — evasion, arrears, refusal. At
+# the greedy equilibrium (the top of Э4, legitimacy 20) the share is 0.6 and the take 12 %
+# of production: inside Э8, a fifth above the tithe, never double it. Checked through Э8.
+[tax.evasion_per_legitimacy_point]
+kind = "c"
+value = 0.008
+unit = "share of the assigned tax lost per point of legitimacy below full collection"
+checked_by = "Э8"
+
+# (в) The legitimacy at which everything assigned is collected: the norm of a hereditary
+# ruler. Below it the share falls; a usurper at his own norm (30) collects 0.68 — contested
+# rule is poorer rule. Checked through Э8.
+[tax.full_collection_at_legitimacy]
+kind = "c"
+value = 70.0
+unit = "legitimacy, 0–100"
+checked_by = "Э8"

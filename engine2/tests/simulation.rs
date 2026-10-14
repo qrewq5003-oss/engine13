@@ -16,10 +16,10 @@ fn verbs_are_offered_journaled_and_have_no_effect_yet() {
     let mut g = game(1);
     let who = ActorRef::Ruler(ActorId(0));
     let offers = g.verbs(who);
-    // The tax verbs are enabled by the scenario but closed by the economy until internal
-    // politics prices them (plan §16); the offer says why.
+    // The tax verbs are enabled by the scenario and priced by internal politics (6b): the
+    // offer carries the price; a call with a target the verb does not take is an error.
     let raise = offers.iter().find(|o| o.verb == VerbId::RaiseTax).unwrap();
-    assert!(!raise.available && raise.why.is_some());
+    assert!(raise.available && raise.cost_legitimacy > 0);
     let call = VerbCall { actor: who, verb: VerbId::RaiseTax, target: Target::Province(ProvinceId(0)) };
     let err = g.tick(&[call]).unwrap_err();
     assert!(matches!(err, SimError::Verb(_)), "{err}");
