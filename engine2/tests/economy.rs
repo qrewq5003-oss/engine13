@@ -168,7 +168,7 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
                 for q in r.postings.iter().filter(|q| q.account == t) {
                     match q.source {
                         Source::Tax => assert!(q.milli >= 0),
-                        Source::Court | Source::Upkeep | Source::Interest | Source::Repayment => assert!(q.milli <= 0, "seed {seed}: {:?} put wheat into a treasury", q.source),
+                        Source::Court | Source::Upkeep | Source::Interest | Source::Repayment | Source::Seat => assert!(q.milli <= 0, "seed {seed}: {:?} put wheat into a treasury", q.source),
                         Source::Loan => assert!(q.milli >= 0),
                         other => panic!("seed {seed}: treasury moved by {other:?}"),
                     }
@@ -176,6 +176,10 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
                 // The counter-entries: the same figure on the debt.
                 assert_eq!(sum(t, Source::Loan), sum(d, Source::Loan), "seed {seed} actor {a:?}: a loan without its debt");
                 assert_eq!(sum(t, Source::Repayment), sum(d, Source::Repayment), "seed {seed} actor {a:?}: a repayment without its debt");
+                // A seat's income (E0 Х1) is a transfer: what left the treasury arrived in
+                // the houses' treasuries of the same polity.
+                let to_houses: i64 = r.postings.iter().filter(|q| q.source == Source::Seat && matches!(q.account, Account::HouseTreasury(h) if w.houses[&h].polity == *a)).map(|q| q.milli).sum();
+                assert_eq!(-sum(t, Source::Seat), to_houses, "seed {seed} actor {a:?}: a seat's income without its house");
                 assert!(sum(d, Source::Interest) >= 0);
                 assert!(w.treasury(*a) >= 0 && w.debt(*a) >= 0);
                 if !w.actors[a].institutions.contains(&Institution::Bank) {
@@ -239,7 +243,7 @@ fn wheat_is_accounted_by_source_and_the_observed_shares_are_reported() {
         military_shares.push(pay as f64 / (pay + court) as f64);
         // Every treasury movement is one of the economy's sources.
         for src in by_source.keys() {
-            assert!(matches!(src, Source::Tax | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment), "seed {seed}: treasury moved by {src:?}");
+            assert!(matches!(src, Source::Tax | Source::Seat | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment), "seed {seed}: treasury moved by {src:?}");
         }
     }
     let mean = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;

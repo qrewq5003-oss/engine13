@@ -62,6 +62,9 @@ pub enum Source {
     Tax,
     /// Court and administration (E0 Э5).
     Court,
+    /// A house's income from a seat it holds (E0 Х1): `−` on the polity's treasury and `+`
+    /// on the house's, the same figure.
+    Seat,
     /// The army's pay (E0 А3).
     Upkeep,
     Loot,
@@ -75,6 +78,9 @@ pub enum Source {
     Hire,
     /// A province's people lost to foraging armies (E0 П6).
     Ruin,
+    /// A new house rises from the people: `−` one person on a province's population; the
+    /// founder is a record of the house, not a stock (owner's rule on #285).
+    Rise,
     Desertion,
     BattleLoss,
     Tribute,

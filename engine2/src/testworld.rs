@@ -6,18 +6,21 @@
 
 use std::collections::BTreeMap;
 
-use crate::ids::{ActorId, ProvinceId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
-use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
-use crate::world::{ActorFact, Facts, Land, Names, ProvinceFact, World};
+use crate::scenario::{ActorData, DisplayCurrency, HouseData, PersonData, ProvinceData, ScenarioData};
+use crate::world::{ActorFact, Facts, HouseFact, Land, Names, PersonFact, ProvinceFact, Succession, World};
 
 /// Five states, each a column of the 5×5 grid; all land arable; province `i` has an area
 /// of `250 + 25·i` km², which at the arable density of `params.toml` (40 people per km²,
 /// E0 П1) carries `10_000 + 1_000·i` people; it starts at 60 % of that; treasuries
 /// 100 000 kg each. The top row is the coast, and each coastal province faces the coasts
 /// two columns away across a bay (a sea link no land link duplicates). Each state's capital
-/// is its top province, with 600 soldiers (≈ 1 % of its people, E0 А11). Returns the facts
-/// and their names.
+/// is its top province, with 600 soldiers (≈ 1 % of its people, E0 А11). Each state has a
+/// house `h<a>` with a ruler `r<a>` and a child `c<a>`; state 0 also has a brother `b0`
+/// governing its second province, a designated heir (`c0`) and a second house `o0` of one
+/// adult — the shapes succession must handle. Rules: blood, acclamation, election, mixed,
+/// blood. Returns the facts and their names.
 pub fn five_states() -> (Facts, Names) {
     const SIDE: u32 = 5;
     let mut provinces = Vec::new();
@@ -51,13 +54,48 @@ pub fn five_states() -> (Facts, Names) {
             }
             let area_km2 = 250 + 25 * u64::from(i);
             let capacity = 10_000 + 1_000 * u64::from(i);
-            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours });
+            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours, governor: None });
             province_names.push((format!("p{i:02}"), format!("Province {i}")));
         }
     }
-    let actors = (0..SIDE).map(|a| ActorFact { treasury_kg: 100_000, capital: ProvinceId(a), soldiers: 600, institutions: Vec::new() }).collect();
-    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors };
-    let names = Names { actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(), provinces: province_names };
+    // Houses and persons, keyed by string id and compiled in sorted order like a scenario.
+    let house_list: Vec<(String, String, u32)> = (0..SIDE).map(|a| (format!("h{a}"), format!("House {a}"), a)).chain([("o0".to_string(), "Other 0".to_string(), 0)]).collect();
+    let house_index = |sid: &str| HouseId(house_list.iter().position(|(k, _, _)| k == sid).unwrap() as u32);
+    const RULER_AGE: [i32; 5] = [35, 50, 28, 62, 44];
+    const CHILD_AGE: [i32; 5] = [12, 24, 5, 30, 20];
+    // (sid, name, house, born, parent)
+    let mut person_list: Vec<(String, String, String, i32, Option<String>)> = Vec::new();
+    for a in 0..SIDE as usize {
+        person_list.push((format!("r{a}"), format!("Ruler {a}"), format!("h{a}"), 1477 - RULER_AGE[a], None));
+        person_list.push((format!("c{a}"), format!("Child {a}"), format!("h{a}"), 1477 - CHILD_AGE[a], Some(format!("r{a}"))));
+    }
+    person_list.push(("b0".to_string(), "Brother 0".to_string(), "h0".to_string(), 1447, None));
+    person_list.push(("o0a".to_string(), "Other 0 adult".to_string(), "o0".to_string(), 1437, None));
+    person_list.sort_by(|x, y| x.0.cmp(&y.0));
+    let person_index = |sid: &str| PersonId(person_list.iter().position(|(k, ..)| k == sid).unwrap() as u32);
+    let persons: Vec<PersonFact> = person_list.iter().map(|(_, _, h, born, parent)| PersonFact { house: house_index(h), born: *born, parent: parent.as_deref().map(person_index) }).collect();
+    let houses: Vec<HouseFact> = house_list.iter().map(|(_, _, a)| HouseFact { polity: ActorId(*a), treasury_kg: 0 }).collect();
+    provinces[5].governor = Some(person_index("b0"));
+    const RULES: [Succession; 5] = [Succession::Blood, Succession::Acclamation, Succession::Election, Succession::Mixed, Succession::Blood];
+    let actors = (0..SIDE)
+        .map(|a| ActorFact {
+            treasury_kg: 100_000,
+            capital: ProvinceId(a),
+            soldiers: 600,
+            institutions: Vec::new(),
+            ruler: person_index(&format!("r{a}")),
+            heir: if a == 0 { Some(person_index("c0")) } else { None },
+            regent: None,
+            succession: RULES[a as usize],
+        })
+        .collect();
+    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors, houses, persons };
+    let names = Names {
+        actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(),
+        provinces: province_names,
+        houses: house_list.iter().map(|(k, n, _)| (k.clone(), n.clone())).collect(),
+        persons: person_list.iter().map(|(k, n, ..)| (k.clone(), n.clone())).collect(),
+    };
     (facts, names)
 }
 
@@ -72,10 +110,34 @@ pub fn world(seed: u64) -> World {
 pub fn five_states_scenario() -> ScenarioData {
     let (facts, names) = five_states();
     let pname = |p: &ProvinceId| names.provinces[p.index()].0.clone();
+    let person = |p: &PersonId| names.persons[p.index()].0.clone();
     let mut actors = BTreeMap::new();
     for (i, a) in facts.actors.iter().enumerate() {
         let (sid, name) = &names.actors[i];
-        actors.insert(sid.clone(), ActorData { name: name.clone(), treasury_kg: a.treasury_kg, capital: pname(&a.capital), soldiers: a.soldiers, institutions: a.institutions.clone() });
+        actors.insert(
+            sid.clone(),
+            ActorData {
+                name: name.clone(),
+                treasury_kg: a.treasury_kg,
+                capital: pname(&a.capital),
+                soldiers: a.soldiers,
+                institutions: a.institutions.clone(),
+                ruler: person(&a.ruler),
+                heir: a.heir.as_ref().map(person),
+                regent: a.regent.as_ref().map(person),
+                succession: a.succession,
+            },
+        );
+    }
+    let mut houses = BTreeMap::new();
+    for (i, h) in facts.houses.iter().enumerate() {
+        let (sid, name) = &names.houses[i];
+        houses.insert(sid.clone(), HouseData { name: name.clone(), polity: names.actors[h.polity.index()].0.clone(), treasury_kg: h.treasury_kg });
+    }
+    let mut persons = BTreeMap::new();
+    for (i, p) in facts.persons.iter().enumerate() {
+        let (sid, name) = &names.persons[i];
+        persons.insert(sid.clone(), PersonData { name: name.clone(), house: names.houses[p.house.index()].0.clone(), born: p.born, parent: p.parent.as_ref().map(person) });
     }
     let mut provinces = BTreeMap::new();
     for (i, f) in facts.provinces.iter().enumerate() {
@@ -91,6 +153,7 @@ pub fn five_states_scenario() -> ScenarioData {
                 population: f.population,
                 neighbours: f.neighbours.iter().map(pname).collect(),
                 sea_neighbours: f.sea_neighbours.iter().map(pname).collect(),
+                governor: f.governor.as_ref().map(person),
             },
         );
     }
@@ -105,6 +168,8 @@ pub fn five_states_scenario() -> ScenarioData {
         display_currency: DisplayCurrency { name: "ducat".to_string(), kg_per_unit: 100.0 },
         actors,
         provinces,
+        houses,
+        persons,
         verbs,
     }
 }

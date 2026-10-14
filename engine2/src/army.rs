@@ -63,9 +63,10 @@ fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
 }
 
 impl World {
-    /// A polity is alive while it holds land.
+    /// A polity is alive while it holds land and its ruler lives: a polity whose last house
+    /// died out has fallen with its land (`politics.rs`), one conquered has none.
     pub fn alive(&self, a: ActorId) -> bool {
-        self.actors.get(&a).is_some_and(|x| !x.provinces.is_empty())
+        self.actors.get(&a).is_some_and(|x| !x.provinces.is_empty() && self.person_alive(x.ruler))
     }
 
     pub fn at_war(&self, a: ActorId, b: ActorId) -> bool {
@@ -257,9 +258,9 @@ impl World {
         Ok(())
     }
 
-    /// A polity without land falls: levies join the people where they stand, mercenaries
-    /// leave the world, wars close, the record stays.
-    fn fall(&mut self, a: ActorId) -> Result<(), WorldError> {
+    /// A polity falls — without land, or without anyone to take its throne: levies join
+    /// the people where they stand, mercenaries leave the world, wars close, the record stays.
+    pub(crate) fn fall(&mut self, a: ActorId) -> Result<(), WorldError> {
         for u in self.units_of(a) {
             self.disband_unit(u)?;
         }

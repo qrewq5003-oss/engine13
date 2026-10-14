@@ -114,6 +114,26 @@ pub struct Params {
     pub recruit_rate_ppm_per_tick: i64,
     /// E0 А4: the advance per hired mercenary, kg (outputs × output per head).
     pub mercenary_advance_kg: i64,
+    /// E0 В2: yearly mortality by age band, `(first age of the band, share per year)`,
+    /// ascending; the last band is open.
+    pub mortality_by_age: [(i32, f64); 7],
+    /// (в) E0 В2: the elite's factor on the table.
+    pub mortality_elite_factor: f64,
+    /// E0 В4: births per person of fertile age per tick.
+    pub births_per_adult_per_tick: f64,
+    /// E0 В1: the age of majority, years.
+    pub majority_age: i32,
+    /// E0 В3: the base chance of a ruler's violent death per tick (at legitimacy 50).
+    pub violent_death_per_tick: f64,
+    /// (в) The legitimacy norms by standing (E0 §1.7).
+    pub legitimacy_norm_hereditary: f64,
+    pub legitimacy_norm_elected: f64,
+    pub legitimacy_norm_acclaimed: f64,
+    pub legitimacy_norm_regency: f64,
+    /// (в) The share of the gap to the norm legitimacy closes per tick.
+    pub legitimacy_rate_per_tick: f64,
+    /// E0 Х1: a house's share of its seat's tax, parts per million.
+    pub seat_income_share_ppm: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -122,6 +142,11 @@ impl Params {
     pub fn capacity(&self, area_km2: u64, land: Land) -> u64 {
         let d = self.capacity_milli_per_km2.iter().find(|(l, _)| *l == land).map(|(_, d)| *d).unwrap_or(0);
         (area_km2 as i64 * d / 1000) as u64
+    }
+
+    /// The yearly mortality of an age by the table (E0 В2), before the elite factor.
+    pub fn mortality_per_year(&self, age: i32) -> f64 {
+        self.mortality_by_age.iter().rev().find(|(from, _)| age >= *from).map(|(_, q)| *q).unwrap_or(self.mortality_by_age[0].1)
     }
 }
 
@@ -194,6 +219,25 @@ impl Params {
         let levy_ceiling = value("recruit.ceiling_share")?;
         let levy_rate = value("recruit.rate_per_tick")?;
         let advance_outputs = value("mercenaries.advance_outputs")?;
+        let mortality_by_age = [
+            (0, value("mortality.infant")?),
+            (1, value("mortality.child")?),
+            (5, value("mortality.youth")?),
+            (20, value("mortality.adult")?),
+            (40, value("mortality.mature")?),
+            (60, value("mortality.old")?),
+            (80, value("mortality.aged")?),
+        ];
+        let elite = value("mortality.elite_factor")?;
+        let births = value("births.per_adult_per_year")?;
+        let majority = value("majority.age")?;
+        let violent = value("violent_death.per_year")?;
+        let norm_hereditary = value("legitimacy.norm_hereditary")?;
+        let norm_elected = value("legitimacy.norm_elected")?;
+        let norm_acclaimed = value("legitimacy.norm_acclaimed")?;
+        let norm_regency = value("legitimacy.norm_regency")?;
+        let legitimacy_rate = value("legitimacy.rate_per_tick")?;
+        let seat_share = value("house.income_share_of_seat")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -220,6 +264,17 @@ impl Params {
             recruit_ceiling_ppm: (levy_ceiling * 1_000_000.0).round() as i64,
             recruit_rate_ppm_per_tick: (levy_rate * 1_000_000.0).round() as i64,
             mercenary_advance_kg: (advance_outputs * output).round() as i64,
+            mortality_by_age,
+            mortality_elite_factor: elite,
+            births_per_adult_per_tick: births / 2.0,
+            majority_age: majority.round() as i32,
+            violent_death_per_tick: violent / 2.0,
+            legitimacy_norm_hereditary: norm_hereditary,
+            legitimacy_norm_elected: norm_elected,
+            legitimacy_norm_acclaimed: norm_acclaimed,
+            legitimacy_norm_regency: norm_regency,
+            legitimacy_rate_per_tick: legitimacy_rate,
+            seat_income_share_ppm: (seat_share * 1_000_000.0).round() as i64,
             entries,
         })
     }
@@ -289,6 +344,15 @@ mod tests {
         assert_eq!(p.march_km_per_tick, 2100);
         assert_eq!(p.siege_capital_ticks, 4);
         assert_eq!(p.mercenary_advance_kg, 700);
+        assert!((p.mortality_per_year(0) - 0.36).abs() < 1e-12);
+        assert!((p.mortality_per_year(3) - 0.065).abs() < 1e-12);
+        assert!((p.mortality_per_year(19) - 0.013).abs() < 1e-12);
+        assert!((p.mortality_per_year(20) - 0.021).abs() < 1e-12);
+        assert!((p.mortality_per_year(95) - 0.30).abs() < 1e-12);
+        assert!((p.births_per_adult_per_tick - 0.0345).abs() < 1e-12);
+        assert_eq!(p.majority_age, 18);
+        assert!((p.violent_death_per_tick - 0.01).abs() < 1e-12);
+        assert_eq!(p.seat_income_share_ppm, 20_000);
     }
 
     #[test]

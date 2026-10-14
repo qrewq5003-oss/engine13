@@ -22,14 +22,19 @@ fn play(label: &str, scenario: &ScenarioData, ticks: u32) {
         Ok(g) => g,
         Err(e) => panic!("{label}: cannot build: {e}"),
     };
+    let mut died = 0usize;
     let (s, _) = sentinel::run(&mut g, ticks, 1, "none", Thresholds::default(), |g| {
-        if let Err(e) = g.tick(&[]) {
-            panic!("{label}: tick failed: {e}");
+        match g.tick(&[]) {
+            Ok(r) => died += r.events.iter().filter(|e| matches!(e.event, engine2::Event::ActorDied { .. })).count(),
+            Err(e) => panic!("{label}: tick failed: {e}"),
         }
     });
     let flags = s.flags();
     assert!(flags.is_empty(), "{label}: sentinel flags {flags:?}");
     let o = g.observe();
+    // Without war nothing conquers and nothing falls: a polity whose last house dies out
+    // raises a new one from its people (plan §18.5, owner's rule on #285).
+    assert_eq!(died, 0, "{label}: {died} polities fell without war");
     assert_eq!(o.alive.len(), scenario.actors.len(), "{label}: an actor vanished without a system to kill it");
 }
 

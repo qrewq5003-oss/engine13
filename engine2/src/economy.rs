@@ -6,6 +6,9 @@
 //! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2);
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
 //!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) → `Source::Tax`;
+//! - **seats** (E0 Х1, `house.income_share_of_seat`): the ruling house takes its share of
+//!   the tax, a governor's house its share of the province's tax — transfers to the houses'
+//!   treasuries (`Source::Seat`, plan §18);
 //! - **court** = tax × `court.share_of_revenue` (E0 Э5) → `Source::Court`;
 //! - **interest** on the debt at `loan.interest_per_year` / 2 (E0 Э6) → `Source::Interest`:
 //!   paid from the treasury when it can; what it cannot pay is added to the debt;
@@ -122,11 +125,33 @@ impl World {
         let ids: Vec<ActorId> = self.actors.keys().copied().collect();
         let mut out = Vec::with_capacity(ids.len());
         for a in ids {
+            // A fallen polity has no economy: no ruler to tax for, no army to pay.
+            if !self.alive(a) {
+                continue;
+            }
             let treasury = Account::Treasury(a);
             let production = self.production_per_tick(a, params);
-            let income = production * self.actors[&a].tax_rate_ppm / 1_000_000;
+            let rate = self.actors[&a].tax_rate_ppm;
+            let income = production * rate / 1_000_000;
             if income > 0 {
                 self.post(treasury, Source::Tax, income * 1000)?;
+            }
+            // The houses' seats: the throne's share of the tax, a governorship's share of
+            // its province's tax.
+            let ruling_house = self.persons[&self.actors[&a].ruler].house;
+            let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
+            for p in self.actors[&a].provinces.clone() {
+                if let Some(g) = self.provinces[&p].governor {
+                    let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000;
+                    seats.push((self.persons[&g].house, province_tax * params.seat_income_share_ppm / 1_000_000));
+                }
+            }
+            for (house, kg) in seats {
+                let kg = kg.min(self.treasury(a));
+                if kg > 0 {
+                    self.post(treasury, Source::Seat, -kg * 1000)?;
+                    self.post(Account::HouseTreasury(house), Source::Seat, kg * 1000)?;
+                }
             }
             let court = income * params.court_share_ppm / 1_000_000;
             if court > 0 {

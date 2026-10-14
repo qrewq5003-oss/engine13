@@ -11,7 +11,10 @@
 //! `coastal` mark alone is not a link (plan §14). Both are checked symmetric.
 //!
 //! A polity gives its capital and its starting army in soldiers (E0 А11); the army starts as
-//! one unit at the capital.
+//! one unit at the capital. It gives its ruler, its rule of succession, and — facts, when
+//! they are facts — a designated heir and a regent (plan §18); a province may give its
+//! governor. Houses say which polity they belong to; persons their house, their year of
+//! birth and their parent. Every person listed is alive at the start.
 //!
 //! The engine receives the compiled [`Facts`] and the starting [`Names`], which then live in
 //! the world (an heir born in the game is named there). What is presentation only — the
@@ -22,10 +25,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, ProvinceId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact};
+use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, Succession};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -42,8 +45,33 @@ pub struct ScenarioData {
     pub actors: BTreeMap<String, ActorData>,
     /// Keyed by the scenario's string id of the province.
     pub provinces: BTreeMap<String, ProvinceData>,
+    /// Keyed by the scenario's string id of the house.
+    pub houses: BTreeMap<String, HouseData>,
+    /// Keyed by the scenario's string id of the person.
+    pub persons: BTreeMap<String, PersonData>,
     /// Enabled verbs and their display names, keyed by `VerbId::key`.
     pub verbs: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HouseData {
+    pub name: String,
+    /// The polity the house belongs to.
+    pub polity: String,
+    /// Starting treasury of the house in kilograms of wheat-equivalent.
+    pub treasury_kg: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonData {
+    pub name: String,
+    pub house: String,
+    /// Year of birth.
+    pub born: i32,
+    /// The parent, for the line of blood; absent for a founder.
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,6 +94,14 @@ pub struct ActorData {
     pub soldiers: u64,
     /// The polity's institutions, from the engine's closed list (facts: a bank exists or not).
     pub institutions: Vec<Institution>,
+    /// The person on the throne.
+    pub ruler: String,
+    /// A designated heir, when there is one.
+    pub heir: Option<String>,
+    /// The regent, when the ruler is a minor and one is in place.
+    pub regent: Option<String>,
+    /// The rule of succession (E0 §4).
+    pub succession: Succession,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -82,6 +118,8 @@ pub struct ProvinceData {
     pub neighbours: Vec<String>,
     /// Coasts faced across the water; only on coastal provinces.
     pub sea_neighbours: Vec<String>,
+    /// The governor's seat, when a person holds it.
+    pub governor: Option<String>,
 }
 
 /// Presentation data that is not part of the world: verbs' display names and the money.
@@ -116,6 +154,20 @@ pub enum SchemaError {
     Empty,
     #[error("province '{province}' starts with {population} people on land that carries {capacity}")]
     OverCapacity { province: String, population: u64, capacity: u64 },
+    #[error("house '{0}' names unknown polity '{1}'")]
+    UnknownHousePolity(String, String),
+    #[error("person '{0}' names unknown house '{1}'")]
+    UnknownHouse(String, String),
+    #[error("person '{0}' names unknown parent '{1}'")]
+    UnknownParent(String, String),
+    #[error("person '{0}' is not younger than its parent '{1}'")]
+    ParentNotOlder(String, String),
+    #[error("person '{0}' is born after the start year")]
+    BornInTheFuture(String),
+    #[error("'{0}' names unknown person '{1}' for a seat")]
+    UnknownPerson(String, String),
+    #[error("'{0}' gives a seat to '{1}', who belongs to a house of another polity")]
+    SeatOutsidePolity(String, String),
 }
 
 /// Everything a scenario compiles to.
@@ -144,6 +196,42 @@ impl ScenarioData {
             self.actors.keys().enumerate().map(|(i, k)| (k.as_str(), ActorId(i as u32))).collect();
         let province_index: BTreeMap<&str, ProvinceId> =
             self.provinces.keys().enumerate().map(|(i, k)| (k.as_str(), ProvinceId(i as u32))).collect();
+        let house_index: BTreeMap<&str, HouseId> = self.houses.keys().enumerate().map(|(i, k)| (k.as_str(), HouseId(i as u32))).collect();
+        let person_index: BTreeMap<&str, PersonId> = self.persons.keys().enumerate().map(|(i, k)| (k.as_str(), PersonId(i as u32))).collect();
+
+        // Houses and persons: every reference must exist, a parent must be older, nobody
+        // is born after the start.
+        let mut houses = Vec::with_capacity(self.houses.len());
+        for (key, h) in &self.houses {
+            let polity = *actor_index.get(h.polity.as_str()).ok_or_else(|| SchemaError::UnknownHousePolity(key.clone(), h.polity.clone()))?;
+            houses.push(HouseFact { polity, treasury_kg: h.treasury_kg });
+        }
+        let mut persons = Vec::with_capacity(self.persons.len());
+        for (key, p) in &self.persons {
+            let house = *house_index.get(p.house.as_str()).ok_or_else(|| SchemaError::UnknownHouse(key.clone(), p.house.clone()))?;
+            if p.born > self.start_year {
+                return Err(SchemaError::BornInTheFuture(key.clone()));
+            }
+            let parent = match &p.parent {
+                None => None,
+                Some(name) => {
+                    let id = *person_index.get(name.as_str()).ok_or_else(|| SchemaError::UnknownParent(key.clone(), name.clone()))?;
+                    if self.persons[name].born >= p.born {
+                        return Err(SchemaError::ParentNotOlder(key.clone(), name.clone()));
+                    }
+                    Some(id)
+                }
+            };
+            persons.push(PersonFact { house, born: p.born, parent });
+        }
+        // A seat of a polity goes to a person of one of its houses.
+        let seat = |holder: &str, name: &str, polity: ActorId| -> Result<PersonId, SchemaError> {
+            let id = *person_index.get(name).ok_or_else(|| SchemaError::UnknownPerson(holder.to_string(), name.to_string()))?;
+            if houses[persons[id.index()].house.index()].polity != polity {
+                return Err(SchemaError::SeatOutsidePolity(holder.to_string(), name.to_string()));
+            }
+            Ok(id)
+        };
 
         let resolve = |key: &str, list: &[String]| -> Result<Vec<ProvinceId>, SchemaError> {
             let own = province_index[key];
@@ -188,7 +276,8 @@ impl ScenarioData {
             if p.population > capacity {
                 return Err(SchemaError::OverCapacity { province: key.clone(), population: p.population, capacity });
             }
-            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours });
+            let governor = p.governor.as_deref().map(|g| seat(key, g, owner)).transpose()?;
+            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor });
         }
 
         let mut actors = Vec::with_capacity(self.actors.len());
@@ -201,7 +290,11 @@ impl ScenarioData {
             let mut institutions = a.institutions.clone();
             institutions.sort();
             institutions.dedup();
-            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions });
+            let id = actor_index[key.as_str()];
+            let ruler = seat(key, &a.ruler, id)?;
+            let heir = a.heir.as_deref().map(|h| seat(key, h, id)).transpose()?;
+            let regent = a.regent.as_deref().map(|r| seat(key, r, id)).transpose()?;
+            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions, ruler, heir, regent, succession: a.succession });
         }
 
         let mut verbs = Vec::new();
@@ -212,10 +305,12 @@ impl ScenarioData {
         verbs.sort_by_key(|(id, _)| *id);
 
         Ok(Compiled {
-            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors },
+            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors, houses, persons },
             names: Names {
                 actors: self.actors.iter().map(|(k, a)| (k.clone(), a.name.clone())).collect(),
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
+                houses: self.houses.iter().map(|(k, h)| (k.clone(), h.name.clone())).collect(),
+                persons: self.persons.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
             },
             display: Display { verbs, currency: self.display_currency.clone() },
         })
@@ -239,12 +334,38 @@ treasury_kg = 10
 capital = "p2"
 soldiers = 20
 institutions = ["Bank"]
+ruler = "bob"
+succession = "Election"
 [actors.a]
 name = "A"
 treasury_kg = 20
 capital = "p1"
 soldiers = 0
 institutions = []
+ruler = "ann"
+heir = "ann_jr"
+succession = "Blood"
+[houses.ha]
+name = "House A"
+polity = "a"
+treasury_kg = 5
+[houses.hb]
+name = "House B"
+polity = "b"
+treasury_kg = 0
+[persons.ann]
+name = "Ann"
+house = "ha"
+born = 1440
+[persons.ann_jr]
+name = "Ann the younger"
+house = "ha"
+born = 1470
+parent = "ann"
+[persons.bob]
+name = "Bob"
+house = "hb"
+born = 1430
 [provinces.p2]
 name = "P2"
 owner = "b"
@@ -272,6 +393,7 @@ coastal = true
 population = 50
 neighbours = []
 sea_neighbours = ["p2"]
+governor = "ann_jr"
 [verbs]
 raise_tax = "Поднять налог"
 "#;
@@ -299,6 +421,18 @@ raise_tax = "Поднять налог"
         assert!(c.facts.provinces[1].coastal && !c.facts.provinces[0].coastal);
         assert_eq!(c.display.verbs, vec![(VerbId::RaiseTax, "Поднять налог".to_string())]);
         assert_eq!(c.facts.scenario_id, "t");
+        // Houses and persons in sorted order of their ids; seats resolved to them.
+        assert_eq!(c.names.houses, vec![("ha".to_string(), "House A".to_string()), ("hb".to_string(), "House B".to_string())]);
+        assert_eq!(c.names.persons[0].0, "ann");
+        assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5 });
+        assert_eq!(c.facts.persons[1], PersonFact { house: HouseId(0), born: 1470, parent: Some(PersonId(0)) });
+        assert_eq!(c.facts.actors[0].ruler, PersonId(0));
+        assert_eq!(c.facts.actors[0].heir, Some(PersonId(1)));
+        assert_eq!(c.facts.actors[0].succession, Succession::Blood);
+        assert_eq!(c.facts.actors[1].succession, Succession::Election);
+        assert_eq!(c.facts.actors[1].heir, None);
+        assert_eq!(c.facts.provinces[2].governor, Some(PersonId(1)));
+        assert!(ScenarioData::parse(&OK.replacen("succession = \"Blood\"", "succession = \"Lottery\"", 1)).is_err());
         assert_eq!(c.facts.diseases, vec![Disease::Plague]);
         let no_plague = ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = []", 1)).unwrap();
         assert!(no_plague.compile(&params()).unwrap().facts.diseases.is_empty());
@@ -328,6 +462,28 @@ raise_tax = "Поднять налог"
         assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownVerb(_))));
         let bad = OK.replacen("capital = \"p2\"", "capital = \"p1\"", 1);
         assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::BadCapital(..))));
+    }
+
+    #[test]
+    fn seats_houses_and_parents_are_checked() {
+        let p = params();
+        let bad = OK.replacen("ruler = \"bob\"", "ruler = \"nobody\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownPerson(..))));
+        // Bob's house belongs to b: he cannot sit on a's throne.
+        let bad = OK.replacen("ruler = \"ann\"", "ruler = \"bob\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::SeatOutsidePolity(..))));
+        let bad = OK.replacen("governor = \"ann_jr\"", "governor = \"bob\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::SeatOutsidePolity(..))));
+        let bad = OK.replacen("polity = \"b\"", "polity = \"zzz\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownHousePolity(..))));
+        let bad = OK.replacen("house = \"hb\"", "house = \"hz\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownHouse(..))));
+        let bad = OK.replacen("parent = \"ann\"", "parent = \"eve\"", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::UnknownParent(..))));
+        let bad = OK.replacen("born = 1470", "born = 1440", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::ParentNotOlder(..))));
+        let bad = OK.replacen("born = 1430", "born = 1480", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&p), Err(SchemaError::BornInTheFuture(_))));
     }
 
     #[test]

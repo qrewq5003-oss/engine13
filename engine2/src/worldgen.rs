@@ -19,6 +19,14 @@
 //! colony is unreachable by design. Each polity gets a capital (its most populous province)
 //! and a starting army there, sized by E0 А11 and kept within the capital's supply (E0 А8).
 //!
+//! **Houses (E2 step 6a, plan §18).** Every polity gets a ruling house of 3–8 persons with
+//! ages (the ruler 20–60, children and siblings around it), a rule of succession by lot, in
+//! some polities a designated heir and a governor of a province, and 2–4 houses that do not
+//! rule — the owner's rule that the house role must be able to take the throne needs other
+//! houses to exist as facts of the scenario, and a polity's nobility must not be thinner
+//! than its ruling family (owner on #285: with 0–2 the extinction of every house was a
+//! chain of new dynasties, not an exception).
+//!
 //! Everything drawn comes from the bands of E0 §5 where E0 has a row; what E0 has no row for
 //! is a model choice (kind (в)) and is said so at the constant. The fingerprint of
 //! `generate(1)` is pinned: an update of `rand` that changed every world would break
@@ -30,9 +38,9 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::params::Params;
-use crate::scenario::{ActorData, DisplayCurrency, ProvinceData, ScenarioData};
+use crate::scenario::{ActorData, DisplayCurrency, HouseData, PersonData, ProvinceData, ScenarioData};
 use crate::verbs::VerbId;
-use crate::world::{Disease, Institution, Land};
+use crate::world::{Disease, Institution, Land, Succession};
 
 /// Province area, km². E0 §2a: tens of provinces per scenario; Italy's ~300 000 km² over
 /// ~25 provinces is ~12 000; the band leaves room for small city territories.
@@ -63,6 +71,14 @@ const SEA_REACH: u32 = 4;
 const STATES: (u64, u64) = (3, 15);
 /// Maximum land neighbours a province may have.
 const MAX_DEGREE: usize = 7;
+/// The ruler's age at the start, kind (в): an adult within the reigns of E0 В5.
+const RULER_AGE: (u64, u64) = (20, 60);
+/// Members of the ruling house, kind (в); E0 Х3 gives the size only through В2 and В4.
+const RULING_HOUSE_SIZE: (u64, u64) = (3, 8);
+/// Members of a house that does not rule, kind (в).
+const OTHER_HOUSE_SIZE: (u64, u64) = (2, 5);
+/// Houses that do not rule, per polity, kind (в).
+const OTHER_HOUSES: (u64, u64) = (2, 4);
 
 fn pick<R: Rng>(rng: &mut R, (lo, hi): (u64, u64)) -> u64 {
     rng.gen_range(lo..=hi)
@@ -380,11 +396,15 @@ impl Map {
                     population,
                     neighbours,
                     sea_neighbours,
+                    governor: None,
                 },
             );
         }
         let mut rng = ChaCha8Rng::seed_from_u64(fnv(id.as_bytes()) ^ 0x7ea5_u64);
         let mut actors = BTreeMap::new();
+        let mut houses = BTreeMap::new();
+        let mut persons = BTreeMap::new();
+        let start_year = 1000;
         for s in 0..states {
             let pop = pop_by_state.get(&s).copied().unwrap_or(0);
             let kg = pop as f64 * pick_f(&mut rng, REVENUE_PER_HEAD_KG) * pick_f(&mut rng, TREASURY_YEARS);
@@ -397,16 +417,76 @@ impl Map {
             let wanted = (pop as f64 * pick_f(&mut rng, ARMY_SHARE)).floor() as i64;
             let soldiers = wanted.min(budget_limit * 9 / 10).max(0) as u64;
             let institutions = if bank_for(s) { vec![Institution::Bank] } else { Vec::new() };
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers, institutions });
+            // The ruling house and the houses beside it.
+            let n_other = pick(&mut rng, OTHER_HOUSES) as usize;
+            let mut adults_by_house: Vec<(String, Vec<String>)> = Vec::new();
+            let mut ruler = String::new();
+            let mut heir = None;
+            for h in 0..=n_other {
+                let hid = format!("h{s:02}{}", (b'a' + h as u8) as char);
+                let size = pick(&mut rng, if h == 0 { RULING_HOUSE_SIZE } else { OTHER_HOUSE_SIZE }) as usize;
+                let seat_income = yearly_income as f64 * params.seat_income_share_ppm as f64 / 1_000_000.0;
+                let treasury_kg = if h == 0 { (seat_income * pick_f(&mut rng, (0.0, 1.0))).floor() as i64 } else { 0 };
+                houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg });
+                let head_age = pick(&mut rng, RULER_AGE) as i32;
+                let head = format!("{hid}p00");
+                persons.insert(head.clone(), PersonData { name: format!("{hid} head"), house: hid.clone(), born: start_year - head_age, parent: None });
+                let mut adults = vec![head.clone()];
+                let mut children: Vec<(String, i32)> = Vec::new();
+                for k in 1..size {
+                    let key = format!("{hid}p{k:02}");
+                    // A child of the head where the head's age allows, else a sibling.
+                    let (born, parent) = if head_age > 17 && rng.gen_bool(0.7) {
+                        (start_year - rng.gen_range(0..=(head_age - 17).min(44)), Some(head.clone()))
+                    } else {
+                        (start_year - rng.gen_range(RULER_AGE.0 as i32..=RULER_AGE.1 as i32), None)
+                    };
+                    persons.insert(key.clone(), PersonData { name: format!("{hid} {k}"), house: hid.clone(), born, parent: parent.clone() });
+                    if start_year - born >= params.majority_age {
+                        adults.push(key.clone());
+                    }
+                    if parent.is_some() {
+                        children.push((key, born));
+                    }
+                }
+                if h == 0 {
+                    ruler = head.clone();
+                    // Sometimes the eldest child is the designated heir (a fact, as Gian
+                    // Galeazzo under Galeazzo Maria).
+                    if rng.gen_bool(0.3) {
+                        heir = children.iter().min_by_key(|(_, born)| *born).map(|(k, _)| k.clone());
+                    }
+                }
+                adults_by_house.push((hid, adults));
+            }
+            let succession = match rng.gen_range(0..4) {
+                0 => Succession::Blood,
+                1 => Succession::Acclamation,
+                2 => Succession::Election,
+                _ => Succession::Mixed,
+            };
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession });
+            // A governor of one province that is not the capital: an adult of any house of
+            // the polity who is not the ruler.
+            let mut own: Vec<String> = provinces.iter().filter(|(_, p)| p.owner == sid(s) && *p != &provinces[&pid(cap_i)]).map(|(k, _)| k.clone()).collect();
+            own.sort();
+            let candidates: Vec<String> = adults_by_house.iter().flat_map(|(_, a)| a.iter().cloned()).filter(|p| *p != ruler).collect();
+            if !own.is_empty() && !candidates.is_empty() && rng.gen_bool(0.5) {
+                let p = own[rng.gen_range(0..own.len())].clone();
+                let g = candidates[rng.gen_range(0..candidates.len())].clone();
+                provinces.get_mut(&p).unwrap().governor = Some(g);
+            }
         }
         let verbs = VerbId::ALL.iter().map(|v| (v.key().to_string(), v.key().replace('_', " "))).collect();
         ScenarioData {
             id,
-            start_year: 1000,
+            start_year,
             diseases,
             display_currency: DisplayCurrency { name: "coin".to_string(), kg_per_unit: 100.0 },
             actors,
             provinces,
+            houses,
+            persons,
             verbs,
         }
     }
@@ -617,16 +697,17 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the sea-links version of the generator (E2 step 2). If this changes, every
-    /// seed plays a different world and "fails on seed N" stops reproducing: bump it only
-    /// with a deliberate change of the generator, never with a dependency update.
+    /// Pinned on the houses version of the generator (E2 step 6a; before: the sea-links
+    /// version of step 2). If this changes, every seed plays a different world and "fails on
+    /// seed N" stops reproducing: bump it only with a deliberate change of the generator,
+    /// never with a dependency update.
     #[test]
     fn world_one_is_pinned() {
         let p = Params::load().unwrap();
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 7_126_929_595_064_441_416;
+    const PINNED_WORLD_ONE: u64 = 213_264_665_699_613_513;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -657,10 +738,42 @@ mod tests {
                 assert_eq!(&s.provinces[&actor.capital].owner, a, "seed {seed}: capital of {a} not its own");
                 let people: u64 = s.provinces.values().filter(|pr| &pr.owner == a).map(|pr| pr.population).sum();
                 assert!(actor.soldiers as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
+                let ruler = &s.persons[&actor.ruler];
+                assert_eq!(&s.houses[&ruler.house].polity, a, "seed {seed}: the ruler of {a} is of another polity's house");
+                let age = s.start_year - ruler.born;
+                assert!((RULER_AGE.0 as i32..=RULER_AGE.1 as i32).contains(&age), "seed {seed}: ruler of {a} aged {age}");
+                let members = s.persons.values().filter(|p| p.house == ruler.house).count();
+                assert!((RULING_HOUSE_SIZE.0 as usize..=RULING_HOUSE_SIZE.1 as usize).contains(&members), "seed {seed}: ruling house of {a} has {members}");
+                let houses = s.houses.values().filter(|h| &h.polity == a).count();
+                assert!((1 + OTHER_HOUSES.0 as usize..=1 + OTHER_HOUSES.1 as usize).contains(&houses), "seed {seed}: {a} has {houses} houses");
+                if let Some(h) = &actor.heir {
+                    assert_eq!(s.persons[h].parent.as_deref(), Some(actor.ruler.as_str()), "seed {seed}: the heir of {a} is not the ruler's child");
+                }
+            }
+            for (k, p) in &s.persons {
+                if let Some(parent) = &p.parent {
+                    assert!(s.persons[parent].born < p.born, "seed {seed}: {k} is not younger than its parent");
+                }
+                assert!(p.born <= s.start_year, "seed {seed}: {k} born in the future");
+            }
+            for (k, pr) in &s.provinces {
+                if let Some(g) = &pr.governor {
+                    assert_eq!(s.houses[&s.persons[g].house].polity, pr.owner, "seed {seed}: governor of {k} from another polity");
+                    assert_ne!(&s.actors[&pr.owner].ruler, g, "seed {seed}: the ruler governs {k} as well");
+                }
             }
         }
         assert!(max_states >= 12, "largest world has only {max_states} states");
         assert!(max_provinces >= 70, "largest world has only {max_provinces} provinces");
+        // The shapes succession must meet exist in the family: governors, designated heirs,
+        // houses beside the ruling one, every rule.
+        let all: Vec<ScenarioData> = (1..=50).map(|seed| generate(seed, &p)).collect();
+        assert!(all.iter().any(|s| s.provinces.values().any(|pr| pr.governor.is_some())));
+        assert!(all.iter().any(|s| s.actors.values().any(|a| a.heir.is_some())));
+        assert!(all.iter().any(|s| s.houses.len() > s.actors.len()));
+        for rule in [Succession::Blood, Succession::Acclamation, Succession::Election, Succession::Mixed] {
+            assert!(all.iter().any(|s| s.actors.values().any(|a| a.succession == rule)), "{rule:?} never drawn");
+        }
     }
 
     #[test]
