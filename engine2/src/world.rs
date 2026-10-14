@@ -14,13 +14,19 @@
 //!   one scenario cannot be loaded into another (AGENTS §8);
 //! - **names live in the world** and travel with the save: actors born during the game
 //!   (heirs, E2) get a name here, not in the scenario.
+//!
+//! E2 step 6a (plan §18): **people, houses and seats.** A person has a house, a year of
+//! birth and a parent; a house belongs to a polity and has a treasury; the throne of a
+//! polity and the governorship of a province are seats a person holds. The rule of
+//! succession is a fact of the polity (an institution by form, E0 §4). What happens to
+//! them is `politics.rs`.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Event, Stamped};
-use crate::ids::{ActorId, ProvinceId, UnitId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
 use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
@@ -40,6 +46,62 @@ pub enum Disease {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Institution {
     Bank,
+}
+
+/// The rule by which a polity recognises its next ruler (E0 §4, the second institution of
+/// the closed list; sources В3/В6: Eisner 2011, Omissi 2018). Exactly one per polity, so a
+/// field of its own rather than an element of `institutions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Succession {
+    /// A dynasty: the line by seniority, no rite of acclamation.
+    Blood,
+    /// The army, the senate or an assembly proclaims the next ruler: the eldest adult of
+    /// the house who can lead; a child only when no adult is left.
+    Acclamation,
+    /// A doge, a pope: chosen between houses. **E2 distortion (owner, §18):** until the
+    /// agents of E3 vote, the choice falls on the eldest adult of the ruling house and only
+    /// the legitimacy norm differs — Venice plays as a dynasty.
+    Election,
+    /// Blood recognised through acclamation (Rome 375: Valentinian II proclaimed by the
+    /// army within days): the line by seniority, the norm between the two.
+    Mixed,
+}
+
+/// How the ruler came to the throne: the standing the legitimacy norm is keyed by (E0
+/// §1.7). Usurpation comes with 6b.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Standing {
+    /// By blood, under a rule of blood.
+    Hereditary,
+    /// By blood, recognised by acclamation (the mixed rule): the norm between the two.
+    Confirmed,
+    /// Chosen under a rule of election.
+    Elected,
+    /// Proclaimed: by rule, or from another house when the ruling house died out.
+    Acclaimed,
+}
+
+/// A person: a member of a house, alive or dead (the record stays: no dangling ids).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Person {
+    pub house: HouseId,
+    /// Year of birth; the age is derived.
+    pub born: i32,
+    /// The parent, for the line of blood; none for the founders of the starting facts.
+    pub parent: Option<PersonId>,
+    /// The tick of death, once dead.
+    pub died: Option<Tick>,
+}
+
+/// A house: a family inside a polity, holding seats and a treasury of its own. Its
+/// members are the persons that name it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct House {
+    /// The polity the house belongs to (owner's rule on §18: a house must be able to take
+    /// the throne of its polity, so it must say which one).
+    pub polity: ActorId,
 }
 
 /// Land of a province: the closed list the capacity density (E0 П1) is keyed by.
@@ -69,6 +131,16 @@ pub struct Actor {
     /// Share of the army's pay met this tick, parts per million: the share of the army that
     /// is supplied at home (`movement.rs`).
     pub paid_share_ppm: i64,
+    /// The person on the throne. A polity whose ruler is dead and unreplaced has fallen.
+    pub ruler: PersonId,
+    /// The designated heir, if any (a fact; the rule gives one otherwise).
+    pub heir: Option<PersonId>,
+    /// The regent while the ruler is a minor (E0 В1).
+    pub regent: Option<PersonId>,
+    /// The rule of succession (E0 §4).
+    pub succession: Succession,
+    /// How the ruler came to the throne: keys the legitimacy norm.
+    pub standing: Standing,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -91,6 +163,9 @@ pub struct Province {
     pub sea_neighbours: Vec<ProvinceId>,
     /// The siege on it, if an enemy stands here unopposed (`army.rs`).
     pub siege: Option<Siege>,
+    /// The governor's seat, if a person of the owner's polity holds it (the despot of the
+    /// Morea, the Sforza fief). The seat passes within the holder's house.
+    pub governor: Option<PersonId>,
 }
 
 /// An army on the graph: owner, position, quality, and where it is ordered to go. Its
@@ -126,6 +201,10 @@ pub struct Names {
     pub actors: Vec<(String, String)>,
     /// Index = `ProvinceId`.
     pub provinces: Vec<(String, String)>,
+    /// Index = `HouseId`.
+    pub houses: Vec<(String, String)>,
+    /// Index = `PersonId`; a person born in play is named here.
+    pub persons: Vec<(String, String)>,
 }
 
 /// One province of the starting facts.
@@ -138,6 +217,7 @@ pub struct ProvinceFact {
     pub owner: ActorId,
     pub neighbours: Vec<ProvinceId>,
     pub sea_neighbours: Vec<ProvinceId>,
+    pub governor: Option<PersonId>,
 }
 
 /// One polity of the starting facts.
@@ -150,6 +230,26 @@ pub struct ActorFact {
     pub soldiers: u64,
     /// The polity's institutions, from the engine's closed list.
     pub institutions: Vec<Institution>,
+    pub ruler: PersonId,
+    pub heir: Option<PersonId>,
+    pub regent: Option<PersonId>,
+    pub succession: Succession,
+}
+
+/// One house of the starting facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HouseFact {
+    pub polity: ActorId,
+    /// Starting treasury of the house in kg of wheat-equivalent.
+    pub treasury_kg: i64,
+}
+
+/// One person of the starting facts; all of them alive at the start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PersonFact {
+    pub house: HouseId,
+    pub born: i32,
+    pub parent: Option<PersonId>,
 }
 
 /// The starting facts the world is built from — the compiled scenario (`scenario.rs`).
@@ -165,6 +265,10 @@ pub struct Facts {
     pub provinces: Vec<ProvinceFact>,
     /// Index = `ActorId`.
     pub actors: Vec<ActorFact>,
+    /// Index = `HouseId`.
+    pub houses: Vec<HouseFact>,
+    /// Index = `PersonId`.
+    pub persons: Vec<PersonFact>,
 }
 
 impl Facts {
@@ -199,6 +303,10 @@ pub struct World {
     /// Polities at war, as pairs with the lower id first (`army.rs`). Opened only by the
     /// tests until diplomacy prices the declaration; closed by the fall of a side.
     pub wars: std::collections::BTreeSet<(ActorId, ActorId)>,
+    pub houses: BTreeMap<HouseId, House>,
+    pub persons: BTreeMap<PersonId, Person>,
+    /// Next person id; persons born in play number on from here.
+    pub next_person: u32,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -243,6 +351,18 @@ pub enum WorldError {
     UnknownActor(ActorId),
     #[error("a polity cannot be at war with itself: {0:?}")]
     WarWithSelf(ActorId),
+    #[error("unknown person {0:?}")]
+    UnknownPerson(PersonId),
+    #[error("house {0:?} belongs to unknown polity {1:?}")]
+    UnknownHousePolity(HouseId, ActorId),
+    #[error("person {0:?} belongs to unknown house {1:?}")]
+    UnknownHouse(PersonId, HouseId),
+    #[error("person {0:?} holds a seat of polity {1:?} but belongs to a house of another polity")]
+    SeatOutsidePolity(PersonId, ActorId),
+    #[error("person {0:?} is not older than its child {1:?}")]
+    ParentNotOlder(PersonId, PersonId),
+    #[error("person {0:?} is born after the start of the world")]
+    BornInTheFuture(PersonId),
     #[error("ledger: {0}")]
     Ledger(#[from] LedgerError),
 }
@@ -261,20 +381,72 @@ impl World {
         if names.provinces.len() != facts.provinces.len() {
             return Err(WorldError::NamesMismatch { what: "provinces", names: names.provinces.len(), items: facts.provinces.len() });
         }
+        if names.houses.len() != facts.houses.len() {
+            return Err(WorldError::NamesMismatch { what: "houses", names: names.houses.len(), items: facts.houses.len() });
+        }
+        if names.persons.len() != facts.persons.len() {
+            return Err(WorldError::NamesMismatch { what: "persons", names: names.persons.len(), items: facts.persons.len() });
+        }
         let tick = Tick::ZERO;
         let mut ledger = Ledger::new();
+        // Houses and persons first: the seats below refer to them.
+        let n_actors = facts.actors.len() as u32;
+        let mut houses: BTreeMap<HouseId, House> = BTreeMap::new();
+        for (i, h) in facts.houses.iter().enumerate() {
+            let id = HouseId(i as u32);
+            if h.polity.0 >= n_actors {
+                return Err(WorldError::UnknownHousePolity(id, h.polity));
+            }
+            houses.insert(id, House { polity: h.polity });
+            ledger.open(tick, Account::HouseTreasury(id), h.treasury_kg)?;
+        }
+        let mut persons: BTreeMap<PersonId, Person> = BTreeMap::new();
+        for (i, p) in facts.persons.iter().enumerate() {
+            let id = PersonId(i as u32);
+            if !houses.contains_key(&p.house) {
+                return Err(WorldError::UnknownHouse(id, p.house));
+            }
+            if p.born > facts.start_year {
+                return Err(WorldError::BornInTheFuture(id));
+            }
+            if let Some(parent) = p.parent {
+                let pf = facts.persons.get(parent.index()).ok_or(WorldError::UnknownPerson(parent))?;
+                if pf.born >= p.born {
+                    return Err(WorldError::ParentNotOlder(parent, id));
+                }
+            }
+            persons.insert(id, Person { house: p.house, born: p.born, parent: p.parent, died: None });
+        }
+        // A seat of a polity is held by a person of one of its houses.
+        let seat = |person: PersonId, polity: ActorId| -> Result<(), WorldError> {
+            let p = persons.get(&person).ok_or(WorldError::UnknownPerson(person))?;
+            if houses[&p.house].polity != polity {
+                return Err(WorldError::SeatOutsidePolity(person, polity));
+            }
+            Ok(())
+        };
         let mut actors: BTreeMap<ActorId, Actor> = BTreeMap::new();
         for (i, a) in facts.actors.iter().enumerate() {
             let id = ActorId(i as u32);
+            seat(a.ruler, id)?;
+            for p in [a.heir, a.regent].into_iter().flatten() {
+                seat(p, id)?;
+            }
+            let standing = crate::politics::standing_of_rule(a.succession);
             actors.insert(
                 id,
                 Actor {
                     provinces: Vec::new(),
                     capital: a.capital,
-                    legitimacy: 50.0,
+                    legitimacy: 0.0,
                     institutions: a.institutions.iter().copied().collect(),
                     tax_rate_ppm: params.tax_default_ppm,
                     paid_share_ppm: 1_000_000,
+                    ruler: a.ruler,
+                    heir: a.heir,
+                    regent: a.regent,
+                    succession: a.succession,
+                    standing,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -295,6 +467,9 @@ impl World {
             }
             let actor = actors.get_mut(&f.owner).ok_or(WorldError::UnknownOwner(id, f.owner))?;
             actor.provinces.push(id);
+            if let Some(g) = f.governor {
+                seat(g, f.owner)?;
+            }
             let capacity = params.capacity(f.area_km2, f.land);
             provinces.insert(
                 id,
@@ -307,6 +482,7 @@ impl World {
                     neighbours: f.neighbours.clone(),
                     sea_neighbours: f.sea_neighbours.clone(),
                     siege: None,
+                    governor: f.governor,
                 },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
@@ -327,7 +503,8 @@ impl World {
         }
         // The opening postings belong to no tick report; the world starts settled.
         ledger.drain_postings();
-        Ok(World {
+        let next_person = persons.len() as u32;
+        let mut world = World {
             scenario_id: facts.scenario_id.clone(),
             facts_hash: facts.hash(),
             seed,
@@ -339,12 +516,23 @@ impl World {
             units,
             next_unit,
             wars: std::collections::BTreeSet::new(),
+            houses,
+            persons,
+            next_person,
             names,
             ledger,
             draws: Vec::new(),
             events: Vec::new(),
             next_seq: 0,
-        })
+        };
+        // Legitimacy starts at the norm of the ruler's standing (a minor on the throne
+        // starts at the regency norm).
+        let ids: Vec<ActorId> = world.actors.keys().copied().collect();
+        for a in ids {
+            let norm = world.legitimacy_norm(a, params);
+            world.actors.get_mut(&a).unwrap().legitimacy = norm;
+        }
+        Ok(world)
     }
 
     /// Append an event of the current tick.
@@ -393,9 +581,10 @@ impl World {
     }
 
     /// Play one tick: one decision draw per actor (stand-in for E3), units move
-    /// (`movement.rs`), the economy produces, taxes and pays (`economy.rs`), units are
-    /// supplied to the paid share, people grow, starve, sicken and migrate
-    /// (`population.rs`), then `TickPlayed`.
+    /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
+    /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
+    /// (`politics.rs`), people grow, starve, sicken and migrate (`population.rs`), then
+    /// `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
@@ -404,6 +593,7 @@ impl World {
         self.phase_siege(params)?;
         let _ = self.phase_economy(params)?;
         self.phase_supply(params)?;
+        self.phase_people(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);
@@ -436,6 +626,10 @@ impl World {
 
     pub fn soldiers(&self, u: UnitId) -> i64 {
         self.ledger.stock(Account::Soldiers(u)).unwrap_or(0)
+    }
+
+    pub fn house_treasury(&self, h: HouseId) -> i64 {
+        self.ledger.stock(Account::HouseTreasury(h)).unwrap_or(0)
     }
 
     /// The units of an actor, in id order.
@@ -514,17 +708,17 @@ mod tests {
         let mut w = world(7);
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
-        assert_eq!(r.draws.len(), w.actors.len());
-        assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
+        assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), w.actors.len());
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Birth)), "no system of the test world draws elsewhere");
+        assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));
-        assert_eq!(r.events.len(), 1);
-        assert!(matches!(r.events[0].event, Event::TickPlayed));
+        assert!(matches!(r.events.last().unwrap().event, Event::TickPlayed));
         assert_eq!(r.events[0].seq, 0);
         assert_eq!(w.tick, Tick(1));
         assert_eq!(w.year(), 1477);
         let r2 = w.tick(&params()).unwrap();
-        assert_eq!(r2.events[0].seq, 1, "sequence numbers continue across ticks");
+        assert_eq!(r2.events[0].seq, r.events.last().unwrap().seq + 1, "sequence numbers continue across ticks");
     }
 
     #[test]

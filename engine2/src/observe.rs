@@ -20,13 +20,17 @@ impl Game {
         ObsId(format!("u{}", id.0))
     }
 
+    fn house_id(&self, id: crate::ids::HouseId) -> ObsId {
+        ObsId(self.world().names.houses[id.index()].0.clone())
+    }
+
     fn account(&self, a: Account) -> (ObsId, String) {
         match a {
             Account::Population(p) => (self.province_id(p), "population".into()),
             Account::Soldiers(u) => (self.unit_id(u), "soldiers".into()),
             Account::Treasury(a) => (self.actor_id(a), "treasury".into()),
             Account::Debt(a) => (self.actor_id(a), "debt".into()),
-            Account::HouseTreasury(h) => (ObsId(format!("house{}", h.0)), "treasury".into()),
+            Account::HouseTreasury(h) => (self.house_id(h), "treasury".into()),
         }
     }
 }
@@ -60,7 +64,7 @@ impl Observed for Game {
                 Event::Verb { actor, verb, .. } => ObsEvent::Verb {
                     actor: match actor {
                         crate::verbs::ActorRef::Ruler(a) => self.actor_id(*a),
-                        crate::verbs::ActorRef::House(h) => ObsId(format!("house{}", h.0)),
+                        crate::verbs::ActorRef::House(h) => self.house_id(*h),
                     },
                     verb: verb.key().into(),
                 },
@@ -100,6 +104,13 @@ impl Observed for Game {
                 Event::Recruited { .. } => ObsEvent::Other("Recruited".into()),
                 Event::Disbanded { .. } => ObsEvent::Other("Disbanded".into()),
                 Event::Hired { .. } => ObsEvent::Other("Hired".into()),
+                Event::PersonDied { .. } => ObsEvent::Other("PersonDied".into()),
+                Event::PersonBorn { .. } => ObsEvent::Other("PersonBorn".into()),
+                Event::HouseExtinct { house } => ObsEvent::Other(format!("HouseExtinct@{}", self.house_id(*house).0)),
+                Event::Succession { actor, .. } => ObsEvent::Other(format!("Succession@{}", self.actor_id(*actor).0)),
+                Event::Regency { .. } => ObsEvent::Other("Regency".into()),
+                Event::RegencyEnded { .. } => ObsEvent::Other("RegencyEnded".into()),
+                Event::GovernorChanged { .. } => ObsEvent::Other("GovernorChanged".into()),
             })
             .collect()
     }
@@ -111,7 +122,7 @@ impl Observed for Game {
     /// that never occurs across the matrix is the sentinel's `Never`; registering kinds that
     /// nothing can cause yet would flag the absence of later systems, not a defect.
     fn possible_kinds(&self) -> Vec<String> {
-        let mut out = Vec::new();
+        let mut out = vec!["PersonDied".to_string(), "PersonBorn".to_string()];
         if self.world().diseases.contains(&crate::world::Disease::Plague) {
             out.push("Plague".to_string());
         }

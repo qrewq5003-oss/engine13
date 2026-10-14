@@ -402,7 +402,9 @@ fn scripted_wars_on_generated_worlds_keep_the_books_change_owners_and_the_strong
             }
         }
         for (a, actor) in &w.actors {
-            assert_eq!(w.alive(*a), !actor.provinces.is_empty());
+            // Alive: land and a living ruler (a polity whose houses died out fell with its
+            // land, plan §18).
+            assert_eq!(w.alive(*a), !actor.provinces.is_empty() && w.person_alive(actor.ruler));
             for u in w.units_of(*a) {
                 assert!(w.alive(*a), "seed {seed}: a fallen polity keeps unit {u:?}");
             }

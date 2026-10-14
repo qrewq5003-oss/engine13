@@ -323,3 +323,171 @@ kind = "b"
 band = [0.50, 0.75]
 unit = "share of spending"
 e0 = "Э9"
+
+# ---- the house and the throne (E2 step 6a, plan §18) ----
+
+# E0 В2 — mortality by age, the Frier table (Model West, levels 2–3): l(1) = 0.64,
+# l(5) = 0.49, l(20) = 0.40, l(40) = 0.26, l(60) = 0.11, l(80) = 0.007, e₀ ≈ 21. Yearly rates
+# of the bands are −ln(l(b)/l(a))/(b − a); the bands straddle the value by about a fifth
+# (levels 2 and 3 of the model, по памяти). Frier B., «Roman Life Expectancy: Ulpian's
+# Evidence», HSCP 86 (1982), p. 245 — открыл (вторичное) via Pflaumer P., JSM 2015, tables 2
+# and 5 — открыл; Herlihy & Klapisch-Zuber (1985), ch. 3 — по памяти (Tuscany 1427 alike).
+[mortality.infant]
+kind = "a"
+value = 0.36
+band = [0.30, 0.42]
+unit = "share dying per year, age 0"
+e0 = "В2"
+
+[mortality.child]
+kind = "a"
+value = 0.065
+band = [0.05, 0.08]
+unit = "share dying per year, ages 1–4"
+e0 = "В2"
+
+[mortality.youth]
+kind = "a"
+value = 0.013
+band = [0.010, 0.016]
+unit = "share dying per year, ages 5–19"
+e0 = "В2"
+
+[mortality.adult]
+kind = "a"
+value = 0.021
+band = [0.017, 0.025]
+unit = "share dying per year, ages 20–39"
+e0 = "В2"
+
+[mortality.mature]
+kind = "a"
+value = 0.042
+band = [0.034, 0.050]
+unit = "share dying per year, ages 40–59"
+e0 = "В2"
+
+[mortality.old]
+kind = "a"
+value = 0.13
+band = [0.10, 0.16]
+unit = "share dying per year, ages 60–79"
+e0 = "В2"
+
+[mortality.aged]
+kind = "a"
+value = 0.30
+band = [0.20, 0.40]
+unit = "share dying per year, ages 80 and over"
+e0 = "В2"
+
+# (в) The elite lives longer (E0 В2: level 6 of the model against levels 2–3, e₀ ≈ 30
+# against 21): the house's mortality is the table times this factor. Checked through В5.
+[mortality.elite_factor]
+kind = "c"
+value = 0.7
+unit = "factor on the yearly rates of the table"
+checked_by = "В5"
+
+# E0 В5 — observed: the length of a reign (principate 7, dominate 11, the Middle Ages
+# 15–20 years; Ramos et al. 2020; Eisner 2011). Measured on the generated worlds.
+[reign.observed_years]
+kind = "b"
+band = [7.0, 20.0]
+unit = "years, mean over the reigns that ended"
+e0 = "В5"
+
+# E0 В4 — births: 4–6 legitimate children per ruler, i.e. per couple, over a reproductive
+# life (Sundell, Kokkonen, Møller, Krishnarajan 2021, Dataverse — по памяти). The model has
+# no sex and no marriage: each person is the one parent of its children, and the half of the
+# children that marries out of the house (the daughters) is not modelled — so the row is
+# В4 ÷ 2 per person, over the fertile window 16–45 (29 years) the unit is defined on:
+# 2–3 ÷ 29 = 0.069–0.103 a year. The value sits at the bottom of the band — four children
+# per couple — because the owner's rule on §18 asks for about one adult descendant per
+# member over a life (neither a house that doubles every generation nor one that always
+# dies out), and with the elite factor above that is what the bottom gives (median house
+# 4 → 6 over 150 years on the generated worlds; the middle of the band gives 4 → 16).
+[births.per_adult_per_year]
+kind = "a"
+value = 0.069
+band = [0.069, 0.103]
+unit = "children per living person aged 16–45 per year, staying in the house"
+e0 = "В4"
+
+# E0 В1 — majority: venia aetatis at 20 (men) and 18 (women) under Valentinian's law of
+# 371 (CTh 2.17.1 — по памяти); emperors were proclaimed as children, Gian Galeazzo got no
+# power after 20 either (Lubkin 1994, ch. 1 — по памяти): the threshold of the regency
+# mechanism, no guarantee of power; a custom, not an era.
+[majority.age]
+kind = "a"
+value = 18.0
+band = [16.0, 20.0]
+unit = "years of age"
+e0 = "В1"
+
+# E0 В3 — violent death of a ruler per year: 284–395 ≈ 4–5 %/year of which murders and
+# executions ≈ 2.5 %; the 15th century ≈ 0.5–1 %; 600–1800 ≈ 1 % (Eisner 2011, «Killing
+# Kings» — abstract открыл, tables по памяти; Saleh 2019 via Ramos et al. 2020 — открыл).
+# One row for every age: the rule of succession acts through the legitimacy norm, never as
+# a multiplier (E0 §5.4). Applied as В3/2 × (100 − L)/50 a tick.
+[violent_death.per_year]
+kind = "a"
+value = 0.02
+band = [0.005, 0.05]
+unit = "share of rulers killed per year at legitimacy 50"
+e0 = "В3"
+
+# (в) The legitimacy norm by the ruler's standing (E0 §1.7): hereditary above elected above
+# acclaimed; a regency below them all. The mixed rule (blood confirmed by acclamation) takes
+# the mean of hereditary and acclaimed. Checked through В5 (the reign's length depends on
+# the norm through В3); the usurper's norm comes with 6b and В6.
+[legitimacy.norm_hereditary]
+kind = "c"
+value = 70.0
+unit = "legitimacy, 0–100"
+checked_by = "В5"
+
+[legitimacy.norm_elected]
+kind = "c"
+value = 60.0
+unit = "legitimacy, 0–100"
+checked_by = "В5"
+
+[legitimacy.norm_acclaimed]
+kind = "c"
+value = 50.0
+unit = "legitimacy, 0–100"
+checked_by = "В5"
+
+[legitimacy.norm_regency]
+kind = "c"
+value = 40.0
+unit = "legitimacy, 0–100"
+checked_by = "В5"
+
+# (в) How fast legitimacy moves toward its norm: this share of the gap a tick.
+[legitimacy.rate_per_tick]
+kind = "c"
+value = 0.1
+unit = "share of the gap to the norm per tick"
+checked_by = "В5"
+
+# E0 Х1 — a great house's income as a share of the polity's: 0.4–4 % (the senatorial houses
+# of Rome c. 400: Olympiodorus fr. 44 via Cameron 1984 — открыл; Venice 1423: a noble of
+# 4 000 ducats ≈ 0.4 %; Bertrandon de la Broquière on Novo Brdo — по памяти). Per seat: the
+# throne takes this share of the polity's tax, a governorship of its province's tax.
+[house.income_share_of_seat]
+kind = "a"
+value = 0.02
+band = [0.005, 0.05]
+unit = "share of the seat's tax, per tick"
+e0 = "Х1"
+
+# E0 Х4 — observed: the share of the nobility in the polity's income (Scheidel & Friesen
+# 2009 — по памяти: 1.5 % of households, 15–25 % of income). Measured, not an acceptance:
+# the engine's houses are the few great ones of Х1, not the whole nobility.
+[house.observed_share_of_income]
+kind = "b"
+band = [0.15, 0.25]
+unit = "share of the polities' tax going to houses"
+e0 = "Х4"

@@ -8,8 +8,9 @@
 //! - **The first randomness:** plague worlds are played with several game seeds; the matrix
 //!   flags are read (plan §13). Plague occurs in some run of every plague world (no `Never`),
 //!   and the stocks differ across game seeds — randomness reaches the world. The outcome
-//!   (who is alive, who owns what) is still seed-independent, because no system yet changes
-//!   it; that flag is asserted here on purpose and must fall with the army and battle.
+//!   (who is alive, who owns what) was seed-independent until E2 step 6a: the house and the
+//!   throne is the first system that changes who is alive without anyone's order (a polity
+//!   whose houses die out falls), so that flag is no longer asserted here.
 //! - **Plague and П7:** one band for every world (owner's decision on PR #282): a plague
 //!   world's growth over 100 ticks lies in the same band, and the mean over plague worlds is
 //!   reported.
@@ -117,8 +118,8 @@ fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
         }
         assert!(!flags.iter().any(|f| matches!(f, Flag::Never { .. })), "world {world_seed}: plague declared but never struck in 3 × 100 ticks");
         assert!(stocks[0] != stocks[1] || stocks[1] != stocks[2], "world {world_seed}: three game seeds, identical stocks — randomness did not reach the world");
-        // Honest statement of this step: nothing changes who is alive or who owns what yet.
-        assert!(flags.iter().any(|f| matches!(f, Flag::SeedIndependent { .. })), "world {world_seed}: outcome differs by seed before any system can change it");
+        // Since E2 step 6a the outcome may differ by seed: a polity whose houses die out falls
+        // (plan §18). Before that step the `SeedIndependent` flag was asserted here.
     }
     assert!(plague_worlds >= 3, "only {plague_worlds} plague worlds among 20");
     let mean = growths.iter().sum::<f64>() / growths.len() as f64;

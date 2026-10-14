@@ -26,6 +26,9 @@ pub struct ActorView {
     /// Debt in the scenario's display currency, for showing only.
     pub debt_display: f64,
     pub legitimacy: f64,
+    /// The ruler's name, and the regent's while the ruler is a minor.
+    pub ruler: String,
+    pub regent: Option<String>,
 }
 
 /// The world as shown.
@@ -75,6 +78,8 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
                 debt_kg,
                 debt_display: debt_kg as f64 / currency.kg_per_unit,
                 legitimacy: a.legitimacy,
+                ruler: w.names.persons[a.ruler.index()].1.clone(),
+                regent: a.regent.map(|r| w.names.persons[r.index()].1.clone()),
             }
         })
         .collect();

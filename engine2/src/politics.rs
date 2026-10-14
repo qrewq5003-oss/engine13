@@ -1,0 +1,365 @@
+//! Internal politics, part one (brief §2 «Внутренняя политика», plan §18, PR 6a): the house
+//! and the throne — who rules, who dies, who is born, who inherits.
+//!
+//! Per tick, after the supply and before the population, in canonical order:
+//! 1. **Deaths (E0 В2):** every living person draws once (`DrawPoint::Mortality`, keyed by
+//!    person) against the yearly rate of its age band — the Frier table (Model West,
+//!    levels 2–3) by seven bands, times the elite factor (в), halved for the tick. The record
+//!    of a dead person stays (no dangling ids); its seats are freed, a governorship passes
+//!    within the house, a house with no living member is **extinct**.
+//! 2. **Violent death of a ruler (E0 В3):** one draw per living ruler of a living polity
+//!    (`DrawPoint::Violence`, keyed by polity) against `В3/2 × (100 − L)/50`: at legitimacy
+//!    50 the base rate, at 100 none, at 0 twice the base. The rule of succession acts
+//!    through the legitimacy norm, never as a multiplier (E0 §5.4).
+//! 3. **Succession:** a polity whose ruler died this tick gets its next ruler — the
+//!    designated heir if alive, else by the rule ([`Succession`]): by blood the line by
+//!    seniority (descendants first, elder lines first, then the nearest collateral line);
+//!    by acclamation or election the eldest adult of the ruling house, a child only if no
+//!    adult is left. When the ruling house has no living member the throne passes to
+//!    **another house of the polity** (owner's rule on §18: the house role must be able to
+//!    take the throne): governors first, then the eldest adult, then the eldest living
+//!    member of any house of the polity; the standing is `Acclaimed` (or `Elected` under
+//!    election). Only when no house of the polity has a living person does the polity
+//!    **fall** (`ActorDied`, the rules of §17): a ruler out of nothing is forbidden; the
+//!    land stays with the record, masterless, until the collapse system gives it heirs.
+//! 4. **Regency (E0 В1):** a ruler under `majority.age` has a regent — the eldest adult of
+//!    the ruler's house, else of any house of the polity; the regency ends at majority
+//!    (`RegencyEnded`) or passes on the regent's death. A general mechanism, no dates: who
+//!    the regent is at the start is a fact of the scenario.
+//! 5. **Births (E0 В4):** every living person of fertile age (16–45, the window the row's
+//!    unit is defined on) draws once (`DrawPoint::Birth`, keyed by person) at
+//!    `births.per_adult_per_year / 2`; a child is a new person of the same house, named in
+//!    the world's `Names` (decision of #278: names live in the world). The rate is В4's
+//!    children per ruler **per couple**, halved: the half that marries out of the house is
+//!    not modelled (owner's rule on §18, so a house does not double every generation).
+//! 6. **Legitimacy:** drawn toward the norm of the ruler's standing (hereditary, confirmed,
+//!    elected, acclaimed; regency while the ruler is a minor) at `legitimacy.rate_per_tick`
+//!    of the gap. The only dynamics of legitimacy in 6a; the prices come with 6b.
+//!
+//! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
+//! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
+//! `Source::Seat` from the treasury to the house's treasury. **A house's treasury has no
+//! spending in E2** (bribes went to diplomacy, house troops to the collapse system): it
+//! grows without an outlet until then — recorded here so that the growth is not read as a
+//! defect (owner's note on §18).
+
+use crate::event::{Cause, Event};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
+use crate::params::Params;
+use crate::rng::{draw_unit, Draw, DrawPoint};
+use crate::world::{Person, Standing, Succession, World, WorldError};
+
+/// The fertile window in years of age: the unit of `births.per_adult_per_year` (E0 В4 gives
+/// children per couple over a reproductive life), not a tunable.
+const FERTILE_AGE: (i32, i32) = (16, 45);
+
+/// The standing a succession by rule gives.
+pub fn standing_of_rule(rule: Succession) -> Standing {
+    match rule {
+        Succession::Blood => Standing::Hereditary,
+        Succession::Mixed => Standing::Confirmed,
+        Succession::Election => Standing::Elected,
+        Succession::Acclamation => Standing::Acclaimed,
+    }
+}
+
+impl World {
+    /// Age in whole years at the current tick.
+    pub fn age(&self, p: PersonId) -> i32 {
+        self.year() - self.persons[&p].born
+    }
+
+    pub fn person_alive(&self, p: PersonId) -> bool {
+        self.persons.get(&p).is_some_and(|x| x.died.is_none())
+    }
+
+    pub fn is_adult(&self, p: PersonId, params: &Params) -> bool {
+        self.age(p) >= params.majority_age
+    }
+
+    /// Living members of a house, in id order.
+    pub fn members(&self, h: HouseId) -> Vec<PersonId> {
+        self.persons.iter().filter(|(_, p)| p.house == h && p.died.is_none()).map(|(id, _)| *id).collect()
+    }
+
+    /// The houses of a polity, in id order.
+    pub fn houses_of(&self, a: ActorId) -> Vec<HouseId> {
+        self.houses.iter().filter(|(_, h)| h.polity == a).map(|(id, _)| *id).collect()
+    }
+
+    /// Living persons of all houses of a polity, in id order.
+    pub fn people_of_polity(&self, a: ActorId) -> Vec<PersonId> {
+        self.persons.iter().filter(|(_, p)| p.died.is_none() && self.houses[&p.house].polity == a).map(|(id, _)| *id).collect()
+    }
+
+    /// Living adults of all houses of a polity, the ruler excluded: who can be regent.
+    pub fn people_of_polity_adults(&self, a: ActorId, params: &Params) -> Vec<PersonId> {
+        let ruler = self.actors[&a].ruler;
+        self.people_of_polity(a).into_iter().filter(|p| *p != ruler && self.is_adult(*p, params)).collect()
+    }
+
+    /// The eldest of `candidates` (ties: the lower id), adults first when `adults_first`.
+    fn eldest(&self, candidates: &[PersonId], adults_first: bool, params: &Params) -> Option<PersonId> {
+        let pick = |xs: &[PersonId]| xs.iter().copied().min_by_key(|p| (self.persons[p].born, *p));
+        if adults_first {
+            let adults: Vec<PersonId> = candidates.iter().copied().filter(|p| self.is_adult(*p, params)).collect();
+            if let Some(p) = pick(&adults) {
+                return Some(p);
+            }
+        }
+        pick(candidates)
+    }
+
+    /// The seats a person holds besides the throne: the provinces it governs.
+    fn governed_by(&self, p: PersonId) -> Vec<ProvinceId> {
+        self.provinces.iter().filter(|(_, pr)| pr.governor == Some(p)).map(|(id, _)| *id).collect()
+    }
+
+    /// The legitimacy norm of a polity's ruler by standing, the regency norm while the
+    /// ruler is a minor (E0 §1.7, kind (в) checked through В5).
+    pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
+        let actor = &self.actors[&a];
+        if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
+            return params.legitimacy_norm_regency;
+        }
+        match actor.standing {
+            Standing::Hereditary => params.legitimacy_norm_hereditary,
+            Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
+            Standing::Elected => params.legitimacy_norm_elected,
+            Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+        }
+    }
+
+    /// One keyed draw of a point that draws **once per id per tick** by construction (each
+    /// loop of the phase visits an id once), as a fraction in `[0, 1)`. The ordinal is
+    /// therefore 0 without a scan of the journal — the scan is quadratic in the persons of
+    /// the world; `draws_once_per_person` in the tests holds the claim.
+    fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
+        let d = Draw { point, tick: self.tick, id, n: 0 };
+        self.journal_draw(d, crate::rng::draw(self.seed, d));
+        draw_unit(self.seed, d)
+    }
+
+    /// Kill a person before a tick. For the tests only: the succession of the tick then
+    /// plays out on a death the test chose rather than one the draws gave.
+    #[cfg(feature = "testing")]
+    pub fn kill(&mut self, p: PersonId, cause: Cause, params: &Params) -> Result<(), WorldError> {
+        if !self.person_alive(p) {
+            return Err(WorldError::UnknownPerson(p));
+        }
+        self.die(p, cause, params)
+    }
+
+    /// A person dies: the record stays, the seats are freed, the governorship passes
+    /// within the house, the house may be extinct. The throne is left to the succession.
+    fn die(&mut self, p: PersonId, cause: Cause, params: &Params) -> Result<(), WorldError> {
+        self.persons.get_mut(&p).unwrap().died = Some(self.tick);
+        self.emit(Event::PersonDied { person: p });
+        let actors: Vec<ActorId> = self.actors.keys().copied().collect();
+        for a in actors {
+            let actor = self.actors.get_mut(&a).unwrap();
+            if actor.ruler == p {
+                self.emit(Event::RulerDied { actor: a, person: p, cause });
+            } else {
+                if actor.heir == Some(p) {
+                    actor.heir = None;
+                }
+                if actor.regent == Some(p) {
+                    actor.regent = None;
+                }
+            }
+        }
+        for province in self.governed_by(p) {
+            self.pass_governorship(province, p, params)?;
+        }
+        let house = self.persons[&p].house;
+        if self.members(house).is_empty() {
+            self.emit(Event::HouseExtinct { house });
+        }
+        Ok(())
+    }
+
+    /// A governorship passes within the house of the holder who left it: the eldest adult
+    /// member with no seat; nobody — the seat is vacant.
+    fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
+        let house = self.persons[&from].house;
+        let owner = self.provinces[&province].owner;
+        let free = |w: &World, q: PersonId| w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
+        let candidates: Vec<PersonId> = self.members(house).into_iter().filter(|q| *q != from && free(self, *q)).collect();
+        let to = self.eldest(&candidates, false, params);
+        self.provinces.get_mut(&province).unwrap().governor = to;
+        self.emit(Event::GovernorChanged { province, from, to });
+        Ok(())
+    }
+
+    /// The next ruler by the rule, inside the ruling house (`None` when the house has no
+    /// living member).
+    fn heir_by_rule(&self, dead: PersonId, rule: Succession, params: &Params) -> Option<PersonId> {
+        let house = self.persons[&dead].house;
+        let members = self.members(house);
+        if members.is_empty() {
+            return None;
+        }
+        match rule {
+            Succession::Blood | Succession::Mixed => {
+                // Descendants of the dead ruler by line, then the lines of each nearer
+                // ancestor in turn, then whoever of the house is eldest.
+                if let Some(p) = self.first_living_in_line(dead, Some(dead)) {
+                    return Some(p);
+                }
+                let mut up = self.persons[&dead].parent;
+                while let Some(anc) = up {
+                    if let Some(p) = self.first_living_in_line(anc, None) {
+                        return Some(p);
+                    }
+                    up = self.persons[&anc].parent;
+                }
+                self.eldest(&members, false, params)
+            }
+            Succession::Acclamation | Succession::Election => self.eldest(&members, true, params),
+        }
+    }
+
+    /// Depth-first over the descendants of `root` (children elder first), the root itself
+    /// included unless it is `skip`; the first living person.
+    fn first_living_in_line(&self, root: PersonId, skip: Option<PersonId>) -> Option<PersonId> {
+        if skip != Some(root) && self.person_alive(root) {
+            return Some(root);
+        }
+        let mut children: Vec<PersonId> = self.persons.iter().filter(|(_, p)| p.parent == Some(root)).map(|(id, _)| *id).collect();
+        children.sort_by_key(|c| (self.persons[c].born, *c));
+        children.into_iter().find_map(|c| self.first_living_in_line(c, skip))
+    }
+
+    /// Seat the next ruler of `a` after the death of its ruler, or let the polity fall.
+    fn succeed(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
+        let dead = self.actors[&a].ruler;
+        let rule = self.actors[&a].succession;
+        let designated = self.actors[&a].heir.filter(|h| self.person_alive(*h));
+        let (next, how) = if let Some(h) = designated {
+            (h, standing_of_rule(rule))
+        } else if let Some(p) = self.heir_by_rule(dead, rule, params) {
+            (p, standing_of_rule(rule))
+        } else {
+            // The ruling house died out: another house of the polity, governors first.
+            let people = self.people_of_polity(a);
+            let governors: Vec<PersonId> = people.iter().copied().filter(|p| !self.governed_by(*p).is_empty() && self.is_adult(*p, params)).collect();
+            let pick = self.eldest(&governors, true, params).or_else(|| self.eldest(&people, true, params));
+            match pick {
+                Some(p) => (p, if rule == Succession::Election { Standing::Elected } else { Standing::Acclaimed }),
+                None => {
+                    self.fall(a)?;
+                    return Ok(());
+                }
+            }
+        };
+        {
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.ruler = next;
+            actor.heir = None;
+            actor.regent = None;
+            actor.standing = how;
+        }
+        self.emit(Event::Succession { actor: a, from: dead, to: next, how });
+        // One seat per person: a governor who takes the throne leaves the governorship.
+        for province in self.governed_by(next) {
+            self.pass_governorship(province, next, params)?;
+        }
+        Ok(())
+    }
+
+    /// A new person of `house`, child of `parent`, named in the world.
+    fn born(&mut self, parent: PersonId) -> PersonId {
+        let house = self.persons[&parent].house;
+        let id = PersonId(self.next_person);
+        self.next_person += 1;
+        let k = self.persons.values().filter(|p| p.house == house).count() + 1;
+        let (hsid, hname) = &self.names.houses[house.index()];
+        self.names.persons.push((format!("{hsid}.{k}"), format!("{hname} {k}")));
+        self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), died: None });
+        self.emit(Event::PersonBorn { person: id, house, parent });
+        id
+    }
+
+    /// The phase of the house and the throne.
+    pub(crate) fn phase_people(&mut self, params: &Params) -> Result<(), WorldError> {
+        let year = self.year();
+        // 1. Deaths, every living person in id order.
+        let living: Vec<PersonId> = self.persons.iter().filter(|(_, p)| p.died.is_none()).map(|(id, _)| *id).collect();
+        for p in &living {
+            let age = year - self.persons[p].born;
+            let per_tick = params.mortality_per_year(age) * params.mortality_elite_factor / 2.0;
+            if self.draw_once(DrawPoint::Mortality, p.0) < per_tick {
+                self.die(*p, Cause::Natural, params)?;
+            }
+        }
+        // 2. Violent death of the rulers of living polities.
+        let actors: Vec<ActorId> = self.actors.keys().copied().collect();
+        for a in &actors {
+            if !self.alive(*a) {
+                continue;
+            }
+            let legitimacy = self.actors[a].legitimacy;
+            let per_tick = params.violent_death_per_tick * (100.0 - legitimacy) / 50.0;
+            if self.draw_once(DrawPoint::Violence, a.0) < per_tick {
+                let ruler = self.actors[a].ruler;
+                self.die(ruler, Cause::Murder, params)?;
+            }
+        }
+        // 3. Successions: a polity with land whose ruler died this tick.
+        for a in &actors {
+            let ruler = self.actors[a].ruler;
+            let died_now = self.persons[&ruler].died == Some(self.tick);
+            if died_now && !self.actors[a].provinces.is_empty() {
+                self.succeed(*a, params)?;
+            }
+        }
+        // 4. Regency: a minor on the throne has a regent (a dead regent was cleared by
+        // `die`, so the seat is filled again in the same tick); majority ends it.
+        for a in &actors {
+            if !self.alive(*a) {
+                continue;
+            }
+            let ruler = self.actors[a].ruler;
+            let minor = !self.is_adult(ruler, params);
+            let regent = self.actors[a].regent.filter(|r| self.person_alive(*r));
+            if minor && regent.is_none() {
+                let house = self.persons[&ruler].house;
+                let of_house: Vec<PersonId> = self.members(house).into_iter().filter(|p| *p != ruler && self.is_adult(*p, params)).collect();
+                let of_polity: Vec<PersonId> = self.people_of_polity(*a).into_iter().filter(|p| *p != ruler && self.is_adult(*p, params)).collect();
+                let pick = self.eldest(&of_house, true, params).or_else(|| self.eldest(&of_polity, true, params));
+                self.actors.get_mut(a).unwrap().regent = pick;
+                if let Some(r) = pick {
+                    self.emit(Event::Regency { actor: *a, ward: ruler, regent: r });
+                }
+            } else if !minor && self.actors[a].regent.is_some() {
+                self.actors.get_mut(a).unwrap().regent = None;
+                self.emit(Event::RegencyEnded { actor: *a, ruler });
+            }
+        }
+        // 5. Births, every living person of fertile age in id order (persons born this tick
+        // are not of age).
+        for p in &living {
+            if !self.person_alive(*p) {
+                continue;
+            }
+            let age = year - self.persons[p].born;
+            if !(FERTILE_AGE.0..=FERTILE_AGE.1).contains(&age) {
+                continue;
+            }
+            if self.draw_once(DrawPoint::Birth, p.0) < params.births_per_adult_per_tick {
+                self.born(*p);
+            }
+        }
+        // 6. Legitimacy toward the norm.
+        for a in &actors {
+            if !self.alive(*a) {
+                continue;
+            }
+            let norm = self.legitimacy_norm(*a, params);
+            let actor = self.actors.get_mut(a).unwrap();
+            actor.legitimacy += (norm - actor.legitimacy) * params.legitimacy_rate_per_tick;
+        }
+        Ok(())
+    }
+}

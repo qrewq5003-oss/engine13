@@ -9,7 +9,9 @@
 //! E2 step 2: the province graph with land and sea edges, units that move and are supplied
 //! on it (`movement.rs`). E2 step 3: the population system (`population.rs`) — the first
 //! randomness (plague). E2 step 4: the economy (`economy.rs`) — the treasury as a flow,
-//! the budget as the army's limit, the bank as the first institution.
+//! the budget as the army's limit, the bank as the first institution. E2 step 5: the army
+//! (`army.rs`) — war, march, battle, siege, the fall of polities. E2 step 6a: the house and
+//! the throne (`politics.rs`) — people, houses, seats, deaths, births, succession, regency.
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -31,6 +33,7 @@ pub mod movement;
 #[cfg(feature = "sentinel")]
 pub mod observe;
 pub mod params;
+pub mod politics;
 pub mod population;
 pub mod rng;
 pub mod save;
@@ -54,4 +57,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact, Siege, TickReport, Unit, World};
+pub use world::{ActorFact, Disease, Facts, House, HouseFact, Institution, Land, Names, Person, PersonFact, ProvinceFact, Siege, Standing, Succession, TickReport, Unit, World};

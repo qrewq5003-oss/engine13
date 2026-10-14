@@ -39,6 +39,10 @@ pub enum DrawPoint {
     Event = 3,
     /// Mortality of a person.
     Mortality = 4,
+    /// Violent death of a polity's ruler (keyed by polity).
+    Violence = 5,
+    /// A birth to a person.
+    Birth = 6,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.

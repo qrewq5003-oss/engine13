@@ -7,11 +7,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, PersonId, ProvinceId, UnitId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
+use crate::world::Standing;
 
 /// Outcome of a battle for the attacker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +90,20 @@ pub enum Event {
     Disbanded { unit: UnitId, soldiers: u64 },
     /// Mercenaries were hired against an advance.
     Hired { unit: UnitId, soldiers: u64, advance_kg: u64 },
+    /// A person died (a ruler's death also emits `RulerDied` with its cause).
+    PersonDied { person: PersonId },
+    /// A child was born to a member of a house.
+    PersonBorn { person: PersonId, house: HouseId, parent: PersonId },
+    /// A house has no living member left: the subject is lost (E0 §2.3).
+    HouseExtinct { house: HouseId },
+    /// The throne passed; `how` is the standing the new ruler holds it by.
+    Succession { actor: ActorId, from: PersonId, to: PersonId, how: Standing },
+    /// A minor on the throne got a regent.
+    Regency { actor: ActorId, ward: PersonId, regent: PersonId },
+    /// The ruler came of age; the regency ended.
+    RegencyEnded { actor: ActorId, ruler: PersonId },
+    /// A governorship passed within the house (`to` is `None` when the seat fell vacant).
+    GovernorChanged { province: ProvinceId, from: PersonId, to: Option<PersonId> },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.
