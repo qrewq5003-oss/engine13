@@ -8,7 +8,8 @@
 //! Step E1c: `Observed` for the sentinel crate (`observe.rs`), the short run in CI.
 //! E2 step 2: the province graph with land and sea edges, units that move and are supplied
 //! on it (`movement.rs`). E2 step 3: the population system (`population.rs`) — the first
-//! randomness (plague).
+//! randomness (plague). E2 step 4: the economy (`economy.rs`) — the treasury as a flow,
+//! the budget as the army's limit, the bank as the first institution.
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -21,6 +22,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod economy;
 pub mod event;
 pub mod ids;
 pub mod ledger;
@@ -51,4 +53,4 @@ pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
 pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
-pub use world::{ActorFact, Disease, Facts, Land, Names, ProvinceFact, TickReport, Unit, World};
+pub use world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact, TickReport, Unit, World};

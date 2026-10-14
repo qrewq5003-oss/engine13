@@ -37,3 +37,7 @@ required-features = ["worldgen"]
 [[test]]
 name = "population"
 required-features = ["sentinel", "worldgen"]
+
+[[test]]
+name = "economy"
+required-features = ["worldgen"]

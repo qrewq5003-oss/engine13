@@ -90,6 +90,8 @@ impl Observed for Game {
                 Event::Famine { province, .. } => ObsEvent::Other(format!("Famine@{}", self.province_id(*province).0)),
                 Event::Plague { .. } => ObsEvent::Other("Plague".into()),
                 Event::Migration { .. } => ObsEvent::Other("Migration".into()),
+                Event::PayShortfall { actor, .. } => ObsEvent::Other(format!("PayShortfall@{}", self.actor_id(*actor).0)),
+                Event::Loan { .. } => ObsEvent::Other("Loan".into()),
             })
             .collect()
     }

@@ -33,6 +33,15 @@ pub enum Disease {
     Plague,
 }
 
+/// An institution a polity may hold: the engine's closed list (E0 §4, variant 3). Each
+/// comes with its source and the rows it changes. `Bank` (E0 Э6, Э7): a polity with a bank
+/// may borrow, down to the debt ceiling, at interest; without one its treasury never goes
+/// below zero. Next: the succession rule (internal politics), gunpowder (army).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Institution {
+    Bank,
+}
+
 /// Land of a province: the closed list the capacity density (E0 П1) is keyed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Land {
@@ -52,6 +61,14 @@ pub struct Actor {
     pub provinces: Vec<ProvinceId>,
     pub capital: ProvinceId,
     pub legitimacy: f64,
+    /// The polity's institutions (facts of the scenario).
+    pub institutions: std::collections::BTreeSet<Institution>,
+    /// Tax as parts per million of production; starts at `tax.default_rate` (E0 Э4). The
+    /// verbs that change it are closed until internal politics prices them (plan §16).
+    pub tax_rate_ppm: i64,
+    /// Share of the army's pay met this tick, parts per million: the share of the army that
+    /// is supplied at home (`movement.rs`).
+    pub paid_share_ppm: i64,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -117,6 +134,8 @@ pub struct ActorFact {
     pub capital: ProvinceId,
     /// Starting army, stationed at the capital as one unit.
     pub soldiers: u64,
+    /// The polity's institutions, from the engine's closed list.
+    pub institutions: Vec<Institution>,
 }
 
 /// The starting facts the world is built from — the compiled scenario (`scenario.rs`).
@@ -226,7 +245,17 @@ impl World {
         let mut actors: BTreeMap<ActorId, Actor> = BTreeMap::new();
         for (i, a) in facts.actors.iter().enumerate() {
             let id = ActorId(i as u32);
-            actors.insert(id, Actor { provinces: Vec::new(), capital: a.capital, legitimacy: 50.0 });
+            actors.insert(
+                id,
+                Actor {
+                    provinces: Vec::new(),
+                    capital: a.capital,
+                    legitimacy: 50.0,
+                    institutions: a.institutions.iter().copied().collect(),
+                    tax_rate_ppm: params.tax_default_ppm,
+                    paid_share_ppm: 1_000_000,
+                },
+            );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
         }
         let mut provinces: BTreeMap<ProvinceId, Province> = BTreeMap::new();
@@ -339,13 +368,16 @@ impl World {
         sorted.into_iter().map(|id| (id, self.draw(point, id))).collect()
     }
 
-    /// Play one tick: one decision draw per actor (stand-in for E3), units move and are
-    /// supplied (`movement.rs`), people grow, starve, sicken and migrate
+    /// Play one tick: one decision draw per actor (stand-in for E3), units move
+    /// (`movement.rs`), the economy produces, taxes and pays (`economy.rs`), units are
+    /// supplied to the paid share, people grow, starve, sicken and migrate
     /// (`population.rs`), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
-        self.phase_units(params)?;
+        self.phase_movement(params)?;
+        let _ = self.phase_economy(params)?;
+        self.phase_supply(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);
@@ -452,8 +484,9 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.len(), w.actors.len());
-        assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut)), "every unit is supplied at home: only people move");
+        assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
+        assert!(r.postings.iter().any(|p| p.source == Source::Tax));
         assert_eq!(r.events.len(), 1);
         assert!(matches!(r.events[0].event, Event::TickPlayed));
         assert_eq!(r.events[0].seq, 0);

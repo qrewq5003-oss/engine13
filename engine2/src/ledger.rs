@@ -63,6 +63,9 @@ pub enum Source {
     MigrationIn,
     MigrationOut,
     Tax,
+    /// Court and administration (E0 Э5).
+    Court,
+    /// The army's pay (E0 А3).
     Upkeep,
     Loot,
     Recruit,

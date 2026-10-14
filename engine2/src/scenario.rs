@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{ActorId, ProvinceId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{ActorFact, Disease, Facts, Land, Names, ProvinceFact};
+use crate::world::{ActorFact, Disease, Facts, Institution, Land, Names, ProvinceFact};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -64,6 +64,8 @@ pub struct ActorData {
     pub capital: String,
     /// Starting army in soldiers, one unit at the capital.
     pub soldiers: u64,
+    /// The polity's institutions, from the engine's closed list (facts: a bank exists or not).
+    pub institutions: Vec<Institution>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -196,7 +198,10 @@ impl ScenarioData {
             let Some(capital) = capital.filter(|_| owned) else {
                 return Err(SchemaError::BadCapital(key.clone(), a.capital.clone()));
             };
-            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers });
+            let mut institutions = a.institutions.clone();
+            institutions.sort();
+            institutions.dedup();
+            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions });
         }
 
         let mut verbs = Vec::new();
@@ -233,11 +238,13 @@ name = "B"
 treasury_kg = 10
 capital = "p2"
 soldiers = 20
+institutions = ["Bank"]
 [actors.a]
 name = "A"
 treasury_kg = 20
 capital = "p1"
 soldiers = 0
+institutions = []
 [provinces.p2]
 name = "P2"
 owner = "b"
@@ -281,6 +288,9 @@ raise_tax = "Поднять налог"
         assert_eq!(c.names.actors[1].0, "b");
         assert_eq!(c.facts.actors[0].treasury_kg, 20);
         assert_eq!(c.facts.actors[1].soldiers, 20);
+        assert_eq!(c.facts.actors[1].institutions, vec![Institution::Bank]);
+        assert!(c.facts.actors[0].institutions.is_empty());
+        assert!(ScenarioData::parse(&OK.replacen("institutions = [\"Bank\"]", "institutions = [\"Guild\"]", 1)).is_err());
         assert_eq!(c.facts.actors[1].capital, ProvinceId(1)); // p2
         assert_eq!(c.facts.provinces[0].owner, ActorId(0)); // p1 owned by a
         assert_eq!(c.facts.provinces[1].owner, ActorId(1)); // p2 owned by b

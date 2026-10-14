@@ -80,8 +80,18 @@ pub struct Params {
     pub migration_min_gap_ppm: i64,
     /// E0 П1: people per km² by land, as thousandths so capacity is integer arithmetic.
     pub capacity_milli_per_km2: [(Land, i64); 4],
-    /// E0 А8: soldiers 1 000 inhabitants can supply.
-    pub supply_soldiers_per_1000: i64,
+    /// E0 Э2: output per head per year, kg.
+    pub output_per_head_kg: i64,
+    /// E0 Э4: the starting tax rate, parts per million of production.
+    pub tax_default_ppm: i64,
+    /// E0 Э5: court and administration, parts per million of revenue.
+    pub court_share_ppm: i64,
+    /// E0 А3: pay per soldier per year, kg (outputs × output per head).
+    pub pay_per_soldier_kg_per_year: i64,
+    /// E0 Э6: interest per tick on a negative treasury, parts per million.
+    pub loan_interest_ppm_per_tick: i64,
+    /// E0 Э7: debt ceiling in thousandths of a year of revenue.
+    pub loan_ceiling_years_milli: i64,
     /// E0 А7: share of the unsupplied soldiers lost per tick, parts per million.
     pub army_attrition_unsupplied_ppm_per_tick: i64,
     /// E0 А5 (в): edges a unit crosses per tick.
@@ -148,7 +158,12 @@ impl Params {
             (Land::Steppe, milli("capacity.steppe")?),
             (Land::Desert, milli("capacity.desert")?),
         ];
-        let supply = value("supply.soldiers_per_1000_people")?;
+        let output = value("production.output_per_head_kg")?;
+        let tax = value("tax.default_rate")?;
+        let court = value("court.share_of_revenue")?;
+        let pay_outputs = value("army.pay_per_soldier_outputs")?;
+        let interest = value("loan.interest_per_year")?;
+        let ceiling_years = value("loan.ceiling_years_of_revenue")?;
         let attrition_year = value("army.attrition_unsupplied_per_year")?;
         let moves = value("movement.provinces_per_tick")?;
         Ok(Params {
@@ -159,7 +174,12 @@ impl Params {
             migration_rate_ppm_per_tick: (migration_rate * 1_000_000.0).round() as i64,
             migration_min_gap_ppm: (migration_gap * 1_000_000.0).round() as i64,
             capacity_milli_per_km2,
-            supply_soldiers_per_1000: supply.round() as i64,
+            output_per_head_kg: output.round() as i64,
+            tax_default_ppm: (tax * 1_000_000.0).round() as i64,
+            court_share_ppm: (court * 1_000_000.0).round() as i64,
+            pay_per_soldier_kg_per_year: (pay_outputs * output).round() as i64,
+            loan_interest_ppm_per_tick: (interest / 2.0 * 1_000_000.0).round() as i64,
+            loan_ceiling_years_milli: (ceiling_years * 1000.0).round() as i64,
             // Two ticks a year: half the yearly share per tick.
             army_attrition_unsupplied_ppm_per_tick: (attrition_year / 2.0 * 1_000_000.0).round() as i64,
             movement_provinces_per_tick: moves.round() as u32,
@@ -222,7 +242,12 @@ mod tests {
         assert_eq!(p.migration_min_gap_ppm, 100_000);
         assert_eq!(p.capacity(250, Land::Arable), 10_000);
         assert_eq!(p.capacity(1000, Land::Steppe), 1000);
-        assert_eq!(p.supply_soldiers_per_1000, 150);
+        assert_eq!(p.output_per_head_kg, 700);
+        assert_eq!(p.tax_default_ppm, 100_000);
+        assert_eq!(p.court_share_ppm, 400_000);
+        assert_eq!(p.pay_per_soldier_kg_per_year, 2100);
+        assert_eq!(p.loan_interest_ppm_per_tick, 40_000);
+        assert_eq!(p.loan_ceiling_years_milli, 5000);
         assert_eq!(p.army_attrition_unsupplied_ppm_per_tick, 150_000);
         assert_eq!(p.movement_provinces_per_tick, 1);
     }
