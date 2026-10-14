@@ -113,6 +113,11 @@ pub enum Event {
     TaxRateChanged { actor: ActorId, from_ppm: i64, to_ppm: i64 },
     /// The ruler bought legitimacy with the treasury (`enforce_order`, E2 step 6b).
     OrderEnforced { actor: ActorId, kg: u64 },
+    /// The polity defaulted: a debt past the ceiling whose interest the treasury could not
+    /// meet is written off, legitimacy pays, the credit closes for a term (E2 step 6b).
+    Default { actor: ActorId, written_off_kg: u64 },
+    /// The term after a default ended: the bank lends again.
+    CreditRestored { actor: ActorId },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

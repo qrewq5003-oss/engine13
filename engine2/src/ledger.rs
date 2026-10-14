@@ -90,6 +90,8 @@ pub enum Source {
     Interest,
     /// Paying the debt down: `−` on the treasury and `−` on the debt, the same amount.
     Repayment,
+    /// Default: the debt written off — `−` on the debt alone (E2 step 6b).
+    Default,
     /// A verb's own cost, e.g. a bribe.
     Verb,
     /// Used by tests of the ledger itself.

@@ -144,6 +144,9 @@ pub struct Params {
     /// (в) `enforce_order`: its price as parts per million of yearly revenue, and its gain.
     pub order_cost_share_ppm: i64,
     pub order_gain: f64,
+    /// (в) Default: its price in legitimacy and the ticks the credit stays closed.
+    pub legitimacy_cost_default: f64,
+    pub default_ticks_without_credit: u32,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -257,6 +260,8 @@ impl Params {
         let gain_lower_tax = value("legitimacy.gain_lower_tax")?;
         let order_cost = value("order.cost_share_of_revenue")?;
         let order_gain = value("order.gain")?;
+        let cost_default = value("legitimacy.cost_default")?;
+        let years_without_credit = value("default.years_without_credit")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -300,6 +305,8 @@ impl Params {
             legitimacy_gain_lower_tax: gain_lower_tax,
             order_cost_share_ppm: (order_cost * 1_000_000.0).round() as i64,
             order_gain,
+            legitimacy_cost_default: cost_default,
+            default_ticks_without_credit: (years_without_credit * 2.0).round() as u32,
             entries,
         })
     }

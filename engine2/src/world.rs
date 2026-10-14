@@ -142,6 +142,8 @@ pub struct Actor {
     pub succession: Succession,
     /// How the ruler came to the throne: keys the legitimacy norm.
     pub standing: Standing,
+    /// After a default the bank lends nothing until this tick (E2 step 6b).
+    pub credit_closed_until: Option<Tick>,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -453,6 +455,7 @@ impl World {
                     regent: a.regent,
                     succession: a.succession,
                     standing,
+                    credit_closed_until: None,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;

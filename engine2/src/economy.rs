@@ -26,8 +26,13 @@
 //! `+debt` — so the polity's net worth (treasury − debt) never grows from borrowing, and the
 //! ceiling and the interest apply to the debt. Without a bank there is no debt at all
 //! (owner's rule: a pay debt without a bank would be a free loan and would void the budget
-//! as the limit). Nothing stops interest from carrying the debt past the ceiling: default
-//! as an event is for internal politics (plan §16).
+//! as the limit). Interest can carry the debt past the ceiling; **default** (E2 step 6b,
+//! plan §18.3): a debt past the ceiling whose interest of the tick the treasury could not
+//! meet is written off (`Source::Default` on the debt alone), legitimacy pays
+//! `legitimacy.cost_default`, and the bank lends nothing — not for the pay, not to the verb
+//! — for `default.years_without_credit` (`Actor::credit_closed_until`; `CreditRestored`
+//! when the term ends). The owner's choice on §18: a write-off with the credit closed, not
+//! a suspension of interest.
 //!
 //! The tax verbs are priced by internal politics (`politics.rs`, E2 step 6b: a step of the
 //! rate inside Э4 for a price in legitimacy); `take_loan` needs the bank institution and
@@ -103,9 +108,29 @@ impl World {
         self.yearly_income(a, params) * params.loan_ceiling_years_milli / 1000
     }
 
-    /// How much more a polity may borrow: the ceiling less the debt it carries.
+    /// How much more a polity may borrow: the ceiling less the debt it carries; nothing
+    /// while the credit is closed after a default.
     pub fn loan_room(&self, a: ActorId, params: &Params) -> i64 {
+        if self.credit_closed(a) {
+            return 0;
+        }
         (self.debt_ceiling(a, params) - self.debt(a)).max(0)
+    }
+
+    /// Whether the bank lends nothing to this polity after its default.
+    pub fn credit_closed(&self, a: ActorId) -> bool {
+        self.actors[&a].credit_closed_until.is_some_and(|t| self.tick < t)
+    }
+
+    /// Default: write the debt off, pay in legitimacy, close the credit for the term.
+    fn default(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
+        let debt = self.debt(a);
+        self.post(Account::Debt(a), Source::Default, -debt * 1000)?;
+        let actor = self.actors.get_mut(&a).unwrap();
+        actor.legitimacy = (actor.legitimacy - params.legitimacy_cost_default).clamp(0.0, 100.0);
+        actor.credit_closed_until = Some(crate::time::Tick(self.tick.0 + params.default_ticks_without_credit));
+        self.emit(Event::Default { actor: a, written_off_kg: debt as u64 });
+        Ok(())
     }
 
     pub(crate) fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
@@ -129,6 +154,11 @@ impl World {
             // A fallen polity has no economy: no ruler to tax for, no army to pay.
             if !self.alive(a) {
                 continue;
+            }
+            // The term after a default ends: the bank lends again.
+            if self.actors[&a].credit_closed_until.is_some_and(|t| self.tick >= t) {
+                self.actors.get_mut(&a).unwrap().credit_closed_until = None;
+                self.emit(Event::CreditRestored { actor: a });
             }
             let treasury = Account::Treasury(a);
             let production = self.production_per_tick(a, params);
@@ -168,6 +198,10 @@ impl World {
                 }
                 if interest > from_treasury {
                     self.post(Account::Debt(a), Source::Interest, (interest - from_treasury) * 1000)?;
+                    // Past the ceiling and unable to serve the debt: default.
+                    if self.debt(a) > self.debt_ceiling(a, params) {
+                        self.default(a, params)?;
+                    }
                 }
             }
             let soldiers: i64 = self.units_of(a).iter().map(|u| self.soldiers(*u)).sum();
@@ -213,6 +247,9 @@ impl World {
             VerbId::TakeLoan => {
                 if !self.actors[&a].institutions.contains(&Institution::Bank) {
                     return Err(VerbError::NotAvailable(call.verb, "no bank: the polity has no institution to borrow from"));
+                }
+                if self.credit_closed(a) {
+                    return Err(VerbError::NotAvailable(call.verb, "in default: no credit"));
                 }
                 let amount = self.yearly_income(a, params).min(self.loan_room(a, params));
                 if amount <= 0 {

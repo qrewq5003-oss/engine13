@@ -153,6 +153,8 @@ impl Game {
                     (VerbId::TakeLoan, ActorRef::Ruler(a)) => {
                         if !self.world.actors.get(&a).is_some_and(|x| x.institutions.contains(&Institution::Bank)) {
                             (false, Some("no bank"))
+                        } else if self.world.credit_closed(a) {
+                            (false, Some("in default: no credit"))
                         } else if self.world.loan_room(a, &self.params) <= 0 {
                             (false, Some("at the debt ceiling"))
                         } else {

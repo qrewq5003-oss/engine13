@@ -4,7 +4,10 @@
 //!   price in legitimacy, raising costs it and lowering gives some back, the take follows
 //!   the rate, and at the edge of the band the verb is closed with its reason;
 //! - `enforce_order` takes its share of a year's revenue from the treasury for its gain in
-//!   legitimacy, as one posting signed `Verb`; a treasury that cannot pay closes it.
+//!   legitimacy, as one posting signed `Verb`; a treasury that cannot pay closes it;
+//! - a debt past the ceiling whose interest the treasury cannot meet is a default: written
+//!   off on the debt alone, paid in legitimacy, the credit closed for the term — no loan for
+//!   the pay, none to the verb — and open again when the term ends.
 
 use engine2::sim::{Game, Simulation};
 use engine2::{testworld, ActorId, ActorRef, Event, Params, Source, Target, VerbCall, VerbId, World};
@@ -156,4 +159,72 @@ fn enforce_order_buys_legitimacy_with_a_share_of_a_years_revenue_and_closes_when
     assert!(!o.available);
     assert_eq!(o.why.as_deref(), Some("cannot pay"));
     assert!(matches!(g.world_mut().apply_verb(&call, &p), Err(engine2::economy::VerbError::NotAvailable(VerbId::EnforceOrder, "cannot pay"))));
+}
+
+#[test]
+fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_paid_in_legitimacy_with_the_credit_closed_for_the_term() {
+    let p = params();
+    let mut s = testworld::five_states_scenario();
+    s.verbs.insert("take_loan".to_string(), "Take a loan".to_string());
+    let mut g = Game::new(&s, params(), 1).unwrap();
+    let a = ActorId(0);
+    let who = ActorRef::Ruler(a);
+    let loan = VerbCall { actor: who, verb: VerbId::TakeLoan, target: Target::None };
+    g.world_mut().actors.get_mut(&a).unwrap().institutions.insert(engine2::Institution::Bank);
+    // A debt of twice the ceiling, as the ledger of the test sets it, and an empty treasury:
+    // the interest of the tick cannot be met.
+    let w = g.world_mut();
+    let ceiling = w.debt_ceiling(a, &p);
+    assert!(ceiling > 0);
+    w.post(engine2::Account::Debt(a), Source::Test, 2 * ceiling * 1000).unwrap();
+    let t = w.treasury(a);
+    w.post(engine2::Account::Treasury(a), Source::Test, -t * 1000).unwrap();
+    let debt = w.debt(a);
+    let l0 = w.actors[&a].legitimacy;
+    let r = g.tick(&[]).unwrap();
+    let written_off = r.events.iter().find_map(|e| match e.event {
+        Event::Default { actor, written_off_kg } if actor == a => Some(written_off_kg),
+        _ => None,
+    });
+    assert!(written_off.is_some(), "no default on a debt past the ceiling with its interest unpaid");
+    let w = g.world();
+    assert_eq!(w.debt(a), 0, "the debt is written off");
+    let off: Vec<_> = r.postings.iter().filter(|q| q.source == Source::Default).collect();
+    assert_eq!(off.len(), 1, "one entry, on the debt alone");
+    assert_eq!(off[0].account, engine2::Account::Debt(a));
+    assert_eq!(-off[0].milli / 1000, written_off.unwrap() as i64);
+    assert!(-off[0].milli / 1000 >= debt, "the interest of the tick was on the debt when it was written off");
+    // The price: legitimacy, with the tick's drift toward the norm on top.
+    let norm = w.legitimacy_norm(a, &p);
+    let after_price = (l0 - p.legitimacy_cost_default).clamp(0.0, 100.0);
+    let expected = after_price + (norm - after_price) * p.legitimacy_rate_per_tick;
+    assert!((w.actors[&a].legitimacy - expected).abs() < 1e-9, "{} vs {expected}", w.actors[&a].legitimacy);
+    // No credit: the verb is closed with its reason, and the pay borrows nothing.
+    let offer = |g: &Game| g.verbs(who).into_iter().find(|o| o.verb == VerbId::TakeLoan).unwrap();
+    assert_eq!(offer(&g).why.as_deref(), Some("in default: no credit"));
+    assert!(matches!(g.world_mut().apply_verb(&loan, &p), Err(engine2::economy::VerbError::NotAvailable(VerbId::TakeLoan, "in default: no credit"))));
+    let unit = g.world().units_of(a)[0];
+    let limit = g.world().sustainable_soldiers(a, &p);
+    let soldiers = g.world().soldiers(unit);
+    g.world_mut().post(engine2::Account::Soldiers(unit), Source::Recruit, (limit * 3 - soldiers).max(0) * 1000).unwrap();
+    let until = g.world().actors[&a].credit_closed_until.expect("the term is set");
+    assert_eq!(until.0, g.world().tick.0 - 1 + p.default_ticks_without_credit);
+    let mut restored_at = None;
+    for i in 1..=(p.default_ticks_without_credit + 2) {
+        let r = g.tick(&[]).unwrap();
+        if r.events.iter().any(|e| matches!(e.event, Event::CreditRestored { actor } if actor == a)) {
+            restored_at = Some(i);
+            break;
+        }
+        assert!(!r.postings.iter().any(|q| q.source == Source::Loan), "a loan while the credit is closed");
+        assert_eq!(g.world().debt(a), 0);
+        // Closed up to the tick of the term; open from it, before its economy says so.
+        assert_eq!(g.world().credit_closed(a), g.world().tick < until);
+        assert_eq!(offer(&g).available, g.world().tick >= until);
+    }
+    assert_eq!(restored_at, Some(p.default_ticks_without_credit), "the credit opens exactly when the term ends");
+    assert!(!g.world().credit_closed(a));
+    assert!(offer(&g).available, "with the credit open the loan is on offer again");
+    g.tick(&[loan]).unwrap();
+    assert!(g.world().debt(a) > 0);
 }

@@ -545,3 +545,20 @@ kind = "c"
 value = 10.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+
+# (в) Default: a debt past the ceiling whose interest the treasury cannot meet is written off
+# (the owner's choice on §18: a write-off with the credit closed, not Venice's suspension of
+# interest — that comes if a source shows it). The price in legitimacy, checked through В6;
+# the years without credit, checked through Э9 — the army's share of spending an unbanked
+# polity can keep.
+[legitimacy.cost_default]
+kind = "c"
+value = 20.0
+unit = "legitimacy, 0–100"
+checked_by = "В6"
+
+[default.years_without_credit]
+kind = "c"
+value = 10.0
+unit = "years"
+checked_by = "Э9"
