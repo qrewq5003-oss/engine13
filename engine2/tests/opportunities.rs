@@ -201,16 +201,19 @@ fn the_bots_usurp_a_weak_ruler_not_a_legitimate_one_and_secede_only_with_a_chanc
     assert!(w.usurpation_utility(s0, o0a, &p) > 0.0, "a weak ruler is worth deposing: {:.2}", w.usurpation_utility(s0, o0a, &p));
     w.actors.get_mut(&s0).unwrap().legitimacy = 70.0;
     assert!(w.usurpation_utility(s0, o0a, &p) < 0.0, "a legitimate one is not: {:.2}", w.usurpation_utility(s0, o0a, &p));
-    // The secession: the ruler's weakness against the odds of being crushed.
-    w.actors.get_mut(&s0).unwrap().legitimacy = 50.0;
+    // The secession: the ruler's weakness, at `agent.weight_independence`, against the odds
+    // of being crushed. Against a hereditary ruler at its norm the parent's army decides;
+    // with the shipped weight (2) a ruler at legitimacy 50 or below is left whatever its
+    // army (plan §23j).
+    w.actors.get_mut(&s0).unwrap().legitimacy = 70.0;
     let u = w.secession_utility(h, s0, at(0, 1), &p);
     assert!(u > 0.0, "a militia of two provinces against the parent's 600: {u:.2}");
     let unit = w.units_of(s0)[0];
     w.post(Account::Soldiers(unit), Source::Recruit, 100_000 * 1000).unwrap();
     let u = w.secession_utility(h, s0, at(0, 1), &p);
     assert!(u < 0.0, "against an army a hundred times its own: {u:.2}");
-    w.actors.get_mut(&s0).unwrap().legitimacy = 0.0;
-    assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a ruler with no legitimacy at all invites even a hopeless rising");
+    w.actors.get_mut(&s0).unwrap().legitimacy = 40.0;
+    assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a weak ruler is left even with a hopeless rising");
 }
 
 // ---------- elections (owner's answer 5 on §23) ----------
@@ -295,4 +298,104 @@ fn a_player_house_votes_through_the_contract_and_a_vote_for_no_candidate_is_an_e
     let r = g.play(&vote(engine2::Reply::Vote(b2))).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Elected { winner, weight: 6, total: 6, .. } if winner == b2)));
     assert_ne!(g.world().actors[&ActorId(2)].ruler, e2a);
+}
+
+// ---------- the court's faith and its policy (owner's answer 6 on §23) ----------
+
+/// The test world with `rows` provinces of state 0 praying a second faith (from the capital
+/// down) and a goal of union with it.
+fn union_game(rows: u32, bots: bool, player: Option<ActorRef>) -> Game {
+    let mut g = Game::new(&testworld::five_states_scenario(), params(), 9).unwrap();
+    g.set_bots(bots);
+    g.set_player(player);
+    let w = g.world_mut();
+    for y in 0..rows {
+        w.provinces.get_mut(&at(0, y)).unwrap().religion = ReligionId(1);
+    }
+    let since = w.tick;
+    w.actors.get_mut(&ActorId(0)).unwrap().goals.push(engine2::Goal { kind: engine2::GoalKind::Union, target: engine2::GoalTarget::Religion(ReligionId(1)), since, baseline: 0, best_ppm: 0 });
+    g
+}
+
+fn converted(r: &engine2::TickReport) -> bool {
+    r.events.iter().any(|e| matches!(e.event, Event::HouseConverted { to: ReligionId(1), .. }))
+}
+
+#[test]
+fn a_court_with_a_goal_of_union_is_offered_it_and_takes_it_when_its_people_pray_so() {
+    let s0 = ActorRef::Ruler(ActorId(0));
+    // Four of five provinces pray the new faith: the bot takes the union.
+    let mut g = union_game(4, true, None);
+    g.tick(&[]).unwrap();
+    assert!(g.world().opportunities.iter().any(|o| o.to == s0 && matches!(o.what, Chance::Union { faith: ReligionId(1), .. })), "offered while the goal stands");
+    assert!(g.world().union_utility(ActorId(0), ReligionId(1)) > 0.0);
+    let r = g.tick(&[]).unwrap();
+    assert!(converted(&r), "taken at the next turn: the court prays the new faith");
+    assert_eq!(g.world().polity_religion(ActorId(0)), ReligionId(1));
+    // None prays it: the union would alienate the whole land — declined.
+    let mut g = union_game(0, true, None);
+    g.tick(&[]).unwrap();
+    assert!(g.world().union_utility(ActorId(0), ReligionId(1)) < 0.0);
+    assert!(!converted(&g.tick(&[]).unwrap()));
+    // A world without the contract keeps its faith (E2 had no such decision).
+    let mut g = union_game(4, false, None);
+    g.tick(&[]).unwrap();
+    assert!(!converted(&g.tick(&[]).unwrap()));
+    // The player on the throne decides: silence lapses, a take converts.
+    let mut g = union_game(0, true, Some(s0));
+    g.tick(&[]).unwrap();
+    let offer = g.opportunities(s0).into_iter().find(|o| matches!(o.what, Chance::Union { .. })).expect("the player's court is offered the union");
+    let r = g.play(&Turn { answers: vec![Answer { who: s0, opportunity: offer.id, reply: engine2::Reply::Take }], ..Turn::default() }).unwrap();
+    assert!(converted(&r), "the player may take what the bot would not");
+}
+
+#[test]
+fn the_policy_of_conversion_met_by_contact_is_offered_to_the_court_for_a_price_in_legitimacy() {
+    let mut p = params();
+    p.institution_adoption_per_tick = 1.0;
+    let policy = engine2::Institution::ConversionPolicy;
+    let game = |bots: bool| {
+        let mut g = Game::new(&testworld::five_states_scenario(), p.clone(), 10).unwrap();
+        g.set_bots(bots);
+        let w = g.world_mut();
+        w.actors.get_mut(&ActorId(1)).unwrap().institutions.insert(policy);
+        for y in 1..4 {
+            w.provinces.get_mut(&at(0, y)).unwrap().religion = ReligionId(1);
+        }
+        g
+    };
+    let mut g = game(true);
+    g.tick(&[]).unwrap();
+    let offered: Vec<ActorId> = g.world().opportunities.iter().filter_map(|o| if let Chance::Policy { polity, from } = o.what { assert_eq!(from, ActorId(1)); Some(polity) } else { None }).collect();
+    assert_eq!(offered, vec![ActorId(0), ActorId(2), ActorId(3)], "the holder's contacts, by the draw of adoption — state 3 by the sea edge of the top row");
+    assert!(g.world().policy_utility(ActorId(0), &p) > 0.0, "three provinces of five pray otherwise");
+    assert!(g.world().policy_utility(ActorId(2), &p) < 0.0, "nobody to convert: the price for nothing");
+    let r = g.tick(&[]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Adopted { actor: ActorId(0), institution, from: ActorId(1) } if institution == policy)));
+    assert!(g.world().actors[&ActorId(0)].institutions.contains(&policy));
+    assert!(!g.world().actors[&ActorId(2)].institutions.contains(&policy) && !g.world().actors[&ActorId(3)].institutions.contains(&policy), "declined");
+    // A world without the contract: the policy does not spread (as in E2).
+    let mut g = game(false);
+    g.tick(&[]).unwrap();
+    g.tick(&[]).unwrap();
+    assert!(!g.world().actors[&ActorId(0)].institutions.contains(&policy));
+}
+
+#[test]
+fn the_price_of_the_policy_is_paid_in_legitimacy_on_taking_it() {
+    let mut p = params();
+    p.institution_adoption_per_tick = 1.0;
+    let s0 = ActorRef::Ruler(ActorId(0));
+    let mut g = Game::new(&testworld::five_states_scenario(), p.clone(), 11).unwrap();
+    g.set_player(Some(s0));
+    g.world_mut().actors.get_mut(&ActorId(1)).unwrap().institutions.insert(engine2::Institution::ConversionPolicy);
+    g.tick(&[]).unwrap();
+    let offer = g.opportunities(s0).into_iter().find(|o| matches!(o.what, Chance::Policy { .. })).expect("offered");
+    let mut declined = Game::from_save(&testworld::five_states_scenario(), p.clone(), &g.to_save().unwrap()).unwrap();
+    declined.set_player(Some(s0));
+    let take = |id| Turn { answers: vec![Answer { who: s0, opportunity: id, reply: engine2::Reply::Take }], ..Turn::default() };
+    g.play(&take(offer.id)).unwrap();
+    declined.play(&Turn { answers: vec![Answer { who: s0, opportunity: offer.id, reply: engine2::Reply::Decline }], ..Turn::default() }).unwrap();
+    let (a, b) = (g.world().actors[&ActorId(0)].legitimacy, declined.world().actors[&ActorId(0)].legitimacy);
+    assert!((b - a - p.policy_cost_legitimacy * (1.0 - p.legitimacy_rate_per_tick)).abs() < 1e-6, "the price once, then drawn toward the norm: {b} − {a}");
 }

@@ -23,6 +23,15 @@
 //! for its own candidate the largest wins and the election is nearly a dynasty again — the
 //! honest model with the houses' bargains is E4's (owner's note on §23).
 //!
+//! **The court's faith and its policy** (owner's answer 6 on §23: decisions of the court,
+//! no new verbs). A court whose goal is the union with another faith is offered **the
+//! union** every tick it holds the goal: taken, the ruling house takes that faith
+//! (`HouseConverted`) — the price is in the world, the provinces of the old faith now
+//! alienated from the court. **The policy of conversion** reaches a court by the channels
+//! of contact the bank spreads along (`faith.rs`): the draw that would adopt a practice
+//! offers the court the policy instead, at `policy.cost_legitimacy` — a court's decision,
+//! not a practice caught from a neighbour (§20).
+//!
 //! **Lifetime.** Opened in a tick's phases (`opened` = that tick), answered at the start of
 //! the next tick, before the verbs: the answer meets the world as the opening tick left it,
 //! and the effect is checked again — a province taken meanwhile, a candidate dead, a ruler
@@ -65,6 +74,10 @@ pub enum Chance {
     /// A house's vote for the next ruler of `polity`, elected among `candidates` (the eldest
     /// adult of each house with one); `interim` holds the throne until the count.
     Vote { polity: ActorId, candidates: Vec<PersonId>, interim: PersonId },
+    /// The court of `polity` may take `faith` (a goal of union).
+    Union { polity: ActorId, faith: crate::ids::ReligionId },
+    /// The court of `polity` may adopt the policy of conversion, met at `from`.
+    Policy { polity: ActorId, from: ActorId },
 }
 
 impl Chance {
@@ -74,6 +87,8 @@ impl Chance {
             Chance::Secession { .. } => "Secession",
             Chance::Usurpation { .. } => "Usurpation",
             Chance::Vote { .. } => "Vote",
+            Chance::Union { .. } => "Union",
+            Chance::Policy { .. } => "Policy",
         }
     }
 }
@@ -153,7 +168,7 @@ impl World {
             match (&o.what, a.reply) {
                 (Chance::Vote { candidates, .. }, Reply::Vote(c)) if !candidates.contains(&c) => return Err(AnswerError::BadReply(a.opportunity, "not a candidate")),
                 (Chance::Vote { .. }, Reply::Take) => return Err(AnswerError::BadReply(a.opportunity, "a vote names its candidate")),
-                (Chance::Secession { .. } | Chance::Usurpation { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
+                (Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Union { .. } | Chance::Policy { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
                 _ => {}
             }
         }
@@ -161,11 +176,13 @@ impl World {
     }
 
     /// The rule of E2 for an opportunity nobody answered in a world without the contract:
-    /// a house takes its chance; nobody votes (the interim stays, as E2 elected).
+    /// a house takes its chance; nobody votes (the interim stays, as E2 elected); a court
+    /// keeps its faith and takes no policy (E2 had neither decision).
     fn rule_reply(o: &Opportunity) -> Option<Reply> {
         match o.what {
             Chance::Secession { .. } | Chance::Usurpation { .. } => Some(Reply::Take),
             Chance::Vote { .. } => None,
+            Chance::Union { .. } | Chance::Policy { .. } => Some(Reply::Decline),
         }
     }
 
@@ -273,6 +290,32 @@ impl World {
                 Ok(Ok(()))
             }
             Chance::Vote { .. } => Ok(Err("a vote names its candidate")),
+            Chance::Union { polity, faith } => {
+                if !self.alive(polity) || o.to != ActorRef::Ruler(polity) {
+                    return Ok(Err("the polity has fallen"));
+                }
+                let house = self.ruling_house(polity);
+                let from = self.houses[&house].religion;
+                if from == faith {
+                    return Ok(Err("the court prays so already"));
+                }
+                self.houses.get_mut(&house).unwrap().religion = faith;
+                self.emit(Event::HouseConverted { house, from, to: faith });
+                Ok(Ok(()))
+            }
+            Chance::Policy { polity, from } => {
+                if !self.alive(polity) || o.to != ActorRef::Ruler(polity) {
+                    return Ok(Err("the polity has fallen"));
+                }
+                let institution = crate::world::Institution::ConversionPolicy;
+                if self.actors[&polity].institutions.contains(&institution) {
+                    return Ok(Err("the court has the policy already"));
+                }
+                self.actors.get_mut(&polity).unwrap().institutions.insert(institution);
+                self.pay_legitimacy(polity, params.policy_cost_legitimacy);
+                self.emit(Event::Adopted { actor: polity, institution, from });
+                Ok(Ok(()))
+            }
         }
     }
 }

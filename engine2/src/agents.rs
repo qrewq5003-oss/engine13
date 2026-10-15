@@ -551,8 +551,27 @@ impl World {
         match (o.to, &o.what) {
             (ActorRef::House(h), Chance::Secession { polity, province }) => self.house_would_secede(h, *polity, *province, params),
             (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
+            (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
+            (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
             _ => false,
         }
+    }
+
+    /// The utility of the union for a court (owner's answer 6 on §23): its goal reached, 1,
+    /// and the change in the people praying with the court — the share of the new faith
+    /// against the share of the old, at twice the goal (the alienation of the old faith is
+    /// the price, owner's rule on §20).
+    pub fn union_utility(&self, polity: ActorId, faith: crate::ids::ReligionId) -> f64 {
+        let court = self.polity_religion(polity);
+        1.0 + 2.0 * (self.people_share_praying(polity, faith) - self.people_share_praying(polity, court))
+    }
+
+    /// The utility of the policy of conversion for a court: the share of its people praying
+    /// otherwise than the court, whom the policy turns, at twice the goal, against its price
+    /// in legitimacy at the bot's price.
+    pub fn policy_utility(&self, polity: ActorId, params: &Params) -> f64 {
+        let other = 1.0 - self.people_share_praying(polity, self.polity_religion(polity));
+        2.0 * other - params.policy_cost_legitimacy / 100.0 * params.agent_weight_price_legitimacy
     }
 
     /// The utility of a secession for the house that would carry it (plan §23.2 p. 5): the

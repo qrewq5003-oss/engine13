@@ -236,6 +236,8 @@ pub struct Params {
     /// checked through В6 and В8.
     pub agent_weight_throne: f64,
     pub agent_weight_independence: f64,
+    /// (в) What a court pays in legitimacy for adopting the policy of conversion (E3 (в)).
+    pub policy_cost_legitimacy: f64,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
     pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
@@ -398,6 +400,7 @@ impl Params {
         let pay_memory = value("agent.pay_memory_ticks")?;
         let w_throne = value("agent.weight_throne")?;
         let w_independence = value("agent.weight_independence")?;
+        let policy_cost = value("policy.cost_legitimacy")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
             (GoalKind::Hold, value("aspiration.weight_hold")?),
@@ -495,6 +498,7 @@ impl Params {
             agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
             agent_weight_throne: w_throne,
             agent_weight_independence: w_independence,
+            policy_cost_legitimacy: policy_cost,
             aspiration_weights,
             entries,
         })
