@@ -809,6 +809,37 @@ band = [0.1, 0.7]
 unit = "share of the province's people, a century after the change of rule"
 e0 = "Р2"
 
+# E0 Р1 — the rate of conversion and assimilation of a province along one channel: the
+# logistic rate r (the share won grows as s' = s + r·s·(1 − s) a year): a peak of ≈ 1.4 %
+# of the province's people a year means r ≈ 0.056; the early growth of the Christian number,
+# ≈ 3.4 % a year of the believers (Hopkins 1998, opened secondary), is r ≈ 0.034; Bulliet's
+# curve reaches half about a century after the conquest (r ≈ 0.04 from a seed of 2 %).
+# Under the rule of a court with `ConversionPolicy` at full rate; by the neighbourhood at
+# `conversion.neighbourhood_factor` of it. Checked against Р2 by arithmetic (params test).
+[conversion.rate_per_year]
+kind = "a"
+value = 0.04
+band = [0.03, 0.06]
+unit = "logistic rate of the share won per year"
+e0 = "Р1"
+
+# (в) The seed a conversion starts from (a logistic curve does not leave zero): merchants,
+# garrisons, the first converts. Checked through Р2.
+[conversion.seed_share]
+kind = "c"
+value = 0.02
+unit = "share of the province's people"
+checked_by = "Р2"
+
+# (в) The neighbourhood's channel against the rule's: a province most of whose neighbours
+# pray otherwise drifts to their faith at this share of Р1 — the slow drift that is all a
+# court without the policy gets (Crete, Rumelia). Checked through Р2.
+[conversion.neighbourhood_factor]
+kind = "c"
+value = 0.5
+unit = "share of the rule's rate"
+checked_by = "Р2"
+
 # (в) The friction of faith and tongue between two courts (E0 §1.7): the norm of their
 # relation sits lower by these while the courts pray or speak differently. Checked through Р2.
 [relation.norm_faith]

@@ -126,6 +126,8 @@ impl Observed for Game {
                 Event::Gift { from, to, .. } => ObsEvent::Other(format!("Gift@{}-{}", self.actor_id(*from).0, self.actor_id(*to).0)),
                 Event::Marriage { .. } => ObsEvent::Other("Marriage".into()),
                 Event::Submission { vassal, .. } => ObsEvent::Other(format!("Submission@{}", self.actor_id(*vassal).0)),
+                Event::Converted { province, .. } => ObsEvent::Other(format!("Converted@{}", self.province_id(*province).0)),
+                Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
             })
             .collect()
     }

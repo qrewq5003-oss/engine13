@@ -824,8 +824,8 @@ impl World {
     /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
     /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
     /// (`politics.rs`), treaties run out and relations move to their norms
-    /// (`diplomacy.rs`), people grow, starve, sicken and migrate (`population.rs`), then
-    /// `TickPlayed`.
+    /// (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), people grow, starve,
+    /// sicken and migrate (`population.rs`), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
@@ -836,6 +836,7 @@ impl World {
         self.phase_supply(params)?;
         self.phase_people(params)?;
         self.phase_diplomacy(params)?;
+        self.phase_faith(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);

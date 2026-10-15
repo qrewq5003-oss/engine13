@@ -8,7 +8,13 @@
 //!   collapse, with no effect on the take;
 //! - a run with faiths saves and loads bit for bit;
 //! - the generator gives worlds a few tongues and faiths, mixed borders and some polities
-//!   with the conversion policy — neither none nor all; the extreme worlds stay uniform.
+//!   with the conversion policy — neither none nor all; the extreme worlds stay uniform;
+//! - under the conversion policy a province of another faith converts along the logistic
+//!   curve of Р1 and turns at half, the former majority gone; the share at a century is
+//!   inside Р2; without the policy rule converts nothing in four centuries (Crete) and only
+//!   the neighbourhood drifts, slower; a change of target starts from the seed; the tongue
+//!   follows the neighbourhood alone; on generated worlds conversions are neither never nor
+//!   always.
 
 use engine2::sim::{Game, Simulation};
 use engine2::{from_save, testworld, to_save, worldgen, ActorId, CultureId, HouseId, Institution, Params, ProvinceId, ReligionId};
@@ -140,4 +146,193 @@ fn the_generator_mixes_tongues_and_faiths_and_gives_the_policy_to_some_and_the_e
         assert_eq!((c.names.cultures.len(), c.names.religions.len()), (1, 1), "{name}: a sketch of geography stays uniform");
         assert!(s.actors.values().all(|a| !a.institutions.contains(&Institution::ConversionPolicy)), "{name}");
     }
+}
+
+use engine2::event::Channel;
+use engine2::{Event, ScenarioData, World};
+
+/// The test world with polity 1 of another faith (court and people) and one province of
+/// polity 0 — p05, next to the capital — of that faith too; `policy` gives polity 0 the
+/// conversion policy.
+fn mixed_scenario(policy: bool) -> ScenarioData {
+    let mut s = testworld::five_states_scenario();
+    for (k, p) in s.provinces.iter_mut() {
+        if p.owner == "s1" || k == "p05" {
+            p.religion = "f1".to_string();
+        }
+    }
+    s.houses.get_mut("h1").unwrap().religion = "f1".to_string();
+    if policy {
+        s.actors.get_mut("s0").unwrap().institutions.push(Institution::ConversionPolicy);
+    }
+    s
+}
+
+fn world_of(s: &ScenarioData, seed: u64) -> World {
+    let c = s.compile(&params()).unwrap();
+    World::from_facts(&c.facts, c.names, &params(), seed).unwrap()
+}
+
+#[test]
+fn under_the_conversion_policy_a_province_of_another_faith_converts_along_the_logistic_curve_and_turns_at_half() {
+    let p = params();
+    let mut w = world_of(&mixed_scenario(true), 21);
+    let (s0, p05) = (ActorId(0), ProvinceId(5));
+    assert_eq!(w.conversion_channel(p05, &p).map(|(to, by, _)| (to, by)), Some((ReligionId(0), Channel::Rule)));
+    let people = w.population(p05);
+    let mut shares = Vec::new();
+    let mut turned_at = None;
+    for tick in 0..300u32 {
+        let r = w.tick(&p).unwrap();
+        if let Some(c) = w.provinces[&p05].converting {
+            assert_eq!(c.to, ReligionId(0));
+            shares.push(c.share_ppm);
+        }
+        if r.events.iter().any(|e| matches!(e.event, Event::Converted { province, from, to, by: Channel::Rule } if province == p05 && from == ReligionId(1) && to == ReligionId(0))) {
+            turned_at = Some(tick);
+            break;
+        }
+    }
+    // The curve: starts at the seed, grows faster then slower, never jumps.
+    assert_eq!(shares[0], p.conversion_seed_ppm + p.conversion_rate_ppm_per_tick * p.conversion_seed_ppm / 1_000_000 * (1_000_000 - p.conversion_seed_ppm) / 1_000_000);
+    assert!(shares.windows(2).all(|x| x[1] > x[0]), "monotone");
+    let steps: Vec<i64> = shares.windows(2).map(|x| x[1] - x[0]).collect();
+    assert!(steps.last().unwrap() > &(steps[0] * 5), "the curve accelerates up to the turn: the step at the end is many times the first");
+    // Half a century at least, under two centuries: Bulliet's curve, not a stroke.
+    let t = turned_at.expect("the majority turns within 150 years");
+    assert!((100..300).contains(&t), "turned at tick {t}");
+    // Р2: the share won a century after the change of rule is inside the band.
+    let band = p.entries["conversion.observed_share_after_a_century"].band.unwrap();
+    // (The turn comes just before the century here, so the share is read at the turn.)
+    let at_century = shares.get(199).or(shares.last()).copied().unwrap() as f64 / 1e6;
+    assert!((band[0]..=band[1]).contains(&at_century), "Р2 at a century: {at_century:.3} in {band:?}");
+    eprintln!("Р2 by rule: share at a century {at_century:.3}, the majority turned at tick {t} ({} years)", t / 2);
+    // After the turn: the former majority is gone (one number), the province is at one
+    // with its court, nothing is on the move, the people are all still there.
+    assert_eq!(w.provinces[&p05].religion, ReligionId(0));
+    assert!(w.provinces[&p05].converting.is_none(), "the former majority vanishes with the turn (owner's note on §20)");
+    assert!(!w.alienated(p05));
+    assert!(w.conversion_channel(p05, &p).is_none());
+    assert!(w.population(p05) > 0 && (w.population(p05) - people).abs() < people / 2, "conversion moves no people");
+    let _ = s0;
+}
+
+#[test]
+fn without_the_policy_rule_converts_nothing_in_four_centuries_and_only_the_neighbourhood_drifts() {
+    let p = params();
+    // Venetian Crete: a court of another faith over the province, no policy — nothing moves
+    // by rule, however long. The province's neighbours pray as it does.
+    let mut w = world_of(&mixed_scenario(false), 22);
+    let p05 = ProvinceId(5);
+    // Its neighbours pray as it does (p00 and p10 of polity 0 made f1 too): no majority of
+    // another faith around it, and a court of another faith without the policy.
+    for q in [ProvinceId(0), ProvinceId(10)] {
+        w.provinces.get_mut(&q).unwrap().religion = ReligionId(1);
+    }
+    assert!(w.alienated(p05));
+    assert_eq!(w.conversion_channel(p05, &p), None, "no policy, no rule channel; no neighbourhood of another faith");
+    for _ in 0..800 {
+        w.tick(&p).unwrap();
+    }
+    assert_eq!(w.provinces[&p05].religion, ReligionId(1), "still of its own faith after four centuries");
+    assert!(w.provinces[&p05].converting.is_none());
+    // The neighbourhood: a province most of whose neighbours pray otherwise drifts to them
+    // at the factor's rate — p05's neighbours are p00 (f0), p10 (f0), p06 (f1): put p00 and
+    // p10 to f1 and the drift starts, by the neighbourhood, slower than the rule.
+    let mut w = world_of(&mixed_scenario(false), 23);
+    let p0 = ProvinceId(0);
+    w.provinces.get_mut(&p0).unwrap().religion = ReligionId(0);
+    // Make polity 0's own province p10 (neighbour of p05) of faith f1 too and p05 of f0:
+    // then p05 (f0) has neighbours p00 f0, p10 f1, p06 f1 → two of three otherwise.
+    w.provinces.get_mut(&p05).unwrap().religion = ReligionId(0);
+    w.provinces.get_mut(&ProvinceId(10)).unwrap().religion = ReligionId(1);
+    let (to, by, rate) = w.conversion_channel(p05, &p).expect("the neighbourhood's majority");
+    assert_eq!((to, by), (ReligionId(1), Channel::Neighbourhood));
+    assert_eq!(rate, (p.conversion_rate_ppm_per_tick as f64 * p.conversion_neighbourhood_factor).round() as i64);
+    let mut turned_at = None;
+    for tick in 0..600u32 {
+        let r = w.tick(&p).unwrap();
+        if r.events.iter().any(|e| matches!(e.event, Event::Converted { province, by: Channel::Neighbourhood, .. } if province == p05)) {
+            turned_at = Some(tick);
+            break;
+        }
+    }
+    let t = turned_at.expect("the neighbourhood turns the province in the end");
+    assert!(t > 300, "slower than the rule: turned at tick {t}");
+    eprintln!("by neighbourhood: the majority turned at tick {t} ({} years)", t / 2);
+}
+
+#[test]
+fn a_change_of_target_starts_the_share_from_the_seed_again_and_the_tongue_follows_the_neighbourhood_alone() {
+    let p = params();
+    let mut w = world_of(&mixed_scenario(true), 24);
+    let (s0, p05) = (ActorId(0), ProvinceId(5));
+    for _ in 0..60 {
+        w.tick(&p).unwrap();
+    }
+    let grown = w.provinces[&p05].converting.unwrap().share_ppm;
+    assert!(grown > 2 * p.conversion_seed_ppm, "thirty years in: well past the seed ({grown})");
+    // The court changes faith (a new house): the target changes and the share begins again.
+    let house0 = w.persons[&w.actors[&s0].ruler].house;
+    w.houses.get_mut(&house0).unwrap().religion = ReligionId(1);
+    assert!(!w.alienated(p05), "now at one with its court: no channel by rule");
+    assert_ne!(w.conversion_channel(p05, &p).map(|(_, by, _)| by), Some(Channel::Rule));
+    // Another province of polity 0, of the old faith, now converts towards f1 from the seed.
+    let p0 = ProvinceId(0);
+    assert_eq!(w.conversion_channel(p0, &p).map(|(to, by, _)| (to, by)), Some((ReligionId(1), Channel::Rule)));
+    w.tick(&p).unwrap();
+    let started = w.provinces[&p0].converting.unwrap();
+    assert_eq!(started.to, ReligionId(1));
+    assert!(started.share_ppm < 2 * p.conversion_seed_ppm, "from the seed, not from the other's progress");
+    // The tongue: the policy does not assimilate — a province of another tongue under the
+    // court stays; only a neighbourhood of another tongue draws it.
+    let mut w = world_of(&mixed_scenario(true), 25);
+    for q in [p05, ProvinceId(0), ProvinceId(10), ProvinceId(6)] {
+        w.provinces.get_mut(&q).unwrap().culture = CultureId(1);
+    }
+    assert!(w.alienated(p05), "another tongue than the court's");
+    assert!(w.assimilation_channel(p05, &p).is_none(), "the rule has no channel for the tongue, and the neighbours speak as the province does");
+    for _ in 0..400 {
+        w.tick(&p).unwrap();
+    }
+    assert_eq!(w.provinces[&p05].culture, CultureId(1), "Crete stays Greek-speaking");
+    for q in [ProvinceId(0), ProvinceId(10), ProvinceId(6)] {
+        w.provinces.get_mut(&q).unwrap().culture = CultureId(1);
+    }
+    w.provinces.get_mut(&p05).unwrap().culture = CultureId(0);
+    assert_eq!(w.assimilation_channel(p05, &p).map(|(to, _)| to), Some(CultureId(1)));
+    let mut turned = false;
+    for _ in 0..800 {
+        let r = w.tick(&p).unwrap();
+        if r.events.iter().any(|e| matches!(e.event, Event::Assimilated { province, to, .. } if province == p05 && to == CultureId(1))) {
+            turned = true;
+            break;
+        }
+    }
+    assert!(turned, "the neighbourhood assimilates in the end");
+}
+
+#[test]
+fn on_generated_worlds_conversions_happen_but_not_everywhere() {
+    let p = params();
+    let (mut alienated_at_start, mut converted, mut assimilated, mut alienated_at_end) = (0usize, 0usize, 0usize, 0usize);
+    for seed in 1..=20u64 {
+        let s = worldgen::generate(seed, &p);
+        let mut g = Game::new(&s, params(), seed).unwrap();
+        alienated_at_start += g.world().provinces.keys().filter(|q| g.world().alienated(**q)).count();
+        for _ in 0..300 {
+            let r = g.tick(&[]).unwrap();
+            converted += r.events.iter().filter(|e| matches!(e.event, Event::Converted { .. })).count();
+            assimilated += r.events.iter().filter(|e| matches!(e.event, Event::Assimilated { .. })).count();
+        }
+        alienated_at_end += g.world().provinces.keys().filter(|q| g.world().alienated(**q)).count();
+        for pr in g.world().provinces.values() {
+            if let Some(c) = pr.converting {
+                assert!(c.share_ppm > 0 && c.share_ppm < 500_000, "seed {seed}: a share on the move stays below half");
+            }
+        }
+    }
+    eprintln!("20 worlds × 300 ticks: alienated provinces {alienated_at_start} at the start, {alienated_at_end} at the end; {converted} conversions, {assimilated} assimilations");
+    assert!(converted > 0, "conversions are not never");
+    assert!(alienated_at_end > 0, "and not always: the mixed march does not vanish in 150 years");
 }

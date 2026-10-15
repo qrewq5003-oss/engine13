@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
+use crate::ids::{CultureId, ReligionId, ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
@@ -139,6 +139,20 @@ pub enum Event {
     Marriage { a: PersonId, b: PersonId, dowry_kg: u64 },
     /// A peace of submission: the loser of the war became the winner's vassal.
     Submission { vassal: ActorId, lord: ActorId },
+    /// A province's majority turned to another faith (E2 step 8, E0 Р1): by the rule of a
+    /// court with the conversion policy, or by the drift of its neighbourhood.
+    Converted { province: ProvinceId, from: ReligionId, to: ReligionId, by: Channel },
+    /// A province's majority took the tongue of its neighbourhood.
+    Assimilated { province: ProvinceId, from: CultureId, to: CultureId },
+}
+
+/// The channel a conversion or an assimilation came by (plan §20.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Channel {
+    /// The owner's court, under `Institution::ConversionPolicy`.
+    Rule,
+    /// Most of the province's neighbours, by land and by sea.
+    Neighbourhood,
 }
 
 /// An event with its place in the run: a global sequence number and the tick.
