@@ -141,6 +141,7 @@ impl Observed for Game {
                 // Plain kinds (E3): `Never` is read over them by the horizon.
                 Event::GoalReached { .. } => ObsEvent::Other("GoalReached".into()),
                 Event::GoalDropped { .. } => ObsEvent::Other("GoalDropped".into()),
+                Event::Preempted { verb, .. } => ObsEvent::Other(format!("Preempted:{}", verb.key())),
             })
             .collect()
     }

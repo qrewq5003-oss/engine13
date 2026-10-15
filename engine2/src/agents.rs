@@ -22,7 +22,9 @@
 //! player sees (`sim.rs`), with the same rules of availability — the progress the verb
 //! would move over the polity's goals, the survival it buys at war with a stronger enemy,
 //! less its price: a point of legitimacy per hundred at `agent.weight_price_legitimacy`, a
-//! kilogram per year of revenue at `agent.weight_price_treasury`. No learning, no
+//! kilogram per year of revenue at `agent.weight_price_treasury`; a lasting decision — the
+//! tax — as a flow over the goal's horizon ([`World::tax_utility`], owner's rule on #291).
+//! No learning, no
 //! look-ahead: an estimate off the state (a war on the owner of what is wanted, peace when
 //! it is taken or the war is lost, a levy at war, a loan when the pay fell short, an
 //! embassy to whom an alliance is wanted). **The choice is softmax** at `agent.temperature`
@@ -403,36 +405,7 @@ impl World {
                     -0.5
                 }
             }
-            // The tax is anchored to the tithe (E0 Э4: the tithe as the norm of an agrarian
-            // tax): at peace a rate off the tithe goes back toward it — up when legitimacy
-            // allows, down always; at war with the pay short it goes up while legitimacy
-            // holds; in a crisis of legitimacy at peace it goes below. Without the anchor the
-            // first bots lowered the tax at every dip of legitimacy and never raised it at
-            // peace: Э8 fell from 0.094 to 0.063 and the armies of peace below А11.
-            (VerbId::RaiseTax, _) => {
-                let mut u = 0.0;
-                if !at_war && actor.tax_rate_ppm < params.tax_default_ppm && actor.legitimacy >= lawful - 10.0 {
-                    u += 0.6;
-                }
-                if at_war && unpaid && actor.legitimacy > lawful - 20.0 {
-                    u += 0.5;
-                }
-                u - price_l(params.legitimacy_cost_raise_tax)
-            }
-            (VerbId::LowerTax, _) => {
-                let mut u = 0.0;
-                if !at_war && actor.tax_rate_ppm > params.tax_default_ppm {
-                    u += 0.6;
-                }
-                if !at_war && actor.tax_rate_ppm <= params.tax_default_ppm && actor.legitimacy < lawful - 25.0 {
-                    u += 0.4;
-                }
-                if u > 0.0 {
-                    u + price_l(params.legitimacy_gain_lower_tax)
-                } else {
-                    -1.0
-                }
-            }
+            (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility(a, call.verb, params),
             (VerbId::EnforceOrder, _) => {
                 let gap = (lawful - actor.legitimacy).max(0.0) / 100.0;
                 2.0 * gap - price_kg(self.order_cost(a, params))
@@ -465,6 +438,41 @@ impl World {
             }
             _ => 0.0,
         }
+    }
+
+    /// The utility of a step of the tax (owner's rule on #291): **a lasting decision valued
+    /// as a flow over the goal's horizon** — the error of the prices of 6b would otherwise
+    /// sit in the bot's head, a one-off point of legitimacy weighed against a tick's take
+    /// while the rate moves the take every year. The take: the rate times the share
+    /// collected at the legitimacy the norm settles at, before and after the step; its
+    /// change is valued in log over the horizon in years at `agent.weight_price_treasury`
+    /// (a step down and the step back up cancel — valued as a share of the current take,
+    /// the bot would cycle a step around its equilibrium), and weighs more when the army's
+    /// pay falls short (revenue short of the pay is worth its inverse share, down to a
+    /// quarter). The shift of the norm: points over the horizon at
+    /// `agent.weight_price_legitimacy`; the blow or the gain: once. With the shipped
+    /// weights the equilibrium is the tithe — both steps from it cost — and the bot comes
+    /// back to it from either side by itself; at war with half the pay unmet a step up is
+    /// still not worth it, at a third it is.
+    pub fn tax_utility(&self, a: ActorId, verb: VerbId, params: &Params) -> f64 {
+        let actor = &self.actors[&a];
+        let years = f64::from(params.goal_horizon_ticks) / 2.0;
+        let lawful = self.lawful_norm(a, params);
+        let norm = self.legitimacy_norm(a, params);
+        let up = verb == VerbId::RaiseTax;
+        let step = if up { params.tax_step_ppm } else { -params.tax_step_ppm } as f64 / 1e6;
+        let next_norm = (norm + if up { -params.legitimacy_norm_per_tax_step } else { params.legitimacy_norm_per_tax_step }).clamp(0.0, 100.0);
+        let collected = |l: f64| (1.0 - (lawful - l).max(0.0) * params.tax_evasion_ppm_per_legitimacy_point as f64 / 1e6).max(0.0);
+        let rate = actor.tax_rate_ppm as f64 / 1e6;
+        let (now, next) = (rate * collected(norm), (rate + step) * collected(next_norm));
+        if now <= 0.0 || next <= 0.0 {
+            return -1.0;
+        }
+        let need = 1.0 / (actor.paid_share_ppm as f64 / 1e6).max(0.25);
+        let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
+        let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_norm - norm);
+        let once = params.agent_weight_price_legitimacy / 100.0 * if up { -params.legitimacy_cost_raise_tax } else { params.legitimacy_gain_lower_tax };
+        take + lasting + once
     }
 
     /// The options a ruler has: every available call of the enabled verbs over their

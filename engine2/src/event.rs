@@ -173,6 +173,10 @@ pub enum Event {
     GoalReached { actor: ActorId, goal: Goal },
     /// A goal that made no progress over `goal.horizon_years` was put aside.
     GoalDropped { actor: ActorId, goal: Goal },
+    /// A call — the player's or a bot's — closed by an earlier call of the same tick (two
+    /// houses asking for the same bride): everyone decided on the state at the tick's
+    /// start, and the calls are applied in one order for all (E3).
+    Preempted { actor: ActorRef, verb: VerbId, target: Target },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

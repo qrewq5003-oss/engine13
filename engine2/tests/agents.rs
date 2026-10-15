@@ -38,14 +38,15 @@ fn all_verbs(mut s: ScenarioData) -> ScenarioData {
     s
 }
 
-/// The refusals a bot's call may meet at application: an earlier call of the same tick
-/// closed it — the peace both sides proposed, the war both declared, the bride two houses
-/// asked for (plan §23b: first all decide, then all is applied).
-const CONFLICTS: [&str; 4] = ["not at war", "already at war", "no unmarried adult to marry", "the other house has no unmarried adult"];
+/// The refusals a call may meet at application: an earlier call of the same tick closed it
+/// — the bride two houses asked for, a war closed by a peace of its principal pair (plan
+/// §23b: first all decide, then all is applied in one order). A peace or a war both sides
+/// made in one tick is not among them: the second is nothing (owner's rule on #291).
+const CONFLICTS: [&str; 3] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult"];
 
 fn assert_conflicts_only(g: &Game) {
-    let r = g.bot_rejection_reasons();
-    assert!(r.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a bot's call refused for another reason than a conflict of the tick: {r:?}");
+    let r = g.preempted_reasons();
+    assert!(r.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a call preempted for another reason than a conflict of the tick: {r:?}");
 }
 
 fn world_of(s: &ScenarioData, seed: u64) -> World {
@@ -298,6 +299,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let (mut falls, mut falls_by_conquest, mut reached, mut dropped, mut verbs) = (0u64, 0u64, 0u64, 0u64, BTreeMap::<VerbId, u64>::new());
     let mut rejections: BTreeMap<String, u64> = BTreeMap::new();
     let mut per_polity_war_share: Vec<f64> = Vec::new();
+    let mut rates: Vec<f64> = Vec::new();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
@@ -377,7 +379,9 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
             tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
         }
         polity_centuries += n0 as f64 * 1.5;
-        for (k, v) in g.bot_rejection_reasons() {
+        let w = g.world();
+        rates.extend(w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(_, x)| x.tax_rate_ppm as f64 / 1e6));
+        for (k, v) in g.preempted_reasons() {
             *rejections.entry(k.clone()).or_insert(0) += v;
         }
         for (_, (w, n)) in war_by_actor {
@@ -399,11 +403,19 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let d3 = bound_century as f64 / alive_century as f64;
     let e8 = tax as f64 / production as f64;
     eprintln!(
-        "with bots, 20 worlds × 300 ticks: В5 {b5:.1} years ({} reigns); В6 {b6:.1} per century per polity; В7 {b7:.2}; В8 {b8:.2}; А11 at war {a11_war:.4}, at peace {a11_peace:.4} ({at_peace_ticks} peace polity-ticks); А12 share of polity-ticks at war {a12:.3} — polities under a tenth {never}, over nine tenths {always} of {}; Д3 at a century {d3:.2}; Э8 {e8:.3}; falls {falls} of which by conquest {falls_by_conquest}; goals reached {reached}, put aside {dropped}; verbs {verbs:?}; bot calls refused as conflicts of the tick {rejections:?}",
+        "with bots, 20 worlds × 300 ticks: В5 {b5:.1} years ({} reigns); В6 {b6:.1} per century per polity; В7 {b7:.2}; В8 {b8:.2}; А11 at war {a11_war:.4}, at peace {a11_peace:.4} ({at_peace_ticks} peace polity-ticks); А12 share of polity-ticks at war {a12:.3} — polities under a tenth {never}, over nine tenths {always} of {}; Д3 at a century {d3:.2}; Э8 {e8:.3}; falls {falls} of which by conquest {falls_by_conquest}; goals reached {reached}, put aside {dropped}; verbs {verbs:?}; calls preempted by the tick's conflicts {rejections:?}; tax rates at the end — mean {:.3}, below the tithe {}, at it {}, above {}",
         reigns.len(),
-        per_polity_war_share.len()
+        per_polity_war_share.len(),
+        rates.iter().sum::<f64>() / rates.len().max(1) as f64,
+        rates.iter().filter(|r| **r < 0.0999).count(),
+        rates.iter().filter(|r| (0.0999..=0.1001).contains(*r)).count(),
+        rates.iter().filter(|r| **r > 0.1001).count()
     );
-    assert!(rejections.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a bot's call refused for another reason than a conflict of the tick: {rejections:?}");
+    // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
+    // by their utility — the mean rate inside a step of it.
+    let mean_rate = rates.iter().sum::<f64>() / rates.len().max(1) as f64;
+    assert!((mean_rate - 0.10).abs() <= 0.02, "the bots' mean tax {mean_rate:.3} drifted more than a step from the tithe");
+    assert!(rejections.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a call preempted for another reason than a conflict of the tick: {rejections:?}");
     assert_eq!(falls, falls_by_conquest, "a polity falls only by conquest: every fall in the tick its last province was taken");
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");
@@ -483,4 +495,106 @@ fn the_outcome_depends_on_the_strategy_and_on_the_seed_and_a_run_with_bots_saves
     assert_eq!(straight.to_save().unwrap(), g2.to_save().unwrap());
     assert!(a.iter().any(|r| r.events.iter().any(|e| matches!(e.event, Event::Verb { .. }))), "the run had bots' calls to carry");
     let _ = (Target::None, VerbCall { actor: ActorRef::Ruler(ActorId(0)), verb: VerbId::Recruit, target: Target::None });
+}
+
+
+#[test]
+fn every_call_of_a_tick_is_applied_in_one_order_for_all_the_player_at_the_place_of_its_actor() {
+    let p = params();
+    let mut s = all_verbs(testworld::five_states_scenario());
+    // One unmarried adult in house h4 of polity 4 — the bride both polity 1 and polity 3
+    // ask for: c4 is married into the other house of polity 0, r4 is left.
+    s.persons.get_mut("c4").unwrap().spouse = Some("o0a".to_string());
+    s.persons.get_mut("o0a").unwrap().spouse = Some("c4".to_string());
+    let house = |sid: &str| engine2::HouseId(s.houses.keys().position(|k| k == sid).unwrap() as u32);
+    let (h1, h3, h4) = (house("h1"), house("h3"), house("h4"));
+    // Across polities a marriage needs the relation at the threshold.
+    let friendly = |g: &mut Game| {
+        for a in [1u32, 3] {
+            g.world_mut().relations.insert((ActorId(a), ActorId(4)), 80.0);
+        }
+    };
+    let mut g = Game::new(&s, params(), 51).unwrap();
+    g.set_bots(false);
+    friendly(&mut g);
+    let marry = |a: u32, g: engine2::HouseId| VerbCall { actor: ActorRef::Ruler(ActorId(a)), verb: VerbId::ProposeMarriage, target: Target::House(g) };
+    // The order: by the caller's polity, whatever order the calls came in.
+    let order = engine2::sim::application_order(g.world(), &[marry(3, h4), marry(1, h4), VerbCall { actor: ActorRef::House(h3), verb: VerbId::ProposeMarriage, target: Target::House(h4) }]);
+    assert_eq!(order.iter().map(|c| c.actor).collect::<Vec<_>>(), vec![ActorRef::Ruler(ActorId(1)), ActorRef::Ruler(ActorId(3)), ActorRef::House(h3)]);
+    // Played: polity 1 comes first and marries; polity 3's call is preempted, not an error.
+    let r = g.tick(&[marry(3, h4), marry(1, h4)]).unwrap();
+    let married = r.events.iter().find_map(|e| match e.event {
+        Event::Marriage { a, b, .. } => Some((a, b)),
+        _ => None,
+    });
+    let (x, y) = married.expect("one marriage");
+    let houses_married = [g.world().persons[&x].house, g.world().persons[&y].house];
+    assert!(houses_married.contains(&h1) && houses_married.contains(&h4), "the lower polity married: {houses_married:?}");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Preempted { actor: ActorRef::Ruler(ActorId(3)), verb: VerbId::ProposeMarriage, .. })));
+    assert_eq!(g.preempted(), 1);
+    // The player at the place of its actor: a player playing polity 3 against a bot of
+    // polity 1 loses the bride the same way; playing polity 0 it would win — the queue is
+    // the actors', not the player's.
+    let mut g = Game::new(&s, params(), 51).unwrap();
+    g.set_bots(false);
+    friendly(&mut g);
+    g.set_player(Some(ActorRef::Ruler(ActorId(3))));
+    let r = g.tick(&[marry(1, h4), marry(3, h4)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Preempted { actor: ActorRef::Ruler(ActorId(3)), .. })), "the player's call came first in the list and still goes after polity 1");
+    let _ = p;
+}
+
+#[test]
+fn a_peace_or_a_war_both_sides_made_in_one_tick_is_made_once_and_a_players_call_not_on_offer_touches_nothing() {
+    let p = params();
+    let s = all_verbs(testworld::five_states_scenario());
+    let mut g = Game::new(&s, params(), 52).unwrap();
+    g.set_bots(false);
+    let call = |a: u32, verb: VerbId, b: u32| VerbCall { actor: ActorRef::Ruler(ActorId(a)), verb, target: Target::Actor(ActorId(b)) };
+    let r = g.tick(&[call(0, VerbId::DeclareWar, 1), call(1, VerbId::DeclareWar, 0)]).unwrap();
+    assert_eq!(r.events.iter().filter(|e| matches!(e.event, Event::War { .. })).count(), 1, "one war");
+    assert_eq!(r.events.iter().filter(|e| matches!(e.event, Event::Verb { verb: VerbId::DeclareWar, .. })).count(), 1, "declared once: the second is nothing");
+    let l1 = g.world().actors[&ActorId(1)].legitimacy;
+    assert!(l1 > p.legitimacy_norm_hereditary - 1.0 || g.world().actors[&ActorId(1)].standing != engine2::Standing::Hereditary, "the second side paid no price for a war already made");
+    let r = g.tick(&[call(1, VerbId::MakePeace, 0), call(0, VerbId::MakePeace, 1)]).unwrap();
+    assert_eq!(r.events.iter().filter(|e| matches!(e.event, Event::Peace { .. })).count(), 1, "one peace");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Preempted { .. })), "the second proposal is nothing, not a refusal");
+    assert_eq!(g.preempted(), 0, "the parity is not cluttered");
+    // A player's call not on offer: an error, and nothing touched — no decision drawn, no
+    // call applied, the tick not played.
+    let mut g = Game::new(&s, params(), 53).unwrap();
+    g.set_player(Some(ActorRef::Ruler(ActorId(0))));
+    let before = g.to_save().unwrap();
+    let bad = [call(0, VerbId::MakePeace, 1)];
+    assert!(g.tick(&bad).is_err(), "peace with a polity not at war is not on offer");
+    assert_eq!(g.to_save().unwrap(), before, "nothing touched");
+}
+
+#[test]
+fn the_tax_is_a_lasting_decision_valued_as_a_flow_and_the_bot_comes_back_to_the_tithe_by_itself() {
+    let p = params();
+    let mut w = testworld::world(54);
+    let a = ActorId(0);
+    let u = |w: &World, v: VerbId| w.tax_utility(a, v, &p);
+    // At the tithe both steps cost: the equilibrium of the shipped weights.
+    assert_eq!(w.actors[&a].tax_rate_ppm, p.tax_default_ppm);
+    assert!(u(&w, VerbId::RaiseTax) < 0.0 && u(&w, VerbId::LowerTax) < 0.0, "at the tithe: raise {:.2}, lower {:.2}", u(&w, VerbId::RaiseTax), u(&w, VerbId::LowerTax));
+    // A step below: raising pays; a step above: lowering pays.
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm - p.tax_step_ppm;
+    assert!(u(&w, VerbId::RaiseTax) > 0.0, "below the tithe the step up pays: {:.2}", u(&w, VerbId::RaiseTax));
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm + p.tax_step_ppm;
+    assert!(u(&w, VerbId::LowerTax) > 0.0, "above the tithe the step down pays: {:.2}", u(&w, VerbId::LowerTax));
+    // A step down and back up cancel in the take: the log.
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    assert!(years > 1.0);
+    // At war with the pay short the take weighs more: at half the pay still no, at a third yes.
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm;
+    w.actors.get_mut(&a).unwrap().paid_share_ppm = 500_000;
+    assert!(u(&w, VerbId::RaiseTax) < 0.0, "half the pay unmet: {:.2}", u(&w, VerbId::RaiseTax));
+    w.actors.get_mut(&a).unwrap().paid_share_ppm = 330_000;
+    assert!(u(&w, VerbId::RaiseTax) > 0.0, "a third of the pay met: {:.2}", u(&w, VerbId::RaiseTax));
+    // The option set of a bot reads the same function.
+    w.actors.get_mut(&a).unwrap().paid_share_ppm = 1_000_000;
+    let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+    assert!((w.utility(a, &call, &p) - u(&w, VerbId::RaiseTax)).abs() < 1e-12);
 }
