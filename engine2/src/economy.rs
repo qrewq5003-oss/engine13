@@ -295,7 +295,13 @@ impl World {
                 self.post(treasury, Source::Upkeep, -paid * 1000)?;
             }
             let share = if pay_due == 0 { 1_000_000 } else { paid * 1_000_000 / pay_due };
-            self.actors.get_mut(&a).unwrap().paid_share_ppm = share;
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.paid_share_ppm = share;
+            actor.paid_share_history_ppm.push(share);
+            let keep = params.agent_pay_memory_ticks;
+            if actor.paid_share_history_ppm.len() > keep {
+                actor.paid_share_history_ppm.drain(..actor.paid_share_history_ppm.len() - keep);
+            }
             if paid < pay_due {
                 self.emit(Event::PayShortfall { actor: a, unpaid_kg: (pay_due - paid) as u64 });
             }

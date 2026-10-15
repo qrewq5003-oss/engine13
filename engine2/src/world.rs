@@ -165,6 +165,12 @@ pub struct Actor {
     /// Share of the army's pay met this tick, parts per million: the share of the army that
     /// is supplied at home (`movement.rs`).
     pub paid_share_ppm: i64,
+    /// The paid shares of the last ticks, oldest first, at most `agent.pay_memory_ticks` of
+    /// them: the bot's reading of its pay (E3 (в), owner's rule on #292). The share of one
+    /// tick jumps at war from 0.08 to 1.0 and back, and a bot reading it raised and lowered
+    /// the tax by turns — a quarter of its changes undone the next tick, half a step's
+    /// price in legitimacy each time.
+    pub paid_share_history_ppm: Vec<i64>,
     /// The person on the throne. A polity whose ruler is dead and unreplaced has fallen.
     pub ruler: PersonId,
     /// The designated heir, if any (a fact; the rule gives one otherwise).
@@ -679,6 +685,7 @@ impl World {
                     institutions: a.institutions.iter().copied().collect(),
                     tax_rate_ppm: params.tax_default_ppm,
                     paid_share_ppm: 1_000_000,
+                    paid_share_history_ppm: Vec::new(),
                     ruler: a.ruler,
                     heir: a.heir,
                     regent: a.regent,

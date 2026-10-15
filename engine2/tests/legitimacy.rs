@@ -690,10 +690,11 @@ fn net_take(w: &mut World, a: ActorId, p: &Params) -> i64 {
 /// Every reachable bottom state — each lawful norm (the four standings, the regency, the
 /// usurper under each rule of succession), with and without a default, at every rate of
 /// the band where the norm sits at zero or below — at legitimacy 0: a step up lowers the
-/// share by what it costs above zero, the net take of a tick does not rise, except in two
-/// states named below, and the bot never wants the step.
+/// share by what it costs above zero, the net take of a tick gains at most
+/// `BOTTOM_GAIN_CEILING` (owner's rule on #292: two states gain a trace by the ordinary
+/// arithmetic of the step, named below; the rest lose), and the bot never wants the step.
 #[test]
-fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_does_not_raise_the_net_take() {
+fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_gains_at_most_two_percent() {
     let p = params();
     let base = world();
     let a = ActorId(0);
@@ -749,25 +750,30 @@ fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_does_not
                 assert!(wants < 0.0, "{label}: the bot wants the step up at the bottom ({wants:.3})");
                 let (before, after) = (net_take(&mut w, a, &p), net_take(&mut raised, a, &p));
                 assert!(before > 0, "{label}: something is taken");
+                let gain = after as f64 / before as f64 - 1.0;
+                assert!(gain <= BOTTOM_GAIN_CEILING, "{label}: a step up at the bottom gains {:+.1}% of the net take, above the ceiling", gain * 100.0);
                 if after > before {
-                    rises.push(format!("{label}: {:+.1}%", (after as f64 / before as f64 - 1.0) * 100.0));
+                    rises.push(format!("{label}: {:+.1}%", gain * 100.0));
                 }
                 rate += p.tax_step_ppm;
             }
         }
     }
     assert!(states >= 30, "the bottom states are reached: {states}");
-    // Two states still gain a little, and not by the bound: their share at the bottom is
-    // high (0.60 and 0.68 of the take), and there a step costs less in share than it adds
-    // in rate — the arithmetic of the step above zero, where a hereditary ruler at its norm
+    // Two states gain a trace, and not by the bound: their share at the bottom is high
+    // (0.60 and 0.68 of the take), and there a step costs less in share than it adds in
+    // rate — the arithmetic of the step above zero, where a hereditary ruler at its norm
     // gains +10 % for the step from the tithe. Before the rule all of them gained 11–17 %.
-    // Named so that a change shows; the owner decides on #292.
+    // The owner on #292: an ordinary price, accepted; named so that a change shows.
     let named = ["Regency, default true, rate 0.14", "Usurper/Acclamation, default true, rate 0.12"];
     eprintln!("bottom states {states}; a step up still raises the net take in: {rises:?}");
-    assert_eq!(rises.len(), named.len(), "{rises:?}");
+    assert_eq!(rises.len(), named.len(), "the states where a step up at the bottom gains: {rises:?}");
     for (r, n) in rises.iter().zip(named) {
-        assert!(r.starts_with(n), "{rises:?}");
-        let gain: f64 = r.rsplit(": ").next().unwrap().trim_end_matches('%').parse().unwrap();
-        assert!(gain < 2.0, "{r}: more than a trace");
+        assert!(r.starts_with(n), "the states where a step up at the bottom gains: {rises:?}");
     }
 }
+
+/// The most a step of the tax up may add to the net take at the bottom of legitimacy
+/// (owner's rule on #292): a trace by the ordinary arithmetic of the step, never the free
+/// 11–17 % of the clamped norm.
+const BOTTOM_GAIN_CEILING: f64 = 0.02;

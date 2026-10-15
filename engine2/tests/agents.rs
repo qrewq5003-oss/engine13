@@ -331,9 +331,11 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let mut rates: Vec<f64> = Vec::new();
     let (mut revolt_ticks, mut province_ticks, mut revolt_lengths, mut revolts_started, mut revolts_ended) = (0u64, 0u64, Vec::<u32>::new(), 0u64, 0u64);
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
+    let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
         let n0 = g.world().actors.len();
         polities_start += n0;
         let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
@@ -414,6 +416,14 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                             falls_by_conquest += 1;
                         }
                     }
+                    Event::TaxRateChanged { actor, from_ppm, to_ppm } => {
+                        tax_changes += 1;
+                        let up = to_ppm > from_ppm;
+                        if last_tax.get(actor).is_some_and(|(last, was_up)| last + 1 == t && *was_up != up) {
+                            tax_undone += 1;
+                        }
+                        last_tax.insert(*actor, (t, up));
+                    }
                     Event::GoalReached { .. } => reached += 1,
                     Event::GoalDropped { .. } => dropped += 1,
                     Event::Verb { verb, .. } => *verbs.entry(*verb).or_insert(0) += 1,
@@ -455,6 +465,12 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         rates.iter().filter(|r| (0.0999..=0.1001).contains(*r)).count(),
         rates.iter().filter(|r| **r > 0.1001).count()
     );
+    // The tax does not swing (owner's rule on #292): a step undone the next tick costs the
+    // ruler half a step's price in legitimacy for nothing — the bots that read the pay of
+    // one tick raised and lowered by turns, 28 % of their changes, and usurped themselves.
+    let undone = tax_undone as f64 / tax_changes.max(1) as f64;
+    eprintln!("tax changes {tax_changes}, undone the next tick {tax_undone} ({undone:.3})");
+    assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
     // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
     // by their utility — the mean rate inside a step of it.
     let mean_rate = rates.iter().sum::<f64>() / rates.len().max(1) as f64;

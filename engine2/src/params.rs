@@ -228,6 +228,9 @@ pub struct Params {
     /// (в) The goals a polity keeps at a time; a freed slot is filled by revanche, by the
     /// wish of a vassal to be free, else by the weighted lot (E3 (б)).
     pub goal_open_per_polity: usize,
+    /// (в) The ticks over which a bot reads its army's paid share (E3 (в), owner's rule on
+    /// #292): the bot's input, smoothed so that its tax does not swing with one tick's pay.
+    pub agent_pay_memory_ticks: usize,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
     pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
@@ -387,6 +390,7 @@ impl Params {
         let horizon = value("goal.horizon_years")?;
         let advance = value("agent.advance_ratio")?;
         let open_goals = value("goal.open_per_polity")?;
+        let pay_memory = value("agent.pay_memory_ticks")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
             (GoalKind::Hold, value("aspiration.weight_hold")?),
@@ -481,6 +485,7 @@ impl Params {
             goal_horizon_ticks: (horizon * 2.0).round() as u32,
             agent_advance_ratio: advance,
             goal_open_per_polity: open_goals.round() as usize,
+            agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
             aspiration_weights,
             entries,
         })

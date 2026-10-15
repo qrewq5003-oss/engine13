@@ -214,6 +214,7 @@ impl World {
                 institutions,
                 tax_rate_ppm,
                 paid_share_ppm: 1_000_000,
+                paid_share_history_ppm: Vec::new(),
                 ruler,
                 heir: None,
                 regent: None,

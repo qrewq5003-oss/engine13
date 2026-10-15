@@ -499,13 +499,26 @@ impl World {
         self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).flat_map(|a| self.bot_orders(a, params)).collect()
     }
 
+    /// The army's paid share as the bot reads it: the mean over the last
+    /// `agent.pay_memory_ticks` ticks (owner's rule on #292 — an input of the bot, not a
+    /// rule of the world: the peace still reads the pay of the tick, `diplomacy.rs`).
+    pub fn paid_share_seen_ppm(&self, a: ActorId) -> i64 {
+        let actor = &self.actors[&a];
+        let h = &actor.paid_share_history_ppm;
+        if h.is_empty() {
+            actor.paid_share_ppm
+        } else {
+            h.iter().sum::<i64>() / h.len() as i64
+        }
+    }
+
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         Context {
             enemy: self.outmatched(a),
             at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
             income: self.yearly_income(a, params).max(1) as f64,
-            unpaid: self.actors[&a].paid_share_ppm < 1_000_000,
+            unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             lawful: self.lawful_norm(a, params),
             wanted_allies: self.wanted_allies(a),
         }
@@ -651,7 +664,7 @@ impl World {
         if now <= 0.0 || next <= 0.0 {
             return -1.0;
         }
-        let need = 1.0 / (actor.paid_share_ppm as f64 / 1e6).max(0.25);
+        let need = 1.0 / (self.paid_share_seen_ppm(a) as f64 / 1e6).max(0.25);
         let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
         let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_unclamped - unclamped);
         let once = params.agent_weight_price_legitimacy / 100.0 * if up { -params.legitimacy_cost_raise_tax } else { params.legitimacy_gain_lower_tax };

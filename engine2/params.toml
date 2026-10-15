@@ -1102,3 +1102,15 @@ kind = "c"
 value = 2.0
 unit = "goals per polity"
 checked_by = "А12"
+
+# (в) The ticks over which a bot reads its army's paid share — an input of the bot, not a
+# rule of the world (owner's rule on #292; the peace reads the pay of the tick). The share
+# of one tick jumps at war from 0.08 to 1.0 and back; read by the tick, the need in the
+# tax's utility flipped with it and the bot raised and lowered the tax by turns: 715 of
+# 2 820 changes on 20 worlds undone the next tick, each turn 10 − 5 points of legitimacy,
+# usurpations of the bots' own making. Checked through В6.
+[agent.pay_memory_ticks]
+kind = "c"
+value = 4.0
+unit = "ticks"
+checked_by = "В6"
