@@ -15,7 +15,7 @@ use crate::params::Params;
 use crate::world::Institution;
 use crate::save::{self, SaveError};
 use crate::scenario::{Display, ScenarioData, SchemaError};
-use crate::verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
+use crate::verbs::{ActorRef, Order, Target, VerbCall, VerbId, VerbOffer};
 use crate::view::{self, ChronicleSnapshot, WorldView};
 use crate::world::{TickReport, World, WorldError};
 
@@ -33,13 +33,21 @@ pub enum SimError {
     VerbNotEnabled(VerbId),
     #[error("{0}")]
     Verb(#[from] VerbError),
+    #[error("{0}")]
+    Order(#[from] crate::movement::OrderError),
 }
 
 pub trait Simulation: Sized {
     fn new(scenario: &ScenarioData, params: Params, seed: u64) -> Result<Self, SimError>;
     /// Play one tick with the player's calls. Returns exactly what the tick did. A call of
     /// a verb the scenario does not enable is an error, and nothing is played.
-    fn tick(&mut self, player: &[VerbCall]) -> Result<TickReport, SimError>;
+    fn tick(&mut self, player: &[VerbCall]) -> Result<TickReport, SimError> {
+        self.tick_turn(player, &[])
+    }
+    /// Play one tick with the player's calls and orders to units (E3 (б): orders are a
+    /// channel of the contract, not a verb). An order to a unit the caller does not command
+    /// is an error, and nothing is played.
+    fn tick_turn(&mut self, player: &[VerbCall], orders: &[Order]) -> Result<TickReport, SimError>;
     /// The verbs on offer to `who`, computed by the one function agents use too.
     fn verbs(&self, who: ActorRef) -> Vec<VerbOffer>;
     fn view(&self) -> WorldView;
@@ -54,13 +62,25 @@ pub trait Simulation: Sized {
 /// id, then the order the calls came in. The player's calls stand at the place of the
 /// player's actor, a bot's at its own: one order for all.
 pub fn application_order(world: &World, calls: &[VerbCall]) -> Vec<VerbCall> {
-    let key = |c: &VerbCall| match c.actor {
-        ActorRef::Ruler(a) => (a, 0u8, 0u32),
-        ActorRef::House(h) => (world.houses.get(&h).map(|x| x.polity).unwrap_or(ActorId(u32::MAX)), 1, h.0),
-    };
     let mut v: Vec<(usize, VerbCall)> = calls.iter().copied().enumerate().collect();
-    v.sort_by_key(|(i, c)| (key(c), *i));
+    v.sort_by_key(|(i, c)| (caller_key(world, c.actor), *i));
     v.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The place of a caller in the one order of a tick: its polity, the ruler before the
+/// houses, the houses by id.
+fn caller_key(world: &World, who: ActorRef) -> (ActorId, u8, u32) {
+    match who {
+        ActorRef::Ruler(a) => (a, 0, 0),
+        ActorRef::House(h) => (world.houses.get(&h).map(|x| x.polity).unwrap_or(ActorId(u32::MAX)), 1, h.0),
+    }
+}
+
+/// The orders of a tick in the same one order for all.
+pub fn order_application(world: &World, orders: &[Order]) -> Vec<Order> {
+    let mut v: Vec<(usize, Order)> = orders.iter().copied().enumerate().collect();
+    v.sort_by_key(|(i, o)| (caller_key(world, o.actor), *i));
+    v.into_iter().map(|(_, o)| o).collect()
 }
 
 /// The bond a call makes between a pair — a peace or a war — that the other side of the
@@ -259,7 +279,11 @@ impl Simulation for Game {
         Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, preempted: std::collections::BTreeMap::new(), bots: true })
     }
 
-    fn tick(&mut self, player: &[VerbCall]) -> Result<TickReport, SimError> {
+    fn tick_turn(&mut self, player: &[VerbCall], orders: &[Order]) -> Result<TickReport, SimError> {
+        // Every order of the player must be possible on the state as it stands.
+        for o in orders {
+            self.world.order_room(o)?;
+        }
         // Validate every call before touching the world, so an error leaves nothing
         // half-played: the verb enabled, and every call of the player on offer on the state
         // as it stands. Tried on a copy in the order of application (a loan and the hire it
@@ -294,10 +318,13 @@ impl Simulation for Game {
         // against bot would measure the queue, not the strategy.
         let enabled: Vec<VerbId> = self.display.verbs.iter().map(|(v, _)| *v).collect();
         let mut calls: Vec<VerbCall> = player.to_vec();
+        let mut all_orders: Vec<Order> = orders.to_vec();
         if self.bots {
+            all_orders.extend(self.world.bot_orders_all(self.player, &self.params));
             calls.extend(self.world.decide_all(&enabled, self.player, &self.params));
         }
         let mut bonded: std::collections::BTreeSet<(VerbId, (ActorId, ActorId))> = std::collections::BTreeSet::new();
+        let mut disbanded: std::collections::BTreeSet<crate::ids::UnitId> = std::collections::BTreeSet::new();
         for call in application_order(&self.world, &calls) {
             // A peace or a war the other side of the pair already made this tick is nothing
             // (owner's rule on #291): both proposed it, it is made once.
@@ -308,12 +335,26 @@ impl Simulation for Game {
             match self.world.apply_verb(&call, &self.params) {
                 Ok(()) => {
                     bonded.extend(bond);
+                    if let (VerbId::Disband, Target::Unit(u)) = (call.verb, call.target) {
+                        disbanded.insert(u);
+                    }
                     self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target });
                 }
                 Err(e) => {
                     *self.preempted.entry(format!("{:?}: {e}", call.verb)).or_insert(0) += 1;
                     self.world.emit(Event::Preempted { actor: call.actor, verb: call.verb, target: call.target });
                 }
+            }
+        }
+        // Then the orders, in the same one order for all; an order to a unit the tick's
+        // calls disbanded is preempted like a call.
+        for o in order_application(&self.world, &all_orders) {
+            // An order to a unit its caller disbanded this tick is nothing.
+            if disbanded.contains(&o.unit) {
+                continue;
+            }
+            if let Err(e) = self.world.apply_order(&o) {
+                *self.preempted.entry(format!("Order: {e}")).or_insert(0) += 1;
             }
         }
         let report = self.world.tick(&self.params)?;

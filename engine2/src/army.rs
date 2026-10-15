@@ -96,19 +96,19 @@ impl World {
                 return Err(WorldError::UnknownActor(x));
             }
         }
-        self.war_between(attacker, victim, None);
+        self.war_between(attacker, victim, None, attacker);
         let principal = Some(pair(attacker, victim));
         let mut with_victim: Vec<ActorId> = self.allies_of(victim);
         with_victim.extend(self.lord_of(victim));
         with_victim.extend(self.vassals_of(victim));
         for x in with_victim {
             if x != attacker && self.alive(x) && !self.peace_in_force(x, attacker) {
-                self.war_between(x, attacker, principal);
+                self.war_between(x, attacker, principal, attacker);
             }
         }
         for x in self.vassals_of(attacker) {
             if x != victim && self.alive(x) && !self.peace_in_force(x, victim) {
-                self.war_between(x, victim, principal);
+                self.war_between(x, victim, principal, x);
             }
         }
         Ok(())
@@ -116,11 +116,11 @@ impl World {
 
     /// Record a war between a pair if there is none, with its event; `of` names the
     /// principal pair when the war is an obligation of theirs.
-    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>) {
+    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>, by: ActorId) {
         let (a, b) = pair(a, b);
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
-            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of });
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by) });
             self.emit(Event::War { a, b });
         }
     }

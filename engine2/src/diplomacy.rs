@@ -276,15 +276,35 @@ impl World {
         params.legitimacy_cost_declare_war * if self.treaty(a, b).is_some() { params.treaty_breach_factor } else { 1.0 }
     }
 
-    /// Would `b` accept peace from `a`?
+    /// Would `b` accept peace from `a`? By the state of the war (§19) and its declarer
+    /// (E3 (б), owner's rule on #291): a receiver that is losing accepts always; **the
+    /// declarer** accepts only at the threshold of the relation, or when its war goal
+    /// against the other is gone (put aside, or never there), or when it is exhausted — its
+    /// army's pay short; a winner that did not declare accepts at the threshold; **the
+    /// attacked** accepts a status quo always. With «nothing taken — both accept» the
+    /// attacked ended every war of the first bots at once, before a battle (829 peaces on
+    /// 695 declarations); with «the declarer at the threshold» alone an aggressor without a
+    /// chance would fight for ever — wars ended more often by exhaustion than by conquest.
     pub fn peace_room(&self, a: ActorId, b: ActorId, params: &Params) -> Result<(), &'static str> {
         if a == b || !self.at_war(a, b) {
             return Err("not at war");
         }
-        match self.losing_side(a, b) {
-            Some(loser) if loser == a && self.relation(a, b) < params.treaty_accept_at_relation => Err("the winner wants more: the relation is below the threshold"),
-            _ => Ok(()),
+        let loser = self.losing_side(a, b);
+        if loser == Some(b) {
+            return Ok(());
         }
+        let at_threshold = self.relation(a, b) >= params.treaty_accept_at_relation;
+        if self.wars[&pair(a, b)].by == Some(b) {
+            let exhausted = self.actors[&b].paid_share_ppm < 1_000_000;
+            if at_threshold || exhausted || !self.war_goal_against(b, a) {
+                return Ok(());
+            }
+            return Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid");
+        }
+        if loser == Some(a) && !at_threshold {
+            return Err("the winner wants more: the relation is below the threshold");
+        }
+        Ok(())
     }
 
     /// Would `b` accept an alliance from `a`?

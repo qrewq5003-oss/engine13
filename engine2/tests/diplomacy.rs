@@ -484,6 +484,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     // winner's accepted; the loser accepts at the threshold.
     let mut w = testworld::world(13);
     w.ally_now(s1, s3, &p).unwrap();
+    // The declarer refuses a status quo or the loser's peace only while it has a war goal
+    // (E3 (б), owner's rule on #291): s0 wants all of s1.
+    w.set_goal(s0, engine2::GoalKind::Take, engine2::GoalTarget::Polity(s1)).unwrap();
     w.declare_war(s0, s1).unwrap();
     assert!(w.at_war(s0, s3), "the ally entered");
     take(&mut w, s0, at(1, 4), &p);
@@ -491,7 +494,7 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     assert_eq!(w.losing_side(s0, s1), Some(s1));
     assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
     let err = w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap_err();
-    assert!(err.to_string().contains("the winner wants more"), "{err}");
+    assert!(err.to_string().contains("the declarer wants its war"), "{err}");
     assert!(w.at_war(s0, s1));
     w.relations.insert((s0, s1), p.treaty_accept_at_relation);
     assert!(w.peace_room(s1, s0, &p).is_ok(), "at the threshold the winner accepts");

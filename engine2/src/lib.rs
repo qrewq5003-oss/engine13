@@ -65,5 +65,5 @@ pub use save::{from_save, to_save, SaveError, SAVE_FORMAT};
 pub use scenario::{Compiled, Display, ScenarioData};
 pub use sim::{Game, Simulation};
 pub use time::Tick;
-pub use verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
+pub use verbs::{ActorRef, Order, Target, VerbCall, VerbId, VerbOffer};
 pub use world::{ActorFact, Disease, Facts, House, HouseFact, Institution, Land, Names, Person, PairMap, PersonFact, ProvinceFact, RelationFacts, Shift, Siege, Standing, Succession, TickReport, Treaty, TreatyKind, Unit, War, World};
