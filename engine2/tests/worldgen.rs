@@ -15,16 +15,25 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use engine2::sim::{Game, Simulation};
 use engine2::{worldgen, Params, ScenarioData};
-use sentinel::{Observed, Thresholds};
+use sentinel::{Flag, Matrix, Observed, RunSummary, Thresholds};
 
 fn play(label: &str, scenario: &ScenarioData, ticks: u32) {
+    let _ = play_summary(label, scenario, ticks);
+}
+
+/// One world through the sentinel: its run summary for the matrix and the kinds it
+/// declares possible within `ticks`.
+fn play_summary(label: &str, scenario: &ScenarioData, ticks: u32) -> (RunSummary, Vec<String>) {
     let params = Params::load().unwrap();
     let mut g = match Game::new(scenario, params, 1) {
         Ok(g) => g,
         Err(e) => panic!("{label}: cannot build: {e}"),
     };
+    // What the world can produce within the run is read at the start: a channel that has
+    // done its work by the end (a province converted) is no longer there to be seen.
+    let possible = g.possible_kinds(ticks);
     let mut died = 0usize;
-    let (s, _) = sentinel::run(&mut g, ticks, 1, "none", Thresholds::default(), |g| {
+    let (s, summary) = sentinel::run(&mut g, ticks, 1, "none", Thresholds::default(), |g| {
         match g.tick(&[]) {
             Ok(r) => died += r.events.iter().filter(|e| matches!(e.event, engine2::Event::ActorDied { .. })).count(),
             Err(e) => panic!("{label}: tick failed: {e}"),
@@ -37,6 +46,7 @@ fn play(label: &str, scenario: &ScenarioData, ticks: u32) {
     // raises a new one from its people (plan §18.5, owner's rule on #285).
     assert_eq!(died, 0, "{label}: {died} polities fell without war");
     assert_eq!(o.alive.len(), scenario.actors.len(), "{label}: an actor vanished without a system to kill it");
+    (summary, possible)
 }
 
 #[test]
@@ -56,18 +66,33 @@ fn extreme_worlds_fifty_ticks_no_flags() {
     }
 }
 
-/// The full matrix before a world-changing merge (200 seeds, 300 ticks). Ignored in CI.
+/// The full matrix before a world-changing merge (200 seeds, 300 ticks): no single-run
+/// flag in any world, and over the matrix no `Never` — every kind some world declares
+/// possible within 150 years (a conversion, an adoption) happens in some world (owner's
+/// rule on #288). `Always` is not read here: the generated worlds share their ids, so a
+/// pair common to all of them would say nothing. Run in release in CI.
 #[test]
 #[ignore]
 fn two_hundred_seeds_three_hundred_ticks_no_flags() {
     let params = Params::load().unwrap();
+    let mut m = Matrix::new();
+    let mut possible: Vec<String> = Vec::new();
     for seed in 1..=200u64 {
         let s = worldgen::generate(seed, &params);
-        play(&format!("seed {seed}"), &s, 300);
+        let (summary, kinds) = play_summary(&format!("seed {seed}"), &s, 300);
+        for k in kinds {
+            if !possible.contains(&k) {
+                possible.push(k);
+            }
+        }
+        m.add(summary);
     }
     for (name, s) in worldgen::extreme_worlds(&params) {
         play(name, &s, 300);
     }
+    assert!(possible.contains(&"Converted".to_string()) && possible.contains(&"Adopted".to_string()), "the matrix declares conversions and adoptions possible: {possible:?}");
+    let never: Vec<Flag> = m.flags(&Thresholds::default(), &possible, None).into_iter().filter(|f| matches!(f, Flag::Never { .. })).collect();
+    assert!(never.is_empty(), "declared kinds that happened in no world of the matrix: {never:?}");
 }
 
 // ---------- shapes of the land graph ----------

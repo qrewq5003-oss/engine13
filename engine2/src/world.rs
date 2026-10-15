@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Event, Stamped};
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
+use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, ReligionId, UnitId};
 use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
 use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
@@ -42,10 +42,18 @@ pub enum Disease {
 /// An institution a polity may hold: the engine's closed list (E0 §4, variant 3). Each
 /// comes with its source and the rows it changes. `Bank` (E0 Э6, Э7): a polity with a bank
 /// may borrow, down to the debt ceiling, at interest; without one its treasury never goes
-/// below zero. Next: the succession rule (internal politics), gunpowder (army).
+/// below zero. `ConversionPolicy` (E2 step 8, owner's rule on §20): the polity converts
+/// the provinces it holds to the faith of its court — fiscal incentives, pressure on the
+/// elites — along Bulliet's curve (E0 Р1); without it rule converts nothing, and a province
+/// changes faith only by the slow drift of its neighbourhood (Venetian Crete stayed Orthodox
+/// for four and a half centuries; Rumelia after eighty years of Ottoman rule was a fifth
+/// Muslim by Barkan's registers — by memory; Bulliet's Iran, where conversion was rewarded,
+/// is the other edge). Ascribed by the facts with a source, never for the outcome. Next:
+/// gunpowder (army).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Institution {
     Bank,
+    ConversionPolicy,
 }
 
 /// The rule by which a polity recognises its next ruler (E0 §4, the second institution of
@@ -107,6 +115,21 @@ pub struct House {
     /// The polity the house belongs to (owner's rule on §18: a house must be able to take
     /// the throne of its polity, so it must say which one).
     pub polity: ActorId,
+    /// The tongue and the faith of the house (E2 step 8): the polity speaks and prays as its
+    /// ruling house does; a house raised from the people takes its capital's.
+    pub culture: CultureId,
+    pub religion: ReligionId,
+}
+
+/// A province's majority on the move (E2 step 8): the share of its people already won to
+/// another tongue or faith, along the logistic curve of E0 Р1; at half the majority turns
+/// and the share is spent — the former majority is gone (owner's note on §20: one number,
+/// not a mix).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Shift<T> {
+    pub to: T,
+    pub share_ppm: i64,
 }
 
 /// Land of a province: the closed list the capacity density (E0 П1) is keyed by.
@@ -269,6 +292,12 @@ pub struct Province {
     /// The governor's seat, if a person of the owner's polity holds it (the despot of the
     /// Morea, the Sforza fief). The seat passes within the holder's house.
     pub governor: Option<PersonId>,
+    /// The tongue and the faith of the majority (E2 step 8), and the minority on its way to
+    /// another, if any (`faith.rs`).
+    pub culture: CultureId,
+    pub religion: ReligionId,
+    pub assimilating: Option<Shift<CultureId>>,
+    pub converting: Option<Shift<ReligionId>>,
 }
 
 /// An army on the graph: owner, position, quality, and where it is ordered to go. Its
@@ -308,6 +337,10 @@ pub struct Names {
     pub houses: Vec<(String, String)>,
     /// Index = `PersonId`; a person born in play is named here.
     pub persons: Vec<(String, String)>,
+    /// Index = `CultureId` / `ReligionId`: the scenario's string ids, interned in sorted
+    /// order; the engine reads neither.
+    pub cultures: Vec<String>,
+    pub religions: Vec<String>,
 }
 
 /// One province of the starting facts.
@@ -321,6 +354,8 @@ pub struct ProvinceFact {
     pub neighbours: Vec<ProvinceId>,
     pub sea_neighbours: Vec<ProvinceId>,
     pub governor: Option<PersonId>,
+    pub culture: CultureId,
+    pub religion: ReligionId,
 }
 
 /// One polity of the starting facts.
@@ -345,6 +380,8 @@ pub struct HouseFact {
     pub polity: ActorId,
     /// Starting treasury of the house in kg of wheat-equivalent.
     pub treasury_kg: i64,
+    pub culture: CultureId,
+    pub religion: ReligionId,
 }
 
 /// One person of the starting facts; all of them alive at the start.
@@ -479,6 +516,10 @@ pub enum WorldError {
     WarWithSelf(ActorId),
     #[error("a polity cannot be bound to itself: {0:?}")]
     RelationWithSelf(ActorId),
+    #[error("unknown culture {0:?}")]
+    UnknownCulture(CultureId),
+    #[error("unknown religion {0:?}")]
+    UnknownReligion(ReligionId),
     #[error("unknown person {0:?}")]
     UnknownPerson(PersonId),
     #[error("house {0:?} belongs to unknown polity {1:?}")]
@@ -515,6 +556,16 @@ impl World {
         if names.persons.len() != facts.persons.len() {
             return Err(WorldError::NamesMismatch { what: "persons", names: names.persons.len(), items: facts.persons.len() });
         }
+        let (n_cultures, n_religions) = (names.cultures.len() as u32, names.religions.len() as u32);
+        let known_faith = |c: CultureId, r: ReligionId| -> Result<(), WorldError> {
+            if c.0 >= n_cultures {
+                return Err(WorldError::UnknownCulture(c));
+            }
+            if r.0 >= n_religions {
+                return Err(WorldError::UnknownReligion(r));
+            }
+            Ok(())
+        };
         let tick = Tick::ZERO;
         let mut ledger = Ledger::new();
         // Houses and persons first: the seats below refer to them.
@@ -525,7 +576,8 @@ impl World {
             if h.polity.0 >= n_actors {
                 return Err(WorldError::UnknownHousePolity(id, h.polity));
             }
-            houses.insert(id, House { polity: h.polity });
+            known_faith(h.culture, h.religion)?;
+            houses.insert(id, House { polity: h.polity, culture: h.culture, religion: h.religion });
             ledger.open(tick, Account::HouseTreasury(id), h.treasury_kg)?;
         }
         let mut persons: BTreeMap<PersonId, Person> = BTreeMap::new();
@@ -607,6 +659,7 @@ impl World {
                 seat(g, f.owner)?;
             }
             let capacity = params.capacity(f.area_km2, f.land);
+            known_faith(f.culture, f.religion)?;
             provinces.insert(
                 id,
                 Province {
@@ -619,6 +672,10 @@ impl World {
                     sea_neighbours: f.sea_neighbours.clone(),
                     siege: None,
                     governor: f.governor,
+                    culture: f.culture,
+                    religion: f.religion,
+                    assimilating: None,
+                    converting: None,
                 },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
@@ -767,8 +824,8 @@ impl World {
     /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
     /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
     /// (`politics.rs`), treaties run out and relations move to their norms
-    /// (`diplomacy.rs`), people grow, starve, sicken and migrate (`population.rs`), then
-    /// `TickPlayed`.
+    /// (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), people grow, starve,
+    /// sicken and migrate (`population.rs`), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
         let _ = self.draw_each(DrawPoint::Decision, actor_ids);
@@ -779,6 +836,7 @@ impl World {
         self.phase_supply(params)?;
         self.phase_people(params)?;
         self.phase_diplomacy(params)?;
+        self.phase_faith(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);

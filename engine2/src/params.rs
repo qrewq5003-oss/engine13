@@ -191,6 +191,18 @@ pub struct Params {
     pub bribe_gain_per_share: f64,
     /// (в) The dowry as parts per million of the proposing house's treasury.
     pub dowry_share_ppm: i64,
+    /// (в) The friction of two courts of another faith or tongue in the relation (E2 step 8).
+    pub relation_norm_faith: f64,
+    pub relation_norm_culture: f64,
+    /// E0 Р1: the logistic rate of conversion per tick (half the yearly rate), as parts per
+    /// million; (в) the seed share a conversion starts from, parts per million; (в) the
+    /// factor of the neighbourhood channel against the rule's.
+    pub conversion_rate_ppm_per_tick: i64,
+    pub conversion_seed_ppm: i64,
+    pub conversion_neighbourhood_factor: f64,
+    /// (в) The chance per tick that a polity takes up an institution a polity it is in
+    /// contact with holds (E2 step 8).
+    pub institution_adoption_per_tick: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -330,6 +342,12 @@ impl Params {
         let bribe_share = value("bribe.share_of_revenue")?;
         let bribe_gain = value("bribe.gain_per_share_of_income")?;
         let dowry_share = value("marriage.dowry_share_of_house")?;
+        let norm_faith = value("relation.norm_faith")?;
+        let norm_culture = value("relation.norm_culture")?;
+        let conversion_rate = value("conversion.rate_per_year")?;
+        let conversion_seed = value("conversion.seed_share")?;
+        let neighbourhood_factor = value("conversion.neighbourhood_factor")?;
+        let adoption = value("institution.adoption_per_year")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -399,6 +417,12 @@ impl Params {
             bribe_share_ppm: (bribe_share * 1_000_000.0).round() as i64,
             bribe_gain_per_share: bribe_gain,
             dowry_share_ppm: (dowry_share * 1_000_000.0).round() as i64,
+            relation_norm_faith: norm_faith,
+            relation_norm_culture: norm_culture,
+            conversion_rate_ppm_per_tick: (conversion_rate / 2.0 * 1_000_000.0).round() as i64,
+            conversion_seed_ppm: (conversion_seed * 1_000_000.0).round() as i64,
+            conversion_neighbourhood_factor: neighbourhood_factor,
+            institution_adoption_per_tick: adoption / 2.0,
             entries,
         })
     }
@@ -455,6 +479,27 @@ mod tests {
         let p = Params::load().unwrap();
         let price_years = p.order_cost_share_ppm as f64 / 1_000_000.0;
         assert!(price_years * p.legitimacy_norm_per_tax_step >= p.order_gain, "order at {price_years} years of revenue for {} against a norm shift of {} per step: tax up and order back is a profit", p.order_gain, p.legitimacy_norm_per_tax_step);
+    }
+
+    /// E0 Р2 holds for the shipped Р1 by arithmetic: the logistic share a century after the
+    /// change of rule, from the seed at the rate, lies in the band — and so does the
+    /// neighbourhood's drift at its factor (the other edge).
+    #[test]
+    fn conversion_at_a_century_lies_in_r2() {
+        let p = Params::load().unwrap();
+        let band = p.entries["conversion.observed_share_after_a_century"].band.unwrap();
+        let share_after = |rate_per_tick: f64| {
+            let mut s = p.conversion_seed_ppm as f64 / 1e6;
+            for _ in 0..200 {
+                s += rate_per_tick * s * (1.0 - s);
+            }
+            s
+        };
+        let rate = p.conversion_rate_ppm_per_tick as f64 / 1e6;
+        let by_rule = share_after(rate);
+        let by_neighbourhood = share_after(rate * p.conversion_neighbourhood_factor);
+        assert!((band[0]..=band[1]).contains(&by_rule), "by rule {by_rule:.3} outside Р2 {band:?}");
+        assert!((band[0]..=band[1]).contains(&by_neighbourhood), "by neighbourhood {by_neighbourhood:.3} outside Р2 {band:?}");
     }
 
     #[test]

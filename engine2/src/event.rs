@@ -7,12 +7,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
+use crate::ids::{CultureId, ReligionId, ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
-use crate::world::{Standing, TreatyKind};
+use crate::world::{Institution, Standing, TreatyKind};
 
 /// Outcome of a battle for the attacker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +139,27 @@ pub enum Event {
     Marriage { a: PersonId, b: PersonId, dowry_kg: u64 },
     /// A peace of submission: the loser of the war became the winner's vassal.
     Submission { vassal: ActorId, lord: ActorId },
+    /// A province's majority turned to another faith (E2 step 8, E0 Р1): by the rule of a
+    /// court with the conversion policy, or by the drift of its neighbourhood.
+    Converted { province: ProvinceId, from: ReligionId, to: ReligionId, by: Channel },
+    /// A province's majority took the tongue of its neighbourhood.
+    Assimilated { province: ProvinceId, from: CultureId, to: CultureId },
+    /// A polity took up an institution along a channel of contact — trade with a neighbour,
+    /// a marriage, a treaty — from a polity that holds it (E0 §2 variant 3; E2 step 8).
+    Adopted { actor: ActorId, institution: Institution, from: ActorId },
+    /// A house that took a throne took the faith of the court with it (owner's rule on
+    /// #288: a foreign dynasty took the faith of the land — «Paris is worth a mass»); its
+    /// tongue stays its own.
+    HouseConverted { house: HouseId, from: ReligionId, to: ReligionId },
+}
+
+/// The channel a conversion or an assimilation came by (plan §20.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Channel {
+    /// The owner's court, under `Institution::ConversionPolicy`.
+    Rule,
+    /// Most of the province's neighbours, by land and by sea.
+    Neighbourhood,
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

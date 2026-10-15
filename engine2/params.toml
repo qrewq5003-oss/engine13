@@ -791,3 +791,92 @@ kind = "c"
 value = 0.5
 unit = "share of the house's treasury"
 checked_by = "Д3"
+
+# ---- religion and culture (E2 step 8, plan §20) ----
+
+# E0 Р2 — observed: the share of a province's people won to the faith of its ruler a
+# century after the change of rule. **By memory**, two edges: Bulliet's Iran, where
+# conversion was rewarded — about half by the second century (Conversion to Islam in the
+# Medieval Period, 1979, ch. 3; the curve 2.5 / 13.5 / 34 / 34 / 16 % per quarter-century);
+# Ottoman Rumelia after eighty years — about a fifth Muslim, settlers included (Barkan's
+# registers of the 1520s–30s); Radushev 2010 — one highly converted district, not the
+# Balkans; Venetian Crete — Orthodox after four and a half centuries. Sources to open:
+# Bulliet, Barkan, Radushev. Owner's rule on §20: rule converts only under the institution
+# `ConversionPolicy`; without it a province drifts with its neighbourhood alone.
+[conversion.observed_share_after_a_century]
+kind = "b"
+band = [0.1, 0.7]
+unit = "share of the province's people, a century after the change of rule"
+e0 = "Р2"
+
+# E0 Р1 — the rate of conversion and assimilation of a province along one channel: the
+# logistic rate r (the share won grows as s' = s + r·s·(1 − s) a year): a peak of ≈ 1.4 %
+# of the province's people a year means r ≈ 0.056; the early growth of the Christian number,
+# ≈ 3.4 % a year of the believers (Hopkins 1998, opened secondary), is r ≈ 0.034; Bulliet's
+# curve reaches half about a century after the conquest (r ≈ 0.04 from a seed of 2 %).
+# Under the rule of a court with `ConversionPolicy` at full rate; by the neighbourhood at
+# `conversion.neighbourhood_factor` of it. Checked against Р2 by arithmetic (params test).
+[conversion.rate_per_year]
+kind = "a"
+value = 0.04
+band = [0.03, 0.06]
+unit = "logistic rate of the share won per year"
+e0 = "Р1"
+
+# (в) The seed a conversion starts from (a logistic curve does not leave zero): merchants,
+# garrisons, the first converts. Checked through Р2.
+[conversion.seed_share]
+kind = "c"
+value = 0.02
+unit = "share of the province's people"
+checked_by = "Р2"
+
+# (в) The neighbourhood's channel against the rule's: a province most of whose neighbours
+# pray otherwise drifts to their faith at this share of Р1 — the slow drift that is all a
+# court without the policy gets (Crete, Rumelia). Checked through Р2.
+[conversion.neighbourhood_factor]
+kind = "c"
+value = 0.5
+unit = "share of the rule's rate"
+checked_by = "Р2"
+
+# (в) The friction of faith and tongue between two courts (E0 §1.7): the norm of their
+# relation sits lower by these while the courts pray or speak differently. Checked through Р2.
+[relation.norm_faith]
+kind = "c"
+value = 10.0
+unit = "relation below the base between courts of another faith"
+checked_by = "Р2"
+
+[relation.norm_culture]
+kind = "c"
+value = 5.0
+unit = "relation below the base between courts of another tongue"
+checked_by = "Р2"
+
+# E0 Р3 — observed: the share of polities with a bank a century on, where banks exist. By
+# memory: in Italy by 1400 most of the great states — Florence, Venice, Genoa, Siena, Lucca —
+# banked, and the Medici branches reached Bruges, London, Geneva and Avignon in the 1440s
+# while the kingdoms beyond the Alps borrowed from them rather than keeping their own.
+# Sources to open: de Roover, The Rise and Decline of the Medici Bank (1963); Goldthwaite,
+# The Economy of Renaissance Florence (2009). Owner's rule on §20: checked on the generator —
+# the bank must not become «always» in 300 ticks (half the polities start with one and the
+# channel of trade is contact).
+[institution.observed_bank_share_after_a_century]
+kind = "b"
+band = [0.4, 0.9]
+unit = "share of polities with a bank a century after the start"
+e0 = "Р3"
+
+# (в) The spread of institutions along the channels of E0 §2 (3) — one mechanism with faith:
+# a polity in contact with one that holds an institution — a neighbour by land or sea, an
+# ally, a lord or vassal, a house married into — takes it up with this chance a year, by a
+# keyed draw. Only what is a practice spreads (the bank); a policy is not caught from a
+# neighbour. Checked through Р3: 0.01 gave 0.76 a century on and every polity banked in 8
+# small worlds of 20 by 150 years; 0.005 gives the middle of Р3 (owner's rule on #288 — a
+# bank never became universal: Byzantium and the Ottomans had none).
+[institution.adoption_per_year]
+kind = "c"
+value = 0.005
+unit = "chance per year with a channel"
+checked_by = "Р3"

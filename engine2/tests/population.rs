@@ -106,7 +106,7 @@ fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
                 g.tick(&[]).unwrap();
             });
             assert!(sen.flags().is_empty(), "world {world_seed} game seed {game_seed}: {:?}", sen.flags());
-            possible = g.possible_kinds();
+            possible = g.possible_kinds(100);
             stocks.push(g.observe().stocks);
             growths.push(yearly_growth(start, total_people(&g), 100));
             m.add(summary);

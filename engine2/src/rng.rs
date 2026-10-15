@@ -47,6 +47,9 @@ pub enum DrawPoint {
     Rise = 7,
     /// A usurpation of the throne (keyed by polity).
     Usurpation = 8,
+    /// A polity taking up an institution its neighbours, allies or in-laws hold (keyed by
+    /// polity; E2 step 8).
+    Adoption = 9,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.

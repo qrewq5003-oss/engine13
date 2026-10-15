@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
+use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, ReligionId};
 use crate::params::Params;
 use crate::verbs::VerbId;
 use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, RelationFacts, Succession};
@@ -89,6 +89,10 @@ pub struct HouseData {
     pub polity: String,
     /// Starting treasury of the house in kilograms of wheat-equivalent.
     pub treasury_kg: i64,
+    /// The tongue and the faith of the house (E2 step 8): facts, as strings the scenario
+    /// chooses; the engine interns them and never reads which is which.
+    pub culture: String,
+    pub religion: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -150,6 +154,9 @@ pub struct ProvinceData {
     pub sea_neighbours: Vec<String>,
     /// The governor's seat, when a person holds it.
     pub governor: Option<String>,
+    /// The tongue and the faith of the province's majority (E2 step 8).
+    pub culture: String,
+    pub religion: String,
 }
 
 /// Presentation data that is not part of the world: verbs' display names and the money.
@@ -246,13 +253,28 @@ impl ScenarioData {
             self.provinces.keys().enumerate().map(|(i, k)| (k.as_str(), ProvinceId(i as u32))).collect();
         let house_index: BTreeMap<&str, HouseId> = self.houses.keys().enumerate().map(|(i, k)| (k.as_str(), HouseId(i as u32))).collect();
         let person_index: BTreeMap<&str, PersonId> = self.persons.keys().enumerate().map(|(i, k)| (k.as_str(), PersonId(i as u32))).collect();
+        // Cultures and religions: the scenario's strings, interned in sorted order.
+        let cultures: Vec<String> = {
+            let mut v: Vec<String> = self.provinces.values().map(|p| p.culture.clone()).chain(self.houses.values().map(|h| h.culture.clone())).collect();
+            v.sort();
+            v.dedup();
+            v
+        };
+        let religions: Vec<String> = {
+            let mut v: Vec<String> = self.provinces.values().map(|p| p.religion.clone()).chain(self.houses.values().map(|h| h.religion.clone())).collect();
+            v.sort();
+            v.dedup();
+            v
+        };
+        let culture = |s: &str| CultureId(cultures.iter().position(|c| c == s).expect("interned") as u32);
+        let religion = |s: &str| ReligionId(religions.iter().position(|r| r == s).expect("interned") as u32);
 
         // Houses and persons: every reference must exist, a parent must be older, nobody
         // is born after the start.
         let mut houses = Vec::with_capacity(self.houses.len());
         for (key, h) in &self.houses {
             let polity = *actor_index.get(h.polity.as_str()).ok_or_else(|| SchemaError::UnknownHousePolity(key.clone(), h.polity.clone()))?;
-            houses.push(HouseFact { polity, treasury_kg: h.treasury_kg });
+            houses.push(HouseFact { polity, treasury_kg: h.treasury_kg, culture: culture(&h.culture), religion: religion(&h.religion) });
         }
         let mut persons = Vec::with_capacity(self.persons.len());
         for (key, p) in &self.persons {
@@ -337,7 +359,7 @@ impl ScenarioData {
                 return Err(SchemaError::OverCapacity { province: key.clone(), population: p.population, capacity });
             }
             let governor = p.governor.as_deref().map(|g| seat(key, g, owner)).transpose()?;
-            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor });
+            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor, culture: culture(&p.culture), religion: religion(&p.religion) });
         }
 
         let mut actors = Vec::with_capacity(self.actors.len());
@@ -413,6 +435,8 @@ impl ScenarioData {
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
                 houses: self.houses.iter().map(|(k, h)| (k.clone(), h.name.clone())).collect(),
                 persons: self.persons.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
+                cultures,
+                religions,
             },
             display: Display { verbs, currency: self.display_currency.clone() },
         })
@@ -451,10 +475,14 @@ succession = "Blood"
 name = "House A"
 polity = "a"
 treasury_kg = 5
+culture = "west"
+religion = "latin"
 [houses.hb]
 name = "House B"
 polity = "b"
 treasury_kg = 0
+culture = "east"
+religion = "greek"
 [persons.ann]
 name = "Ann"
 house = "ha"
@@ -477,6 +505,8 @@ coastal = true
 population = 50
 neighbours = ["p1"]
 sea_neighbours = ["p3"]
+culture = "east"
+religion = "greek"
 [provinces.p1]
 name = "P1"
 owner = "a"
@@ -486,6 +516,8 @@ coastal = false
 population = 50
 neighbours = ["p2"]
 sea_neighbours = []
+culture = "west"
+religion = "latin"
 [provinces.p3]
 name = "P3"
 owner = "a"
@@ -495,6 +527,8 @@ coastal = true
 population = 50
 neighbours = []
 sea_neighbours = ["p2"]
+culture = "west"
+religion = "greek"
 governor = "ann_jr"
 [verbs]
 raise_tax = "Поднять налог"
@@ -526,7 +560,11 @@ raise_tax = "Поднять налог"
         // Houses and persons in sorted order of their ids; seats resolved to them.
         assert_eq!(c.names.houses, vec![("ha".to_string(), "House A".to_string()), ("hb".to_string(), "House B".to_string())]);
         assert_eq!(c.names.persons[0].0, "ann");
-        assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5 });
+        assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5, culture: CultureId(1), religion: ReligionId(1) });
+        // Cultures and religions interned in sorted order: east < west, greek < latin.
+        assert_eq!(c.names.cultures, vec!["east".to_string(), "west".to_string()]);
+        assert_eq!(c.names.religions, vec!["greek".to_string(), "latin".to_string()]);
+        assert_eq!((c.facts.provinces[2].culture, c.facts.provinces[2].religion), (CultureId(1), ReligionId(0))); // p3: west, greek
         assert_eq!(c.facts.persons[1], PersonFact { house: HouseId(0), born: 1470, parent: Some(PersonId(0)), spouse: None });
         assert_eq!(c.facts.actors[0].ruler, PersonId(0));
         assert_eq!(c.facts.actors[0].heir, Some(PersonId(1)));

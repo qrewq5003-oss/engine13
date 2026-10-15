@@ -155,10 +155,12 @@ pub trait Observed {
     fn observe(&self) -> Observation;
     /// The events of the tick just played, mapped.
     fn events_of_last_tick(&self) -> Vec<ObsEvent>;
-    /// The event kinds this engine's systems can produce. A declared kind that never
-    /// appears across a matrix of runs is the `Never` flag. Systems register their kinds as
-    /// they arrive (E2).
-    fn possible_kinds(&self) -> Vec<String>;
+    /// The event kinds this engine's systems can produce **within a run of
+    /// `horizon_ticks`**. A declared kind that never appears across a matrix of runs is the
+    /// `Never` flag. Systems register their kinds as they arrive (E2); a kind whose physics
+    /// needs a century (a conversion) is declared for the full matrix and not for the short
+    /// run (owner's rule on #288), so that the flag names a defect, never the horizon.
+    fn possible_kinds(&self, horizon_ticks: u32) -> Vec<String>;
 }
 
 /// Model thresholds (E0 kind (в)); the sentinel is checked by its own synthetic tests.
