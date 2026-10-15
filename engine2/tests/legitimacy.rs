@@ -709,7 +709,9 @@ fn net_take(w: &mut World, a: ActorId, p: &Params) -> i64 {
 /// at legitimacy at its (saturated) norm: a step up lowers the
 /// share by what it costs above zero, the net take of a tick gains at most
 /// `BOTTOM_GAIN_CEILING` (owner's rule on #292: two states gain a trace by the ordinary
-/// arithmetic of the step, named below; the rest lose), and the bot never wants the step.
+/// arithmetic of the step, named below; the rest lose), and the bot never wants the step
+/// where it does not raise the take (E3 (е1): the bot prices the step in the world's wheat,
+/// so in the two named states, where the take grows, an unpaid army may want it — printed).
 #[test]
 fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_gains_at_most_two_percent() {
     let p = params();
@@ -758,20 +760,20 @@ fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_gains_at
                 raised.apply_verb(&call, &p).unwrap();
                 assert!(raised.actors[&a].legitimacy > 0.0 && raised.actors[&a].legitimacy < settled, "{label}: the rating falls, saturating, and never to zero");
                 assert_eq!(raised.collection_share_ppm(a, &p), (share - step_share).max(0), "{label}: the step costs the share what it costs above zero");
-                // The bot reads the same prices, the lasting shift included: at the bottom a
-                // step up is never worth it, not even with the army's pay unmet (the need at
-                // its top, a quarter paid) and not in the two states where the take still
-                // grows.
+                // The bot reads the same prices: at the bottom a step up that does not raise
+                // the take is never worth it, not even with the army's pay unmet (the need at
+                // its top, a quarter paid).
                 let mut unpaid = w.clone();
                 unpaid.actors.get_mut(&a).unwrap().paid_share_ppm = 0;
                 let wants = unpaid.tax_utility(a, VerbId::RaiseTax, &p);
-                assert!(wants < 0.0, "{label}: the bot wants the step up at the bottom ({wants:.3})");
                 let (before, after) = (net_take(&mut w, a, &p), net_take(&mut raised, a, &p));
                 assert!(before > 0, "{label}: something is taken");
                 let gain = after as f64 / before as f64 - 1.0;
                 assert!(gain <= BOTTOM_GAIN_CEILING, "{label}: a step up at the bottom gains {:+.1}% of the net take, above the ceiling", gain * 100.0);
                 if after > before {
-                    rises.push(format!("{label}: {:+.1}%", gain * 100.0));
+                    rises.push(format!("{label}: {:+.1}% (an unpaid bot's worth of the step {wants:+.3})", gain * 100.0));
+                } else {
+                    assert!(wants < 0.0, "{label}: the bot wants a step up at the bottom that does not raise the take ({wants:.3})");
                 }
                 rate += p.tax_step_ppm;
             }

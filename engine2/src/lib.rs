@@ -54,6 +54,7 @@ pub mod time;
 pub mod verbs;
 pub mod view;
 pub mod world;
+pub mod worth;
 #[cfg(feature = "worldgen")]
 pub mod worldgen;
 

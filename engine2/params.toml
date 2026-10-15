@@ -1110,23 +1110,6 @@ unit = "temperature of the softmax over utilities"
 checked_by = "А12"
 origin = "выбран: температура softmax"
 
-# (в) What a price weighs against a goal's progress (progress runs 0–1): a point of
-# legitimacy per hundred, and a kilogram per year of the polity's revenue. Checked
-# through А12.
-[agent.weight_price_legitimacy]
-kind = "c"
-value = 2.0
-unit = "utility per 100 points of legitimacy"
-checked_by = "А12"
-origin = "выбран: вес цены легитимности против прогресса цели — к выводу в (е)"
-
-[agent.weight_price_treasury]
-kind = "c"
-value = 1.0
-unit = "utility per year of revenue"
-checked_by = "А12"
-origin = "выбран: вес цены казны против прогресса цели — к выводу в (е)"
-
 # (в) A goal that made no progress for this long is put aside and the next reachable one
 # taken (plan §23.2 p. 1: goals change by the rules, not by the lot). Checked through А12.
 [goal.horizon_years]
@@ -1239,39 +1222,6 @@ value = 6.0
 unit = "ticks"
 checked_by = "В6"
 origin = "подобран по цели теста: метание налога ниже 5 % (владелец, #292)"
-
-# (в) What a house puts on the throne when the lot offers it a usurpation (E3 (в), owner's
-# rule on #290: the candidate's house decides): weighed against the risk — the throne at the
-# usurper's norm kills, by the next usurpation or a murder, before natural death — and the
-# legitimacy the polity loses. At 1 (a goal reached) a house usurped only a ruler below
-# ~40 legitimacy and В6 fell to 1.2; the base rate cannot lift it, since the risk grows with
-# it (0.06 — 1.6, 0.08 — 1.8, 0.10 — 1.7). At 1.5 the houses declined 3 chances of 533 —
-# no decision left; at 1.25 with the base 0.05 they decline 110 of 685, В6 2.6 (plan §23h).
-# Checked through В6.
-[agent.weight_throne]
-kind = "c"
-value = 1.25
-unit = "goals"
-checked_by = "В6"
-origin = "подобран по полосе по памяти: В6 — к выводу в (е) из дохода кресла и риска казни"
-
-# (в) What a house puts on a polity of its own when the lot offers it a secession: weighed by
-# the weakness of the ruler it leaves, against the odds of being crushed by the parent's army
-# (plan §23h). At 1 the houses took 9–13 chances of ~75; at 1.5 they take 23 of 74 (34
-# declined, 17 void — the same house took the throne first); at 2 a ruler at legitimacy 50
-# or below is left whatever its army, and the army decides against one above. В8 barely
-# moves with it (0.51–0.53): the gathering by conquest decides it. Raised to 2 when the
-# policy of conversion came (plan §23j): fewer alienated provinces, fewer chances, В8 0.49
-# at 1.5 — 0.52 at 2 (revolt.per_year 0.003 would give 0.53 with В7 at 4.8 under its top 5).
-# Back to 1.5 by the owner's rule on #293: at 2 a house left any ruler at legitimacy 50 or
-# below whatever the army against it — a suicide — and В8 hardly answers to the weight: the
-# conquests move it. В8 stays at the edge, marked (plan §23l). Checked through В8.
-[agent.weight_independence]
-kind = "c"
-value = 1.5
-unit = "goals"
-checked_by = "В8"
-origin = "подобран по полосе по памяти: В8 — к выводу в (е) из дохода державы и шанса быть раздавленным"
 
 # (в) What a court pays in legitimacy for the policy of conversion (owner's answer 6 on §23:
 # a decision of the court with a price in legitimacy): the policy turns the provinces of

@@ -21,9 +21,15 @@
 //! **Utility** ([`World::utility`]): for every offer the ruler has — the same offers the
 //! player sees (`sim.rs`), with the same rules of availability — the progress the verb
 //! would move over the polity's goals, the survival it buys at war with a stronger enemy,
-//! less its price: a point of legitimacy per hundred at `agent.weight_price_legitimacy`, a
-//! kilogram per year of revenue at `agent.weight_price_treasury`; a lasting decision — the
-//! tax — as a flow over the goal's horizon ([`World::tax_utility`], owner's rule on #291).
+//! less its price **in wheat over the horizon, in years of the polity's revenue** (E3 (е1),
+//! `worth.rs`): a kilogram as a kilogram; a point of legitimacy at what the world turns it
+//! into — the take it collects, the usurpations and murders it invites; a lasting decision —
+//! the tax — as a flow over the goal's horizon ([`World::tax_utility`], owner's rule on
+//! #291). The house's decisions — the throne, a polity of its own, a match — are worth the
+//! seats and the dowry they bring the house in years of its income; an alliance, an embassy,
+//! a gift — the battle formula against the threat a goal or a war names. The goals a war
+//! serves, the levy, the loan and the peace are still in goal units: (е2) values them in
+//! wheat through the battle, the take, the peace and the supply.
 //! No learning, no
 //! look-ahead: an estimate off the state (a war on the owner of what is wanted, peace when
 //! it is taken or the war is lost, a levy at war, a loan when the pay fell short, an
@@ -112,8 +118,7 @@ pub struct Context {
     at_war: bool,
     income: f64,
     unpaid: bool,
-    lawful: f64,
-    wanted_allies: Vec<ActorId>,
+    risk: crate::worth::RiskPrices,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -384,24 +389,6 @@ impl World {
             .max_by_key(|b| self.army_size(*b))
     }
 
-    /// The polities `a` wants an alliance with, by its goals: those at war with or bordering
-    /// the polity an alliance is wanted against, and — at war with a stronger enemy — those
-    /// at war with that enemy.
-    fn wanted_allies(&self, a: ActorId) -> Vec<ActorId> {
-        let mut out = Vec::new();
-        for g in &self.actors[&a].goals {
-            if let (GoalKind::AllianceAgainst, GoalTarget::Polity(x)) = (g.kind, g.target) {
-                out.extend(self.actors.keys().copied().filter(|b| *b != a && *b != x && self.alive(*b) && (self.at_war(*b, x) || self.borders(*b, x))));
-            }
-        }
-        if let Some(enemy) = self.outmatched(a) {
-            out.extend(self.actors.keys().copied().filter(|b| *b != a && self.alive(*b) && self.at_war(*b, enemy)));
-        }
-        out.sort();
-        out.dedup();
-        out
-    }
-
     /// The progress a war on `b` would move over `a`'s goals.
     fn war_wanted(&self, a: ActorId, b: ActorId) -> f64 {
         let mut want = 0.0f64;
@@ -562,20 +549,9 @@ impl World {
             (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
             (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
             (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
-            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_utility(g, *from, params) > 0.0,
+            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_worth(g, *from, params) > 0.0,
             _ => false,
         }
-    }
-
-    /// The utility of a match offered to house `g` by house `from`: the bond — with its own
-    /// polity's ruling house or with a polity its own wants as an ally, as the proposer
-    /// weighs it (0.4, else −0.2) — and the dowry, at the bot's price of wheat in shares of
-    /// its polity's revenue.
-    pub fn marriage_utility(&self, g: crate::ids::HouseId, from: crate::ids::HouseId, params: &Params) -> f64 {
-        let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
-        let bond = if mine == theirs || self.wanted_allies(mine).contains(&theirs) { 0.4 } else { -0.2 };
-        let income = self.yearly_income(mine, params).max(1) as f64;
-        bond + self.dowry(from, params) as f64 / income * params.agent_weight_price_treasury
     }
 
     /// The utility of the union for a court (owner's answer 6 on §23): its goal reached, 1,
@@ -588,58 +564,24 @@ impl World {
     }
 
     /// The utility of the policy of conversion for a court: the share of its people praying
-    /// otherwise than the court, whom the policy turns, at twice the goal, against its price
-    /// in legitimacy at the bot's price.
+    /// otherwise than the court, whom the policy turns, at twice the goal (goal units until
+    /// the faith is valued in wheat), against its price in legitimacy at what the world turns
+    /// the blow into (`World::blow_worth`, E3 (е1)).
     pub fn policy_utility(&self, polity: ActorId, params: &Params) -> f64 {
         let other = 1.0 - self.people_share_praying(polity, self.polity_religion(polity));
-        2.0 * other - params.policy_cost_legitimacy / 100.0 * params.agent_weight_price_legitimacy
+        2.0 * other + self.blow_worth(polity, params.policy_cost_legitimacy, &self.risk_prices(polity, params), params)
     }
 
-    /// The utility of a secession for the house that would carry it (plan §23.2 p. 5): the
-    /// weakness of the ruler it leaves — `1 − L/100` — against the odds of being crushed,
-    /// the parent's army over both armies: the militia the provinces would levy at the
-    /// ceiling of А1 and the house's own men, which go with it.
-    pub fn secession_utility(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> f64 {
-        let capital = self.actors[&polity].capital;
-        let provinces: Vec<ProvinceId> = self.actors[&polity].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == house)).collect();
-        let retinue: i64 = self.units_of_house(house).iter().map(|u| self.soldiers(*u)).sum();
-        let own: i64 = provinces.iter().chain(std::iter::once(&province)).collect::<std::collections::BTreeSet<_>>().into_iter().map(|q| self.population(*q) * params.recruit_ceiling_ppm / 1_000_000).sum::<i64>() + retinue;
-        let parent = (self.army_size(polity) - retinue).max(0);
-        let crushed = if parent + own == 0 { 0.5 } else { parent as f64 / (parent + own) as f64 };
-        params.agent_weight_independence * (1.0 - self.actors[&polity].legitimacy / 100.0) - crushed
-    }
-
-    /// A bot's answer to a chance of secession (E2: always yes; E3 (в): by utility).
+    /// A bot's answer to a chance of secession (E2: always yes; E3 (в): by utility; E3 (е1):
+    /// by what a polity of its own is worth to the house in wheat, `World::independence_worth`).
     pub fn house_would_secede(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> bool {
-        self.secession_utility(house, polity, province, params) > 0.0
+        self.independence_worth(house, polity, province, params) > 0.0
     }
 
-    /// The utility of a usurpation for the candidate's house (plan §23.2 p. 5, owner's rule
-    /// on #290): the throne — a goal reached, 1 — against the risk and the price. **The
-    /// risk:** the usurper rules at the usurper's norm, and the throne at that legitimacy
-    /// kills — the next usurpation (the usurper executed) or a murder (E0 В3) — before the
-    /// candidate's natural death within the goal's horizon, by the candidate's age on the
-    /// mortality table: an old man risks less than a young one, since the reign is short
-    /// either way. **The price:** the legitimacy the polity loses down to the usurper's norm,
-    /// at the bot's price of legitimacy. A legitimate ruler is not worth deposing; a weak one
-    /// is.
-    pub fn usurpation_utility(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> f64 {
-        let l = self.actors[&polity].legitimacy;
-        let lu = l.min(params.legitimacy_norm_usurper);
-        let throne = ((params.usurpation_per_tick + params.violent_death_per_tick) * (100.0 - lu) / 50.0).clamp(0.0, 1.0);
-        let age = self.age(candidate);
-        let (mut alive, mut killed) = (1.0, 0.0);
-        for t in 0..params.goal_horizon_ticks {
-            let natural = (params.mortality_per_year(age + (t / 2) as i32) * params.mortality_elite_factor / 2.0).clamp(0.0, 1.0);
-            killed += alive * throne;
-            alive *= (1.0 - throne) * (1.0 - natural);
-        }
-        params.agent_weight_throne - killed - (l - lu) / 100.0 * params.agent_weight_price_legitimacy
-    }
-
-    /// A bot's answer to a chance of usurpation (E2: always yes; E3 (в): by utility).
+    /// A bot's answer to a chance of usurpation (E2: always yes; E3 (в): by utility; E3 (е1):
+    /// by what the throne is worth to the candidate's house in wheat, `World::throne_worth`).
     pub fn house_would_usurp(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> bool {
-        self.usurpation_utility(polity, candidate, params) > 0.0
+        self.throne_worth(polity, candidate, params) > 0.0
     }
 
     /// The context of a bot's decision, read once.
@@ -649,8 +591,7 @@ impl World {
             at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
-            lawful: self.lawful_norm(a, params),
-            wanted_allies: self.wanted_allies(a),
+            risk: self.risk_prices(a, params),
         }
     }
 
@@ -662,10 +603,9 @@ impl World {
 
     /// The utility of a call in a context read once.
     fn utility_in(&self, a: ActorId, call: &VerbCall, params: &Params, ctx: &Context) -> f64 {
-        let actor = &self.actors[&a];
-        let (enemy, at_war, income, unpaid, lawful) = (ctx.enemy, ctx.at_war, ctx.income, ctx.unpaid, ctx.lawful);
-        let price_kg = |kg: i64| kg as f64 / income * params.agent_weight_price_treasury;
-        let price_l = |l: f64| l / 100.0 * params.agent_weight_price_legitimacy;
+        let (enemy, at_war, income, unpaid) = (ctx.enemy, ctx.at_war, ctx.income, ctx.unpaid);
+        // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price.
+        let price_kg = |kg: i64| kg as f64 / income;
         match (call.verb, call.target) {
             (VerbId::DeclareWar, Target::Actor(b)) => {
                 // What the war is worth: the goals it serves — nothing for a ruler whose army
@@ -685,7 +625,7 @@ impl World {
                 if at_war {
                     u -= 0.5;
                 }
-                u - price_l(self.war_price(a, b, params))
+                u + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
             }
             (VerbId::MakePeace, Target::Actor(b)) => {
                 // The peace is the war the other way round: worth what going on would lose —
@@ -741,37 +681,14 @@ impl World {
                     -0.5
                 }
             }
-            (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility(a, call.verb, params),
-            (VerbId::EnforceOrder, _) => {
-                let gap = (lawful - actor.legitimacy).max(0.0) / 100.0;
-                2.0 * gap - price_kg(self.order_cost(a, params))
-            }
-            (VerbId::ProposeAlliance, Target::Actor(b)) => {
-                let mut u = 0.0;
-                if ctx.wanted_allies.contains(&b) {
-                    u += 1.0;
-                }
-                if enemy.is_some() && self.army_size(b) > self.army_size(a) {
-                    u += 0.2;
-                }
-                u - price_kg(self.embassy_cost(a, params))
-            }
-            (VerbId::SendEmbassy, Target::Actor(b)) => {
-                let wanted = ctx.wanted_allies.contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
-                (if wanted { 0.5 } else { 0.0 }) - price_kg(self.embassy_cost(a, params))
-            }
-            (VerbId::Bribe, Target::Actor(b)) => {
-                let wanted = ctx.wanted_allies.contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
-                (if wanted { 0.4 } else { 0.0 }) - price_kg(self.gift_size(a, params))
-            }
-            (VerbId::ProposeMarriage, Target::House(g)) => {
-                let b = self.houses[&g].polity;
-                if b != a && ctx.wanted_allies.contains(&b) {
-                    0.4
-                } else {
-                    -0.2
-                }
-            }
+            (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility_at(a, call.verb, &ctx.risk, params),
+            // Order bought back: the gain of legitimacy at what the world turns it into.
+            (VerbId::EnforceOrder, _) => self.blow_worth(a, -params.order_gain, &ctx.risk, params) - price_kg(self.order_cost(a, params)),
+            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth(a, b, params) - price_kg(self.embassy_cost(a, params)),
+            (VerbId::SendEmbassy, Target::Actor(b)) => self.relation_push_worth(a, b, params.embassy_gain, params) - price_kg(self.embassy_cost(a, params)),
+            (VerbId::Bribe, Target::Actor(b)) => self.relation_push_worth(a, b, self.gift_push(a, b, params), params) - price_kg(self.gift_size(a, params)),
+            // A match is the ruling house's: the bond against the dowry, in its own wheat.
+            (VerbId::ProposeMarriage, Target::House(g)) => self.proposal_worth(self.ruling_house(a), g, params),
             _ => 0.0,
         }
     }
@@ -779,41 +696,41 @@ impl World {
     /// The utility of a step of the tax (owner's rule on #291): **a lasting decision valued
     /// as a flow over the goal's horizon** — the error of the prices of 6b would otherwise
     /// sit in the bot's head, a one-off point of legitimacy weighed against a tick's take
-    /// while the rate moves the take every year. The take: the rate times the share
-    /// collected at the legitimacy the norm settles at, before and after the step; its
-    /// change is valued in log over the horizon in years at `agent.weight_price_treasury`
-    /// (a step down and the step back up cancel — valued as a share of the current take,
-    /// the bot would cycle a step around its equilibrium), and weighs more when the army's
-    /// pay falls short (revenue short of the pay is worth its inverse share, down to a
-    /// quarter). The shift of the norm: points over the horizon at
-    /// `agent.weight_price_legitimacy`; the blow or the gain: once. With the shipped
-    /// weights the equilibrium is the tithe — both steps from it cost — and the bot comes
-    /// back to it from either side by itself; at war with half the pay unmet a step up is
-    /// still not worth it, at a third it is. **No bound in the prices** (owner's rule on
-    /// #292): the take reads the share as the world collects it, at the unclamped norm below
-    /// the bottom, and the lasting shift is the unclamped norm's too — clamped, a ruler at
-    /// legitimacy 0 saw no price in a step up and no gain in a step down, raised the tax at
-    /// the bottom and stayed there for the term of its default (seed 35 of the full run).
-    /// A step at the bottom costs what it costs above zero, in the world and in the bot.
+    /// while the rate moves the take every year. **The take:** the rate times the share the
+    /// world collects (`collection_share_for`) at the legitimacy the norm settles at — the
+    /// pressure, unbounded below the bottom (owner's rules on #292, #293) — before and after
+    /// the step; its change is valued in log over the horizon in years (a step down and the
+    /// step back up cancel — valued as a share of the current take, the bot would cycle a
+    /// step around its equilibrium), and weighs more when the army's pay falls short
+    /// (revenue short of the pay is worth its inverse share, down to a quarter). **The
+    /// legitimacy** (E3 (е1), owner's answer 2 on §24.7: no weight — what the world turns it
+    /// into): the shifted norm and the step's blow or gain invite usurpations and murders,
+    /// each at what it would cost the polity (`World::course_risk`), and the blow costs the
+    /// take while the rating comes back to its norm (`World::course_worth`).
     pub fn tax_utility(&self, a: ActorId, verb: VerbId, params: &Params) -> f64 {
+        self.tax_utility_at(a, verb, &self.risk_prices(a, params), params)
+    }
+
+    /// The utility of a step of the tax at the prices of the risks read once.
+    fn tax_utility_at(&self, a: ActorId, verb: VerbId, prices: &crate::worth::RiskPrices, params: &Params) -> f64 {
         let actor = &self.actors[&a];
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
-        let lawful = self.lawful_norm(a, params);
         let unclamped = self.unclamped_legitimacy_norm(a, params);
         let up = verb == VerbId::RaiseTax;
         let step = if up { params.tax_step_ppm } else { -params.tax_step_ppm } as f64 / 1e6;
         let next_unclamped = unclamped + if up { -params.legitimacy_norm_per_tax_step } else { params.legitimacy_norm_per_tax_step };
-        let collected = |l: f64| (1.0 - (lawful - l).max(0.0) * params.tax_evasion_ppm_per_legitimacy_point as f64 / 1e6).max(0.0);
+        let collected = |l: f64| self.collection_share_for(a, l, params) as f64 / 1e6;
         let rate = actor.tax_rate_ppm as f64 / 1e6;
         let (now, next) = (rate * collected(unclamped), (rate + step) * collected(next_unclamped));
         if now <= 0.0 || next <= 0.0 {
             return -1.0;
         }
         let need = 1.0 / (self.paid_share_seen_ppm(a) as f64 / 1e6).max(0.25);
-        let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
-        let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_unclamped - unclamped);
-        let once = params.agent_weight_price_legitimacy / 100.0 * -self.tax_step_cost(a, up, params);
-        take + lasting + once
+        let take = years * need * (next / now).ln();
+        let from = self.course(a, params);
+        let lasting = self.course_after_tax_step(a, up, false, params);
+        let after = self.course_after_tax_step(a, up, true, params);
+        take + self.course_risk(a, &from, &lasting, prices, params) + self.course_worth(a, &lasting, &after, prices, params)
     }
 
     /// The options a ruler has: every available call of the enabled verbs over their

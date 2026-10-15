@@ -250,12 +250,13 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     let mut g = Game::new(&s, params(), 43).unwrap();
     let s0 = ActorId(0);
     assert_eq!(g.player(), None);
-    // Without goals nobody acts: on the first tick, before any goal is drawn, nothing is
-    // better than doing nothing.
+    // Without goals nobody acts but on its tax: on the first tick, before any goal is drawn,
+    // nothing is better than doing nothing — except the step of the tax toward the world's
+    // equilibrium, a decision of the take, not of a goal (E3 (е1)).
     let quiet = all_verbs(testworld::five_states_scenario());
     let mut q = Game::new(&quiet, params(), 43).unwrap();
     let r = q.tick(&[]).unwrap();
-    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Verb { .. })), "a bot that wants nothing does nothing");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Verb { verb, .. } if verb != VerbId::RaiseTax)), "a bot that wants nothing does nothing but its tax");
     g.set_player(Some(ActorRef::Ruler(s0)));
     // Nothing is always an option, at nothing.
     let options = g.world().options(ActorId(1), &VerbId::ALL, &p);
@@ -712,10 +713,12 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         assert!(opportunities.get(&format!("{kind} taken")).copied().unwrap_or(0) > 0, "no {kind} taken on 20 worlds: {opportunities:?}");
     }
     assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
-    // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
-    // by their utility — the mean rate inside a step of it.
+    // The tax as a flow (owner's rule on #291): no anchor. Under the weights of #291 the
+    // bots kept near the tithe; in the world's wheat (E3 (е1)) they keep where its prices put
+    // them — two to three steps above, collecting a share inside Э8 (asserted below) — and
+    // never at the top of Э4, where the bottom of legitimacy once drove the usurpers (#292).
     let mean_rate = rates.iter().sum::<f64>() / rates.len().max(1) as f64;
-    assert!((mean_rate - 0.10).abs() <= 0.02, "the bots' mean tax {mean_rate:.3} drifted more than a step from the tithe");
+    assert!(mean_rate * 1e6 + p.tax_step_ppm as f64 <= p.tax_band_ppm.1 as f64, "the bots' mean tax {mean_rate:.3} at the top of Э4");
     assert!(rejections.keys().all(|k| is_conflict(k)), "a call preempted for another reason than a conflict of the tick: {rejections:?}");
     assert_eq!(falls, falls_by_conquest, "a polity falls only by conquest: every fall in the tick its last province was taken");
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
@@ -900,27 +903,59 @@ fn a_peace_or_a_war_both_sides_made_in_one_tick_is_made_once_and_a_players_call_
     assert_eq!(g.to_save().unwrap(), before, "nothing touched");
 }
 
+/// E3 (е1): with no weight on legitimacy the equilibrium is where the world's prices put it,
+/// not the tithe — the take a step adds against the collection it loses and the usurpations,
+/// murders and risings the shifted norm invites. Under the weights of #291 it was the tithe;
+/// the world's own prices hold the bot a few steps above it, below the top of Э4 (the
+/// collected share, Э8, stays in its band: `on_generated_worlds_…`). The one-off prices of a
+/// step (a raise costs, a lowering gives half back) leave a narrow band where neither step
+/// pays: the bot climbs to its lower edge from below and comes down to its upper edge from
+/// above.
 #[test]
-fn the_tax_is_a_lasting_decision_valued_as_a_flow_and_the_bot_comes_back_to_the_tithe_by_itself() {
+fn the_tax_is_a_lasting_decision_valued_as_a_flow_and_the_bot_comes_back_to_its_equilibrium_by_itself() {
     let p = params();
     let mut w = testworld::world(54);
     let a = ActorId(0);
     let u = |w: &World, v: VerbId| w.tax_utility(a, v, &p);
-    // At the tithe both steps cost: the equilibrium of the shipped weights.
-    assert_eq!(w.actors[&a].tax_rate_ppm, p.tax_default_ppm);
-    assert!(u(&w, VerbId::RaiseTax) < 0.0 && u(&w, VerbId::LowerTax) < 0.0, "at the tithe: raise {:.2}, lower {:.2}", u(&w, VerbId::RaiseTax), u(&w, VerbId::LowerTax));
-    // A step below: raising pays; a step above: lowering pays.
-    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm - p.tax_step_ppm;
-    assert!(u(&w, VerbId::RaiseTax) > 0.0, "below the tithe the step up pays: {:.2}", u(&w, VerbId::RaiseTax));
-    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm + p.tax_step_ppm;
-    assert!(u(&w, VerbId::LowerTax) > 0.0, "above the tithe the step down pays: {:.2}", u(&w, VerbId::LowerTax));
+    let set = |w: &mut World, rate: i64| {
+        w.actors.get_mut(&a).unwrap().tax_rate_ppm = rate;
+        let norm = w.legitimacy_norm(a, &p);
+        w.actors.get_mut(&a).unwrap().legitimacy = norm;
+    };
+    // The band: from the bottom of Э4 up while a step up pays, from the top down while a
+    // step down pays — the rating at its norm.
+    // On the grid of the steps from the tithe, where every polity starts.
+    let mut low = p.tax_default_ppm - (p.tax_default_ppm - p.tax_band_ppm.0) / p.tax_step_ppm * p.tax_step_ppm;
+    set(&mut w, low);
+    while low + p.tax_step_ppm <= p.tax_band_ppm.1 && u(&w, VerbId::RaiseTax) > 0.0 {
+        low += p.tax_step_ppm;
+        set(&mut w, low);
+    }
+    let mut high = p.tax_default_ppm + (p.tax_band_ppm.1 - p.tax_default_ppm) / p.tax_step_ppm * p.tax_step_ppm;
+    set(&mut w, high);
+    while high - p.tax_step_ppm >= p.tax_band_ppm.0 && u(&w, VerbId::LowerTax) > 0.0 {
+        high -= p.tax_step_ppm;
+        set(&mut w, high);
+    }
+    eprintln!("the band where neither step pays on the test world: {:.2}–{:.2} (the tithe {:.2})", low as f64 / 1e6, high as f64 / 1e6, p.tax_default_ppm as f64 / 1e6);
+    assert!(low <= high && high - low <= 2 * p.tax_step_ppm, "one band, narrow");
+    assert!(high + p.tax_step_ppm <= p.tax_band_ppm.1, "the world's prices hold the bot below the top of Э4");
+    // Inside it both steps cost; a step below it raising pays, a step above it lowering pays.
+    for rate in (low..=high).step_by(p.tax_step_ppm as usize) {
+        set(&mut w, rate);
+        assert!(u(&w, VerbId::RaiseTax) < 0.0 && u(&w, VerbId::LowerTax) < 0.0, "inside the band: raise {:.2}, lower {:.2}", u(&w, VerbId::RaiseTax), u(&w, VerbId::LowerTax));
+    }
+    set(&mut w, low - p.tax_step_ppm);
+    assert!(u(&w, VerbId::RaiseTax) > 0.0, "below it the step up pays: {:.2}", u(&w, VerbId::RaiseTax));
+    set(&mut w, high + p.tax_step_ppm);
+    assert!(u(&w, VerbId::LowerTax) > 0.0, "above it the step down pays: {:.2}", u(&w, VerbId::LowerTax));
+    let rate = low;
     // A step down and back up cancel in the take: the log.
     let years = f64::from(p.goal_horizon_ticks) / 2.0;
     assert!(years > 1.0);
-    // At war with the pay short the take weighs more: at half the pay still no, at a third yes.
-    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_default_ppm;
-    w.actors.get_mut(&a).unwrap().paid_share_ppm = 500_000;
-    assert!(u(&w, VerbId::RaiseTax) < 0.0, "half the pay unmet: {:.2}", u(&w, VerbId::RaiseTax));
+    // At war with the pay short the take weighs more: at the equilibrium a third of the pay
+    // met makes the step up worth it.
+    set(&mut w, rate);
     w.actors.get_mut(&a).unwrap().paid_share_ppm = 330_000;
     assert!(u(&w, VerbId::RaiseTax) > 0.0, "a third of the pay met: {:.2}", u(&w, VerbId::RaiseTax));
     // The option set of a bot reads the same function.
@@ -1194,11 +1229,12 @@ fn windows_of_the_fitted_values() {
     let base = params();
     let seeds: Vec<u64> = (1..=20).collect();
     type Set = fn(&mut Params, f64);
-    let sweeps: [(&str, &[f64], Set); 4] = [
-        ("agent.weight_throne → В6", &[0.75, 1.0, 1.125, 1.25, 1.375, 1.5, 2.0], |p, v| p.agent_weight_throne = v),
+    let sweeps: [(&str, &[f64], Set); 3] = [
         ("usurpation.per_year → В6", &[0.02, 0.03, 0.04, 0.05, 0.06, 0.08], |p, v| p.usurpation_per_tick = v / 2.0),
         ("revolt.per_year → В7, В9", &[0.0015, 0.002, 0.0025, 0.003, 0.004, 0.005], |p, v| p.revolt_per_tick = v / 2.0),
-        ("agent.weight_independence → В8", &[0.5, 1.0, 1.5, 2.0, 3.0], |p, v| p.agent_weight_independence = v),
+        // The horizon of every worth (E3 (е1)): chosen, not fitted, and since the weights of
+        // the throne and of independence went into the model, the bots' one lever on В6 and В8.
+        ("goal.horizon_years → all", &[10.0, 15.0, 20.0, 25.0, 30.0, 40.0], |p, v| p.goal_horizon_ticks = (v * 2.0) as u32),
     ];
     for (name, values, set) in sweeps {
         let mut inside = Vec::new();
@@ -1214,5 +1250,117 @@ fn windows_of_the_fitted_values() {
             }
         }
         eprintln!("{name}: all bands at {inside:?} of {values:?}");
+    }
+}
+
+// ---------- step (е1): the bot calls the world's formulas ----------
+
+/// E3 (е1) acceptance (owner's rules after #293, plan §24.6): the bot **calls** the world's
+/// formulas, so a change of the world's numbers — and nothing in the bot — changes its
+/// choices: the collection and the norm's shift move the tax it settles at, the hazard of
+/// usurpation moves what the throne is worth to a house (and, through the house's answer,
+/// what the ruler fears), the battle's exponent moves what a polity of its own and an ally
+/// are worth.
+#[test]
+fn a_change_of_the_worlds_numbers_alone_changes_the_bots_choices() {
+    let p = params();
+    let a = ActorId(0);
+    // The tax: where a step up stops paying, from the bottom of the tithe's grid, the rating
+    // at its norm.
+    let settles = |p: &Params| -> i64 {
+        let mut w = testworld::world(54);
+        let mut rate = p.tax_default_ppm - (p.tax_default_ppm - p.tax_band_ppm.0) / p.tax_step_ppm * p.tax_step_ppm;
+        loop {
+            w.actors.get_mut(&a).unwrap().tax_rate_ppm = rate;
+            let norm = w.legitimacy_norm(a, p);
+            w.actors.get_mut(&a).unwrap().legitimacy = norm;
+            if rate + p.tax_step_ppm > p.tax_band_ppm.1 || w.tax_utility(a, VerbId::RaiseTax, p) <= 0.0 {
+                return rate;
+            }
+            rate += p.tax_step_ppm;
+        }
+    };
+    let shipped = settles(&p);
+    let mut evasive = p.clone();
+    evasive.tax_evasion_ppm_per_legitimacy_point *= 2;
+    let mut shifting = p.clone();
+    shifting.legitimacy_norm_per_tax_step *= 2.0;
+    let (e, s) = (settles(&evasive), settles(&shifting));
+    // Usurpers four times as frequent and ruling at 10: the throne is worth little to the
+    // candidate's house, which would decline it — and the ruler, reading the house's answer,
+    // fears the usurpation no more (printed: a property of the model, plan §24b).
+    let mut harsh = p.clone();
+    harsh.legitimacy_norm_usurper = 10.0;
+    harsh.usurpation_per_tick *= 4.0;
+    let tw = testworld::world(54);
+    let c = tw.usurper_candidate(a, &p).expect("a candidate");
+    eprintln!(
+        "the tax settles at {:.2}; with the evasion doubled {:.2}; with the norm's shift per step doubled {:.2}; with usurpers four times as frequent and ruling at 10 {:.2} (the candidate's house: the throne {:.2} shipped, {:.2} there)",
+        shipped as f64 / 1e6,
+        e as f64 / 1e6,
+        s as f64 / 1e6,
+        settles(&harsh) as f64 / 1e6,
+        tw.throne_worth(a, c, &p),
+        tw.throne_worth(a, c, &harsh)
+    );
+    assert!(e < shipped, "the collection lost per point of legitimacy moves the tax down");
+    assert!(s < shipped, "a costlier shift of the norm per step moves the tax down");
+    // The choice itself, at the tithe: the step up the shipped world makes worth it, the
+    // evasive world does not.
+    let w = testworld::world(54);
+    assert!(w.tax_utility(a, VerbId::RaiseTax, &p) > 0.0 && w.tax_utility(a, VerbId::RaiseTax, &evasive) < 0.0, "the bot's choice at the tithe flips with the world's collection");
+    // The throne: its seat is held until the next chance of usurpation — oftener chances,
+    // a shorter hold, a throne worth less to the candidate's house.
+    let w = world_of(&carrier_scenario(), 7);
+    let candidate = w.usurper_candidate(a, &p).expect("a candidate");
+    let mut frequent = p.clone();
+    frequent.usurpation_per_tick *= 4.0;
+    let (t0, t1) = (w.throne_worth(a, candidate, &p), w.throne_worth(a, candidate, &frequent));
+    eprintln!("the throne to the candidate's house: {t0:.2}, with usurpations four times as frequent {t1:.2}");
+    assert!(t1 < t0, "the hazard of usurpation moves the throne's worth");
+    // A polity of its own: the chance to hold out is the battle's — a militia smaller than
+    // the parent's army holds out the less the more the battle favours the stronger.
+    let h = engine2::HouseId(carrier_scenario().houses.keys().position(|k| k == "o0").unwrap() as u32);
+    let province = at(0, 1);
+    let mut steep = p.clone();
+    steep.battle_strength_exponent *= 2.0;
+    let (i0, i1) = (w.independence_worth(h, a, province, &p), w.independence_worth(h, a, province, &steep));
+    eprintln!("a polity of its own to the carrier house: {i0:.2}, with the battle's exponent doubled {i1:.2}");
+    assert!((i1 - i0).abs() > 1e-9, "the battle's exponent moves the worth of independence");
+    // An ally against a goal's enemy: the battle formula with the ally's army and without it.
+    let mut w = world_of(&carrier_scenario(), 7);
+    w.set_goal(a, GoalKind::AllianceAgainst, GoalTarget::Polity(ActorId(1))).unwrap();
+    let (al0, al1) = (w.alliance_worth(a, ActorId(2), &p), w.alliance_worth(a, ActorId(2), &steep));
+    eprintln!("an alliance with polity 2 against polity 1: {al0:.3}, with the battle's exponent doubled {al1:.3}");
+    assert!((al1 - al0).abs() > 1e-9, "the battle's exponent moves the worth of an ally");
+}
+
+/// The bot calls the world's formulas, never copies them (E3 (е1)): the parameters of the
+/// world's hazards, drift, mortality, battle, levy, gift and collection appear in the bot's
+/// code only behind the world's functions. A copy — `params.usurpation_per_tick * (100.0 −
+/// l) / 50.0` written into `worth.rs` — fails here (checked by injection when the guard was
+/// written).
+#[test]
+fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
+    const SOURCES: [(&str, &str); 2] = [("agents.rs", include_str!("../src/agents.rs")), ("worth.rs", include_str!("../src/worth.rs"))];
+    let formulas = [
+        "usurpation_per_tick",
+        "violent_death_per_tick",
+        "revolt_per_tick",
+        "legitimacy_rate_per_tick",
+        "mortality_per_year",
+        "mortality_elite_factor",
+        "battle_strength_exponent",
+        "recruit_ceiling_ppm",
+        "bribe_gain_per_share",
+        "tax_evasion_ppm_per_legitimacy_point",
+        "output_per_head_kg",
+    ];
+    for (file, src) in SOURCES {
+        let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+        for f in formulas {
+            let copied: Vec<&&str> = code.iter().filter(|l| l.contains(&format!("params.{f}"))).collect();
+            assert!(copied.is_empty(), "{file} copies a formula of the world through `params.{f}`: {copied:?}");
+        }
     }
 }

@@ -240,12 +240,10 @@ pub struct Params {
     /// the retinue of a house that does not rule.
     pub retinue_share_ppm: i64,
     pub other_retinue_share_ppm: i64,
-    /// (в) The agents (E3, brief §3): the temperature of the softmax over the offers, the
-    /// weights of a price in legitimacy (per 100) and in treasury (per year of revenue)
-    /// against a goal's progress, and the ticks a goal is given before it is put aside.
+    /// (в) The agents (E3, brief §3): the temperature of the softmax over the offers, and
+    /// the ticks a goal is given before it is put aside — the horizon of every worth (E3
+    /// (е1): prices are wheat over it, with no weight).
     pub agent_temperature: f64,
-    pub agent_weight_price_legitimacy: f64,
-    pub agent_weight_price_treasury: f64,
     pub goal_horizon_ticks: u32,
     /// (в) A bot's units advance on the enemy when they are at least this share of the
     /// enemy's whole army, else they hold the capital (E3 (б)).
@@ -256,11 +254,6 @@ pub struct Params {
     /// (в) The ticks over which a bot reads its army's paid share (E3 (в), owner's rule on
     /// #292): the bot's input, smoothed so that its tax does not swing with one tick's pay.
     pub agent_pay_memory_ticks: usize,
-    /// (в) What a house puts on the throne against the risk of a usurpation, and on a
-    /// polity of its own against the risk of a secession (E3 (в)): the houses' appetite,
-    /// checked through В6 and В8.
-    pub agent_weight_throne: f64,
-    pub agent_weight_independence: f64,
     /// (в) What a court pays in legitimacy for adopting the policy of conversion (E3 (в)).
     pub policy_cost_legitimacy: f64,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
@@ -417,14 +410,10 @@ impl Params {
         let retinue = value("house.retinue_share_of_army")?;
         let other_retinue = value("house.other_retinue_share")?;
         let temperature = value("agent.temperature")?;
-        let w_legit = value("agent.weight_price_legitimacy")?;
-        let w_treasury = value("agent.weight_price_treasury")?;
         let horizon = value("goal.horizon_years")?;
         let advance = value("agent.advance_ratio")?;
         let open_goals = value("goal.open_per_polity")?;
         let pay_memory = value("agent.pay_memory_ticks")?;
-        let w_throne = value("agent.weight_throne")?;
-        let w_independence = value("agent.weight_independence")?;
         let policy_cost = value("policy.cost_legitimacy")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
@@ -519,14 +508,10 @@ impl Params {
             retinue_share_ppm: (retinue * 1_000_000.0).round() as i64,
             other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,
             agent_temperature: temperature,
-            agent_weight_price_legitimacy: w_legit,
-            agent_weight_price_treasury: w_treasury,
             goal_horizon_ticks: (horizon * 2.0).round() as u32,
             agent_advance_ratio: advance,
             goal_open_per_polity: open_goals.round() as usize,
             agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
-            agent_weight_throne: w_throne,
-            agent_weight_independence: w_independence,
             policy_cost_legitimacy: policy_cost,
             aspiration_weights,
             entries,
@@ -583,8 +568,9 @@ mod tests {
     /// Money and legitimacy must not be convertible at a profit (review of #286): a step
     /// The registry of (в) parameters (owner's rules after #293): every value says where it
     /// comes from; the count is printed for every PR; **a value fitted to a band that is
-    /// itself only remembered never joins the list silently** — the five there now are named,
-    /// and a new one fails here until the owner decides (a source first, then the model).
+    /// itself only remembered never joins the list silently** — the three there now are named
+    /// (the throne's and independence's weights left for the model in E3 (е1)), and a new one
+    /// fails here until the owner decides (a source first, then the model).
     #[test]
     fn the_registry_of_model_parameters_names_every_origin_and_holds_the_ones_fitted_by_memory() {
         let p = Params::load().unwrap();
@@ -597,7 +583,7 @@ mod tests {
         let of_bots = model.iter().filter(|(n, _)| n.starts_with("agent.") || n.starts_with("aspiration.") || n.starts_with("goal.")).count();
         let by_memory: Vec<&str> = model.iter().filter(|(_, e)| e.origin.as_deref().is_some_and(|o| o.starts_with(FITTED_BY_MEMORY))).map(|(n, _)| n.as_str()).collect();
         eprintln!("registry of (в): {} parameters, of the bots {of_bots}; by origin {by_origin:?}; fitted to a band by memory: {by_memory:?}", model.len());
-        assert_eq!(by_memory, ["agent.weight_independence", "agent.weight_throne", "institution.adoption_per_year", "revolt.per_year", "usurpation.per_year"], "a (в) value fitted to a band by memory joined or left the registry: the owner decides");
+        assert_eq!(by_memory, ["institution.adoption_per_year", "revolt.per_year", "usurpation.per_year"], "a (в) value fitted to a band by memory joined or left the registry: the owner decides");
     }
 
     /// of the tax gives 0.2 of a year's revenue a year and lowers the norm by one step's
