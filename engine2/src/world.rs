@@ -993,7 +993,7 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), w.actors.len());
-        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth)), "no system of the test world draws elsewhere");
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt)), "no system of the test world draws elsewhere");
         assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));

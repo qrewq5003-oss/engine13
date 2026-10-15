@@ -344,9 +344,13 @@ fn on_generated_worlds_usurpations_per_century_per_polity_lie_in_b6_neither_neve
             let r = g.tick(&[]).unwrap();
             for e in &r.events {
                 if let Event::Succession { actor, how: Standing::Usurper, .. } = e.event {
-                    *per_actor.get_mut(&actor).unwrap() += 1;
-                    if t < 200 {
-                        *first_century.get_mut(&actor).unwrap() += 1;
+                    // The polities of the start; one born of a rising (E2 step 9) is not
+                    // in the exposure and not in the count.
+                    if let Some(n) = per_actor.get_mut(&actor) {
+                        *n += 1;
+                        if t < 200 {
+                            *first_century.get_mut(&actor).unwrap() += 1;
+                        }
                     }
                 }
             }
@@ -579,10 +583,11 @@ fn play_worlds(p: &Params) -> (BTreeMap<&'static str, f64>, Vec<f64>, f64) {
                 for a in &ids {
                     spent += act(g.world_mut(), *a, strategy, p);
                 }
-                for a in &ids {
-                    if g.world().alive(*a) {
-                        production += g.world().production_per_tick(*a, p);
-                    }
+                // Over every living polity, the ones born of a rising included (E2 step
+                // 9): their tax is in the take below.
+                let living: Vec<ActorId> = g.world().actors.keys().copied().filter(|a| g.world().alive(*a)).collect();
+                for a in &living {
+                    production += g.world().production_per_tick(*a, p);
                 }
                 let r = g.tick(&[]).unwrap();
                 tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
@@ -642,7 +647,9 @@ fn paired_runs_by_the_outcome_of_brief_1_a_greedy_ruler_gains_at_most_the_ceilin
     for (name, o) in [("plain", &plain), ("greedy: tax to the top, order when below the norm", &greedy), ("order whenever affordable at the top tax", &every), ("borrow to the ceiling and spend", &defaulter)] {
         eprintln!("{name}: net income {} provinces {} seats {} members {} spent {} net worth {} (mean legitimacy {:.1})", o.net_income, o.provinces, o.seats, o.members, o.spent, o.net_worth, o.mean_legitimacy);
     }
-    assert_eq!(plain.provinces, greedy.provinces, "without war no land moves: the price is in the take");
+    // Without war no land moves but by a rising (E2 step 9): the price is in the take and,
+    // through legitimacy, in the provinces that rise against the hard hand.
+    assert!(greedy.provinces <= plain.provinces, "the greedy ruler holds more land than the plain one: {} vs {}", greedy.provinces, plain.provinces);
     for (name, o) in [("greedy", &greedy), ("order whenever affordable", &every)] {
         let gain = o.net_income as f64 / plain.net_income as f64 - 1.0;
         assert!(gain <= GREEDY_GAIN_CEILING, "{name}: {:+.1}% net income over the plain ruler, above the ceiling", gain * 100.0);

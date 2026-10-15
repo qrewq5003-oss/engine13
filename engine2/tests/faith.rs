@@ -440,13 +440,16 @@ fn an_institution_spreads_by_contact_with_a_keyed_draw_and_never_without_a_chann
 fn on_generated_worlds_the_bank_spreads_to_r3_in_a_century_and_is_not_always_in_three() {
     let p = params();
     let band = p.entries["institution.observed_bank_share_after_a_century"].band.unwrap();
-    let (mut at_start, mut at_century, mut at_end, mut polities, mut adoptions) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    // The share is over the polities of the start, a century on — the row's reading and
+    // what #288 measured. Since E2 step 9 polities are born in play (a rising), without a
+    // bank; counted in, the row would measure fragmentation, not the spread of a practice.
+    let (mut at_start, mut at_century, mut at_end, mut polities, mut adoptions, mut born) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     let mut worlds_all_banked_at_end = 0usize;
-    let banks = |g: &Game| g.world().actors.values().filter(|a| a.institutions.contains(&Institution::Bank)).count();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
         let n = g.world().actors.len();
+        let banks = |g: &Game| g.world().actors.iter().filter(|(a, x)| a.index() < n && x.institutions.contains(&Institution::Bank)).count();
         polities += n;
         at_start += banks(&g);
         for tick in 0..300 {
@@ -457,10 +460,12 @@ fn on_generated_worlds_the_bank_spreads_to_r3_in_a_century_and_is_not_always_in_
             }
         }
         at_end += banks(&g);
+        born += g.world().actors.len() - n;
         if banks(&g) == n {
             worlds_all_banked_at_end += 1;
         }
     }
+    eprintln!("{born} polities born of risings over the 20 worlds, outside the Р3 count");
     let (start, century, end) = (at_start as f64 / polities as f64, at_century as f64 / polities as f64, at_end as f64 / polities as f64);
     eprintln!("Р3 share of polities with a bank: start {start:.2}, a century {century:.2} (band {band:?}), 150 years {end:.2}; {adoptions} adoptions; {worlds_all_banked_at_end} of 20 worlds all banked at the end");
     assert!((band[0]..=band[1]).contains(&century), "Р3 {century:.2} outside {band:?}");

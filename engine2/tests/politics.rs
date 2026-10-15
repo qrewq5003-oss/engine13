@@ -282,6 +282,10 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
                     Event::HouseExtinct { .. } => extinct += 1,
                     Event::ActorDied { .. } => falls += 1,
                     Event::NewDynasty { .. } => dynasties += 1,
+                    // A polity born of a rising (E2 step 9): its first reign runs from now.
+                    Event::ActorBorn { actor, .. } => {
+                        since.insert(actor, t + 1);
+                    }
                     _ => {}
                 }
             }

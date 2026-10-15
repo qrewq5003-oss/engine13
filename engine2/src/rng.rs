@@ -50,6 +50,8 @@ pub enum DrawPoint {
     /// A polity taking up an institution its neighbours, allies or in-laws hold (keyed by
     /// polity; E2 step 8).
     Adoption = 9,
+    /// A province rising against its polity (keyed by province; E2 step 9, E0 В7).
+    Revolt = 10,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.

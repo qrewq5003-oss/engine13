@@ -219,7 +219,7 @@ fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
     assert!(w.actors[&s1].provinces.is_empty());
     assert!(w.units_of(s1).is_empty());
     assert!(!w.units.contains_key(&u1));
-    assert!(w.wars.is_empty(), "the war closed with the fall");
+    assert!(w.wars.keys().all(|(x, y)| *x != s1 && *y != s1), "the war closed with the fall");
     assert!(w.actors.contains_key(&s1), "the record stays: no dangling id");
     assert!(g.verbs(ActorRef::Ruler(s1)).iter().all(|o| !o.available && o.why.as_deref() == Some("the polity has fallen")));
     let err = g.tick(&[VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::Recruit, target: Target::Province(at(1, 0)) }]).unwrap_err();

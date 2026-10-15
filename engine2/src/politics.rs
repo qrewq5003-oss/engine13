@@ -158,7 +158,7 @@ impl World {
     }
 
     /// The seats a person holds besides the throne: the provinces it governs.
-    fn governed_by(&self, p: PersonId) -> Vec<ProvinceId> {
+    pub(crate) fn governed_by(&self, p: PersonId) -> Vec<ProvinceId> {
         self.provinces.iter().filter(|(_, pr)| pr.governor == Some(p)).map(|(id, _)| *id).collect()
     }
 
@@ -266,7 +266,7 @@ impl World {
     /// One keyed draw of a point that draws **once per id per tick** by construction (each
     /// loop of the phase visits an id once), as a fraction in `[0, 1)`; the ordinal is
     /// therefore 0, and `draws_once_per_person` in the tests holds the claim.
-    fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
+    pub(crate) fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
         let d = Draw { point, tick: self.tick, id, n: self.draw_ordinal(point, id) };
         debug_assert_eq!(d.n, 0, "{point:?} draws once per id per tick");
         let value = crate::rng::draw(self.seed, d);
@@ -342,7 +342,7 @@ impl World {
 
     /// A governorship passes within the house of the holder who left it: the eldest adult
     /// member with no seat; nobody — the seat is vacant.
-    fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
+    pub(crate) fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
         let house = self.persons[&from].house;
         let owner = self.provinces[&province].owner;
         let free = |w: &World, q: PersonId| w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
@@ -403,6 +403,19 @@ impl World {
         let Some(from) = std::iter::once(capital).chain(provinces.into_iter().filter(|p| *p != capital)).find(|p| self.population(*p) >= 1) else {
             return Ok(None);
         };
+        // The new house speaks as its capital does and prays as the court did (owner's
+        // rule on #288: whoever takes the throne takes the faith of the court).
+        let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
+        self.raise_house_at(a, from, culture, religion)
+    }
+
+    /// A house rises from the people of `from` into polity `a` (which may be a polity being
+    /// born, `collapse.rs`: its name must be in the world already, its record need not),
+    /// with the tongue and the faith given. `None` when nobody lives in `from`.
+    pub(crate) fn raise_house_at(&mut self, a: ActorId, from: ProvinceId, culture: crate::ids::CultureId, religion: crate::ids::ReligionId) -> Result<Option<PersonId>, WorldError> {
+        if self.population(from) < 1 {
+            return Ok(None);
+        }
         let household = HOUSEHOLD.0 + self.draw(DrawPoint::Rise, a.0) % (HOUSEHOLD.1 - HOUSEHOLD.0 + 1);
         let persons = (1 + household).min(self.population(from) as u64);
         self.post(Account::Population(from), Source::Rise, -(persons as i64) * 1000)?;
@@ -411,9 +424,6 @@ impl World {
         let (asid, aname) = &self.names.actors[a.index()];
         let (hsid, hname) = (format!("{asid}.h{k}"), format!("{aname} new house {k}"));
         self.names.houses.push((hsid.clone(), hname.clone()));
-        // The new house speaks as its capital does and prays as the court did (owner's
-        // rule on #288: whoever takes the throne takes the faith of the court).
-        let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
         self.houses.insert(house, House { polity: a, culture, religion, paid_share_ppm: 1_000_000 });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);

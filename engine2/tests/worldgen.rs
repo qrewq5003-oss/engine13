@@ -43,9 +43,10 @@ fn play_summary(label: &str, scenario: &ScenarioData, ticks: u32) -> (RunSummary
     assert!(flags.is_empty(), "{label}: sentinel flags {flags:?}");
     let o = g.observe();
     // Without war nothing conquers and nothing falls: a polity whose last house dies out
-    // raises a new one from its people (plan §18.5, owner's rule on #285).
+    // raises a new one from its people (plan §18.5, owner's rule on #285); a rising (E2
+    // step 9) bears polities but kills none — the parent keeps its capital.
     assert_eq!(died, 0, "{label}: {died} polities fell without war");
-    assert_eq!(o.alive.len(), scenario.actors.len(), "{label}: an actor vanished without a system to kill it");
+    assert!(o.alive.len() >= scenario.actors.len() && scenario.actors.keys().all(|k| o.alive.iter().any(|a| a.0 == *k)), "{label}: an actor vanished without a system to kill it");
     (summary, possible)
 }
 
@@ -91,6 +92,7 @@ fn two_hundred_seeds_three_hundred_ticks_no_flags() {
         play(name, &s, 300);
     }
     assert!(possible.contains(&"Converted".to_string()) && possible.contains(&"Adopted".to_string()), "the matrix declares conversions and adoptions possible: {possible:?}");
+    assert!(["Born", "Revolt", "Secession"].iter().all(|k| possible.contains(&k.to_string())), "the matrix declares risings possible by the horizon: {possible:?}");
     let never: Vec<Flag> = m.flags(&Thresholds::default(), &possible, None).into_iter().filter(|f| matches!(f, Flag::Never { .. })).collect();
     assert!(never.is_empty(), "declared kinds that happened in no world of the matrix: {never:?}");
 }

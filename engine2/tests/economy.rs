@@ -165,6 +165,9 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
             w.post(Account::Soldiers(unit), Source::Recruit, (limit * 2 - w.soldiers(unit)).max(0) * 1000).unwrap();
         }
         for _ in 0..60 {
+            // A house may secede later in the tick it was paid in (E2 step 9): the seat's
+            // income is read against the polity the house belonged to when the tick began.
+            let house_polity: std::collections::BTreeMap<engine2::HouseId, ActorId> = w.houses.iter().map(|(h, x)| (*h, x.polity)).collect();
             let r = w.tick(&p).unwrap();
             for a in &ids {
                 let sum = |account: Account, src: Source| r.postings.iter().filter(|q| q.account == account && q.source == src).map(|q| q.milli).sum::<i64>();
@@ -176,6 +179,10 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
                         Source::Loan => assert!(q.milli >= 0),
                         // A vassal's tribute (E2 step 7): a transfer, either sign.
                         Source::Tribute => {}
+                        // A polity born of a rising (E2 step 9): its treasury opened at
+                        // nothing, then its share of the parent's — a transfer.
+                        Source::Opening => assert_eq!(q.milli, 0, "seed {seed}: a treasury opened with wheat in it"),
+                        Source::Secession => {}
                         other => panic!("seed {seed}: treasury moved by {other:?}"),
                     }
                 }
@@ -183,10 +190,11 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
                 assert_eq!(sum(t, Source::Loan), sum(d, Source::Loan), "seed {seed} actor {a:?}: a loan without its debt");
                 // Tribute moves between treasuries: over all of them it sums to nothing.
                 assert_eq!(r.postings.iter().filter(|q| matches!(q.account, Account::Treasury(_)) && q.source == Source::Tribute).map(|q| q.milli).sum::<i64>(), 0, "seed {seed}: tribute without its counter-entry");
+                assert_eq!(r.postings.iter().filter(|q| matches!(q.account, Account::Treasury(_)) && q.source == Source::Secession).map(|q| q.milli).sum::<i64>(), 0, "seed {seed}: a secession's share without its counter-entry");
                 assert_eq!(sum(t, Source::Repayment), sum(d, Source::Repayment), "seed {seed} actor {a:?}: a repayment without its debt");
                 // A seat's income (E0 Х1) is a transfer: what left the treasury arrived in
                 // the houses' treasuries of the same polity.
-                let to_houses: i64 = r.postings.iter().filter(|q| q.source == Source::Seat && matches!(q.account, Account::HouseTreasury(h) if w.houses[&h].polity == *a)).map(|q| q.milli).sum();
+                let to_houses: i64 = r.postings.iter().filter(|q| q.source == Source::Seat && matches!(q.account, Account::HouseTreasury(h) if house_polity[&h] == *a)).map(|q| q.milli).sum();
                 assert_eq!(-sum(t, Source::Seat), to_houses, "seed {seed} actor {a:?}: a seat's income without its house");
                 assert!(sum(d, Source::Interest) >= 0);
                 assert!(w.treasury(*a) >= 0 && w.debt(*a) >= 0);
@@ -243,9 +251,10 @@ fn wheat_is_accounted_by_source_and_the_observed_shares_are_reported() {
         assert!(tax > 0 && production > 0);
         tax_shares.push(tax as f64 / production as f64);
         military_shares.push(pay as f64 / (pay + court) as f64);
-        // Every treasury movement is one of the economy's sources.
+        // Every treasury movement is one of the economy's sources — or the birth of a
+        // polity (E2 step 9: its treasury opened at nothing and the secession's share).
         for src in by_source.keys() {
-            assert!(matches!(src, Source::Tax | Source::Seat | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment | Source::Tribute), "seed {seed}: treasury moved by {src:?}");
+            assert!(matches!(src, Source::Tax | Source::Seat | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment | Source::Tribute | Source::Opening | Source::Secession), "seed {seed}: treasury moved by {src:?}");
         }
     }
     let mean = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;
