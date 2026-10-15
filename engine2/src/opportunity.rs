@@ -12,6 +12,17 @@
 //! player on a throne answers what is offered to its house too — except a usurpation: a
 //! member of the ruling house who would take the throne from its head is not the head.
 //!
+//! **Elections** (owner's answer 5 on §23): when a ruler under the rule of election dies,
+//! the eldest adult of the ruling house holds the throne for the tick (the interim, as the
+//! rule of E2 gave), and every house of the polity with an adult gets **a vote**: the
+//! candidates are the eldest adult of each such house. At the next turn the votes are
+//! counted by the weight of each house — its seats (governorships, the throne) and its
+//! living adults — and the heaviest candidate takes the throne (`Elected`); a tie keeps the
+//! interim. A house that does not vote (a lapsed opportunity, a world without the
+//! contract) counts nothing: with no votes the interim stays, as in E2. If every house votes
+//! for its own candidate the largest wins and the election is nearly a dynasty again — the
+//! honest model with the houses' bargains is E4's (owner's note on §23).
+//!
 //! **Lifetime.** Opened in a tick's phases (`opened` = that tick), answered at the start of
 //! the next tick, before the verbs: the answer meets the world as the opening tick left it,
 //! and the effect is checked again — a province taken meanwhile, a candidate dead, a ruler
@@ -51,6 +62,9 @@ pub enum Chance {
     /// The house of `candidate` may take the throne of `polity` from `ruler` (E0 В6, owner's
     /// rule on #290: the lot makes the chance, the candidate's house decides).
     Usurpation { polity: ActorId, candidate: PersonId, ruler: PersonId },
+    /// A house's vote for the next ruler of `polity`, elected among `candidates` (the eldest
+    /// adult of each house with one); `interim` holds the throne until the count.
+    Vote { polity: ActorId, candidates: Vec<PersonId>, interim: PersonId },
 }
 
 impl Chance {
@@ -59,15 +73,18 @@ impl Chance {
         match self {
             Chance::Secession { .. } => "Secession",
             Chance::Usurpation { .. } => "Usurpation",
+            Chance::Vote { .. } => "Vote",
         }
     }
 }
 
-/// An answer to an opportunity.
+/// An answer to an opportunity: take it or decline it; a vote names its candidate
+/// (declining a vote is abstaining).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reply {
     Take,
     Decline,
+    Vote(PersonId),
 }
 
 /// The answer of `who` to the opportunity `opportunity`.
@@ -87,6 +104,8 @@ pub enum AnswerError {
     NotYours(u32, ActorRef),
     #[error("opportunity {0} is answered twice")]
     Twice(u32),
+    #[error("opportunity {0}: {1}")]
+    BadReply(u32, &'static str),
 }
 
 impl World {
@@ -128,15 +147,22 @@ impl World {
             if !seen.insert(a.opportunity) {
                 return Err(AnswerError::Twice(a.opportunity));
             }
+            match (&o.what, a.reply) {
+                (Chance::Vote { candidates, .. }, Reply::Vote(c)) if !candidates.contains(&c) => return Err(AnswerError::BadReply(a.opportunity, "not a candidate")),
+                (Chance::Vote { .. }, Reply::Take) => return Err(AnswerError::BadReply(a.opportunity, "a vote names its candidate")),
+                (Chance::Secession { .. } | Chance::Usurpation { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
+                _ => {}
+            }
         }
         Ok(())
     }
 
     /// The rule of E2 for an opportunity nobody answered in a world without the contract:
-    /// a house takes its chance.
-    fn rule_reply(o: &Opportunity) -> Reply {
+    /// a house takes its chance; nobody votes (the interim stays, as E2 elected).
+    fn rule_reply(o: &Opportunity) -> Option<Reply> {
         match o.what {
-            Chance::Secession { .. } | Chance::Usurpation { .. } => Reply::Take,
+            Chance::Secession { .. } | Chance::Usurpation { .. } => Some(Reply::Take),
+            Chance::Vote { .. } => None,
         }
     }
 
@@ -145,25 +171,77 @@ impl World {
     /// except what `player` answers (a player's silence is a choice).
     pub(crate) fn settle_opportunities(&mut self, answers: &[Answer], player: Option<ActorRef>, by_rule: bool, params: &Params) -> Result<(), WorldError> {
         let open = std::mem::take(&mut self.opportunities);
+        // The votes of each election, counted once all are in.
+        let mut elections: std::collections::BTreeMap<ActorId, (PersonId, Vec<(u32, ActorRef, crate::ids::HouseId, PersonId)>)> = std::collections::BTreeMap::new();
         for o in open {
             let given = answers.iter().find(|a| a.opportunity == o.id);
-            let (by, reply) = match given {
-                Some(a) => (a.who, a.reply),
-                None if by_rule && !player.is_some_and(|p| self.answers_for(p, &o)) => (o.to, Self::rule_reply(&o)),
-                None => {
+            let rule = if by_rule && !player.is_some_and(|p| self.answers_for(p, &o)) { Self::rule_reply(&o) } else { None };
+            let (by, reply) = match (given, rule) {
+                (Some(a), _) => (a.who, a.reply),
+                (None, Some(r)) => (o.to, r),
+                (None, None) => {
                     self.emit(Event::OpportunityLapsed { id: o.id, to: o.to });
                     continue;
                 }
             };
-            match reply {
-                Reply::Decline => self.emit(Event::OpportunityDeclined { id: o.id, by }),
-                Reply::Take => match self.take_opportunity(&o, params)? {
+            match (reply, &o.what) {
+                (Reply::Decline, _) => self.emit(Event::OpportunityDeclined { id: o.id, by }),
+                (Reply::Vote(c), Chance::Vote { polity, interim, .. }) => {
+                    let ActorRef::House(h) = o.to else { continue };
+                    elections.entry(*polity).or_insert((*interim, Vec::new())).1.push((o.id, by, h, c));
+                }
+                (Reply::Vote(_), _) => self.emit(Event::OpportunityVoid { id: o.id, why: "not an election".to_string() }),
+                (Reply::Take, _) => match self.take_opportunity(&o, params)? {
                     Ok(()) => self.emit(Event::OpportunityTaken { id: o.id, by }),
                     Err(why) => self.emit(Event::OpportunityVoid { id: o.id, why: why.to_string() }),
                 },
             }
         }
+        for (polity, (interim, votes)) in elections {
+            self.count_votes(polity, interim, &votes, params)?;
+        }
         Ok(())
+    }
+
+    /// The weight of a house in an election (owner's answer 5 on §23): its seats — the
+    /// governorships its members hold and the throne — and its living adults.
+    pub fn house_weight(&self, h: crate::ids::HouseId, params: &Params) -> i64 {
+        let members = self.members(h);
+        let polity = self.houses[&h].polity;
+        let throne = i64::from(self.alive(polity) && members.contains(&self.actors[&polity].ruler));
+        let seats = self.provinces.values().filter(|pr| pr.governor.is_some_and(|g| members.contains(&g))).count() as i64;
+        let adults = members.iter().filter(|p| self.is_adult(**p, params)).count() as i64;
+        seats + throne + adults
+    }
+
+    /// Count an election: every vote by its house's weight; the heaviest candidate takes the
+    /// throne from the interim, a tie keeps the interim; a candidate who can no longer reign
+    /// (dead, a minor, gone from the polity) counts nothing. The votes are void when the
+    /// throne changed hands since it was opened (a usurpation taken first).
+    fn count_votes(&mut self, polity: ActorId, interim: PersonId, votes: &[(u32, ActorRef, crate::ids::HouseId, PersonId)], params: &Params) -> Result<(), WorldError> {
+        if !self.alive(polity) || self.actors[&polity].ruler != interim {
+            for (id, ..) in votes {
+                self.emit(Event::OpportunityVoid { id: *id, why: "the throne changed hands".to_string() });
+            }
+            return Ok(());
+        }
+        let can_reign = |w: &World, c: PersonId| w.person_alive(c) && w.is_adult(c, params) && w.houses[&w.persons[&c].house].polity == polity;
+        let mut tally: std::collections::BTreeMap<PersonId, i64> = std::collections::BTreeMap::new();
+        for (id, by, h, c) in votes {
+            self.emit(Event::OpportunityTaken { id: *id, by: *by });
+            if can_reign(self, *c) {
+                *tally.entry(*c).or_insert(0) += self.house_weight(*h, params);
+            }
+        }
+        let total: i64 = tally.values().sum();
+        let top = tally.values().copied().max().unwrap_or(0);
+        let leaders: Vec<PersonId> = tally.iter().filter(|(_, w)| **w == top).map(|(c, _)| *c).collect();
+        let winner = if leaders.len() == 1 { leaders[0] } else { interim };
+        self.emit(Event::Elected { actor: polity, interim, winner, weight: tally.get(&winner).copied().unwrap_or(0) as u64, total: total as u64 });
+        if winner == interim {
+            return Ok(());
+        }
+        self.seat_elected(polity, winner, params)
     }
 
     /// The effect of taking an opportunity, checked again on the world as it stands; the
@@ -191,6 +269,7 @@ impl World {
                 self.usurp(polity, candidate, params)?;
                 Ok(Ok(()))
             }
+            Chance::Vote { .. } => Ok(Err("a vote names its candidate")),
         }
     }
 }

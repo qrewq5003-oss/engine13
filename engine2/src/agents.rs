@@ -522,12 +522,27 @@ impl World {
     /// The bots' answers to the open opportunities (E3 (в)): every opportunity the player
     /// does not answer, by its decider's utility, on the state as it stands.
     pub fn bot_answers(&self, player: Option<ActorRef>, params: &Params) -> Vec<crate::opportunity::Answer> {
-        use crate::opportunity::{Answer, Reply};
+        use crate::opportunity::Answer;
         self.opportunities
             .iter()
             .filter(|o| !player.is_some_and(|p| self.answers_for(p, o)))
-            .map(|o| Answer { who: o.to, opportunity: o.id, reply: if self.bot_takes(o, params) { Reply::Take } else { Reply::Decline } })
+            .map(|o| Answer { who: o.to, opportunity: o.id, reply: self.bot_reply(o, params) })
             .collect()
+    }
+
+    /// A bot's reply to an opportunity: a vote for its own house's candidate (each house for
+    /// itself — the owner's note on §23: the bargains are E4's), else for the interim; any
+    /// other chance taken when its utility is above doing nothing.
+    pub fn bot_reply(&self, o: &crate::opportunity::Opportunity, params: &Params) -> crate::opportunity::Reply {
+        use crate::opportunity::{Chance, Reply};
+        if let (ActorRef::House(h), Chance::Vote { candidates, interim, .. }) = (o.to, &o.what) {
+            return Reply::Vote(candidates.iter().copied().find(|c| self.persons[c].house == h).unwrap_or(*interim));
+        }
+        if self.bot_takes(o, params) {
+            Reply::Take
+        } else {
+            Reply::Decline
+        }
     }
 
     /// Whether a bot takes an opportunity: its utility above doing nothing.

@@ -471,6 +471,44 @@ impl World {
         Ok(Some(founder))
     }
 
+    /// Seat the winner of an election in place of the interim (E3 (в), `opportunity.rs`):
+    /// the interim steps down alive, the winner leaves its governorships to other houses.
+    pub(crate) fn seat_elected(&mut self, a: ActorId, winner: PersonId, params: &Params) -> Result<(), WorldError> {
+        let interim = self.actors[&a].ruler;
+        let court = self.polity_religion(a);
+        {
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.ruler = winner;
+            actor.heir = None;
+            actor.regent = None;
+            actor.standing = Standing::Elected;
+        }
+        self.keep_court_faith(court, winner);
+        self.emit(Event::Succession { actor: a, from: interim, to: winner, how: Standing::Elected });
+        for province in self.governed_by(winner) {
+            self.pass_seat(province, winner, true, params)?;
+        }
+        Ok(())
+    }
+
+    /// Open the election after an elective throne fell to the interim (E3 (в)): a vote for
+    /// every house of the polity with an adult, the eldest adult of each a candidate; none
+    /// when one house alone could stand.
+    fn open_election(&mut self, a: ActorId, params: &Params) {
+        let interim = self.actors[&a].ruler;
+        let houses: Vec<(HouseId, PersonId)> = self.houses_of(a).into_iter().filter_map(|h| {
+            let adults: Vec<PersonId> = self.members(h).into_iter().filter(|p| self.is_adult(*p, params)).collect();
+            self.eldest(&adults, true, params).map(|c| (h, c))
+        }).collect();
+        if houses.len() < 2 {
+            return;
+        }
+        let candidates: Vec<PersonId> = houses.iter().map(|(_, c)| *c).collect();
+        for (h, _) in houses {
+            self.open_opportunity(crate::verbs::ActorRef::House(h), crate::opportunity::Chance::Vote { polity: a, candidates: candidates.clone(), interim });
+        }
+    }
+
     /// Seat the next ruler of `a` after the death of its ruler; with no house left, raise
     /// one from the people. The polity falls only when it has no people at all.
     fn succeed(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
@@ -511,6 +549,11 @@ impl World {
         // to another house first (owner's rule on #289).
         for province in self.governed_by(next) {
             self.pass_seat(province, next, true, params)?;
+        }
+        // An elective throne without a designated heir: the interim holds it until the
+        // houses' votes are counted at the next turn.
+        if rule == Succession::Election && designated.is_none() {
+            self.open_election(a, params);
         }
         Ok(())
     }

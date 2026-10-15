@@ -345,6 +345,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
     let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
+    let (mut elections, mut elections_turned) = (0u64, 0u64);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
@@ -464,6 +465,10 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                         kind_of.insert(opportunity.id, opportunity.what.kind());
                         *opportunities.entry(format!("{} opened", opportunity.what.kind())).or_insert(0) += 1;
                     }
+                    Event::Elected { interim, winner, .. } => {
+                        elections += 1;
+                        elections_turned += u64::from(interim != winner);
+                    }
                     Event::OpportunityTaken { id, .. } => *opportunities.entry(format!("{} taken", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
                     Event::OpportunityDeclined { id, .. } => *opportunities.entry(format!("{} declined", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
                     Event::OpportunityVoid { id, .. } => *opportunities.entry(format!("{} void", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
@@ -529,7 +534,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         war_lengths.iter().filter(|l| **l <= 1).count()
     );
     assert_eq!(declared_unpaid, 0, "a bot declared war with an unpaid army");
-    eprintln!("opportunities {opportunities:?}");
+    eprintln!("opportunities {opportunities:?}; elections {elections}, the throne to another than the interim {elections_turned}");
     assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
     // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
     // by their utility — the mean rate inside a step of it.

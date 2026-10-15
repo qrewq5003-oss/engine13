@@ -67,7 +67,7 @@ fn o0() -> ActorRef {
 
 fn as_the_bot(g: &Game, who: ActorRef) -> Vec<Answer> {
     let p = g.params().clone();
-    g.opportunities(who).iter().map(|o| Answer { who, opportunity: o.id, reply: if g.world().bot_takes(o, &p) { engine2::Reply::Take } else { engine2::Reply::Decline } }).collect()
+    g.opportunities(who).iter().map(|o| Answer { who, opportunity: o.id, reply: g.world().bot_reply(o, &p) }).collect()
 }
 
 #[test]
@@ -211,4 +211,88 @@ fn the_bots_usurp_a_weak_ruler_not_a_legitimate_one_and_secede_only_with_a_chanc
     assert!(u < 0.0, "against an army a hundred times its own: {u:.2}");
     w.actors.get_mut(&s0).unwrap().legitimacy = 0.0;
     assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a ruler with no legitimacy at all invites even a hopeless rising");
+}
+
+// ---------- elections (owner's answer 5 on §23) ----------
+
+/// State 2 (election) with an adult of the ruling house (`b2`) and a second house `e2` of
+/// two adults governing p07 and p12 — or, `one_seat`, of one adult governing p07.
+fn elective(one_seat: bool) -> ScenarioData {
+    let mut s = testworld::five_states_scenario();
+    s.persons.insert("b2".to_string(), PersonData { name: "Brother 2".into(), house: "h2".into(), born: 1432, parent: None, spouse: None });
+    s.houses.insert("e2".to_string(), engine2::scenario::HouseData { name: "Electors 2".into(), polity: "s2".into(), treasury_kg: 0, culture: "c0".into(), religion: "f0".into(), soldiers: 0 });
+    s.persons.insert("e2a".to_string(), PersonData { name: "Elector 2 eldest".into(), house: "e2".into(), born: 1427, parent: None, spouse: None });
+    s.provinces.get_mut("p07").unwrap().governor = Some("e2a".to_string());
+    if !one_seat {
+        s.persons.insert("e2b".to_string(), PersonData { name: "Elector 2 second".into(), house: "e2".into(), born: 1437, parent: None, spouse: None });
+        s.provinces.get_mut("p12").unwrap().governor = Some("e2b".to_string());
+    }
+    s
+}
+
+/// The elective world, its ruler killed before the first tick; the votes are open after it.
+fn election(one_seat: bool, bots: bool, player: Option<ActorRef>) -> (Game, ScenarioData) {
+    let s = elective(one_seat);
+    let p = params();
+    let mut g = Game::new(&s, p.clone(), 8).unwrap();
+    g.set_bots(bots);
+    g.set_player(player);
+    let r2 = person(&s, "r2");
+    g.world_mut().kill(r2, engine2::event::Cause::Natural, &p).unwrap();
+    let r = g.tick(&[]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Succession { actor, from, to, .. } if actor == ActorId(2) && from == r2 && to == person(&s, "b2"))), "the interim: the eldest adult of the ruling house");
+    (g, s)
+}
+
+#[test]
+fn an_elective_throne_goes_at_the_next_turn_to_the_candidate_of_the_heaviest_house_by_seats_and_adults() {
+    let (mut g, s) = election(false, true, None);
+    let (b2, e2a) = (person(&s, "b2"), person(&s, "e2a"));
+    let votes: Vec<Opportunity> = g.world().opportunities.iter().filter(|o| matches!(o.what, Chance::Vote { .. })).cloned().collect();
+    assert_eq!(votes.len(), 2, "a vote for each house with an adult");
+    let Chance::Vote { candidates, interim, .. } = &votes[0].what else { unreachable!() };
+    assert_eq!((candidates.clone(), *interim), (vec![e2a, b2], b2), "the eldest adult of each house, by house");
+    // The weights: the ruling house the throne and one adult — 2; the electors two seats and
+    // two adults — 4.
+    assert_eq!(g.world().house_weight(house(&s, "h2"), g.params()), 2);
+    assert_eq!(g.world().house_weight(house(&s, "e2"), g.params()), 4);
+    let r = g.tick(&[]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Elected { actor, winner, weight: 4, total: 6, .. } if actor == ActorId(2) && winner == e2a)), "each house for its own: the heavier wins");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Succession { from, to, how: Standing::Elected, .. } if from == b2 && to == e2a)));
+    assert_eq!(g.world().actors[&ActorId(2)].ruler, e2a);
+    assert!(g.world().person_alive(b2), "the interim steps down alive");
+    assert!(!g.world().provinces[&at(2, 1)].governor.is_some_and(|x| x == e2a), "the winner leaves its governorship");
+}
+
+#[test]
+fn with_nobody_voting_the_interim_stays_as_in_e2_and_a_tie_keeps_the_interim() {
+    let (mut g, s) = election(false, false, None);
+    let r = g.tick(&[]).unwrap();
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Elected { .. })), "a world without the contract does not vote");
+    assert_eq!(g.world().actors[&ActorId(2)].ruler, person(&s, "b2"));
+    // One seat and one adult against the throne and one adult: 2 against 2.
+    let (mut g, s) = election(true, true, None);
+    let r = g.tick(&[]).unwrap();
+    let b2 = person(&s, "b2");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Elected { winner, weight: 2, total: 4, .. } if winner == b2)), "a tie keeps the interim");
+    assert_eq!(g.world().actors[&ActorId(2)].ruler, b2);
+}
+
+#[test]
+fn a_player_house_votes_through_the_contract_and_a_vote_for_no_candidate_is_an_error() {
+    let s = elective(false);
+    let e2 = ActorRef::House(house(&s, "e2"));
+    let (mut g, s) = election(false, true, Some(e2));
+    let (b2, e2a) = (person(&s, "b2"), person(&s, "e2a"));
+    let mine = g.opportunities(e2);
+    assert_eq!(mine.len(), 1);
+    let vote = |reply| Turn { answers: vec![Answer { who: e2, opportunity: mine[0].id, reply }], ..Turn::default() };
+    let save = g.to_save().unwrap();
+    assert!(matches!(g.play(&vote(engine2::Reply::Vote(person(&s, "r1")))), Err(SimError::Answer(AnswerError::BadReply(..)))), "not a candidate");
+    assert!(matches!(g.play(&vote(engine2::Reply::Take)), Err(SimError::Answer(AnswerError::BadReply(..)))), "a vote names its candidate");
+    assert_eq!(g.to_save().unwrap(), save, "nothing was played");
+    // The electors give their weight to the interim: 6 of 6, the interim stays.
+    let r = g.play(&vote(engine2::Reply::Vote(b2))).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Elected { winner, weight: 6, total: 6, .. } if winner == b2)));
+    assert_ne!(g.world().actors[&ActorId(2)].ruler, e2a);
 }
