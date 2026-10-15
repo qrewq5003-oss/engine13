@@ -369,7 +369,9 @@ impl World {
         let (asid, aname) = &self.names.actors[a.index()];
         let (hsid, hname) = (format!("{asid}.h{k}"), format!("{aname} new house {k}"));
         self.names.houses.push((hsid.clone(), hname.clone()));
-        self.houses.insert(house, House { polity: a });
+        // The new house speaks and prays as its capital does (owner's answer on §20).
+        let (culture, religion) = (self.provinces[&capital].culture, self.provinces[&capital].religion);
+        self.houses.insert(house, House { polity: a, culture, religion });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);
         for i in 0..persons as usize {

@@ -10,7 +10,9 @@
 //! `relation.norm_alliance` under an alliance, plus `relation.norm_marriage` while a
 //! marriage binds a house of each, plus `relation.norm_vassalage` between a vassal and its
 //! lord, less `relation.norm_border` when their provinces touch (the threat of a neighbour;
-//! the weights of threat — strength, intent, distance — are E3's). A peace in force shifts
+//! the weights of threat — strength, intent, distance — are E3's), less
+//! `relation.norm_faith` and `relation.norm_culture` when the two courts pray or speak
+//! differently (E2 step 8, `faith.rs`). A peace in force shifts
 //! nothing: neither enmity nor friendship. Verbs push the relation once, with saturation
 //! towards the end of the scale they move to; treaties shift the norm.
 //!
@@ -180,6 +182,13 @@ impl World {
         }
         if self.borders(a, b) {
             norm -= params.relation_norm_border;
+        }
+        // The friction of faith and tongue between the two courts (E2 step 8).
+        if self.polity_religion(a) != self.polity_religion(b) {
+            norm -= params.relation_norm_faith;
+        }
+        if self.polity_culture(a) != self.polity_culture(b) {
+            norm -= params.relation_norm_culture;
         }
         norm.clamp(0.0, 100.0)
     }

@@ -249,7 +249,11 @@ fn on_generated_worlds_the_bound_share_at_the_start_lies_in_d3_and_without_agent
             for ((a, b), r) in &w.relations {
                 assert!((0.0..=100.0).contains(r), "seed {seed}: relation {a:?}–{b:?} = {r}");
                 if w.alive(*a) && w.alive(*b) {
-                    assert!((r - w.relation_norm(*a, *b, &p)).abs() < 1.0, "seed {seed}: {a:?}–{b:?} far from its norm after 300 ticks");
+                    // The norm itself moves when a court changes faith or tongue at a
+                    // succession (E2 step 8), and the drift only ever closes the gap: so
+                    // the gap is at most one such jump, and nothing runs away.
+                    let jump = p.relation_norm_faith + p.relation_norm_culture;
+                    assert!((r - w.relation_norm(*a, *b, &p)).abs() <= jump, "seed {seed}: {a:?}–{b:?} farther from its norm than one jump of the norm after 300 ticks");
                 }
             }
         }

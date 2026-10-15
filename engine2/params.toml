@@ -791,3 +791,34 @@ kind = "c"
 value = 0.5
 unit = "share of the house's treasury"
 checked_by = "Д3"
+
+# ---- religion and culture (E2 step 8, plan §20) ----
+
+# E0 Р2 — observed: the share of a province's people won to the faith of its ruler a
+# century after the change of rule. **By memory**, two edges: Bulliet's Iran, where
+# conversion was rewarded — about half by the second century (Conversion to Islam in the
+# Medieval Period, 1979, ch. 3; the curve 2.5 / 13.5 / 34 / 34 / 16 % per quarter-century);
+# Ottoman Rumelia after eighty years — about a fifth Muslim, settlers included (Barkan's
+# registers of the 1520s–30s); Radushev 2010 — one highly converted district, not the
+# Balkans; Venetian Crete — Orthodox after four and a half centuries. Sources to open:
+# Bulliet, Barkan, Radushev. Owner's rule on §20: rule converts only under the institution
+# `ConversionPolicy`; without it a province drifts with its neighbourhood alone.
+[conversion.observed_share_after_a_century]
+kind = "b"
+band = [0.1, 0.7]
+unit = "share of the province's people, a century after the change of rule"
+e0 = "Р2"
+
+# (в) The friction of faith and tongue between two courts (E0 §1.7): the norm of their
+# relation sits lower by these while the courts pray or speak differently. Checked through Р2.
+[relation.norm_faith]
+kind = "c"
+value = 10.0
+unit = "relation below the base between courts of another faith"
+checked_by = "Р2"
+
+[relation.norm_culture]
+kind = "c"
+value = 5.0
+unit = "relation below the base between courts of another tongue"
+checked_by = "Р2"

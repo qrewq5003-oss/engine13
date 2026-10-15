@@ -43,6 +43,15 @@ id_type!(
     /// A unit: an army with strength, quality, commander and position on the province graph.
     UnitId
 );
+id_type!(
+    /// A culture (a tongue): a string of the scenario interned at compile time (E2 step 8);
+    /// the engine never reads which one it is.
+    CultureId
+);
+id_type!(
+    /// A religion (a faith): a string of the scenario interned at compile time (E2 step 8).
+    ReligionId
+);
 
 #[cfg(test)]
 mod tests {

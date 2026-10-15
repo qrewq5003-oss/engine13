@@ -191,6 +191,9 @@ pub struct Params {
     pub bribe_gain_per_share: f64,
     /// (в) The dowry as parts per million of the proposing house's treasury.
     pub dowry_share_ppm: i64,
+    /// (в) The friction of two courts of another faith or tongue in the relation (E2 step 8).
+    pub relation_norm_faith: f64,
+    pub relation_norm_culture: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -330,6 +333,8 @@ impl Params {
         let bribe_share = value("bribe.share_of_revenue")?;
         let bribe_gain = value("bribe.gain_per_share_of_income")?;
         let dowry_share = value("marriage.dowry_share_of_house")?;
+        let norm_faith = value("relation.norm_faith")?;
+        let norm_culture = value("relation.norm_culture")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -399,6 +404,8 @@ impl Params {
             bribe_share_ppm: (bribe_share * 1_000_000.0).round() as i64,
             bribe_gain_per_share: bribe_gain,
             dowry_share_ppm: (dowry_share * 1_000_000.0).round() as i64,
+            relation_norm_faith: norm_faith,
+            relation_norm_culture: norm_culture,
             entries,
         })
     }

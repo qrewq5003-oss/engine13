@@ -79,6 +79,17 @@ const RULING_HOUSE_SIZE: (u64, u64) = (3, 8);
 const OTHER_HOUSE_SIZE: (u64, u64) = (2, 5);
 /// Houses that do not rule, per polity, kind (в).
 const OTHER_HOUSES: (u64, u64) = (2, 4);
+/// Tongues and faiths per world (E2 step 8): each state draws one of each; a province that
+/// touches another state takes that state's with `BORDER_FAITH_CHANCE` — the mixed march
+/// where conversion and friction have something to work on. Houses take the capital's,
+/// save a newcomer house now and then (`HOUSE_FAITH_CHANCE` of keeping the capital's).
+const CULTURES: (u64, u64) = (2, 4);
+const RELIGIONS: (u64, u64) = (2, 3);
+const BORDER_FAITH_CHANCE: f64 = 0.3;
+const HOUSE_FAITH_CHANCE: f64 = 0.8;
+/// The chance a state starts with the conversion policy (E0: ascribed by the facts; here
+/// by lot, so that both edges of Р2 — Iran and Crete — exist on the generated worlds).
+const POLICY_CHANCE: f64 = 0.3;
 /// Starting alliances per world (E2 step 7), between states whose land touches; the share
 /// of states bound at the start is E0 Д3 — in E2 the row measures the generator, since the
 /// starting treaties expire and nobody makes new ones until the agents of E3 (owner's rule
@@ -378,6 +389,15 @@ impl Map {
     fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, bank_for: &dyn Fn(usize) -> bool, bonds: bool, params: &Params) -> ScenarioData {
         let pid = |i: u32| format!("p{i:03}");
         let sid = |a: usize| format!("s{a:02}");
+        // Tongues and faiths (E2 step 8): a draw of its own, so the earlier draws stay.
+        let mut faith_rng = ChaCha8Rng::seed_from_u64(fnv(id.as_bytes()) ^ 0xfa17_u64);
+        let (n_cultures, n_religions) = if bonds { (pick(&mut faith_rng, CULTURES) as usize, pick(&mut faith_rng, RELIGIONS) as usize) } else { (1, 1) };
+        // The first states take each tongue and faith once, so every one drawn exists in the
+        // world; the rest draw by lot.
+        let state_culture: Vec<usize> = (0..states).map(|s| if s < n_cultures { s } else { faith_rng.gen_range(0..n_cultures) }).collect();
+        let state_religion: Vec<usize> = (0..states).map(|s| if s < n_religions { s } else { faith_rng.gen_range(0..n_religions) }).collect();
+        let tongue = |c: usize| format!("tongue{c}");
+        let faith = |r: usize| format!("faith{r}");
         let mut provinces = BTreeMap::new();
         let mut pop_by_state: BTreeMap<usize, u64> = BTreeMap::new();
         let mut capital: BTreeMap<usize, (u64, u32)> = BTreeMap::new();
@@ -391,8 +411,20 @@ impl Map {
             if population > best.0 {
                 *best = (population, i);
             }
-            let neighbours = self.neighbours(i).into_iter().map(pid).collect();
+            let raw_neighbours = self.neighbours(i);
+            let neighbours = raw_neighbours.iter().copied().map(pid).collect();
             let sea_neighbours = self.sea_links.get(&i).into_iter().flatten().map(|j| pid(*j)).collect();
+            // A border province may speak and pray as the state across the border does.
+            let (mut culture, mut religion) = (state_culture[cell.owner], state_religion[cell.owner]);
+            let across: Vec<usize> = raw_neighbours.iter().filter_map(|j| self.cells[*j as usize].as_ref()).map(|c| c.owner).filter(|o| *o != cell.owner).collect();
+            if let Some(o) = across.first() {
+                if bonds && faith_rng.gen_bool(BORDER_FAITH_CHANCE) {
+                    culture = state_culture[*o];
+                }
+                if bonds && faith_rng.gen_bool(BORDER_FAITH_CHANCE) {
+                    religion = state_religion[*o];
+                }
+            }
             provinces.insert(
                 pid(i),
                 ProvinceData {
@@ -405,6 +437,8 @@ impl Map {
                     neighbours,
                     sea_neighbours,
                     governor: None,
+                    culture: tongue(culture),
+                    religion: faith(religion),
                 },
             );
         }
@@ -424,7 +458,16 @@ impl Map {
             let budget_limit = if params.pay_per_soldier_kg_per_year == 0 { 0 } else { for_army / params.pay_per_soldier_kg_per_year };
             let wanted = (pop as f64 * pick_f(&mut rng, ARMY_SHARE)).floor() as i64;
             let soldiers = wanted.min(budget_limit * 9 / 10).max(0) as u64;
-            let institutions = if bank_for(s) { vec![Institution::Bank] } else { Vec::new() };
+            // The capital prays and speaks as the state does, whatever its border drew: the
+            // ruling house takes the capital's faith and the court is the state's.
+            if let Some(cap) = provinces.get_mut(&pid(cap_i)) {
+                cap.culture = tongue(state_culture[s]);
+                cap.religion = faith(state_religion[s]);
+            }
+            let mut institutions = if bank_for(s) { vec![Institution::Bank] } else { Vec::new() };
+            if bonds && faith_rng.gen_bool(POLICY_CHANCE) {
+                institutions.push(Institution::ConversionPolicy);
+            }
             // The ruling house and the houses beside it.
             let n_other = pick(&mut rng, OTHER_HOUSES) as usize;
             let mut adults_by_house: Vec<(String, Vec<String>)> = Vec::new();
@@ -435,7 +478,12 @@ impl Map {
                 let size = pick(&mut rng, if h == 0 { RULING_HOUSE_SIZE } else { OTHER_HOUSE_SIZE }) as usize;
                 let seat_income = yearly_income as f64 * params.seat_income_share_ppm as f64 / 1_000_000.0;
                 let treasury_kg = if h == 0 { (seat_income * pick_f(&mut rng, (0.0, 1.0))).floor() as i64 } else { 0 };
-                houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg });
+                let (house_culture, house_religion) = if h == 0 || !bonds || faith_rng.gen_bool(HOUSE_FAITH_CHANCE) {
+                    (state_culture[s], state_religion[s])
+                } else {
+                    (faith_rng.gen_range(0..n_cultures), faith_rng.gen_range(0..n_religions))
+                };
+                houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg, culture: tongue(house_culture), religion: faith(house_religion) });
                 let head_age = pick(&mut rng, RULER_AGE) as i32;
                 let head = format!("{hid}p00");
                 persons.insert(head.clone(), PersonData { name: format!("{hid} head"), house: hid.clone(), born: start_year - head_age, parent: None, spouse: None });
@@ -759,7 +807,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 9_146_812_683_176_577_038;
+    const PINNED_WORLD_ONE: u64 = 8_809_658_219_070_092_627;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
