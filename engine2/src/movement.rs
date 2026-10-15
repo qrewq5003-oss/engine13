@@ -52,7 +52,57 @@ pub enum Way {
     Sea,
 }
 
+/// Why an order is refused.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum OrderError {
+    #[error("unknown unit {0:?}")]
+    UnknownUnit(UnitId),
+    #[error("unknown province {0:?}")]
+    UnknownProvince(ProvinceId),
+    #[error("{0:?} does not command unit {1:?}")]
+    NotYours(crate::verbs::ActorRef, UnitId),
+    #[error("polity {0:?} has fallen")]
+    Fallen(ActorId),
+}
+
 impl World {
+    /// Whether `who` commands `unit`: a ruler the polity's own units and the ruling house's
+    /// retinue, a house its own retinue (E0 Х2).
+    pub fn commands(&self, who: crate::verbs::ActorRef, unit: UnitId) -> bool {
+        let Some(u) = self.units.get(&unit) else { return false };
+        match who {
+            crate::verbs::ActorRef::Ruler(a) => u.owner == a && u.house.is_none_or(|h| h == self.ruling_house(a)),
+            crate::verbs::ActorRef::House(h) => u.house == Some(h),
+        }
+    }
+
+    /// Whether an order can be given: the unit exists and is the caller's, the province
+    /// exists, the ruler's polity stands.
+    pub fn order_room(&self, o: &crate::verbs::Order) -> Result<(), OrderError> {
+        if !self.units.contains_key(&o.unit) {
+            return Err(OrderError::UnknownUnit(o.unit));
+        }
+        if !self.provinces.contains_key(&o.to) {
+            return Err(OrderError::UnknownProvince(o.to));
+        }
+        if let crate::verbs::ActorRef::Ruler(a) = o.actor {
+            if !self.alive(a) {
+                return Err(OrderError::Fallen(a));
+            }
+        }
+        if !self.commands(o.actor, o.unit) {
+            return Err(OrderError::NotYours(o.actor, o.unit));
+        }
+        Ok(())
+    }
+
+    /// Give an order through the contract's channel.
+    pub fn apply_order(&mut self, o: &crate::verbs::Order) -> Result<(), OrderError> {
+        self.order_room(o)?;
+        self.units.get_mut(&o.unit).unwrap().destination = Some(o.to);
+        Ok(())
+    }
+
     /// Order a unit to move to a province. The path is found when the tick is played.
     pub fn order_move(&mut self, unit: UnitId, to: ProvinceId) -> Result<(), WorldError> {
         if !self.provinces.contains_key(&to) {

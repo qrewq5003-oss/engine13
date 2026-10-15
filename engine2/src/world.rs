@@ -264,6 +264,11 @@ pub struct War {
     /// The principal pair this war is an obligation of (an ally's, a lord's, a vassal's
     /// entry); it ends with their peace. None for a war of its own.
     pub of: Option<(ActorId, ActorId)>,
+    /// Who declared it (E3 (б), owner's rule on #291): the attacked accepts a peace always,
+    /// the declarer only at the threshold of the relation, when its war goal is gone, or
+    /// when it is exhausted (`diplomacy::peace_room`). An ally's entry is the attacker's
+    /// side's declaration; a war of the starting facts has none.
+    pub by: Option<ActorId>,
 }
 
 /// What a treaty binds a pair to (E2 step 7).
@@ -821,7 +826,7 @@ impl World {
             }
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
-            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None });
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;
@@ -854,6 +859,11 @@ impl World {
             }
         }
         Ok(world)
+    }
+
+    /// The events of the tick being played so far.
+    pub(crate) fn events_of_tick(&self) -> &[Stamped] {
+        &self.events
     }
 
     /// Append an event of the current tick.
@@ -1047,7 +1057,7 @@ mod tests {
         // The decision draw belongs to the agents (E3, `decide_all`), not to the tick: a
         // world ticked without agents draws no decision.
         assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), 0);
-        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt)), "no system of the test world draws elsewhere");
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt | DrawPoint::Goal)), "no system of the test world draws elsewhere");
         assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));

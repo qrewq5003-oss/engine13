@@ -201,12 +201,25 @@ impl World {
     }
 
     /// The norm legitimacy moves towards: the standing's norm shifted by the ruler's
-    /// lasting decisions — the tax above the tithe, the closed credit.
+    /// lasting decisions — the tax above the tithe, the closed credit — kept inside 0–100.
     pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
+        self.unclamped_legitimacy_norm(a, params).clamp(0.0, 100.0)
+    }
+
+    /// The same norm before it is kept inside 0–100: below zero when the ruler's decisions
+    /// shift it past the bottom. Legitimacy, a rating, stops at 0; the collection does not
+    /// (owner's rule on #292, `World::collection_share_ppm`).
+    pub fn unclamped_legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
         let actor = &self.actors[&a];
         let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
         let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
-        (self.standing_norm(a, params) - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default).clamp(0.0, 100.0)
+        self.standing_norm(a, params) - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default
+    }
+
+    /// How far the norm sits below zero, in points: the part of the ruler's shift the
+    /// bottom of the rating swallows.
+    pub fn norm_below_zero(&self, a: ActorId, params: &Params) -> f64 {
+        (-self.unclamped_legitimacy_norm(a, params)).max(0.0)
     }
 
     /// Who would take the throne by force: the regent, else a governor, else the eldest

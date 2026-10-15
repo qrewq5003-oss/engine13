@@ -638,7 +638,10 @@ checked_by = "В6"
 # and the take 12 % of production: inside Э8, a fifth above the tithe, never double it. The
 # usurper's gap is from lawful rule, not from its own norm of 30: measured with its own
 # norm, the greedy ruler — soon usurped — collected 0.86 and gained a third over the plain
-# one, above the ceiling of the acceptance. Checked through Э8.
+# one, above the ceiling of the acceptance. Below the bottom the norm keeps counting (owner's
+# rule on #292): the points the ruler's shift puts the norm below zero count as legitimacy
+# lost, so a step of the tax at legitimacy 0 costs the share what it costs above zero.
+# Checked through Э8.
 [tax.evasion_per_legitimacy_point]
 kind = "c"
 value = 0.008
@@ -923,9 +926,12 @@ e0 = "В7"
 # Applied as В7_base/2 × (1 + marks) × (100 − L)/50 a tick, the form of В3 and В6: a loyal
 # province can rise too (Volterra 1472 was a tax revolt), one of another faith and another
 # tongue than the court and the core three times as readily. Checked through В7.
+# Recalibrated at E3 (б): 0.005 was set when a revolt stood for ever (nobody put it down)
+# and a province rose once; with the bots putting revolts down and a province able to rise
+# again, 0.005 gave В7 9.0 — 0.0025 gives 4.7 with В9 at 0.011 (20 worlds × 300 ticks).
 [revolt.per_year]
 kind = "c"
-value = 0.005
+value = 0.0025
 unit = "share per province per year at legitimacy 50, no alienation"
 checked_by = "В7"
 
@@ -1058,4 +1064,41 @@ checked_by = "А12"
 kind = "c"
 value = 1.0
 unit = "weight in the lottery"
+checked_by = "А12"
+
+# ---- orders and suppression (E3 (б), plan §23, §23c) ----
+
+# (в) A bot's units advance on the enemy when they are at least this share of the enemy's
+# whole army, else they go home to hold the capital. Checked through А12 (wars that never
+# move and wars that end at once both leave it).
+[agent.advance_ratio]
+kind = "c"
+value = 1.0
+unit = "own units' soldiers per enemy soldier"
+checked_by = "А12"
+
+# E0 В9 (row added at E3, orders; owner's answers on #289 and §23) — observed: the share of
+# province-ticks in revolt. By memory, source to open: revolts were frequent and mostly short
+# — put down within the year or the next campaign (Volterra 1472 in a month; the tax revolts
+# of the fifteenth century), the long ones rare; a world with a tenth of its land standing in
+# revolt for decades would be a degeneration of the engine, not history. Measured on the
+# generated worlds with the bots suppressing (`tests/agents.rs`); the mean length of a revolt
+# printed beside it.
+[revolt.observed_share_of_provinces]
+kind = "b"
+band = [0.005, 0.05]
+unit = "share of province-ticks in revolt"
+e0 = "В9"
+
+# (в) The goals a polity keeps at a time (E3 (б)). A goal is put aside when the horizon
+# passes without new progress — an ambition that went nowhere, and a «hold» kept for the
+# horizon alike (done) — and the freed slot is filled: revanche first (a province conquered
+# from it), the wish of a vassal to be free, else the weighted lot of reachable kinds the
+# generator draws by. Measured: renewed only as «hold the capital», the goals of war fell
+# from 0.42 of the polities in the first fifty years to 0.13 in the last, and А12 from 0.21
+# to 0.03 — the world fell asleep. Checked through А12.
+[goal.open_per_polity]
+kind = "c"
+value = 2.0
+unit = "goals per polity"
 checked_by = "А12"

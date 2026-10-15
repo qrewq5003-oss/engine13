@@ -290,6 +290,15 @@ impl World {
             self.relations.insert(crate::army::pair(new, *b), 0.0);
         }
         self.open_war(new, parent)?;
+        // The war of secession is the parent's to end (E3 (б)): the new polity has what it
+        // rose for and accepts a status quo always; the parent — the declarer of record —
+        // wants its provinces back (a goal «take» of the new polity) and accepts only at the
+        // threshold, when the goal is put aside, or exhausted. The parent's allies are in
+        // by §19 all the same.
+        if let Some(w) = self.wars.get_mut(&crate::army::pair(new, parent)) {
+            w.by = Some(parent);
+        }
+        self.set_goal(parent, crate::agents::GoalKind::Take, crate::agents::GoalTarget::Polity(new))?;
         for b in &others {
             let norm = self.relation_norm(new, *b, params);
             self.relations.insert(crate::army::pair(new, *b), norm);

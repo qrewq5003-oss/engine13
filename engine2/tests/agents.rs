@@ -42,7 +42,7 @@ fn all_verbs(mut s: ScenarioData) -> ScenarioData {
 /// — the bride two houses asked for, a war closed by a peace of its principal pair (plan
 /// §23b: first all decide, then all is applied in one order). A peace or a war both sides
 /// made in one tick is not among them: the second is nothing (owner's rule on #291).
-const CONFLICTS: [&str; 3] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult"];
+const CONFLICTS: [&str; 5] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord"];
 
 fn assert_conflicts_only(g: &Game) {
     let r = g.preempted_reasons();
@@ -169,7 +169,8 @@ fn a_goals_progress_is_read_off_the_state_a_reached_goal_goes_on_as_hold_and_one
     assert!(reached.is_some(), "the province taken reaches the goal");
     assert!(w.actors[&s0].goals.iter().any(|g| g.kind == GoalKind::Hold && g.target == GoalTarget::Province(at(1, 1))), "and it goes on as «hold»");
     assert!(!w.actors[&s0].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == GoalTarget::Province(at(1, 1))));
-    assert!(progress(&w, s0, 6) > 0.0, "one province of five gone: the polity is a fifth taken");
+    let take_s1 = *w.actors[&s0].goals.iter().find(|g| g.kind == GoalKind::Take && g.target == GoalTarget::Polity(s1)).expect("the goal to take s1 stands");
+    assert!(w.goal_progress(s0, &take_s1) > 0.0, "one province of five gone: the polity is a fifth taken");
     // A goal without progress for the horizon is put aside and the next one taken by the
     // rules: nobody's vassal holds its capital.
     let mut w = world_of(&testworld::five_states_scenario(), 42);
@@ -180,15 +181,44 @@ fn a_goals_progress_is_read_off_the_state_a_reached_goal_goes_on_as_hold_and_one
         let r = w.tick(&calm).unwrap();
         if r.events.iter().any(|e| matches!(e.event, Event::GoalDropped { actor, goal } if actor == s0 && goal.kind == GoalKind::Subdue)) {
             dropped_at = Some(t);
-            assert!(r.events.iter().any(|e| matches!(e.event, Event::GoalSet { actor, goal } if actor == s0 && goal.kind == GoalKind::Hold && goal.target == GoalTarget::Province(at(0, 0)))), "the next goal by the rules: hold the capital");
+            assert!(r.events.iter().any(|e| matches!(e.event, Event::GoalSet { actor, .. } if actor == s0)), "the freed slot is filled the same tick");
             break;
         }
     }
     assert_eq!(dropped_at, Some(p.goal_horizon_ticks), "put aside exactly at the horizon");
-    assert_eq!(w.actors[&s0].goals.len(), 1);
-    assert_eq!(w.actors[&s0].goals[0].kind, GoalKind::Hold);
-    // A polity with no goal takes one at the end of its first tick.
-    assert!(w.actors[&s1].goals.iter().any(|g| g.kind == GoalKind::Hold));
+    // The freed slots are filled by the weighted lot of reachable kinds (E3 (б)), one draw a
+    // tick, up to `goal.open_per_polity`.
+    assert!(w.actors[&s0].goals.len() <= p.goal_open_per_polity);
+    assert!(!w.actors[&s0].goals.iter().any(|g| g.kind == GoalKind::Subdue && g.target == GoalTarget::Polity(ActorId(4))), "the dropped goal is gone");
+    // A polity with no goal draws them at the ends of its first ticks, one a tick.
+    assert!(!w.actors[&s1].goals.is_empty() && w.actors[&s1].goals.len() <= p.goal_open_per_polity);
+    for g in &w.actors[&s1].goals {
+        match (g.kind, g.target) {
+            (GoalKind::Hold, GoalTarget::Province(q)) => assert_eq!(w.provinces[&q].owner, s1),
+            (GoalKind::Take, GoalTarget::Province(q)) => assert!(w.borders(s1, w.provinces[&q].owner)),
+            (GoalKind::Subdue | GoalKind::AllianceAgainst, GoalTarget::Polity(b)) => assert!(w.borders(s1, b)),
+            (GoalKind::Unite, GoalTarget::Region(_)) => {}
+            other => panic!("a drawn goal out of the lot: {other:?}"),
+        }
+    }
+    // Revanche: a province conquered from a polity is its goal at once, by the rule.
+    let mut w = world_of(&testworld::five_states_scenario(), 46);
+    w.declare_war(s0, s1).unwrap();
+    let u0 = w.units_of(s0)[0];
+    w.post(engine2::Account::Soldiers(u0), Source::Test, (6000 - w.soldiers(u0)) * 1000).unwrap();
+    w.units.get_mut(&w.units_of(s1)[0]).unwrap().position = at(1, 4);
+    // From its own province next to the target: no capital on the way to besiege.
+    w.units.get_mut(&u0).unwrap().position = at(0, 1);
+    w.order_move(u0, at(1, 1)).unwrap();
+    let mut revanche = false;
+    for _ in 0..3 {
+        let r = w.tick(&calm).unwrap();
+        if r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, to, .. } if province == at(1, 1) && to == s0)) {
+            revanche = r.events.iter().any(|e| matches!(e.event, Event::GoalSet { actor, goal } if actor == s1 && goal.kind == GoalKind::Take && goal.target == GoalTarget::Province(at(1, 1))));
+            break;
+        }
+    }
+    assert!(revanche, "the polity that lost a province wants it back the same tick");
 }
 
 #[test]
@@ -205,13 +235,12 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     let mut g = Game::new(&s, params(), 43).unwrap();
     let s0 = ActorId(0);
     assert_eq!(g.player(), None);
-    // Without aspirations nobody acts: a capital held, nothing better than doing nothing.
+    // Without goals nobody acts: on the first tick, before any goal is drawn, nothing is
+    // better than doing nothing.
     let quiet = all_verbs(testworld::five_states_scenario());
     let mut q = Game::new(&quiet, params(), 43).unwrap();
-    for _ in 0..10 {
-        let r = q.tick(&[]).unwrap();
-        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Verb { .. })), "a bot that holds its capital and wants nothing more does nothing");
-    }
+    let r = q.tick(&[]).unwrap();
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Verb { .. })), "a bot that wants nothing does nothing");
     g.set_player(Some(ActorRef::Ruler(s0)));
     // Nothing is always an option, at nothing.
     let options = g.world().options(ActorId(1), &VerbId::ALL, &p);
@@ -238,9 +267,9 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     }
     let mut verbs_by_bots = 0;
     for _ in 0..50 {
+        let living = g.world().actors.keys().filter(|a| g.world().alive(**a) && **a != s0).count();
         let r = g.tick(&[]).unwrap();
         let decisions: Vec<&engine2::RngDraw> = r.draws.iter().filter(|d| d.draw.point == engine2::DrawPoint::Decision).collect();
-        let living = g.world().actors.keys().filter(|a| g.world().alive(**a) && **a != s0).count();
         assert_eq!(decisions.len(), living, "one keyed draw per deciding actor");
         assert!(decisions.iter().all(|d| d.draw.n == 0 && d.draw.id != s0.0), "once, never for the player's actor");
         for e in &r.events {
@@ -300,6 +329,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let mut rejections: BTreeMap<String, u64> = BTreeMap::new();
     let mut per_polity_war_share: Vec<f64> = Vec::new();
     let mut rates: Vec<f64> = Vec::new();
+    let (mut revolt_ticks, mut province_ticks, mut revolt_lengths, mut revolts_started, mut revolts_ended) = (0u64, 0u64, Vec::<u32>::new(), 0u64, 0u64);
+    let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
@@ -333,10 +364,15 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                 production += w.production_per_tick(*a, &p);
             }
             let sizes: BTreeMap<ActorId, usize> = living.iter().map(|a| (*a, w.actors[a].provinces.len())).collect();
+            province_ticks += w.provinces.len() as u64;
+            revolt_ticks += w.provinces.values().filter(|pr| pr.revolt.is_some()).count() as u64;
+            let started: BTreeMap<ProvinceId, u32> = w.provinces.iter().filter_map(|(q, pr)| pr.revolt.map(|t| (*q, t.0))).collect();
             let r = g.tick(&[]).unwrap();
             if t == 199 {
                 let w = g.world();
-                polities_century += w.actors.len();
+                // The polities living a century on: since the orders of step (б) a polity
+                // can fall, and its record stays.
+                polities_century += w.actors.keys().filter(|a| w.alive(**a)).count();
                 alive_century += w.actors.keys().filter(|a| w.alive(**a)).count();
                 bound_century += w.actors.keys().filter(|a| w.alive(**a) && (!w.allies_of(**a).is_empty() || w.lord_of(**a).is_some() || !w.vassals_of(**a).is_empty())).count();
             }
@@ -359,9 +395,17 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                             risings += 1;
                         }
                     }
-                    Event::Revolt { from, .. } => {
+                    Event::Revolt { from, province } => {
+                        revolts_started += 1;
+                        *revolts_per_province.entry((seed, *province)).or_insert(0) += 1;
                         if sizes.get(from).copied().unwrap_or(0) >= 5 {
                             risings += 1;
+                        }
+                    }
+                    Event::RevoltEnded { province, .. } => {
+                        revolts_ended += 1;
+                        if let Some(s) = started.get(province) {
+                            revolt_lengths.push(t + 1 - s);
                         }
                     }
                     Event::ActorDied { actor } => {
@@ -419,11 +463,27 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert_eq!(falls, falls_by_conquest, "a polity falls only by conquest: every fall in the tick its last province was taken");
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");
-    // А12, А11 at war and Д3 are reported, not asserted, in step (а): a war has no means
-    // until the orders of step (б) — nobody marches, nothing is taken, and the attacked
-    // ends every war at once with a status quo that §19 accepts always (plan §23b, a
-    // question to the owner) — and the alliances follow the threat of step (г).
-    assert!(always < per_polity_war_share.len(), "«never at peace»");
+    // With the orders of step (б) a war has its means: А12, Д3 and В9 are checks, not
+    // print (owner's rule on #291).
+    let a12_band = band("war.observed_share_of_years");
+    assert!((a12_band[0]..=a12_band[1]).contains(&a12), "А12 {a12:.3} outside {a12_band:?}");
+    assert!(always * 10 < per_polity_war_share.len(), "«always at war»: {always} of {} polities over nine tenths of their ticks", per_polity_war_share.len());
+    assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
+    let d3_band = band("diplomacy.observed_bound_share");
+    assert!((d3_band[0]..=d3_band[1]).contains(&d3), "Д3 {d3:.2} outside {d3_band:?}");
+    let b9 = revolt_ticks as f64 / province_ticks as f64;
+    revolt_lengths.sort();
+    let repeated = revolts_per_province.values().filter(|n| **n > 1).count();
+    eprintln!(
+        "В9 share of province-ticks in revolt {b9:.4}; revolts started {revolts_started}, put down {revolts_ended}, length median {} ticks, mean {:.1}, longest {}; provinces that rose again {repeated} of {}",
+        revolt_lengths.get(revolt_lengths.len() / 2).copied().unwrap_or(0),
+        revolt_lengths.iter().sum::<u32>() as f64 / revolt_lengths.len().max(1) as f64,
+        revolt_lengths.last().copied().unwrap_or(0),
+        revolts_per_province.len()
+    );
+    let b9_band = band("revolt.observed_share_of_provinces");
+    assert!((b9_band[0]..=b9_band[1]).contains(&b9), "В9 {b9:.4} outside {b9_band:?}");
+    assert!(revolts_ended * 2 > revolts_started, "the bots put down most revolts: {revolts_ended} of {revolts_started}");
     let b5_band = band("reign.observed_years");
     assert!((b5_band[0]..=b5_band[1]).contains(&b5), "В5 {b5:.1} outside {b5_band:?}");
     let b6_band = band("usurpation.observed_per_century");
@@ -436,8 +496,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!((a11_band[0]..=a11_band[1]).contains(&a11_peace), "А11 at peace {a11_peace:.4} outside {a11_band:?}");
     let b7_band = band("revolt.observed_per_century");
     assert!((b7_band[0]..=b7_band[1]).contains(&b7), "В7 {b7:.2} outside {b7_band:?}");
-    let d3_band = band("diplomacy.observed_bound_share");
-    eprintln!("reported in (а): А12 {a12:.3} against {:?}, А11 at war {a11_war:.4}, Д3 at a century {d3:.2} against {d3_band:?}", band("war.observed_share_of_years"));
+    eprintln!("А11 at war {a11_war:.4} (E0: 2–3 % in war) — printed: the levy of agents at war is the bots' own choice");
 }
 
 #[test]
@@ -597,4 +656,245 @@ fn the_tax_is_a_lasting_decision_valued_as_a_flow_and_the_bot_comes_back_to_the_
     w.actors.get_mut(&a).unwrap().paid_share_ppm = 1_000_000;
     let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
     assert!((w.utility(a, &call, &p) - u(&w, VerbId::RaiseTax)).abs() < 1e-12);
+}
+
+// ---------- step (б): orders, suppression, the peace by its declarer ----------
+
+use engine2::Order;
+
+/// The test world with a second adult in the other house of polity 0, the two of them
+/// governing p05 and p10: a house to carry a secession.
+fn carrier_scenario() -> ScenarioData {
+    use engine2::scenario::PersonData;
+    let mut s = all_verbs(testworld::five_states_scenario());
+    s.persons.insert("o0b".to_string(), PersonData { name: "Other 0 second".into(), house: "o0".into(), born: 1445, parent: None, spouse: None });
+    s.provinces.get_mut("p05").unwrap().governor = Some("o0a".to_string());
+    s.provinces.get_mut("p10").unwrap().governor = Some("o0b".to_string());
+    s
+}
+
+#[test]
+fn an_order_is_a_channel_of_the_contract_a_ruler_commands_its_units_and_the_ruling_houses_retinue_a_house_its_own() {
+    let p = params();
+    let mut s = all_verbs(testworld::five_states_scenario());
+    s.houses.get_mut("h0").unwrap().soldiers = 30;
+    s.houses.get_mut("o0").unwrap().soldiers = 20;
+    let mut g = Game::new(&s, params(), 61).unwrap();
+    g.set_bots(false);
+    let house = |sid: &str| engine2::HouseId(s.houses.keys().position(|k| k == sid).unwrap() as u32);
+    let (h0, o0) = (house("h0"), house("o0"));
+    let w = g.world();
+    let s0 = ActorId(0);
+    let own = w.units.iter().find(|(_, u)| u.owner == s0 && u.house.is_none()).map(|(id, _)| *id).unwrap();
+    let ruling_retinue = w.units_of_house(h0)[0];
+    let other_retinue = w.units_of_house(o0)[0];
+    let ruler = ActorRef::Ruler(s0);
+    assert!(w.commands(ruler, own) && w.commands(ruler, ruling_retinue), "the ruler commands its units and the ruling house's men");
+    assert!(!w.commands(ruler, other_retinue), "not the men of a house that does not rule");
+    assert!(w.commands(ActorRef::House(o0), other_retinue) && !w.commands(ActorRef::House(o0), own));
+    // Played through the contract: the units march.
+    let r = g.tick_turn(&[], &[Order { actor: ruler, unit: own, to: at(0, 4) }, Order { actor: ActorRef::House(o0), unit: other_retinue, to: at(0, 2) }]).unwrap();
+    assert_eq!(g.world().units[&own].position, at(0, 4));
+    assert_eq!(g.world().units[&other_retinue].position, at(0, 2));
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::UnitMoved { unit, .. } if unit == own)));
+    // An order to another's unit is an error, and nothing is touched.
+    let before = g.to_save().unwrap();
+    let foreign = g.world().units_of(ActorId(1))[0];
+    let err = g.tick_turn(&[], &[Order { actor: ruler, unit: foreign, to: at(0, 0) }]).unwrap_err();
+    assert!(err.to_string().contains("does not command"), "{err}");
+    assert_eq!(g.to_save().unwrap(), before, "nothing touched");
+    assert!(g.tick_turn(&[], &[Order { actor: ruler, unit: engine2::UnitId(999), to: at(0, 0) }]).is_err());
+    let _ = p;
+}
+
+#[test]
+fn a_bot_puts_a_revolt_down_at_peace_lets_it_wait_at_war_advances_when_strong_enough_and_holds_its_capital_when_not() {
+    let p = params();
+    let mut w = world_of(&testworld::five_states_scenario(), 62);
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let u0 = w.units_of(s0)[0];
+    // At peace, everything at home: no order.
+    assert!(w.bot_orders(s0, &p).is_empty(), "at home and at peace: nothing to order");
+    // A revolt at peace: the nearest unit goes there and the revolt ends.
+    w.rise_now(at(0, 2), &p).unwrap();
+    assert!(w.in_revolt(at(0, 2)));
+    let orders = w.bot_orders(s0, &p);
+    assert_eq!(orders, vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(0, 2) }]);
+    let mut calm = params();
+    calm.revolt_per_tick = 0.0;
+    for o in &orders {
+        w.apply_order(o).unwrap();
+    }
+    let r = w.tick(&calm).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::RevoltEnded { province, .. } if province == at(0, 2))), "put down");
+    // Back home at peace.
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(0, 0) }]);
+    // At war a revolt waits; the units advance on the enemy when strong enough, else hold.
+    let mut w = world_of(&testworld::five_states_scenario(), 63);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
+    w.declare_war(s0, s1).unwrap();
+    w.rise_now(at(0, 2), &p).unwrap();
+    let orders = w.bot_orders(s0, &p);
+    assert_eq!(orders, vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "equal armies: advance on the wanted province, the revolt waits");
+    let u1 = w.units_of(s1)[0];
+    w.post(engine2::Account::Soldiers(u1), Source::Test, (3000 - w.soldiers(u1)) * 1000).unwrap();
+    assert!(w.bot_orders(s0, &p).is_empty(), "outnumbered: hold the capital, where the unit stands");
+    // Without a wanted province the target is the enemy's capital.
+    let mut w = world_of(&testworld::five_states_scenario(), 64);
+    w.declare_war(s0, s1).unwrap();
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }]);
+}
+
+#[test]
+fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_war_goal_or_exhausted() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let fresh = |seed: u64| {
+        let mut w = world_of(&testworld::five_states_scenario(), seed);
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+        w.declare_war(s0, s1).unwrap();
+        w
+    };
+    let w = fresh(71);
+    assert_eq!(w.wars[&(s0, s1)].by, Some(s0), "the declarer of record");
+    assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
+    // The declarer proposes a status quo: the attacked accepts always.
+    assert!(w.peace_room(s0, s1, &p).is_ok());
+    // The attacked proposes: the declarer refuses — its goal alive, its army paid.
+    assert_eq!(w.peace_room(s1, s0, &p), Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid"));
+    // … accepts at the threshold,
+    let mut x = fresh(72);
+    x.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(x.peace_room(s1, s0, &p).is_ok());
+    // … when its war goal is gone,
+    let mut x = fresh(73);
+    x.actors.get_mut(&s0).unwrap().goals.clear();
+    assert!(x.peace_room(s1, s0, &p).is_ok(), "no war goal left");
+    // … when exhausted: its army's pay short,
+    let mut x = fresh(74);
+    x.actors.get_mut(&s0).unwrap().paid_share_ppm = 800_000;
+    assert!(x.peace_room(s1, s0, &p).is_ok(), "the pay short");
+    // … and always when it is losing (lost more than it took).
+    let mut x = fresh(75);
+    x.wars.get_mut(&(s0, s1)).unwrap().taken = (0, 1);
+    assert_eq!(x.losing_side(s0, s1), Some(s0));
+    assert!(x.peace_room(s1, s0, &p).is_ok(), "the losing declarer accepts always");
+    // A war of the starting facts has no declarer: a status quo is accepted both ways.
+    let mut x = world_of(&testworld::five_states_scenario(), 76);
+    x.declare_war(s0, s1).unwrap();
+    x.wars.get_mut(&(s0, s1)).unwrap().by = None;
+    x.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+    assert!(x.peace_room(s0, s1, &p).is_ok() && x.peace_room(s1, s0, &p).is_ok());
+    // The war of secession is the parent's: the parent is its declarer and wants the new
+    // polity's land; the new polity accepts a status quo always.
+    let s = carrier_scenario();
+    let mut x = world_of(&s, 77);
+    let new = x.rise_now(at(0, 1), &p).unwrap().unwrap();
+    let key = (ActorId(0), new);
+    assert_eq!(x.wars[&key].by, Some(ActorId(0)), "the parent declares the war of secession");
+    assert!(x.actors[&ActorId(0)].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == GoalTarget::Polity(new)), "and wants its provinces back");
+    assert!(x.peace_room(ActorId(0), new, &p).is_ok(), "the new polity accepts a status quo");
+    assert!(x.peace_room(new, ActorId(0), &p).is_err(), "the parent refuses one while its goal stands and its army is paid");
+}
+
+/// The player's strategies of the paired run: the bot in the player's seat, a player who
+/// does nothing, a conqueror who goes to war on its weakest neighbour and marches on its
+/// capital — through the contract, with only what is on offer.
+fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
+    let p = params();
+    let me = ActorId(0);
+    let mut g = Game::new(s, params(), seed).unwrap();
+    if strategy != "none" {
+        g.set_player(Some(ActorRef::Ruler(me)));
+    }
+    let (_, summary) = sentinel::run(&mut g, ticks, seed, strategy, sentinel::Thresholds::default(), |g| {
+        let (mut calls, mut orders) = (Vec::new(), Vec::new());
+        if strategy == "conqueror" && g.world().alive(me) {
+            let w = g.world();
+            let enemy = w.actors.keys().copied().find(|b| w.at_war(me, *b) && w.alive(*b)).or_else(|| {
+                let offered = g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::DeclareWar && o.available);
+                let weakest = w.actors.keys().copied().filter(|b| *b != me && w.alive(*b) && w.borders(me, *b) && w.war_room(me, *b).is_ok()).min_by_key(|b| (w.army_size(*b), *b));
+                if offered {
+                    if let Some(b) = weakest {
+                        calls.push(VerbCall { actor: ActorRef::Ruler(me), verb: VerbId::DeclareWar, target: Target::Actor(b) });
+                    }
+                }
+                weakest
+            });
+            if g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
+                let capital = w.actors[&me].capital;
+                if !w.in_revolt(capital) && w.population(capital) > 0 {
+                    calls.push(VerbCall { actor: ActorRef::Ruler(me), verb: VerbId::Recruit, target: Target::Province(capital) });
+                }
+            }
+            if let Some(b) = enemy {
+                let target = w.actors[&b].capital;
+                for u in w.units.keys().copied().filter(|u| w.commands(ActorRef::Ruler(me), *u)) {
+                    if w.units[&u].destination != Some(target) && w.path(me, w.units[&u].position, target).is_some() {
+                        orders.push(Order { actor: ActorRef::Ruler(me), unit: u, to: target });
+                    }
+                }
+            }
+        }
+        // A call the probe refuses (a war the bots' calls made redundant) is skipped, not
+        // fatal: the player plays on.
+        if g.tick_turn(&calls, &orders).is_err() {
+            g.tick_turn(&[], &orders).or_else(|_| g.tick(&[])).unwrap();
+        }
+    });
+    let _ = p;
+    summary
+}
+
+/// The brief's acceptance of E3 (§8): the outcome depends on the strategy and on the seed —
+/// the sentinel's `StrategyIndependent` and `SeedIndependent` over a matrix of seeds ×
+/// strategies on every world.
+#[test]
+fn the_outcome_depends_on_the_players_strategy_and_on_the_seed_the_sentinel_matrix_on_every_world() {
+    let p = params();
+    const WORLDS: u64 = 10;
+    const TICKS: u32 = 150;
+    let (mut strategy_flags, mut seed_flags, mut matrices) = (0usize, 0usize, 0usize);
+    let mut flagged: Vec<String> = Vec::new();
+    for world in 1..=WORLDS {
+        let s = worldgen::generate(world, &p);
+        let mut m = sentinel::Matrix::new();
+        for seed in [1u64, 2, 3] {
+            for strategy in ["none", "idle", "conqueror"] {
+                m.add(play_strategy(&s, seed, strategy, TICKS));
+            }
+        }
+        matrices += 1;
+        for f in m.flags(&sentinel::Thresholds::default(), &[], None) {
+            match f {
+                sentinel::Flag::StrategyIndependent { seed, .. } => {
+                    strategy_flags += 1;
+                    flagged.push(format!("world {world} seed {seed}: strategy independent"));
+                }
+                sentinel::Flag::SeedIndependent { strategy, .. } => {
+                    seed_flags += 1;
+                    flagged.push(format!("world {world} {strategy}: seed independent"));
+                }
+                _ => {}
+            }
+        }
+    }
+    eprintln!("the sentinel's matrix, {matrices} worlds × 3 seeds × 3 strategies × {TICKS} ticks: StrategyIndependent {strategy_flags}, SeedIndependent {seed_flags}; {flagged:?}");
+    // The test world of the brief (§8): five states, the player at state 0.
+    let mut s = all_verbs(testworld::five_states_scenario());
+    use engine2::scenario::AspirationData;
+    for k in ["s1", "s2", "s3", "s4"] {
+        s.actors.get_mut(k).unwrap().aspirations = vec![AspirationData { kind: GoalKind::Take, target: Some(format!("p{:02}", 5 + k[1..].parse::<usize>().unwrap() - 1)), route: None }];
+    }
+    let mut m = sentinel::Matrix::new();
+    for seed in [1u64, 2, 3] {
+        for strategy in ["none", "idle", "conqueror"] {
+            m.add(play_strategy(&s, seed, strategy, TICKS));
+        }
+    }
+    let test_world: Vec<sentinel::Flag> = m.flags(&sentinel::Thresholds::default(), &[], None).into_iter().filter(|f| matches!(f, sentinel::Flag::StrategyIndependent { .. } | sentinel::Flag::SeedIndependent { .. })).collect();
+    eprintln!("the test world: {test_world:?}");
+    assert!(test_world.is_empty(), "the brief's acceptance on the test world: {test_world:?}");
+    assert_eq!(strategy_flags, 0, "the outcome does not depend on the strategy: {flagged:?}");
+    assert_eq!(seed_flags, 0, "the outcome does not depend on the seed: {flagged:?}");
 }

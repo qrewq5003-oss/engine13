@@ -52,6 +52,9 @@ pub enum DrawPoint {
     Adoption = 9,
     /// A province rising against its polity (keyed by province; E2 step 9, E0 В7).
     Revolt = 10,
+    /// A polity drawing a new goal by the weighted lot of reachable kinds (keyed by polity;
+    /// E3 (б)).
+    Goal = 11,
 }
 
 /// One request for randomness: where, when, for whom, which in turn.

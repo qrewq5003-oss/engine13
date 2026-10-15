@@ -222,6 +222,12 @@ pub struct Params {
     pub agent_weight_price_legitimacy: f64,
     pub agent_weight_price_treasury: f64,
     pub goal_horizon_ticks: u32,
+    /// (в) A bot's units advance on the enemy when they are at least this share of the
+    /// enemy's whole army, else they hold the capital (E3 (б)).
+    pub agent_advance_ratio: f64,
+    /// (в) The goals a polity keeps at a time; a freed slot is filled by revanche, by the
+    /// wish of a vassal to be free, else by the weighted lot (E3 (б)).
+    pub goal_open_per_polity: usize,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
     pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
@@ -379,6 +385,8 @@ impl Params {
         let w_legit = value("agent.weight_price_legitimacy")?;
         let w_treasury = value("agent.weight_price_treasury")?;
         let horizon = value("goal.horizon_years")?;
+        let advance = value("agent.advance_ratio")?;
+        let open_goals = value("goal.open_per_polity")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
             (GoalKind::Hold, value("aspiration.weight_hold")?),
@@ -471,6 +479,8 @@ impl Params {
             agent_weight_price_legitimacy: w_legit,
             agent_weight_price_treasury: w_treasury,
             goal_horizon_ticks: (horizon * 2.0).round() as u32,
+            agent_advance_ratio: advance,
+            goal_open_per_polity: open_goals.round() as usize,
             aspiration_weights,
             entries,
         })

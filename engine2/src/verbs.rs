@@ -94,6 +94,19 @@ pub struct VerbCall {
     pub target: Target,
 }
 
+/// An order to a unit (E3 (б), owner's answer 1 on §23): a channel of the contract, not a
+/// verb of the closed list — the march has its price already (supply on foreign land,
+/// foraging, the ruin of П6). A ruler orders the polity's units and the ruling house's
+/// retinue; a house its own retinue. The player and the bots give orders through the same
+/// channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Order {
+    pub actor: ActorRef,
+    pub unit: UnitId,
+    pub to: ProvinceId,
+}
+
 /// An offer the engine makes: this verb, available or not, at this cost. One function
 /// computes it for the player and for agents (lesson B42).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -32,21 +32,37 @@ fn play_summary(label: &str, scenario: &ScenarioData, ticks: u32) -> (RunSummary
     // What the world can produce within the run is read at the start: a channel that has
     // done its work by the end (a province converted) is no longer there to be seen.
     let possible = g.possible_kinds(ticks);
-    let mut died = 0usize;
+    // A polity falls only by conquest (E3 (б): the bots make war): every fall in the tick
+    // its last province was taken.
+    let (mut died, mut died_without_conquest) = (0usize, 0usize);
     let (s, summary) = sentinel::run(&mut g, ticks, 1, "none", Thresholds::default(), |g| {
         match g.tick(&[]) {
-            Ok(r) => died += r.events.iter().filter(|e| matches!(e.event, engine2::Event::ActorDied { .. })).count(),
+            Ok(r) => {
+                let conquered: Vec<engine2::ActorId> = r.events.iter().filter_map(|e| match e.event {
+                    engine2::Event::ProvinceChangedHands { from, how: engine2::event::Transfer::Conquest, .. } => Some(from),
+                    _ => None,
+                }).collect();
+                for e in &r.events {
+                    if let engine2::Event::ActorDied { actor } = e.event {
+                        died += 1;
+                        if !conquered.contains(&actor) {
+                            died_without_conquest += 1;
+                        }
+                    }
+                }
+            }
             Err(e) => panic!("{label}: tick failed: {e}"),
         }
     });
     let flags = s.flags();
     assert!(flags.is_empty(), "{label}: sentinel flags {flags:?}");
     let o = g.observe();
-    // Without war nothing conquers and nothing falls: a polity whose last house dies out
-    // raises a new one from its people (plan §18.5, owner's rule on #285); a rising (E2
-    // step 9) bears polities but kills none — the parent keeps its capital.
-    assert_eq!(died, 0, "{label}: {died} polities fell without war");
-    assert!(o.alive.len() >= scenario.actors.len() && scenario.actors.keys().all(|k| o.alive.iter().any(|a| a.0 == *k)), "{label}: an actor vanished without a system to kill it");
+    // A polity whose last house dies out raises a new one from its people (plan §18.5,
+    // owner's rule on #285); a rising bears polities and kills none; only a war takes the
+    // last province.
+    assert_eq!(died_without_conquest, 0, "{label}: {died_without_conquest} polities fell without a conquest");
+    let starting_alive = scenario.actors.keys().filter(|k| o.alive.iter().any(|a| a.0 == **k)).count();
+    assert!(starting_alive + died >= scenario.actors.len(), "{label}: an actor vanished without a system to kill it");
     (summary, possible)
 }
 

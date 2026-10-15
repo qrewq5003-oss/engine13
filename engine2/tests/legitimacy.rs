@@ -676,3 +676,98 @@ fn paired_runs_by_the_outcome_of_brief_1_a_greedy_ruler_gains_at_most_the_ceilin
     let (plain_resources, defaulter_resources) = (plain.spent + plain.net_worth, defaulter.spent + defaulter.net_worth);
     assert!(defaulter_resources < plain_resources, "borrowing to spend on order is not a source of resources: {defaulter_resources} vs {plain_resources}");
 }
+
+/// What the treasury keeps of the take in a tick: the tax, less the court and the seats.
+fn net_take(w: &mut World, a: ActorId, p: &Params) -> i64 {
+    let r = w.tick(p).unwrap();
+    r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && matches!(q.source, Source::Tax | Source::Court | Source::Seat)).map(|q| q.milli).sum::<i64>() / 1000
+}
+
+/// Owner's rule on #292: at the bottom of legitimacy a step of the tax up keeps its price.
+/// Legitimacy stops at 0 and the norm with it, so the share collected stopped falling while
+/// the rate rose: a usurper at legitimacy 0 raised the tax from 0.10 to 0.18 for nothing.
+/// Now the points of the norm below zero count as legitimacy lost for the collection.
+/// Every reachable bottom state — each lawful norm (the four standings, the regency, the
+/// usurper under each rule of succession), with and without a default, at every rate of
+/// the band where the norm sits at zero or below — at legitimacy 0: a step up lowers the
+/// share by what it costs above zero, the net take of a tick does not rise, except in two
+/// states named below, and the bot never wants the step.
+#[test]
+fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_does_not_raise_the_net_take() {
+    let p = params();
+    let base = world();
+    let a = ActorId(0);
+    let step_share = (p.legitimacy_norm_per_tax_step * p.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64;
+    let year = base.year();
+    let mut cases: Vec<(String, Standing, Option<Succession>, bool)> = Vec::new();
+    for s in [Standing::Hereditary, Standing::Confirmed, Standing::Elected, Standing::Acclaimed] {
+        cases.push((format!("{s:?}"), s, None, false));
+    }
+    cases.push(("Regency".into(), Standing::Hereditary, None, true));
+    for rule in [Succession::Blood, Succession::Mixed, Succession::Election, Succession::Acclamation] {
+        cases.push((format!("Usurper/{rule:?}"), Standing::Usurper, Some(rule), false));
+    }
+    let (mut states, mut rises): (usize, Vec<String>) = (0, Vec::new());
+    for (name, standing, rule, minor) in &cases {
+        for default in [false, true] {
+            let mut rate = p.tax_default_ppm;
+            while rate + p.tax_step_ppm <= p.tax_band_ppm.1 {
+                let mut w = base.clone();
+                {
+                    let ruler = w.actors[&a].ruler;
+                    if *minor {
+                        w.persons.get_mut(&ruler).unwrap().born = year - 5;
+                    }
+                    let actor = w.actors.get_mut(&a).unwrap();
+                    actor.standing = *standing;
+                    if let Some(rule) = rule {
+                        actor.succession = *rule;
+                    }
+                    actor.tax_rate_ppm = rate;
+                    actor.credit_closed_until = if default { Some(engine2::time::Tick(w.tick.0 + 100)) } else { None };
+                    actor.legitimacy = 0.0;
+                }
+                let label = format!("{name}, default {default}, rate {:.2}", rate as f64 / 1e6);
+                if w.unclamped_legitimacy_norm(a, &p) > 1e-9 {
+                    rate += p.tax_step_ppm;
+                    continue;
+                }
+                states += 1;
+                let share = w.collection_share_ppm(a, &p);
+                let mut raised = w.clone();
+                let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+                raised.apply_verb(&call, &p).unwrap();
+                assert_eq!(raised.actors[&a].legitimacy, 0.0, "{label}: the rating stays at the bottom");
+                assert_eq!(raised.collection_share_ppm(a, &p), (share - step_share).max(0), "{label}: the step costs the share what it costs above zero");
+                // The bot reads the same prices, the lasting shift included: at the bottom a
+                // step up is never worth it, not even with the army's pay unmet (the need at
+                // its top, a quarter paid) and not in the two states where the take still
+                // grows.
+                let mut unpaid = w.clone();
+                unpaid.actors.get_mut(&a).unwrap().paid_share_ppm = 0;
+                let wants = unpaid.tax_utility(a, VerbId::RaiseTax, &p);
+                assert!(wants < 0.0, "{label}: the bot wants the step up at the bottom ({wants:.3})");
+                let (before, after) = (net_take(&mut w, a, &p), net_take(&mut raised, a, &p));
+                assert!(before > 0, "{label}: something is taken");
+                if after > before {
+                    rises.push(format!("{label}: {:+.1}%", (after as f64 / before as f64 - 1.0) * 100.0));
+                }
+                rate += p.tax_step_ppm;
+            }
+        }
+    }
+    assert!(states >= 30, "the bottom states are reached: {states}");
+    // Two states still gain a little, and not by the bound: their share at the bottom is
+    // high (0.60 and 0.68 of the take), and there a step costs less in share than it adds
+    // in rate — the arithmetic of the step above zero, where a hereditary ruler at its norm
+    // gains +10 % for the step from the tithe. Before the rule all of them gained 11–17 %.
+    // Named so that a change shows; the owner decides on #292.
+    let named = ["Regency, default true, rate 0.14", "Usurper/Acclamation, default true, rate 0.12"];
+    eprintln!("bottom states {states}; a step up still raises the net take in: {rises:?}");
+    assert_eq!(rises.len(), named.len(), "{rises:?}");
+    for (r, n) in rises.iter().zip(named) {
+        assert!(r.starts_with(n), "{rises:?}");
+        let gain: f64 = r.rsplit(": ").next().unwrap().trim_end_matches('%').parse().unwrap();
+        assert!(gain < 2.0, "{r}: more than a trace");
+    }
+}

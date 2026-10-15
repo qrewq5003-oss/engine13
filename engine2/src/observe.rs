@@ -40,9 +40,13 @@ impl Observed for Game {
         let w = self.world();
         let alive = w.actors.keys().filter(|a| w.alive(**a)).map(|a| self.actor_id(*a)).collect();
         let owners = w.provinces.iter().map(|(p, pr)| (self.province_id(*p), self.actor_id(pr.owner))).collect();
+        // Only the living are rated: a fallen polity keeps its record, and its legitimacy
+        // frozen at its last value is no rating of the world (since E3 (б) polities fall
+        // by conquest; the full run flagged a fallen one as pinned to a bound).
         let ratings = w
             .actors
             .iter()
+            .filter(|(a, _)| w.alive(**a))
             .map(|(a, actor)| Rating { who: self.actor_id(*a), name: "legitimacy".into(), value: actor.legitimacy, lo: 0.0, hi: 100.0 })
             .collect();
         let stocks = w
