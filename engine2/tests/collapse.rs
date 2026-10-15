@@ -32,6 +32,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 /// The constants with the base of the rising at nothing: the test chooses its risings
 /// through `rise_now`, the draws add none.
 fn calm() -> Params {
@@ -173,19 +190,19 @@ fn the_generator_carves_the_retinues_out_of_the_army_by_x2_and_a_run_with_house_
     assert!(mean(&other_shares) > 0.0 && mean(&other_shares) < band[0]);
     // Save and load through the contract, bit for bit, with house troops melting.
     let s = worldgen::generate(4, &p);
-    let mut straight = Game::new(&s, params(), 4).unwrap();
+    let mut straight = bare(&s, params(), 4).unwrap();
     let mut a = Vec::new();
     for _ in 0..40 {
         a.push(straight.tick(&[]).unwrap());
     }
-    let mut g = Game::new(&s, params(), 4).unwrap();
+    let mut g = bare(&s, params(), 4).unwrap();
     let mut b = Vec::new();
     for _ in 0..20 {
         b.push(g.tick(&[]).unwrap());
     }
     let save = g.to_save().unwrap();
     assert!(save.contains("\"house\":") && save.contains("\"paid_share_ppm\"") && save.contains("\"core_culture\""));
-    let mut g2 = Game::from_save(&s, params(), &save).unwrap();
+    let mut g2 = bare_load(&s, params(), &save).unwrap();
     for _ in 0..20 {
         b.push(g2.tick(&[]).unwrap());
     }
@@ -623,7 +640,7 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
     let mut declared: Vec<String> = Vec::new();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         for k in g.possible_kinds(300) {
             if !declared.contains(&k) {
                 declared.push(k);
@@ -733,13 +750,13 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
         }
         if seed == 1 {
             // Deterministic through a save, risings included.
-            let mut g2 = Game::new(&s, params(), seed).unwrap();
+            let mut g2 = bare(&s, params(), seed).unwrap();
             let mut spliced = Vec::new();
             for _ in 0..150 {
                 spliced.push(g2.tick(&[]).unwrap());
             }
             let save = g2.to_save().unwrap();
-            let mut g3 = Game::from_save(&s, params(), &save).unwrap();
+            let mut g3 = bare_load(&s, params(), &save).unwrap();
             for _ in 0..150 {
                 spliced.push(g3.tick(&[]).unwrap());
             }
@@ -767,5 +784,5 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
     assert!(polities_end > polities_start);
     assert!(in_revolt_end > 0, "revolts stand in E2: nobody marches to put them down");
     assert!(["Born", "Revolt", "Secession"].iter().all(|k| declared.contains(&k.to_string())), "the kinds are declared by the horizon: {declared:?}");
-    assert!(!Game::new(&worldgen::generate(1, &p), params(), 1).unwrap().possible_kinds(10).iter().any(|k| k == "Born"), "and not for a horizon too short to expect one");
+    assert!(!bare(&worldgen::generate(1, &p), params(), 1).unwrap().possible_kinds(10).iter().any(|k| k == "Born"), "and not for a horizon too short to expect one");
 }

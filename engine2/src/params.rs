@@ -215,6 +215,16 @@ pub struct Params {
     /// the retinue of a house that does not rule.
     pub retinue_share_ppm: i64,
     pub other_retinue_share_ppm: i64,
+    /// (в) The agents (E3, brief §3): the temperature of the softmax over the offers, the
+    /// weights of a price in legitimacy (per 100) and in treasury (per year of revenue)
+    /// against a goal's progress, and the ticks a goal is given before it is put aside.
+    pub agent_temperature: f64,
+    pub agent_weight_price_legitimacy: f64,
+    pub agent_weight_price_treasury: f64,
+    pub goal_horizon_ticks: u32,
+    /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
+    /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
+    pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -365,6 +375,18 @@ impl Params {
         let core_margin = value("core.switch_margin")?;
         let retinue = value("house.retinue_share_of_army")?;
         let other_retinue = value("house.other_retinue_share")?;
+        let temperature = value("agent.temperature")?;
+        let w_legit = value("agent.weight_price_legitimacy")?;
+        let w_treasury = value("agent.weight_price_treasury")?;
+        let horizon = value("goal.horizon_years")?;
+        use crate::agents::GoalKind;
+        let aspiration_weights = [
+            (GoalKind::Hold, value("aspiration.weight_hold")?),
+            (GoalKind::AllianceAgainst, value("aspiration.weight_alliance")?),
+            (GoalKind::Take, value("aspiration.weight_take")?),
+            (GoalKind::Subdue, value("aspiration.weight_subdue")?),
+            (GoalKind::Unite, value("aspiration.weight_unite")?),
+        ];
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -445,6 +467,11 @@ impl Params {
             core_switch_margin_ppm: (core_margin * 1_000_000.0).round() as i64,
             retinue_share_ppm: (retinue * 1_000_000.0).round() as i64,
             other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,
+            agent_temperature: temperature,
+            agent_weight_price_legitimacy: w_legit,
+            agent_weight_price_treasury: w_treasury,
+            goal_horizon_ticks: (horizon * 2.0).round() as u32,
+            aspiration_weights,
             entries,
         })
     }

@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::Goal;
 use crate::ids::{CultureId, ReligionId, ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::movement::Way;
@@ -165,6 +166,13 @@ pub enum Event {
     /// A polity was born out of another: the house that leads it and the provinces it took
     /// (brief §2a: the successor gets provinces, not a copy of metrics).
     ActorBorn { actor: ActorId, from: ActorId, house: HouseId, provinces: Vec<ProvinceId> },
+    /// A polity set itself a goal (E3): at the start from the facts, later by the rules.
+    GoalSet { actor: ActorId, goal: Goal },
+    /// A goal's progress reached one: what was to be taken is held, what was to be subdued
+    /// is a vassal… The goal goes on as «hold» where there is something to hold.
+    GoalReached { actor: ActorId, goal: Goal },
+    /// A goal that made no progress over `goal.horizon_years` was put aside.
+    GoalDropped { actor: ActorId, goal: Goal },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

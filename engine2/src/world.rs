@@ -25,8 +25,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::{Goal, GoalFact};
 use crate::event::{Event, Stamped};
-use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, ReligionId, UnitId};
+use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, RegionId, ReligionId, UnitId};
 use crate::ledger::{Account, Ledger, LedgerError, Posting, Source};
 use crate::params::Params;
 use crate::rng::{self, Draw, DrawPoint, RngDraw};
@@ -187,6 +188,10 @@ pub struct Actor {
     /// (`collapse.rs`). A province of another tongue than the core is alienated — not one
     /// of another tongue than the court, which was the norm before nationalism.
     pub core_culture: CultureId,
+    /// The polity's goals (E3, brief §3: a state of the actor with a progress read off the
+    /// facts of the world; `agents.rs`). Starting aspirations are facts of the scenario,
+    /// then the goals live and change by the engine's rules.
+    pub goals: Vec<Goal>,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -360,6 +365,8 @@ pub struct Names {
     /// order; the engine reads neither.
     pub cultures: Vec<String>,
     pub religions: Vec<String>,
+    /// Index = `RegionId`.
+    pub regions: Vec<(String, String)>,
 }
 
 /// One province of the starting facts.
@@ -391,6 +398,15 @@ pub struct ActorFact {
     pub heir: Option<PersonId>,
     pub regent: Option<PersonId>,
     pub succession: Succession,
+    /// Starting aspirations (brief §4): what the polity wants on the first day, in the facts
+    /// of the world.
+    pub goals: Vec<GoalFact>,
+}
+
+/// One region of the starting facts: a named set of provinces (E3, the target of «unite»).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegionFact {
+    pub provinces: Vec<ProvinceId>,
 }
 
 /// One house of the starting facts.
@@ -445,6 +461,8 @@ pub struct Facts {
     /// Index = `PersonId`.
     pub persons: Vec<PersonFact>,
     pub relations: RelationFacts,
+    /// Index = `RegionId`.
+    pub regions: Vec<RegionFact>,
 }
 
 impl Facts {
@@ -487,6 +505,8 @@ pub struct World {
     pub persons: BTreeMap<PersonId, Person>,
     /// Next person id; persons born in play number on from here.
     pub next_person: u32,
+    /// Regions: named sets of provinces, facts of the scenario (E3); index = `RegionId`.
+    pub regions: Vec<Vec<ProvinceId>>,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -544,6 +564,8 @@ pub enum WorldError {
     UnknownReligion(ReligionId),
     #[error("unknown person {0:?}")]
     UnknownPerson(PersonId),
+    #[error("unknown region {0:?}")]
+    UnknownRegion(RegionId),
     #[error("house {0:?} belongs to unknown polity {1:?}")]
     UnknownHousePolity(HouseId, ActorId),
     #[error("person {0:?} belongs to unknown house {1:?}")]
@@ -577,6 +599,9 @@ impl World {
         }
         if names.persons.len() != facts.persons.len() {
             return Err(WorldError::NamesMismatch { what: "persons", names: names.persons.len(), items: facts.persons.len() });
+        }
+        if names.regions.len() != facts.regions.len() {
+            return Err(WorldError::NamesMismatch { what: "regions", names: names.regions.len(), items: facts.regions.len() });
         }
         let (n_cultures, n_religions) = (names.cultures.len() as u32, names.religions.len() as u32);
         let known_faith = |c: CultureId, r: ReligionId| -> Result<(), WorldError> {
@@ -659,6 +684,7 @@ impl World {
                     vassal_of: None,
                     // Set below, once the provinces and their people are in.
                     core_culture: CultureId(0),
+                    goals: Vec::new(),
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -730,6 +756,17 @@ impl World {
                 ledger.open(tick, Account::Soldiers(uid), h.soldiers as i64)?;
             }
         }
+        // Regions: every province known.
+        let mut regions: Vec<Vec<ProvinceId>> = Vec::with_capacity(facts.regions.len());
+        for (i, r) in facts.regions.iter().enumerate() {
+            if let Some(bad) = r.provinces.iter().find(|p| p.0 >= n) {
+                return Err(WorldError::UnknownNeighbour(*bad, ProvinceId(i as u32)));
+            }
+            let mut ps = r.provinces.clone();
+            ps.sort();
+            ps.dedup();
+            regions.push(ps);
+        }
         // The opening postings belong to no tick report; the world starts settled.
         ledger.drain_postings();
         let next_person = persons.len() as u32;
@@ -750,6 +787,7 @@ impl World {
             houses,
             persons,
             next_person,
+            regions,
             names,
             ledger,
             draws: Vec::new(),
@@ -808,6 +846,13 @@ impl World {
                 world.relations.insert((*a, *b), norm);
             }
         }
+        // Starting aspirations (E3): the goals of the first day, with their baselines.
+        for (i, a) in facts.actors.iter().enumerate() {
+            let id = ActorId(i as u32);
+            for g in &a.goals {
+                world.set_goal(id, g.kind, g.target)?;
+            }
+        }
         Ok(world)
     }
 
@@ -859,16 +904,16 @@ impl World {
         sorted.into_iter().map(|id| (id, self.draw(point, id))).collect()
     }
 
-    /// Play one tick: one decision draw per actor (stand-in for E3), units move
-    /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
-    /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
-    /// (`politics.rs`), treaties run out and relations move to their norms
-    /// (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), provinces rise and houses
-    /// take their land into polities of their own (`collapse.rs`), people grow, starve,
-    /// sicken and migrate (`population.rs`), then `TickPlayed`.
+    /// Play one tick: units move (`movement.rs`), battles and sieges (`army.rs`), the
+    /// economy produces, taxes and pays (`economy.rs`), units are supplied to the paid
+    /// share, the house and the throne (`politics.rs`), treaties run out and relations move
+    /// to their norms (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), provinces
+    /// rise and houses take their land into polities of their own (`collapse.rs`), people
+    /// grow, starve, sicken and migrate (`population.rs`), the goals of the polities are
+    /// read against the world (`agents.rs`), then `TickPlayed`. The decisions of the agents
+    /// — one keyed draw per deciding actor — come before the tick, through
+    /// [`World::decide_all`] (E3; the E1 stand-in draw is gone).
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
-        let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
-        let _ = self.draw_each(DrawPoint::Decision, actor_ids);
         self.phase_movement(params)?;
         self.phase_battle(params)?;
         self.phase_siege(params)?;
@@ -879,6 +924,7 @@ impl World {
         self.phase_faith(params)?;
         self.phase_collapse(params)?;
         self.phase_population(params)?;
+        self.phase_goals(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);
         let report = TickReport {
@@ -994,12 +1040,14 @@ mod tests {
     }
 
     #[test]
-    fn tick_advances_time_and_reports_one_draw_per_actor() {
+    fn tick_advances_time_and_reports_the_draws_of_its_systems() {
         let mut w = world(7);
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
-        assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), w.actors.len());
-        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt)), "no system of the test world draws elsewhere");
+        // The decision draw belongs to the agents (E3, `decide_all`), not to the tick: a
+        // world ticked without agents draws no decision.
+        assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), 0);
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt)), "no system of the test world draws elsewhere");
         assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));

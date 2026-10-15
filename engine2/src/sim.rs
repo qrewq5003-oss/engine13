@@ -56,11 +56,55 @@ pub struct Game {
     params: Params,
     /// Events of the last played tick, for the chronicle snapshot.
     last_events: Vec<Stamped>,
+    /// The actor the player plays, if any (E3): its decisions are the player's calls, every
+    /// other living polity is a bot. `None` — a run without a player (the sentinel's
+    /// player-less run, the paired run's bot side).
+    player: Option<ActorRef>,
+    /// Calls of bots the world refused at application, by verb and reason. Every bot
+    /// decides on the state at the tick's start (brief §3), so an earlier call of the same
+    /// tick can close a later one — two polities proposing the same peace, two houses the
+    /// same bride; what was not on offer at the decision is never called (B42, tested).
+    bot_rejections: std::collections::BTreeMap<String, u64>,
+    /// Whether the bots decide at all. On in a game; the acceptance tests of the systems of
+    /// E2 drive the world by hand and switch them off (`set_bots`).
+    bots: bool,
 }
 
 impl Game {
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Who the player plays; `None` — nobody, every polity is a bot.
+    pub fn player(&self) -> Option<ActorRef> {
+        self.player
+    }
+
+    /// Give the player a role (E3): that actor's calls come from `tick(player)`, the bots
+    /// leave it alone. `None` hands it back to the bots.
+    pub fn set_player(&mut self, who: Option<ActorRef>) {
+        self.player = who;
+    }
+
+    /// Calls of bots the world refused so far, at application: conflicts within a tick.
+    pub fn bot_rejections(&self) -> u64 {
+        self.bot_rejections.values().sum()
+    }
+
+    /// The refusals by verb and reason.
+    pub fn bot_rejection_reasons(&self) -> &std::collections::BTreeMap<String, u64> {
+        &self.bot_rejections
+    }
+
+    /// Switch the bots on or off. Off, every polity waits for the player's calls — the
+    /// world of E2 as the tests of its systems drive it; on (the default), every living
+    /// polity but the player's decides every tick.
+    pub fn set_bots(&mut self, on: bool) {
+        self.bots = on;
+    }
+
+    pub fn bots(&self) -> bool {
+        self.bots
     }
 
     /// The constants this run plays with (the sentinel's observer reads the horizons).
@@ -186,7 +230,7 @@ impl Simulation for Game {
     fn new(scenario: &ScenarioData, params: Params, seed: u64) -> Result<Game, SimError> {
         let c = scenario.compile(&params)?;
         let world = World::from_facts(&c.facts, c.names, &params, seed)?;
-        Ok(Game { world, display: c.display, params, last_events: Vec::new() })
+        Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, bot_rejections: std::collections::BTreeMap::new(), bots: true })
     }
 
     fn tick(&mut self, player: &[VerbCall]) -> Result<TickReport, SimError> {
@@ -195,9 +239,20 @@ impl Simulation for Game {
         if let Some(bad) = player.iter().find(|c| !self.enabled(c.verb)) {
             return Err(SimError::VerbNotEnabled(bad.verb));
         }
+        // First all decide — the bots on the state as it stands, before any call lands —
+        // then all is applied: the player's calls, then the bots' in canonical order
+        // (brief §3, E3 step (а)).
+        let enabled: Vec<VerbId> = self.display.verbs.iter().map(|(v, _)| *v).collect();
+        let bots = if self.bots { self.world.decide_all(&enabled, self.player, &self.params) } else { Vec::new() };
         for call in player {
             self.world.apply_verb(call, &self.params)?;
             self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target });
+        }
+        for call in &bots {
+            match self.world.apply_verb(call, &self.params) {
+                Ok(()) => self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target }),
+                Err(e) => *self.bot_rejections.entry(format!("{:?}: {e}", call.verb)).or_insert(0) += 1,
+            }
         }
         let report = self.world.tick(&self.params)?;
         self.last_events = report.events.clone();
@@ -232,6 +287,6 @@ impl Simulation for Game {
                 scenario_hash,
             });
         }
-        Ok(Game { world, display: c.display, params, last_events: Vec::new() })
+        Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, bot_rejections: std::collections::BTreeMap::new(), bots: true })
     }
 }

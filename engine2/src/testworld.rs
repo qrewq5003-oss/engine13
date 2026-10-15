@@ -87,9 +87,10 @@ pub fn five_states() -> (Facts, Names) {
             heir: if a == 0 { Some(person_index("c0")) } else { None },
             regent: None,
             succession: RULES[a as usize],
+            goals: Vec::new(),
         })
         .collect();
-    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors, houses, persons, relations: RelationFacts::default() };
+    let facts = Facts { scenario_id: "testworld".to_string(), start_year: 1477, diseases: Vec::new(), provinces, actors, houses, persons, relations: RelationFacts::default(), regions: Vec::new() };
     let names = Names {
         actors: (0..SIDE).map(|a| (format!("s{a}"), format!("State {a}"))).collect(),
         provinces: province_names,
@@ -99,6 +100,7 @@ pub fn five_states() -> (Facts, Names) {
         // house (the fields are open), so every other test keeps its numbers.
         cultures: vec!["c0".to_string()],
         religions: vec!["f0".to_string()],
+        regions: Vec::new(),
     };
     (facts, names)
 }
@@ -130,6 +132,7 @@ pub fn five_states_scenario() -> ScenarioData {
                 heir: a.heir.as_ref().map(person),
                 regent: a.regent.as_ref().map(person),
                 succession: a.succession,
+                aspirations: Vec::new(),
             },
         );
     }
@@ -177,6 +180,7 @@ pub fn five_states_scenario() -> ScenarioData {
         houses,
         persons,
         relations: None,
+        regions: None,
         verbs,
     }
 }

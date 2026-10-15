@@ -26,6 +26,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 fn person(s: &ScenarioData, sid: &str) -> PersonId {
     PersonId(s.persons.keys().position(|k| k == sid).unwrap() as u32)
 }
@@ -151,7 +168,7 @@ fn house_of(s: &ScenarioData, sid: &str) -> HouseId {
 fn a_polity_with_no_house_left_raises_a_new_house_from_the_people_of_its_capital_and_lives_on() {
     let p = params();
     let s = testworld::five_states_scenario();
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let s4 = ActorId(4);
     let (r4, c4) = (person(&s, "r4"), person(&s, "c4"));
     let capital = g.world().actors[&s4].capital;
@@ -237,7 +254,7 @@ fn a_house_with_the_throne_and_a_governorship_gets_x1_from_both_as_an_exact_tran
 #[test]
 fn a_house_is_offered_nothing_it_can_do_until_diplomacy() {
     let s = testworld::five_states_scenario();
-    let g = Game::new(&s, params(), 1).unwrap();
+    let g = bare(&s, params(), 1).unwrap();
     let offers = g.verbs(ActorRef::House(house(&s, "h0")));
     assert!(offers.iter().all(|o| !o.available && o.why.is_some()));
     let _ = VerbId::RaiseTax; // priced for the ruler in 6b: `tests/legitimacy.rs`
@@ -259,7 +276,7 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
     let (mut tax_total, mut seat_total) = (0i64, 0i64);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
         for h in g.world().houses.keys() {
             sizes_start.push(g.world().members(*h).len());
@@ -357,18 +374,18 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
 fn the_house_and_the_throne_are_deterministic_through_a_save() {
     let p = params();
     let s = worldgen::generate(3, &p);
-    let mut straight = Game::new(&s, params(), 7).unwrap();
+    let mut straight = bare(&s, params(), 7).unwrap();
     let mut a = Vec::new();
     for _ in 0..80 {
         a.push(straight.tick(&[]).unwrap());
     }
-    let mut g = Game::new(&s, params(), 7).unwrap();
+    let mut g = bare(&s, params(), 7).unwrap();
     let mut b = Vec::new();
     for _ in 0..40 {
         b.push(g.tick(&[]).unwrap());
     }
     let save = g.to_save().unwrap();
-    let mut g2 = Game::from_save(&s, params(), &save).unwrap();
+    let mut g2 = bare_load(&s, params(), &save).unwrap();
     for _ in 0..40 {
         b.push(g2.tick(&[]).unwrap());
     }

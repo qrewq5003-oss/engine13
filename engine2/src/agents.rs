@@ -1,0 +1,599 @@
+//! Agents (brief §3 «Агенты: решают все, движок исполняет», plan §23; E3 step (а)): goals
+//! as a state of the actor, utility without learning, the choice by softmax through the
+//! world's keyed randomness, every bot deciding on the snapshot of the tick's start before
+//! anything is applied, and the player going through the same offers.
+//!
+//! **Goals** (`Actor::goals`). A goal is a kind of the engine's closed list (E0 §6: hold,
+//! take, subdue, free, unite, alliance against, union; «survive» is implicit — every polity
+//! at war with a stronger enemy puts it first) with a target in the facts of the world: a
+//! province, a polity, a region (a named set of provinces, a fact of the scenario — a
+//! kingdom or an empire, never a people: owner's rule on §23), a faith, a route of two
+//! provinces. Its **progress** is a function of the state alone ([`World::goal_progress`]):
+//! what is to be held is held and not in revolt or under siege; what is to be taken is
+//! owned; what is to be subdued is a vassal; a region is united when every province of it
+//! is owned. A goal reached is `GoalReached` and goes on as «hold» where there is something
+//! to hold; a goal that made no progress for `goal.horizon_years` is put aside
+//! (`GoalDropped`) and the next reachable one is taken by the rules — free when a vassal,
+//! else hold the capital — never by the lot. Starting aspirations are facts of the scenario
+//! (`aspirations`); the generator draws them by a weighted lot from reachable targets
+//! (owner's answer 3: the peaceful kinds heavier than the greedy, checked through А12).
+//!
+//! **Utility** ([`World::utility`]): for every offer the ruler has — the same offers the
+//! player sees (`sim.rs`), with the same rules of availability — the progress the verb
+//! would move over the polity's goals, the survival it buys at war with a stronger enemy,
+//! less its price: a point of legitimacy per hundred at `agent.weight_price_legitimacy`, a
+//! kilogram per year of revenue at `agent.weight_price_treasury`. No learning, no
+//! look-ahead: an estimate off the state (a war on the owner of what is wanted, peace when
+//! it is taken or the war is lost, a levy at war, a loan when the pay fell short, an
+//! embassy to whom an alliance is wanted). **The choice is softmax** at `agent.temperature`
+//! through one keyed draw at `DrawPoint::Decision` per deciding actor and tick; «do
+//! nothing» is always in the set at a utility of nothing; a verb enters once, with its best
+//! target, and only when it is better than doing nothing ([`World::choices`], plan §23b).
+//!
+//! **Order** (brief §3): [`World::decide_all`] scores every bot on the state as it stands,
+//! then the calls are applied in canonical order of actors (`sim.rs`), the player's first.
+//! A bot never calls what is not on offer, and its calls go through the same
+//! `apply_verb` as the player's: the parity of B42 is a test, not a promise.
+//!
+//! Orders to units, the suppression of revolts, the opportunities a house answers
+//! (secession, usurpation, union, votes), the threat in the relation and the quality of
+//! units are the later steps of E3 (plan §23, owner's cut on #291).
+
+use serde::{Deserialize, Serialize};
+
+use crate::event::Event;
+use crate::ids::{ActorId, ProvinceId, RegionId, ReligionId};
+use crate::params::Params;
+use crate::rng::{unit, Draw, DrawPoint};
+use crate::time::Tick;
+use crate::verbs::{ActorRef, Target, VerbCall, VerbId};
+use crate::world::{World, WorldError};
+
+/// The kinds of a goal: the engine's closed list (E0 §6). «Survive» is implicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum GoalKind {
+    /// Keep what is held: a province, a route, a region, a vassal.
+    Hold,
+    /// Take a province, a route, a region, or all the land of a polity.
+    Take,
+    /// Make a polity a vassal.
+    Subdue,
+    /// Leave vassalage.
+    Free,
+    /// Own every province of a region.
+    Unite,
+    /// An alliance with someone against a polity.
+    AllianceAgainst,
+    /// The court's faith to another (the decision comes with the opportunities channel).
+    Union,
+}
+
+/// The target of a goal: a fact of the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum GoalTarget {
+    None,
+    Province(ProvinceId),
+    Polity(ActorId),
+    Region(RegionId),
+    Religion(ReligionId),
+    Route(ProvinceId, ProvinceId),
+}
+
+/// A goal as the state of an actor: what, of what, since when, and the best progress seen
+/// (the horizon is measured against it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Goal {
+    pub kind: GoalKind,
+    pub target: GoalTarget,
+    pub since: Tick,
+    /// Provinces the target polity held when the goal was set: the baseline of «take a
+    /// polity»; zero otherwise.
+    pub baseline: u32,
+    /// The best progress reached since the goal was set or last moved, parts per million.
+    pub best_ppm: i64,
+}
+
+/// A starting aspiration of the facts: the goal without its clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct GoalFact {
+    pub kind: GoalKind,
+    pub target: GoalTarget,
+}
+
+/// One scored option of a bot: the call and its utility; `None` is doing nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Option_ {
+    pub call: Option<VerbCall>,
+    pub utility: f64,
+}
+
+/// A progress as parts per million.
+fn ppm(progress: f64) -> i64 {
+    (progress * 1_000_000.0).round() as i64
+}
+
+impl World {
+    /// Set a goal for a polity, with its baseline and its event.
+    pub fn set_goal(&mut self, a: ActorId, kind: GoalKind, target: GoalTarget) -> Result<(), WorldError> {
+        if !self.actors.contains_key(&a) {
+            return Err(WorldError::UnknownActor(a));
+        }
+        match target {
+            GoalTarget::Province(p) | GoalTarget::Route(p, _) if !self.provinces.contains_key(&p) => return Err(WorldError::UnknownProvince(p)),
+            GoalTarget::Route(_, q) if !self.provinces.contains_key(&q) => return Err(WorldError::UnknownProvince(q)),
+            GoalTarget::Polity(b) if !self.actors.contains_key(&b) => return Err(WorldError::UnknownActor(b)),
+            GoalTarget::Region(r) if r.index() >= self.regions.len() => return Err(WorldError::UnknownRegion(r)),
+            GoalTarget::Religion(f) if f.index() >= self.names.religions.len() => return Err(WorldError::UnknownReligion(f)),
+            _ => {}
+        }
+        let baseline = match target {
+            GoalTarget::Polity(b) => self.actors[&b].provinces.len() as u32,
+            _ => 0,
+        };
+        let mut goal = Goal { kind, target, since: self.tick, baseline, best_ppm: 0 };
+        goal.best_ppm = ppm(self.goal_progress(a, &goal));
+        self.actors.get_mut(&a).unwrap().goals.push(goal);
+        self.emit(Event::GoalSet { actor: a, goal });
+        Ok(())
+    }
+
+    /// A province is securely held: owned, not in revolt, not under siege.
+    fn held(&self, a: ActorId, p: ProvinceId) -> bool {
+        let pr = &self.provinces[&p];
+        pr.owner == a && pr.revolt.is_none() && pr.siege.is_none()
+    }
+
+    /// The share of a region's provinces a polity holds.
+    fn region_share(&self, a: ActorId, r: RegionId) -> f64 {
+        let ps = &self.regions[r.index()];
+        if ps.is_empty() {
+            return 1.0;
+        }
+        ps.iter().filter(|p| self.provinces[p].owner == a).count() as f64 / ps.len() as f64
+    }
+
+    /// Whether `b` is friendly land for `a`'s route: its own, an ally's, its lord's, a vassal's.
+    fn route_end(&self, a: ActorId, p: ProvinceId) -> f64 {
+        let o = self.provinces[&p].owner;
+        if o == a {
+            if self.held(a, p) {
+                1.0
+            } else {
+                0.5
+            }
+        } else if self.friendly(a, o) {
+            0.5
+        } else {
+            0.0
+        }
+    }
+
+    /// The progress of a goal, 0–1, read off the state (plan §23.2 p. 1).
+    pub fn goal_progress(&self, a: ActorId, g: &Goal) -> f64 {
+        let at_war_with = |b: ActorId| self.at_war(a, b);
+        match (g.kind, g.target) {
+            (GoalKind::Hold, GoalTarget::Province(p)) => f64::from(u8::from(self.held(a, p))),
+            (GoalKind::Hold, GoalTarget::Route(p, q)) => (self.route_end(a, p) + self.route_end(a, q)) / 2.0,
+            (GoalKind::Hold, GoalTarget::Region(r)) => self.region_share(a, r),
+            (GoalKind::Hold, GoalTarget::Polity(b)) => f64::from(u8::from(self.lord_of(b) == Some(a))),
+            (GoalKind::Take, GoalTarget::Province(p)) => {
+                if self.provinces[&p].owner == a {
+                    1.0
+                } else if at_war_with(self.provinces[&p].owner) {
+                    0.3
+                } else {
+                    0.0
+                }
+            }
+            (GoalKind::Take, GoalTarget::Route(p, q)) => (self.route_end(a, p) + self.route_end(a, q)) / 2.0,
+            (GoalKind::Take, GoalTarget::Region(r)) => self.region_share(a, r),
+            (GoalKind::Take, GoalTarget::Polity(b)) => {
+                if g.baseline == 0 {
+                    return 1.0;
+                }
+                let left = self.actors[&b].provinces.len() as f64;
+                (1.0 - left / f64::from(g.baseline)).clamp(0.0, 1.0)
+            }
+            (GoalKind::Subdue, GoalTarget::Polity(b)) => {
+                if self.lord_of(b) == Some(a) {
+                    1.0
+                } else if at_war_with(b) {
+                    0.3
+                } else {
+                    0.0
+                }
+            }
+            (GoalKind::Free, _) => match self.lord_of(a) {
+                None => 1.0,
+                Some(lord) if at_war_with(lord) => 0.5,
+                Some(_) => 0.0,
+            },
+            (GoalKind::Unite, GoalTarget::Region(r)) => self.region_share(a, r),
+            (GoalKind::AllianceAgainst, GoalTarget::Polity(b)) => {
+                let allies = self.allies_of(a);
+                if allies.iter().any(|x| self.at_war(*x, b) || self.borders(*x, b)) {
+                    1.0
+                } else if !allies.is_empty() {
+                    0.5
+                } else {
+                    0.0
+                }
+            }
+            (GoalKind::Union, GoalTarget::Religion(f)) => f64::from(u8::from(self.polity_religion(a) == f)),
+            _ => 0.0,
+        }
+    }
+
+    /// The goal a polity takes when one is put aside: free when a vassal, else hold the
+    /// capital. By the rules, not by the lot.
+    fn next_goal(&self, a: ActorId) -> (GoalKind, GoalTarget) {
+        if self.lord_of(a).is_some() && !self.actors[&a].goals.iter().any(|g| g.kind == GoalKind::Free) {
+            (GoalKind::Free, GoalTarget::None)
+        } else {
+            (GoalKind::Hold, GoalTarget::Province(self.actors[&a].capital))
+        }
+    }
+
+    /// The phase of goals, at the end of the tick: progress read, goals reached go on as
+    /// «hold», goals without progress for the horizon are put aside.
+    pub(crate) fn phase_goals(&mut self, params: &Params) -> Result<(), WorldError> {
+        let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a)).collect();
+        for a in ids {
+            let goals = self.actors[&a].goals.clone();
+            let mut kept: Vec<Goal> = Vec::with_capacity(goals.len());
+            let mut replace = false;
+            for mut g in goals {
+                let progress = self.goal_progress(a, &g);
+                if ppm(progress) > g.best_ppm {
+                    g.best_ppm = ppm(progress);
+                    g.since = self.tick;
+                }
+                if progress >= 1.0 - 1e-9 && matches!(g.kind, GoalKind::Take | GoalKind::Subdue | GoalKind::Unite | GoalKind::Free | GoalKind::Union) {
+                    self.emit(Event::GoalReached { actor: a, goal: g });
+                    match (g.kind, g.target) {
+                        (GoalKind::Take, t @ (GoalTarget::Province(_) | GoalTarget::Route(..) | GoalTarget::Region(_))) | (GoalKind::Unite, t) => {
+                            kept.push(Goal { kind: GoalKind::Hold, target: t, since: self.tick, baseline: 0, best_ppm: 1_000_000 });
+                        }
+                        (GoalKind::Subdue, t) => kept.push(Goal { kind: GoalKind::Hold, target: t, since: self.tick, baseline: 0, best_ppm: 1_000_000 }),
+                        _ => replace = true,
+                    }
+                    continue;
+                }
+                if progress < 1.0 - 1e-9 && self.tick.0.saturating_sub(g.since.0) >= params.goal_horizon_ticks {
+                    self.emit(Event::GoalDropped { actor: a, goal: g });
+                    replace = true;
+                    continue;
+                }
+                kept.push(g);
+            }
+            self.actors.get_mut(&a).unwrap().goals = kept;
+            if replace || self.actors[&a].goals.is_empty() {
+                let (kind, target) = self.next_goal(a);
+                if !self.actors[&a].goals.iter().any(|g| g.kind == kind && g.target == target) {
+                    self.set_goal(a, kind, target)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ---- utility ----
+
+    /// The strongest enemy of `a` at war with it, by soldiers, and whether it outnumbers `a`.
+    fn outmatched(&self, a: ActorId) -> Option<ActorId> {
+        let mine = self.army_size(a);
+        self.actors
+            .keys()
+            .copied()
+            .filter(|b| self.at_war(a, *b) && self.alive(*b))
+            .filter(|b| self.army_size(*b) > mine)
+            .max_by_key(|b| self.army_size(*b))
+    }
+
+    /// The polities `a` wants an alliance with, by its goals: those at war with or bordering
+    /// the polity an alliance is wanted against, and — at war with a stronger enemy — those
+    /// at war with that enemy.
+    fn wanted_allies(&self, a: ActorId) -> Vec<ActorId> {
+        let mut out = Vec::new();
+        for g in &self.actors[&a].goals {
+            if let (GoalKind::AllianceAgainst, GoalTarget::Polity(x)) = (g.kind, g.target) {
+                out.extend(self.actors.keys().copied().filter(|b| *b != a && *b != x && self.alive(*b) && (self.at_war(*b, x) || self.borders(*b, x))));
+            }
+        }
+        if let Some(enemy) = self.outmatched(a) {
+            out.extend(self.actors.keys().copied().filter(|b| *b != a && self.alive(*b) && self.at_war(*b, enemy)));
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// The progress a war on `b` would move over `a`'s goals.
+    fn war_wanted(&self, a: ActorId, b: ActorId) -> f64 {
+        let mut want = 0.0f64;
+        for g in &self.actors[&a].goals {
+            let p = self.goal_progress(a, g);
+            if p >= 1.0 - 1e-9 {
+                continue;
+            }
+            want += match (g.kind, g.target) {
+                (GoalKind::Take, GoalTarget::Province(q)) if self.provinces[&q].owner == b => 1.0,
+                (GoalKind::Take, GoalTarget::Route(q, r)) if self.provinces[&q].owner == b || self.provinces[&r].owner == b => 0.5,
+                (GoalKind::Take | GoalKind::Unite, GoalTarget::Region(r)) => {
+                    let ps = &self.regions[r.index()];
+                    ps.iter().filter(|q| self.provinces[q].owner == b).count() as f64 / ps.len().max(1) as f64
+                }
+                (GoalKind::Take | GoalKind::Subdue, GoalTarget::Polity(x)) if x == b => 1.0,
+                (GoalKind::Free, _) if self.lord_of(a) == Some(b) => 1.0,
+                _ => 0.0,
+            };
+        }
+        want
+    }
+
+    /// The utility of a call for its ruler (plan §23.2 p. 2): goal progress and survival,
+    /// less the price.
+    pub fn utility(&self, a: ActorId, call: &VerbCall, params: &Params) -> f64 {
+        let actor = &self.actors[&a];
+        let enemy = self.outmatched(a);
+        let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let price_kg = |kg: i64| kg as f64 / income * params.agent_weight_price_treasury;
+        let price_l = |l: f64| l / 100.0 * params.agent_weight_price_legitimacy;
+        let unpaid = actor.paid_share_ppm < 1_000_000;
+        let lawful = self.lawful_norm(a, params);
+        match (call.verb, call.target) {
+            (VerbId::DeclareWar, Target::Actor(b)) => {
+                let mut u = self.war_wanted(a, b);
+                if self.army_size(b) > self.army_size(a) * 3 / 2 {
+                    u -= 1.0;
+                }
+                if at_war {
+                    u -= 0.5;
+                }
+                u - price_l(self.war_price(a, b, params))
+            }
+            (VerbId::MakePeace, Target::Actor(b)) => {
+                let losing = self.losing_side(a, b) == Some(a);
+                let wanted = self.war_wanted(a, b);
+                let mut u = 0.0;
+                if losing || enemy == Some(b) {
+                    u += 1.0;
+                }
+                if wanted <= 0.0 {
+                    u += 0.3;
+                } else if !losing {
+                    u -= 0.5;
+                }
+                u
+            }
+            (VerbId::Recruit, Target::Province(_)) => {
+                let room = self.recruit_room(a, params) as f64 / self.recruit_ceiling(a, params).max(1) as f64;
+                let mut u = 0.0;
+                if at_war {
+                    u += 0.5 * room;
+                }
+                if enemy.is_some() {
+                    u += 0.5;
+                }
+                if unpaid {
+                    u -= 1.0;
+                }
+                u
+            }
+            (VerbId::Disband, Target::Unit(_)) => {
+                if !at_war && unpaid {
+                    0.5
+                } else {
+                    -1.0
+                }
+            }
+            (VerbId::HireMercenaries, _) => {
+                let mut u = 0.0;
+                if enemy.is_some() {
+                    u += 0.5;
+                }
+                u - price_kg(self.hire_count(a, params) * params.mercenary_advance_kg)
+            }
+            (VerbId::TakeLoan, _) => {
+                if unpaid && at_war {
+                    0.5
+                } else {
+                    -0.5
+                }
+            }
+            // The tax is anchored to the tithe (E0 Э4: the tithe as the norm of an agrarian
+            // tax): at peace a rate off the tithe goes back toward it — up when legitimacy
+            // allows, down always; at war with the pay short it goes up while legitimacy
+            // holds; in a crisis of legitimacy at peace it goes below. Without the anchor the
+            // first bots lowered the tax at every dip of legitimacy and never raised it at
+            // peace: Э8 fell from 0.094 to 0.063 and the armies of peace below А11.
+            (VerbId::RaiseTax, _) => {
+                let mut u = 0.0;
+                if !at_war && actor.tax_rate_ppm < params.tax_default_ppm && actor.legitimacy >= lawful - 10.0 {
+                    u += 0.6;
+                }
+                if at_war && unpaid && actor.legitimacy > lawful - 20.0 {
+                    u += 0.5;
+                }
+                u - price_l(params.legitimacy_cost_raise_tax)
+            }
+            (VerbId::LowerTax, _) => {
+                let mut u = 0.0;
+                if !at_war && actor.tax_rate_ppm > params.tax_default_ppm {
+                    u += 0.6;
+                }
+                if !at_war && actor.tax_rate_ppm <= params.tax_default_ppm && actor.legitimacy < lawful - 25.0 {
+                    u += 0.4;
+                }
+                if u > 0.0 {
+                    u + price_l(params.legitimacy_gain_lower_tax)
+                } else {
+                    -1.0
+                }
+            }
+            (VerbId::EnforceOrder, _) => {
+                let gap = (lawful - actor.legitimacy).max(0.0) / 100.0;
+                2.0 * gap - price_kg(self.order_cost(a, params))
+            }
+            (VerbId::ProposeAlliance, Target::Actor(b)) => {
+                let mut u = 0.0;
+                if self.wanted_allies(a).contains(&b) {
+                    u += 1.0;
+                }
+                if enemy.is_some() && self.army_size(b) > self.army_size(a) {
+                    u += 0.2;
+                }
+                u - price_kg(self.embassy_cost(a, params))
+            }
+            (VerbId::SendEmbassy, Target::Actor(b)) => {
+                let wanted = self.wanted_allies(a).contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
+                (if wanted { 0.5 } else { 0.0 }) - price_kg(self.embassy_cost(a, params))
+            }
+            (VerbId::Bribe, Target::Actor(b)) => {
+                let wanted = self.wanted_allies(a).contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
+                (if wanted { 0.4 } else { 0.0 }) - price_kg(self.gift_size(a, params))
+            }
+            (VerbId::ProposeMarriage, Target::House(g)) => {
+                let b = self.houses[&g].polity;
+                if b != a && self.wanted_allies(a).contains(&b) {
+                    0.4
+                } else {
+                    -0.2
+                }
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// The options a ruler has: every available call of the enabled verbs over their
+    /// targets, by the same rules the offers use, each with its utility; doing nothing at
+    /// nothing. Canonical order of verbs and targets.
+    pub fn options(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
+        let who = ActorRef::Ruler(a);
+        let mut out = vec![Option_ { call: None, utility: 0.0 }];
+        if !self.alive(a) {
+            return out;
+        }
+        let others: Vec<ActorId> = self.actors.keys().copied().filter(|b| *b != a && self.alive(*b)).collect();
+        let mut calls: Vec<VerbCall> = Vec::new();
+        for v in enabled {
+            match v {
+                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
+                VerbId::MakePeace => calls.extend(others.iter().filter(|b| self.peace_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
+                VerbId::ProposeAlliance => {
+                    let cost = self.embassy_cost(a, params);
+                    if cost > 0 && self.treasury(a) >= cost && self.lord_of(a).is_none() {
+                        calls.extend(others.iter().filter(|b| self.alliance_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
+                    }
+                }
+                VerbId::SendEmbassy => {
+                    let cost = self.embassy_cost(a, params);
+                    if cost > 0 && self.treasury(a) >= cost {
+                        calls.extend(others.iter().map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
+                    }
+                }
+                VerbId::Bribe => {
+                    let gift = self.gift_size(a, params);
+                    if gift > 0 && self.treasury(a) >= gift {
+                        calls.extend(others.iter().map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
+                    }
+                }
+                VerbId::ProposeMarriage => {
+                    let h = self.ruling_house(a);
+                    calls.extend(self.houses.keys().copied().filter(|g| *g != h && self.marriage_room(h, *g, params).is_ok()).map(|g| VerbCall { actor: who, verb: *v, target: Target::House(g) }));
+                }
+                VerbId::Recruit => {
+                    if self.recruit_per_tick(a, params) > 0 {
+                        calls.extend(self.actors[&a].provinces.iter().filter(|p| !self.in_revolt(**p) && self.population(**p) > 0).map(|p| VerbCall { actor: who, verb: *v, target: Target::Province(*p) }));
+                    }
+                }
+                VerbId::Disband => calls.extend(self.units_of(a).into_iter().filter(|u| self.units[u].house.is_none()).map(|u| VerbCall { actor: who, verb: *v, target: Target::Unit(u) })),
+                VerbId::HireMercenaries => {
+                    if self.hire_count(a, params) > 0 {
+                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
+                    }
+                }
+                VerbId::TakeLoan => {
+                    if self.actors[&a].institutions.contains(&crate::world::Institution::Bank) && !self.credit_closed(a) && self.yearly_income(a, params).min(self.loan_room(a, params)) > 0 {
+                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
+                    }
+                }
+                VerbId::RaiseTax | VerbId::LowerTax => {
+                    if self.tax_room(a, *v, params).is_ok() {
+                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
+                    }
+                }
+                VerbId::EnforceOrder => {
+                    let cost = self.order_cost(a, params);
+                    if cost > 0 && self.treasury(a) >= cost {
+                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
+                    }
+                }
+            }
+        }
+        for call in calls {
+            let utility = self.utility(a, &call, params);
+            out.push(Option_ { call: Some(call), utility });
+        }
+        out
+    }
+
+    /// The set a bot chooses from: doing nothing at nothing, and for every verb its best
+    /// target — when that is better than doing nothing. Two rules of the choice (plan
+    /// §23b): **the number of targets must not decide the verb** (forty polities to bribe
+    /// at a hair below nothing would outweigh nothing forty times over in a softmax over
+    /// every call — measured: twelve thousand gifts in a run), so a verb enters once, with
+    /// its best target (ties: the canonical first); and **what is no better than doing
+    /// nothing is not chosen** — a price paid for nothing is not a choice but noise.
+    pub fn choices(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
+        let mut best: Vec<Option_> = Vec::new();
+        for o in self.options(a, enabled, params).into_iter().skip(1) {
+            let verb = o.call.map(|c| c.verb);
+            match best.iter_mut().find(|b| b.call.map(|c| c.verb) == verb) {
+                Some(b) if o.utility > b.utility => *b = o,
+                Some(_) => {}
+                None => best.push(o),
+            }
+        }
+        let mut out = vec![Option_ { call: None, utility: 0.0 }];
+        out.extend(best.into_iter().filter(|o| o.utility > 0.0));
+        out
+    }
+
+    /// One bot's decision: softmax over its choices at the temperature, by one keyed draw.
+    pub fn decide(&mut self, a: ActorId, enabled: &[VerbId], params: &Params) -> Option<VerbCall> {
+        let options = self.choices(a, enabled, params);
+        let d = Draw { point: DrawPoint::Decision, tick: self.tick, id: a.0, n: self.draw_ordinal(DrawPoint::Decision, a.0) };
+        let value = crate::rng::draw(self.seed, d);
+        self.journal_draw(d, value);
+        let u = unit(value);
+        let t = params.agent_temperature.max(1e-6);
+        let top = options.iter().map(|o| o.utility).fold(f64::MIN, f64::max);
+        let weights: Vec<f64> = options.iter().map(|o| ((o.utility - top) / t).exp()).collect();
+        let total: f64 = weights.iter().sum();
+        let mut acc = 0.0;
+        for (o, w) in options.iter().zip(weights) {
+            acc += w / total;
+            if u < acc {
+                return o.call;
+            }
+        }
+        options.last().and_then(|o| o.call)
+    }
+
+    /// Every bot decides on the state as it stands — the player's actor excepted — in
+    /// canonical order; nothing is applied here (brief §3: first all decide, then all is
+    /// applied).
+    pub fn decide_all(&mut self, enabled: &[VerbId], player: Option<ActorRef>, params: &Params) -> Vec<VerbCall> {
+        let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).collect();
+        let mut out = Vec::new();
+        for a in ids {
+            if let Some(call) = self.decide(a, enabled, params) {
+                out.push(call);
+            }
+        }
+        out
+    }
+}

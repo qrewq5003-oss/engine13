@@ -223,6 +223,8 @@ impl World {
                 defaulted: false,
                 vassal_of: None,
                 core_culture: CultureId(0),
+                // The goals come by the rules at the end of the tick (`agents.rs`).
+                goals: Vec::new(),
             },
         );
         self.ledger.open(self.tick, Account::Treasury(new), 0)?;

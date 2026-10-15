@@ -137,6 +137,10 @@ impl Observed for Game {
                 Event::Revolt { .. } => ObsEvent::Other("Revolt".into()),
                 Event::RevoltEnded { province, .. } => ObsEvent::Other(format!("RevoltEnded@{}", self.province_id(*province).0)),
                 Event::ActorBorn { actor, .. } => ObsEvent::Born(self.actor_id(*actor)),
+                Event::GoalSet { actor, .. } => ObsEvent::Other(format!("GoalSet@{}", self.actor_id(*actor).0)),
+                // Plain kinds (E3): `Never` is read over them by the horizon.
+                Event::GoalReached { .. } => ObsEvent::Other("GoalReached".into()),
+                Event::GoalDropped { .. } => ObsEvent::Other("GoalDropped".into()),
             })
             .collect()
     }

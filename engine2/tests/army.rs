@@ -14,6 +14,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 /// Province `(x, y)` of the 5×5 test world; state `x` owns column `x`, capital at `y = 0`.
 fn at(x: u32, y: u32) -> ProvinceId {
     ProvinceId(y * 5 + x)
@@ -34,7 +51,7 @@ fn war_is_priced_in_the_offers_and_the_tests_open_it_without_a_price() {
     // tests still open wars without a price through `World::declare_war`.
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("declare_war".to_string(), "Declare war".to_string());
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
     let war = g.verbs(who).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
     assert!(war.available);
@@ -181,7 +198,7 @@ fn an_undefended_province_falls_within_the_tick_and_a_capital_after_siege_capita
 fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("disband".to_string(), "Disband".to_string());
-    let mut g = Game::new(&s, params(), 2).unwrap();
+    let mut g = bare(&s, params(), 2).unwrap();
     let (s0, s1) = (ActorId(0), ActorId(1));
     let (u0, u1) = (g.world().units_of(s0)[0], g.world().units_of(s1)[0]);
     g.world_mut().declare_war(s0, s1).unwrap();
@@ -264,7 +281,7 @@ fn the_levy_moves_people_into_soldiers_within_a1_and_a2_and_back_when_disbanded(
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("disband".to_string(), "Disband".to_string());
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let s0 = ActorId(0);
     let who = ActorRef::Ruler(s0);
     let field = at(0, 1);
@@ -325,7 +342,7 @@ fn mercenaries_come_from_outside_against_the_advance_leave_when_disbanded_and_a_
     for (k, v) in [("hire_mercenaries", "Hire mercenaries"), ("disband", "Disband"), ("take_loan", "Take a loan")] {
         s.verbs.insert(k.to_string(), v.to_string());
     }
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let s0 = ActorId(0);
     let who = ActorRef::Ruler(s0);
     // No bank, no treasury: nobody hires.
@@ -463,14 +480,14 @@ fn script_levy(w: &mut World, p: &Params) {
 fn a_war_is_deterministic_through_save_and_load() {
     let p = params();
     let s = worldgen::generate(3, &p);
-    let mut g = Game::new(&s, params(), 3).unwrap();
+    let mut g = bare(&s, params(), 3).unwrap();
     let mut straight = Vec::new();
     for _ in 0..12 {
         script_wars(g.world_mut());
         script_levy(g.world_mut(), &p);
         straight.push(g.tick(&[]).unwrap());
     }
-    let mut g2 = Game::new(&s, params(), 3).unwrap();
+    let mut g2 = bare(&s, params(), 3).unwrap();
     let mut spliced = Vec::new();
     for _ in 0..6 {
         script_wars(g2.world_mut());
@@ -478,7 +495,7 @@ fn a_war_is_deterministic_through_save_and_load() {
         spliced.push(g2.tick(&[]).unwrap());
     }
     let save = g2.to_save().unwrap();
-    let mut g3 = Game::from_save(&s, params(), &save).unwrap();
+    let mut g3 = bare_load(&s, params(), &save).unwrap();
     for _ in 0..6 {
         script_wars(g3.world_mut());
         script_levy(g3.world_mut(), &p);

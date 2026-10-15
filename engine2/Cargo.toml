@@ -68,3 +68,7 @@ required-features = ["worldgen", "testing"]
 [[test]]
 name = "collapse"
 required-features = ["sentinel", "worldgen", "testing"]
+
+[[test]]
+name = "agents"
+required-features = ["sentinel", "worldgen", "testing"]

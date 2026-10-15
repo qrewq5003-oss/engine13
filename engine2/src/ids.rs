@@ -52,6 +52,11 @@ id_type!(
     /// A religion (a faith): a string of the scenario interned at compile time (E2 step 8).
     ReligionId
 );
+id_type!(
+    /// A region: a named set of provinces, a fact of the scenario (E3: the target of «unite»;
+    /// a kingdom or an empire, never a people — owner's rule on §23).
+    RegionId
+);
 
 #[cfg(test)]
 mod tests {
