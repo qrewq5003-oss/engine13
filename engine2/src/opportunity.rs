@@ -78,6 +78,9 @@ impl Chance {
     }
 }
 
+/// A vote cast at a turn: the opportunity, who answered, the voting house, its candidate.
+type Vote = (u32, ActorRef, crate::ids::HouseId, PersonId);
+
 /// An answer to an opportunity: take it or decline it; a vote names its candidate
 /// (declining a vote is abstaining).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,7 +175,7 @@ impl World {
     pub(crate) fn settle_opportunities(&mut self, answers: &[Answer], player: Option<ActorRef>, by_rule: bool, params: &Params) -> Result<(), WorldError> {
         let open = std::mem::take(&mut self.opportunities);
         // The votes of each election, counted once all are in.
-        let mut elections: std::collections::BTreeMap<ActorId, (PersonId, Vec<(u32, ActorRef, crate::ids::HouseId, PersonId)>)> = std::collections::BTreeMap::new();
+        let mut elections: std::collections::BTreeMap<ActorId, (PersonId, Vec<Vote>)> = std::collections::BTreeMap::new();
         for o in open {
             let given = answers.iter().find(|a| a.opportunity == o.id);
             let rule = if by_rule && !player.is_some_and(|p| self.answers_for(p, &o)) { Self::rule_reply(&o) } else { None };
@@ -218,7 +221,7 @@ impl World {
     /// throne from the interim, a tie keeps the interim; a candidate who can no longer reign
     /// (dead, a minor, gone from the polity) counts nothing. The votes are void when the
     /// throne changed hands since it was opened (a usurpation taken first).
-    fn count_votes(&mut self, polity: ActorId, interim: PersonId, votes: &[(u32, ActorRef, crate::ids::HouseId, PersonId)], params: &Params) -> Result<(), WorldError> {
+    fn count_votes(&mut self, polity: ActorId, interim: PersonId, votes: &[Vote], params: &Params) -> Result<(), WorldError> {
         if !self.alive(polity) || self.actors[&polity].ruler != interim {
             for (id, ..) in votes {
                 self.emit(Event::OpportunityVoid { id: *id, why: "the throne changed hands".to_string() });
