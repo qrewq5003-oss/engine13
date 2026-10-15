@@ -54,7 +54,8 @@ use crate::rng::DrawPoint;
 use crate::verbs::{Target, VerbCall, VerbId};
 use crate::world::{Unit, World, WorldError};
 
-fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
+/// A pair of polities as the maps of wars, treaties and relations key it: lower id first.
+pub(crate) fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
     if a < b {
         (a, b)
     } else {
@@ -70,25 +71,58 @@ impl World {
     }
 
     pub fn at_war(&self, a: ActorId, b: ActorId) -> bool {
-        a != b && self.wars.contains(&pair(a, b))
+        a != b && self.wars.contains_key(&pair(a, b))
     }
 
-    /// Open a war. For the tests only: the verb is closed until diplomacy prices it.
+    /// Open a war without a price. For the tests only: the verb `declare_war` pays in
+    /// legitimacy (`diplomacy.rs`) and then comes here.
     #[cfg(feature = "testing")]
     pub fn declare_war(&mut self, a: ActorId, b: ActorId) -> Result<(), WorldError> {
-        if a == b {
-            return Err(WorldError::WarWithSelf(a));
+        self.open_war(a, b)
+    }
+
+    /// The war itself, with its obligations (E2 step 7, plan §19.2 p. 3–4, owner's rule):
+    /// the attacked side's allies, its lord and its vassals enter the war against the
+    /// attacker, and the attacker's vassals enter against the attacked — **their entry is no
+    /// declaration**: it costs nothing, breaks no treaty, and pulls nobody further in, so one
+    /// war does not light the world in a chain. An entrant whose peace with the other side
+    /// is in force stays out: the treaty holds.
+    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId) -> Result<(), WorldError> {
+        if attacker == victim {
+            return Err(WorldError::WarWithSelf(attacker));
         }
-        for x in [a, b] {
+        for x in [attacker, victim] {
             if !self.actors.contains_key(&x) {
                 return Err(WorldError::UnknownActor(x));
             }
         }
-        if self.wars.insert(pair(a, b)) {
-            let (a, b) = pair(a, b);
-            self.emit(Event::War { a, b });
+        self.war_between(attacker, victim, None);
+        let principal = Some(pair(attacker, victim));
+        let mut with_victim: Vec<ActorId> = self.allies_of(victim);
+        with_victim.extend(self.lord_of(victim));
+        with_victim.extend(self.vassals_of(victim));
+        for x in with_victim {
+            if x != attacker && self.alive(x) && !self.peace_in_force(x, attacker) {
+                self.war_between(x, attacker, principal);
+            }
+        }
+        for x in self.vassals_of(attacker) {
+            if x != victim && self.alive(x) && !self.peace_in_force(x, victim) {
+                self.war_between(x, victim, principal);
+            }
         }
         Ok(())
+    }
+
+    /// Record a war between a pair if there is none, with its event; `of` names the
+    /// principal pair when the war is an obligation of theirs.
+    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>) {
+        let (a, b) = pair(a, b);
+        if !self.wars.contains_key(&(a, b)) {
+            let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of });
+            self.emit(Event::War { a, b });
+        }
     }
 
     /// All soldiers of a polity, levies and mercenaries.
@@ -246,6 +280,16 @@ impl World {
         let t = self.actors.get_mut(&to).unwrap();
         t.provinces.push(p);
         t.provinces.sort();
+        // The war's record: who has taken what in it (peace reads it, `diplomacy.rs`).
+        if how == Transfer::Conquest {
+            if let Some(war) = self.wars.get_mut(&pair(from, to)) {
+                if to < from {
+                    war.taken.0 += 1;
+                } else {
+                    war.taken.1 += 1;
+                }
+            }
+        }
         self.emit(Event::ProvinceChangedHands { province: p, from, to, how });
         if self.actors[&from].provinces.is_empty() {
             self.fall(from)?;
@@ -264,7 +308,13 @@ impl World {
         for u in self.units_of(a) {
             self.disband_unit(u)?;
         }
-        self.wars.retain(|(x, y)| *x != a && *y != a);
+        self.wars.retain(|(x, y), _| *x != a && *y != a);
+        self.treaties.retain(|(x, y), _| *x != a && *y != a);
+        // A fallen lord frees its vassals (plan §19.2 p. 3).
+        for v in self.vassals_of(a) {
+            self.actors.get_mut(&v).unwrap().vassal_of = None;
+            self.emit(Event::Released { vassal: v, lord: a });
+        }
         self.emit(Event::ActorDied { actor: a });
         Ok(())
     }

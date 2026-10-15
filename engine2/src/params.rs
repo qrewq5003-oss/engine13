@@ -158,9 +158,39 @@ pub struct Params {
     /// E0 Э6: the interest a defaulter pays afterwards — the top of the band, per tick.
     pub loan_interest_after_default_ppm_per_tick: i64,
     /// (в) Collection: the share of the assigned tax lost per point of legitimacy below
-    /// `tax_full_collection_at_legitimacy`, parts per million.
+    /// the norm of lawful rule (`World::lawful_norm`), parts per million.
     pub tax_evasion_ppm_per_legitimacy_point: i64,
-    pub tax_full_collection_at_legitimacy: f64,
+    /// E0 Д2: the share of a vassal's take that goes to its lord, parts per million.
+    pub tribute_share_ppm: i64,
+    /// E0 Д1: the term of a treaty, ticks; and the band in years the generator draws from.
+    pub treaty_term_ticks: u32,
+    pub treaty_term_years_band: [f64; 2],
+    /// (в) The relation of a pair (E2 step 7, plan §19.2): the base norm and its shifts by
+    /// the state of the pair.
+    pub relation_base: f64,
+    pub relation_norm_war: f64,
+    pub relation_norm_alliance: f64,
+    pub relation_norm_marriage: f64,
+    pub relation_norm_vassalage: f64,
+    pub relation_norm_border: f64,
+    /// (в) The share of the gap to the norm a relation closes per tick.
+    pub relation_rate_per_tick: f64,
+    /// (в) The relation a proposal needs to be accepted (plan §19.3).
+    pub treaty_accept_at_relation: f64,
+    /// (в) A war declared on a treaty in force costs this many times the price.
+    pub treaty_breach_factor: f64,
+    /// (в) What declaring a war costs in legitimacy.
+    pub legitimacy_cost_declare_war: f64,
+    /// (в) An embassy's gifts as parts per million of yearly revenue, and its push.
+    pub embassy_cost_share_ppm: i64,
+    pub embassy_gain: f64,
+    /// E0 Д2: a gift to another polity as parts per million of the giver's yearly revenue
+    /// (the subsidy of the strong to the weak), and (в) its push per share of the
+    /// receiver's yearly revenue.
+    pub bribe_share_ppm: i64,
+    pub bribe_gain_per_share: f64,
+    /// (в) The dowry as parts per million of the proposing house's treasury.
+    pub dowry_share_ppm: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -282,7 +312,24 @@ impl Params {
         let norm_penalty_in_default = value("legitimacy.norm_penalty_in_default")?;
         let interest_band = band("loan.interest_per_year")?;
         let evasion = value("tax.evasion_per_legitimacy_point")?;
-        let full_collection = value("tax.full_collection_at_legitimacy")?;
+        let tribute = value("vassal.tribute_share")?;
+        let treaty_term = value("treaty.term_years")?;
+        let treaty_term_band = band("treaty.term_years")?;
+        let relation_base = value("relation.base")?;
+        let relation_norm_war = value("relation.norm_war")?;
+        let relation_norm_alliance = value("relation.norm_alliance")?;
+        let relation_norm_marriage = value("relation.norm_marriage")?;
+        let relation_norm_vassalage = value("relation.norm_vassalage")?;
+        let relation_norm_border = value("relation.norm_border")?;
+        let relation_rate = value("relation.rate_per_tick")?;
+        let accept_at = value("treaty.accept_at_relation")?;
+        let breach_factor = value("treaty.breach_factor")?;
+        let cost_declare_war = value("legitimacy.cost_declare_war")?;
+        let embassy_cost = value("embassy.cost_share_of_revenue")?;
+        let embassy_gain = value("embassy.gain")?;
+        let bribe_share = value("bribe.share_of_revenue")?;
+        let bribe_gain = value("bribe.gain_per_share_of_income")?;
+        let dowry_share = value("marriage.dowry_share_of_house")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -334,7 +381,24 @@ impl Params {
             legitimacy_norm_penalty_in_default: norm_penalty_in_default,
             loan_interest_after_default_ppm_per_tick: (interest_band[1] / 2.0 * 1_000_000.0).round() as i64,
             tax_evasion_ppm_per_legitimacy_point: (evasion * 1_000_000.0).round() as i64,
-            tax_full_collection_at_legitimacy: full_collection,
+            tribute_share_ppm: (tribute * 1_000_000.0).round() as i64,
+            treaty_term_ticks: (treaty_term * 2.0).round() as u32,
+            treaty_term_years_band: treaty_term_band,
+            relation_base,
+            relation_norm_war,
+            relation_norm_alliance,
+            relation_norm_marriage,
+            relation_norm_vassalage,
+            relation_norm_border,
+            relation_rate_per_tick: relation_rate,
+            treaty_accept_at_relation: accept_at,
+            treaty_breach_factor: breach_factor,
+            legitimacy_cost_declare_war: cost_declare_war,
+            embassy_cost_share_ppm: (embassy_cost * 1_000_000.0).round() as i64,
+            embassy_gain,
+            bribe_share_ppm: (bribe_share * 1_000_000.0).round() as i64,
+            bribe_gain_per_share: bribe_gain,
+            dowry_share_ppm: (dowry_share * 1_000_000.0).round() as i64,
             entries,
         })
     }

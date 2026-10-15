@@ -8,7 +8,12 @@
 //!   lowers the norm for the term of the closed credit and the interest stays at the top of
 //!   Э6 afterwards;
 //! - the tax collected is the assigned tax times a share that falls with legitimacy below
-//!   full collection (review of #286: legitimacy costs the polity, not only the ruler);
+//!   the norm of lawful rule (review of #286: legitimacy costs the polity, not only the
+//!   ruler; owner's correction: lawful rule of any kind — elected, acclaimed — collects
+//!   everything at its own norm, the gap is from the norm before the ruler's decisions
+//!   shift it, so the greedy ruler stays punished; a usurper's gap is from the norm of the
+//!   polity's own rule of succession, else the greedy ruler, soon usurped, collects nearly
+//!   everything at the top rate);
 //!   paired runs are judged by the outcome of brief §1 — income, provinces, the houses'
 //!   seats and members — never by legitimacy as a number: a greedy ruler (tax to the top,
 //!   order whenever below the norm) gains at most a quarter over the plain one in net
@@ -504,11 +509,13 @@ fn play_strategy(strategy: &str, p: &Params) -> Outcome {
 }
 
 #[test]
-fn the_tax_collected_falls_with_legitimacy_below_full_collection() {
+fn the_tax_collected_falls_with_legitimacy_below_the_norm_of_the_standing_and_lawful_rule_of_any_kind_collects_everything() {
     let p = params();
     let mut w = world();
     let a = ActorId(0);
-    let full = p.tax_full_collection_at_legitimacy;
+    assert_eq!(w.actors[&a].standing, Standing::Hereditary);
+    let full = w.lawful_norm(a, &p);
+    assert!((full - p.legitimacy_norm_hereditary).abs() < 1e-9);
     for (legitimacy, expected_ppm) in [(full, 1_000_000), (full + 20.0, 1_000_000), (full - 25.0, 1_000_000 - 25 * p.tax_evasion_ppm_per_legitimacy_point), (0.0, 1_000_000 - (full as i64) * p.tax_evasion_ppm_per_legitimacy_point)] {
         w.actors.get_mut(&a).unwrap().legitimacy = legitimacy.min(100.0);
         assert_eq!(w.collection_share_ppm(a, &p), expected_ppm, "at legitimacy {legitimacy}");
@@ -519,29 +526,62 @@ fn the_tax_collected_falls_with_legitimacy_below_full_collection() {
         assert_eq!(tax / 1000, production * rate / 1_000_000 * expected_ppm / 1_000_000, "at legitimacy {legitimacy}");
     }
     assert!(w.collection_share_ppm(a, &p) > 0, "even at zero legitimacy something is collected");
+    // The owner's correction: every lawful standing at its own norm collects everything —
+    // an elected republic is not poorer than a monarchy for being elected — and 25 points
+    // below its norm every standing loses the same share.
+    for standing in [Standing::Hereditary, Standing::Confirmed, Standing::Elected, Standing::Acclaimed] {
+        w.actors.get_mut(&a).unwrap().standing = standing;
+        let norm = w.lawful_norm(a, &p);
+        assert!((norm - w.standing_norm(a, &p)).abs() < 1e-9);
+        w.actors.get_mut(&a).unwrap().legitimacy = norm;
+        assert_eq!(w.collection_share_ppm(a, &p), 1_000_000, "{standing:?} at its norm {norm}");
+        w.actors.get_mut(&a).unwrap().legitimacy = norm - 25.0;
+        assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - 25 * p.tax_evasion_ppm_per_legitimacy_point, "{standing:?} 25 below its norm");
+    }
+    assert!(p.legitimacy_norm_elected < p.legitimacy_norm_hereditary, "the case exists: the elected norm is the lower one");
+    // A usurper is measured against the lawful rule of the polity, not against its own
+    // norm: at the usurper's norm it is short by the whole gap to the rule's standing.
+    w.actors.get_mut(&a).unwrap().standing = Standing::Usurper;
+    let lawful = World::norm_of_standing(engine2::politics::standing_of_rule(w.actors[&a].succession), &p);
+    assert!((w.lawful_norm(a, &p) - lawful).abs() < 1e-9);
+    assert!((w.standing_norm(a, &p) - p.legitimacy_norm_usurper).abs() < 1e-9, "the usurper's own norm stays its own: В6 works through it");
+    w.actors.get_mut(&a).unwrap().legitimacy = p.legitimacy_norm_usurper;
+    let usurper_gap = (lawful - p.legitimacy_norm_usurper).round() as i64;
+    assert!(usurper_gap > 0);
+    assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - usurper_gap * p.tax_evasion_ppm_per_legitimacy_point, "a usurper at its norm is short of the collection");
+    // The gap is from the norm of lawful rule, not from the shifted norm: a ruler at the
+    // top of the tax band, settled at its shifted norm, still loses the collection.
+    w.actors.get_mut(&a).unwrap().standing = Standing::Hereditary;
+    let raise = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+    while w.apply_verb(&raise, &p).is_ok() {}
+    let shifted = w.legitimacy_norm(a, &p);
+    w.actors.get_mut(&a).unwrap().legitimacy = shifted;
+    let gap = (w.lawful_norm(a, &p) - shifted).round() as i64;
+    assert!(gap > 0, "the tax at the top of the band shifts the norm down");
+    assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - gap * p.tax_evasion_ppm_per_legitimacy_point, "the greedy ruler at its shifted norm is still short of the collection");
 }
 
-#[test]
-fn on_generated_worlds_the_greedy_take_stays_inside_e8_and_gains_at_most_the_ceiling_over_the_plain_ruler() {
-    let p = params();
+/// Ten generated worlds, 100 ticks, every ruler on one strategy: the tax share of
+/// production and the net income of the greedy against the plain.
+fn play_worlds(p: &Params) -> (BTreeMap<&'static str, f64>, Vec<f64>, f64) {
     let band = p.entries["tax.observed_share_of_production"].band.unwrap();
     let mut totals: BTreeMap<&str, (i64, i64, i64)> = BTreeMap::new(); // (tax, production, spent)
-    let mut worst_gain = f64::MIN;
+    let mut gains = Vec::new();
     let mut shares: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for seed in 1..=10u64 {
-        let s = worldgen::generate(seed, &p);
+        let s = worldgen::generate(seed, p);
         let mut per_world: BTreeMap<&str, i64> = BTreeMap::new();
         for strategy in ["plain", "greedy"] {
-            let mut g = Game::new(&s, params(), seed).unwrap();
+            let mut g = Game::new(&s, p.clone(), seed).unwrap();
             let ids: Vec<ActorId> = g.world().actors.keys().copied().collect();
             let (mut tax, mut production, mut spent) = (0i64, 0i64, 0i64);
             for _ in 0..100 {
                 for a in &ids {
-                    spent += act(g.world_mut(), *a, strategy, &p);
+                    spent += act(g.world_mut(), *a, strategy, p);
                 }
                 for a in &ids {
                     if g.world().alive(*a) {
-                        production += g.world().production_per_tick(*a, &p);
+                        production += g.world().production_per_tick(*a, p);
                     }
                 }
                 let r = g.tick(&[]).unwrap();
@@ -554,21 +594,44 @@ fn on_generated_worlds_the_greedy_take_stays_inside_e8_and_gains_at_most_the_cei
             *t = (t.0 + tax, t.1 + production, t.2 + spent);
             per_world.insert(strategy, tax - spent);
         }
-        let gain = per_world["greedy"] as f64 / per_world["plain"] as f64 - 1.0;
-        worst_gain = worst_gain.max(gain);
+        gains.push(per_world["greedy"] as f64 / per_world["plain"] as f64 - 1.0);
     }
     let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
     let (plain, greedy) = (totals["plain"], totals["greedy"]);
     let gain = (greedy.0 - greedy.2) as f64 / (plain.0 - plain.2) as f64 - 1.0;
+    (BTreeMap::from([("plain", mean(&shares["plain"])), ("greedy", mean(&shares["greedy"]))]), gains, gain)
+}
+
+/// The ceiling holds in every world once the lottery of the throne is out of the way, and
+/// in the sum of the worlds with it in (owner's note on #287). With usurpation and violent
+/// death switched off the greedy ruler's gain is the arithmetic of the two (в) alone —
+/// 20 % at the top of Э4 in every world — so a world above the ceiling with them on is not
+/// the hard hand paying: it is the plain ruler losing collection to its own usurpations
+/// (seed 4: eight in fifty years over three polities took the plain take down by a third of
+/// the gap), while the greedy ruler, already at the floor of the gap, loses nothing to them.
+#[test]
+fn on_generated_worlds_the_greedy_take_stays_inside_e8_and_gains_at_most_the_ceiling_over_the_plain_ruler() {
+    let p = params();
+    let mut no_lottery = params();
+    no_lottery.usurpation_per_tick = 0.0;
+    no_lottery.violent_death_per_tick = 0.0;
+    let (shares, gains, gain) = play_worlds(&no_lottery);
     eprintln!(
-        "Э8 tax share of production: plain {:.3}, greedy {:.3}; greedy net income over plain: {:+.1}% in all, worst world {:+.1}%",
-        mean(&shares["plain"]),
-        mean(&shares["greedy"]),
+        "without the lottery of the throne — Э8 tax share of production: plain {:.3}, greedy {:.3}; greedy net income over plain: {:+.1}% in all, by world {}",
+        shares["plain"],
+        shares["greedy"],
         gain * 100.0,
-        worst_gain * 100.0
+        gains.iter().map(|g| format!("{:+.1}%", g * 100.0)).collect::<Vec<_>>().join(" ")
     );
+    for (i, g) in gains.iter().enumerate() {
+        assert!(*g <= GREEDY_GAIN_CEILING, "seed {}: the greedy ruler gains {:+.1}% over the plain one without the lottery of the throne: above the ceiling", i + 1, g * 100.0);
+    }
+    let (shares, gains, gain) = play_worlds(&p);
+    let worst = gains.iter().cloned().fold(f64::MIN, f64::max);
+    eprintln!("with it — Э8 tax share of production: plain {:.3}, greedy {:.3}; greedy net income over plain: {:+.1}% in all, worst world {:+.1}%", shares["plain"], shares["greedy"], gain * 100.0, worst * 100.0);
     assert!(gain <= GREEDY_GAIN_CEILING, "the greedy ruler gains {:+.1}% over the plain one: above the ceiling", gain * 100.0);
 }
+
 #[test]
 fn paired_runs_by_the_outcome_of_brief_1_a_greedy_ruler_gains_at_most_the_ceiling_and_a_borrower_who_spends_the_loan_ends_poorer() {
     let p = params();

@@ -174,11 +174,15 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
                         Source::Tax => assert!(q.milli >= 0),
                         Source::Court | Source::Upkeep | Source::Interest | Source::Repayment | Source::Seat => assert!(q.milli <= 0, "seed {seed}: {:?} put wheat into a treasury", q.source),
                         Source::Loan => assert!(q.milli >= 0),
+                        // A vassal's tribute (E2 step 7): a transfer, either sign.
+                        Source::Tribute => {}
                         other => panic!("seed {seed}: treasury moved by {other:?}"),
                     }
                 }
                 // The counter-entries: the same figure on the debt.
                 assert_eq!(sum(t, Source::Loan), sum(d, Source::Loan), "seed {seed} actor {a:?}: a loan without its debt");
+                // Tribute moves between treasuries: over all of them it sums to nothing.
+                assert_eq!(r.postings.iter().filter(|q| matches!(q.account, Account::Treasury(_)) && q.source == Source::Tribute).map(|q| q.milli).sum::<i64>(), 0, "seed {seed}: tribute without its counter-entry");
                 assert_eq!(sum(t, Source::Repayment), sum(d, Source::Repayment), "seed {seed} actor {a:?}: a repayment without its debt");
                 // A seat's income (E0 Х1) is a transfer: what left the treasury arrived in
                 // the houses' treasuries of the same polity.
@@ -241,7 +245,7 @@ fn wheat_is_accounted_by_source_and_the_observed_shares_are_reported() {
         military_shares.push(pay as f64 / (pay + court) as f64);
         // Every treasury movement is one of the economy's sources.
         for src in by_source.keys() {
-            assert!(matches!(src, Source::Tax | Source::Seat | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment), "seed {seed}: treasury moved by {src:?}");
+            assert!(matches!(src, Source::Tax | Source::Seat | Source::Court | Source::Upkeep | Source::Interest | Source::Loan | Source::Repayment | Source::Tribute), "seed {seed}: treasury moved by {src:?}");
         }
     }
     let mean = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;

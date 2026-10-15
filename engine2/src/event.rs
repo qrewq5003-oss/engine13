@@ -12,7 +12,7 @@ use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
-use crate::world::Standing;
+use crate::world::{Standing, TreatyKind};
 
 /// Outcome of a battle for the attacker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +118,27 @@ pub enum Event {
     Default { actor: ActorId, written_off_kg: u64 },
     /// The term after a default ended: the bank lends again.
     CreditRestored { actor: ActorId },
+    /// A treaty ran out at its term (E0 Д1; E2 step 7).
+    TreatyExpired { a: ActorId, b: ActorId, kind: TreatyKind },
+    /// A vassal is a vassal no more: its lord fell, or made the peace that set it free.
+    Released { vassal: ActorId, lord: ActorId },
+    /// A vassal's treasury did not cover the tribute due (E0 Д2).
+    TributeShort { vassal: ActorId, lord: ActorId, unpaid_kg: u64 },
+    /// An alliance made, running to `until` (E0 Д1).
+    Alliance { a: ActorId, b: ActorId, until: Tick },
+    /// A proposal the other side did not accept: the relation was below the threshold, or
+    /// the state of the pair forbade it; the embassy's gifts are spent all the same.
+    Refused { actor: ActorId, verb: VerbId, target: ActorId },
+    /// A treaty broken by a declaration of war before its term: priced as a breach.
+    TreatyBroken { a: ActorId, b: ActorId, kind: TreatyKind },
+    /// An embassy sent: gifts spent for a push of the relation.
+    Embassy { from: ActorId, to: ActorId, kg: u64 },
+    /// A gift to another polity's treasury (E0 Д2, the subsidy).
+    Gift { from: ActorId, to: ActorId, kg: u64 },
+    /// Two houses bound by a marriage, with the dowry that went with it.
+    Marriage { a: PersonId, b: PersonId, dowry_kg: u64 },
+    /// A peace of submission: the loser of the war became the winner's vassal.
+    Submission { vassal: ActorId, lord: ActorId },
 }
 
 /// An event with its place in the run: a global sequence number and the tick.

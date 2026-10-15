@@ -616,20 +616,178 @@ checked_by = "В6"
 
 # (в) Collection (review of #286: legitimacy must cost the polity, not only the person on
 # the throne): collected = rate × production × share, and the share falls by this per point
-# of legitimacy below `tax.full_collection_at_legitimacy` — evasion, arrears, refusal. At
-# the greedy equilibrium (the top of Э4, legitimacy 20) the share is 0.6 and the take 12 %
-# of production: inside Э8, a fifth above the tithe, never double it. Checked through Э8.
+# of legitimacy below **the norm of lawful rule** (`legitimacy.norm_*` of the ruler's
+# standing before the ruler's decisions shift it; for a usurper — of the standing the
+# polity's rule of succession gives) — evasion, arrears, refusal. Lawful rule of any kind
+# collects everything: an elected (60) or an acclaimed (50) ruler at its norm is not poorer
+# than a hereditary one (the owner's correction on #286 — tied to an absolute 70 the share
+# left Venice 8 % poorer than any monarchy for ever). At the greedy equilibrium (the top of
+# Э4: the norm shifted five steps down, legitimacy 50 below lawful rule) the share is 0.6
+# and the take 12 % of production: inside Э8, a fifth above the tithe, never double it. The
+# usurper's gap is from lawful rule, not from its own norm of 30: measured with its own
+# norm, the greedy ruler — soon usurped — collected 0.86 and gained a third over the plain
+# one, above the ceiling of the acceptance. Checked through Э8.
 [tax.evasion_per_legitimacy_point]
 kind = "c"
 value = 0.008
-unit = "share of the assigned tax lost per point of legitimacy below full collection"
+unit = "share of the assigned tax lost per point of legitimacy below the norm of lawful rule"
 checked_by = "Э8"
 
-# (в) The legitimacy at which everything assigned is collected: the norm of a hereditary
-# ruler. Below it the share falls; a usurper at his own norm (30) collects 0.68 — contested
-# rule is poorer rule. Checked through Э8.
-[tax.full_collection_at_legitimacy]
+# ---- diplomacy (E2 step 7, plan §19) ----
+
+# E0 Д1 — the term of a treaty or a league, years: Lodi 1454 and the Italian league of 1455
+# — 25 years with renewal; the peace of 363 with Persia — 30. One band for alliance and
+# peace; the generator draws starting alliances' terms from it.
+[treaty.term_years]
+kind = "a"
+value = 25.0
+band = [10.0, 30.0]
+unit = "years"
+e0 = "Д1"
+
+# E0 Д2 — the tribute of a vassal, share of its income: Serbia's harach 50 000 then 60 000
+# ducats against a main income of about 200 000 (Ivanović 2019 — opened); the other way —
+# a subsidy of the strong to the weak, 1–2 % — is the gift (`bribe.share_of_revenue`).
+[vassal.tribute_share]
+kind = "a"
+value = 0.2
+band = [0.1, 0.3]
+unit = "share of the take"
+e0 = "Д2"
+
+# E0 Д3 — observed: the share of polities bound by an alliance or by vassalage at a time.
+# Italy 1455: five powers of the league among eight to ten states; the Balkans 1430: Serbia,
+# Wallachia, Byzantium tributaries of the Ottomans; Rome 375: the federates. **By memory** —
+# sources to open: Mallett, «Mercenaries and their Masters», ch. 1 (Lodi and the league);
+# Ivanović 2019 (opened for Д2); Heather, «The Fall of the Roman Empire» (the federates).
+# Owner's rule on §19: an honest measure only with the agents of E3 — in E2 the starting
+# bonds run out and nobody makes new ones, so here the row checks the generator at the
+# start, not the engine.
+[diplomacy.observed_bound_share]
+kind = "b"
+band = [0.3, 0.8]
+unit = "share of polities bound by alliance or vassalage"
+e0 = "Д3"
+
+# (в) The relation of a pair, 0–100 (plan §19.2): the base norm, shifted by the state of the
+# pair — war, alliance, a marriage between their houses, vassalage, a shared border — and
+# approached at `relation.rate_per_tick`; embassies and gifts push it once, with saturation.
+# Its reader is the acceptance of proposals (`treaty.accept_at_relation`); E3 reads it for
+# threat and utility. All checked through Д3.
+[relation.base]
 kind = "c"
-value = 70.0
+value = 50.0
+unit = "relation, 0–100"
+checked_by = "Д3"
+
+[relation.norm_war]
+kind = "c"
+value = 30.0
+unit = "relation below the base while at war"
+checked_by = "Д3"
+
+[relation.norm_alliance]
+kind = "c"
+value = 20.0
+unit = "relation above the base under an alliance"
+checked_by = "Д3"
+
+[relation.norm_marriage]
+kind = "c"
+value = 15.0
+unit = "relation above the base while a marriage binds a house of each"
+checked_by = "Д3"
+
+[relation.norm_vassalage]
+kind = "c"
+value = 10.0
+unit = "relation above the base between a vassal and its lord"
+checked_by = "Д3"
+
+# The threat of a neighbour, in E2 only its presence; the weights of threat — strength,
+# intent, distance — are E3's (E0 §1.7).
+[relation.norm_border]
+kind = "c"
+value = 10.0
+unit = "relation below the base when the two polities' land touches"
+checked_by = "Д3"
+
+[relation.rate_per_tick]
+kind = "c"
+value = 0.1
+unit = "share of the gap to the norm per tick"
+checked_by = "Д3"
+
+# (в) The verbs of diplomacy (plan §19.3). Acceptance is a rule of the engine's state, the
+# same for the player and the agents (brief §3, rule 8): a proposal is accepted when the
+# relation of the pair is at this or above and the state of the pair allows it; the offer
+# shows the relation and the threshold (owner's rule on §19). At the norm of war (about 20)
+# a peace from the losing side is refused: in effect peace comes when the winner proposes
+# it. Checked through Д3.
+[treaty.accept_at_relation]
+kind = "c"
+value = 60.0
+unit = "relation, 0–100"
+checked_by = "Д3"
+
+# (в) A war declared on a polity with a treaty in force — alliance or peace — is a breach:
+# a price, not a prohibition (owner's rule on §19): the legitimacy price times this, the
+# treaty gone, and the relations with the victim's allies pushed to nothing.
+[treaty.breach_factor]
+kind = "c"
+value = 2.0
+unit = "multiplier of the price of a declaration"
+checked_by = "Д3"
+
+# (в) What a declaration of war costs in legitimacy: the price of the tax raised once (a
+# verb without a price is a degeneration, decision on #284).
+[legitimacy.cost_declare_war]
+kind = "c"
+value = 10.0
 unit = "legitimacy, 0–100"
-checked_by = "Э8"
+checked_by = "Д3"
+
+# (в) An embassy: gifts worth this share of a year's revenue, spent (`Source::Verb`), for a
+# push of the relation by `embassy.gain` with saturation; the same gifts open a proposal of
+# alliance, accepted or not.
+[embassy.cost_share_of_revenue]
+kind = "c"
+value = 0.05
+unit = "share of yearly revenue"
+checked_by = "Д3"
+
+[embassy.gain]
+kind = "c"
+value = 10.0
+unit = "relation, pushed once with saturation"
+checked_by = "Д3"
+
+# E0 Д2 — the other way round: the subsidy of the strong to the weak, 1–2 % of revenue
+# (Rome's payments to the Huns, 700–2 100 pounds of gold a year against the East's income —
+# by memory). The verb `bribe` is this gift: a transfer to the other treasury (`Source::Gift`),
+# the money stays in the world; buying a house's favour waits for factions.
+[bribe.share_of_revenue]
+kind = "a"
+value = 0.015
+band = [0.01, 0.02]
+unit = "share of the giver's yearly revenue"
+e0 = "Д2"
+
+# (в) The push of a gift per share of the receiver's yearly revenue it is worth: a gift of a
+# twentieth of the receiver's revenue pushes as an embassy does (200 × 0.05 = 10), with the
+# same saturation — a gift means more to the poor than to the rich.
+[bribe.gain_per_share_of_income]
+kind = "c"
+value = 200.0
+unit = "relation per share of the receiver's yearly revenue"
+checked_by = "Д3"
+
+# (в) The dowry: a share of the proposing house's treasury to the other house
+# (`Source::Dowry`) — measured by the house's wealth, not the polity's revenue (owner's rule
+# on §19: a house earns Х1, a dowry of half a year of the polity's revenue would take it
+# decades); the first expense a house has.
+[marriage.dowry_share_of_house]
+kind = "c"
+value = 0.5
+unit = "share of the house's treasury"
+checked_by = "Д3"

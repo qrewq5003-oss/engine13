@@ -5,11 +5,12 @@
 //! make islands, colonies and overseas holdings reachable — a `coastal` mark alone is not a
 //! link (owner's review of PR #280).
 //!
-//! **Passability (E2 steps 2 and 5).** A unit may enter a province its owner holds or a
-//! province of a polity its owner is at war with (`army.rs`), by land or by sea. Other
-//! foreign land is closed until diplomacy grants passage; sea crossing needs no fleet yet —
-//! the fleet becomes the condition when institutions arrive (E0 А10). With no passable path
-//! the order is dropped with a `NoPath` event.
+//! **Passability (E2 steps 2, 5 and 7).** A unit may enter a province its owner holds, a
+//! province of a polity its owner is at war with (`army.rs`), or the land of an ally, of its
+//! lord or of a vassal (`diplomacy.rs`: the right of passage comes with the bond), by land
+//! or by sea. Other foreign land is closed; sea crossing needs no fleet yet — the fleet
+//! becomes the condition when institutions arrive (E0 А10). With no passable path the order
+//! is dropped with a `NoPath` event.
 //!
 //! **The march (E2 step 5, E0 А5).** A unit's reach in a tick is the day's march times the
 //! campaign days of a half-year, over the width of a province (√ of the mean area) — on
@@ -23,8 +24,10 @@
 //! is shared pro rata among the polity's units, and the unpaid share melts — an unpaid army
 //! deserts or mutinies, it does not live off its own subjects (owner's rule on PR #284: a
 //! foraging army at home would void the budget as the limit and А11 with it; requisitions
-//! at home, if ever, come with internal politics and a price in legitimacy). On **foreign
-//! land** a unit **forages** from the province it stands in: up to
+//! at home, if ever, come with internal politics and a price in legitimacy). On **friendly
+//! land** — an ally's, the lord's, a vassal's — a unit is supplied as at home: the paid
+//! share buys its food, the unpaid share melts, nobody forages on a friend (owner's note on
+//! #284). On **enemy land** a unit **forages** from the province it stands in: up to
 //! `forage.soldiers_per_1000_people` of its people, shared pro rata among the foragers; the
 //! province loses `ruin.population_loss_per_tick_at_full_load` of its people scaled by the
 //! load (E0 П6, `Source::Ruin`). Whatever is neither paid nor fed melts at
@@ -60,9 +63,9 @@ impl World {
         Ok(())
     }
 
-    /// Can `owner`'s unit enter `p`? Its own land, or the land of an enemy at war.
+    /// Can `owner`'s unit enter `p`? Its own or friendly land, or the land of an enemy at war.
     pub fn passable(&self, owner: ActorId, p: ProvinceId) -> bool {
-        self.provinces.get(&p).is_some_and(|pr| pr.owner == owner || self.at_war(owner, pr.owner))
+        self.provinces.get(&p).is_some_and(|pr| self.friendly(owner, pr.owner) || self.at_war(owner, pr.owner))
     }
 
     /// Does `p` stop `owner`'s march: enemy land, or an enemy unit standing there.
@@ -175,13 +178,13 @@ impl World {
         for p in provinces {
             let owner = self.provinces[&p].owner;
             let here: Vec<(UnitId, ActorId, i64)> = self.units.iter().filter(|(_, u)| u.position == p).map(|(id, u)| (*id, u.owner, self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0))).collect();
-            // At home: the unpaid share melts.
-            for (id, u_owner, soldiers) in here.iter().filter(|(_, o, _)| *o == owner) {
-                let unsupplied = soldiers - soldiers * self.actors[u_owner].paid_share_ppm / 1_000_000;
-                self.melt(*id, unsupplied, params)?;
+            // At home or on friendly land: the paid share is fed, the unpaid share melts.
+            let fed: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, _)| self.friendly(*o, owner)).map(|(id, o, s)| (*id, s - s * self.actors[o].paid_share_ppm / 1_000_000)).collect();
+            for (id, unsupplied) in fed {
+                self.melt(id, unsupplied, params)?;
             }
-            // Abroad: foraging, shared pro rata by need.
-            let needs: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, s)| *o != owner && *s > 0).map(|(id, _, s)| (*id, *s)).collect();
+            // On enemy land: foraging, shared pro rata by need.
+            let needs: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, s)| !self.friendly(*o, owner) && *s > 0).map(|(id, _, s)| (*id, *s)).collect();
             let total_need: i64 = needs.iter().map(|(_, n)| n).sum();
             if total_need == 0 {
                 continue;

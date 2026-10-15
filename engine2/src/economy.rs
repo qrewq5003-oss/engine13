@@ -7,10 +7,17 @@
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
 //!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) × **the share
 //!   collected** (E2 step 6b, review of #286): the share falls by
-//!   `tax.evasion_per_legitimacy_point` for every point of legitimacy below
-//!   `tax.full_collection_at_legitimacy` — evasion, arrears, refusal; a polity at the top
-//!   of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
+//!   `tax.evasion_per_legitimacy_point` for every point of legitimacy below **the norm of
+//!   lawful rule** (`World::lawful_norm`: the ruler's standing before the ruler's own
+//!   decisions shift it; for a usurper the standing the polity's rule of succession gives)
+//!   — evasion, arrears, refusal. Lawful rule of any kind collects everything: an elected
+//!   or an acclaimed ruler at its norm is not poorer than a hereditary one (the owner's
+//!   correction on #286 — Venice must not be poorer than every monarchy); a polity at the
+//!   top of Э4 with the legitimacy that rate leaves it stays inside Э8, since states never
 //!   collected all they assigned → `Source::Tax`;
+//! - **tribute** (E0 Д2, E2 step 7): a vassal sends `vassal.tribute_share` of its take to
+//!   its lord, what the treasury holds of it, not while at war with the lord → a transfer
+//!   signed `Source::Tribute`;
 //! - **seats** (E0 Х1, `house.income_share_of_seat`): the ruling house takes its share of
 //!   the tax, a governor's house its share of the province's tax — transfers to the houses'
 //!   treasuries (`Source::Seat`, plan §18);
@@ -150,15 +157,17 @@ impl World {
         Ok(())
     }
 
-    pub(crate) fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
+    pub fn yearly_income(&self, a: ActorId, params: &Params) -> i64 {
         self.production_per_tick(a, params) * 2 * self.actors[&a].tax_rate_ppm / 1_000_000 * self.collection_share_ppm(a, params) / 1_000_000
     }
 
     /// The share of the assigned tax a polity collects, parts per million: everything at
-    /// `tax.full_collection_at_legitimacy` and above, less by
-    /// `tax.evasion_per_legitimacy_point` for every point of legitimacy below it.
+    /// the norm of lawful rule and above, less by `tax.evasion_per_legitimacy_point` for
+    /// every point of legitimacy below it. The gap is taken from the norm before the
+    /// ruler's decisions shift it, so a tax above the tithe keeps costing collection: the
+    /// greedy ruler sits at its shifted norm, far below the norm of lawful rule.
     pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
-        let gap = (params.tax_full_collection_at_legitimacy - self.actors[&a].legitimacy).max(0.0);
+        let gap = (self.lawful_norm(a, params) - self.actors[&a].legitimacy).max(0.0);
         (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
     }
 
@@ -192,6 +201,22 @@ impl World {
             let income = production * rate / 1_000_000 * share / 1_000_000;
             if income > 0 {
                 self.post(treasury, Source::Tax, income * 1000)?;
+            }
+            // Tribute (E0 Д2, E2 step 7): a vassal sends its lord a share of the take, what
+            // the treasury holds of it; not while it is at war with the lord — a rebel pays
+            // nothing — and not to a lord that has fallen.
+            if let Some(lord) = self.actors[&a].vassal_of {
+                if self.alive(lord) && !self.at_war(a, lord) {
+                    let due = income * params.tribute_share_ppm / 1_000_000;
+                    let paid = due.min(self.treasury(a));
+                    if paid > 0 {
+                        self.post(treasury, Source::Tribute, -paid * 1000)?;
+                        self.post(Account::Treasury(lord), Source::Tribute, paid * 1000)?;
+                    }
+                    if paid < due {
+                        self.emit(Event::TributeShort { vassal: a, lord, unpaid_kg: (due - paid) as u64 });
+                    }
+                }
             }
             // The houses' seats: the throne's share of the tax, a governorship's share of
             // its province's tax.
@@ -262,13 +287,15 @@ impl World {
     /// year of revenue within the ceiling — on both accounts, so the polity's net worth
     /// does not change.
     pub fn apply_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
+        if crate::diplomacy::is_diplomatic(call.verb) {
+            return self.apply_diplomacy_verb(call, params);
+        }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
         if !self.alive(a) {
             return Err(VerbError::Fallen(a));
         }
         match call.verb {
             VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => self.apply_politics_verb(call, a, params),
-            VerbId::DeclareWar | VerbId::MakePeace => Err(VerbError::NotAvailable(call.verb, "awaits diplomacy: a war without a price is a degeneration (plan §17)")),
             VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => self.apply_army_verb(call, a, params),
             VerbId::TakeLoan => {
                 if !self.actors[&a].institutions.contains(&Institution::Bank) {

@@ -108,6 +108,10 @@ pub struct VerbOffer {
     pub cost_legitimacy: i64,
     /// Why it is not available, when it is not.
     pub why: Option<String>,
+    /// For a proposal (alliance, marriage, peace from the losing side): the relation the
+    /// other side needs to accept, 0–100 (E2 step 7, owner's rule on §19: the offer shows
+    /// the relation and the threshold; `WorldView` carries the relations).
+    pub threshold: Option<i64>,
 }
 
 #[cfg(test)]

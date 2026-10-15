@@ -116,6 +116,16 @@ impl Observed for Game {
                 Event::OrderEnforced { actor, .. } => ObsEvent::Other(format!("OrderEnforced@{}", self.actor_id(*actor).0)),
                 Event::Default { actor, .. } => ObsEvent::Other(format!("Default@{}", self.actor_id(*actor).0)),
                 Event::CreditRestored { .. } => ObsEvent::Other("CreditRestored".into()),
+                Event::TreatyExpired { a, b, .. } => ObsEvent::Other(format!("TreatyExpired@{}-{}", self.actor_id(*a).0, self.actor_id(*b).0)),
+                Event::Released { vassal, .. } => ObsEvent::Other(format!("Released@{}", self.actor_id(*vassal).0)),
+                Event::TributeShort { vassal, .. } => ObsEvent::Other(format!("TributeShort@{}", self.actor_id(*vassal).0)),
+                Event::Alliance { a, b, .. } => ObsEvent::Other(format!("Alliance@{}-{}", self.actor_id(*a).0, self.actor_id(*b).0)),
+                Event::Refused { actor, verb, .. } => ObsEvent::Other(format!("Refused@{}:{}", self.actor_id(*actor).0, verb.key())),
+                Event::TreatyBroken { a, b, .. } => ObsEvent::Other(format!("TreatyBroken@{}-{}", self.actor_id(*a).0, self.actor_id(*b).0)),
+                Event::Embassy { from, to, .. } => ObsEvent::Other(format!("Embassy@{}-{}", self.actor_id(*from).0, self.actor_id(*to).0)),
+                Event::Gift { from, to, .. } => ObsEvent::Other(format!("Gift@{}-{}", self.actor_id(*from).0, self.actor_id(*to).0)),
+                Event::Marriage { .. } => ObsEvent::Other("Marriage".into()),
+                Event::Submission { vassal, .. } => ObsEvent::Other(format!("Submission@{}", self.actor_id(*vassal).0)),
             })
             .collect()
     }

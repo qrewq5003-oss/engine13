@@ -38,7 +38,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::params::Params;
-use crate::scenario::{ActorData, DisplayCurrency, HouseData, PersonData, ProvinceData, ScenarioData};
+use crate::scenario::{ActorData, AllianceData, DisplayCurrency, HouseData, PersonData, ProvinceData, RelationsData, ScenarioData, VassalData};
 use crate::verbs::VerbId;
 use crate::world::{Disease, Institution, Land, Succession};
 
@@ -79,6 +79,14 @@ const RULING_HOUSE_SIZE: (u64, u64) = (3, 8);
 const OTHER_HOUSE_SIZE: (u64, u64) = (2, 5);
 /// Houses that do not rule, per polity, kind (в).
 const OTHER_HOUSES: (u64, u64) = (2, 4);
+/// Starting alliances per world (E2 step 7), between states whose land touches; the share
+/// of states bound at the start is E0 Д3 — in E2 the row measures the generator, since the
+/// starting treaties expire and nobody makes new ones until the agents of E3 (owner's rule
+/// on §19).
+const ALLIANCES: (u64, u64) = (1, 3);
+/// The chance that a state at least twice the size of a touching neighbour (in provinces)
+/// starts as its lord — one vassal a lord, a vassal bound by nothing else.
+const VASSAL_CHANCE: f64 = 0.5;
 
 fn pick<R: Rng>(rng: &mut R, (lo, hi): (u64, u64)) -> u64 {
     rng.gen_range(lo..=hi)
@@ -367,7 +375,7 @@ impl Map {
     /// never starts above capacity. The capital is the most populous province (ties: lowest
     /// id); the army is E0 А11's share of the polity's people, kept within the capital's
     /// supply (E0 А8). Province ids are cell indices, so the map stays legible.
-    fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, bank_for: &dyn Fn(usize) -> bool, params: &Params) -> ScenarioData {
+    fn into_scenario(self, id: String, states: usize, diseases: Vec<Disease>, bank_for: &dyn Fn(usize) -> bool, bonds: bool, params: &Params) -> ScenarioData {
         let pid = |i: u32| format!("p{i:03}");
         let sid = |a: usize| format!("s{a:02}");
         let mut provinces = BTreeMap::new();
@@ -430,7 +438,7 @@ impl Map {
                 houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg });
                 let head_age = pick(&mut rng, RULER_AGE) as i32;
                 let head = format!("{hid}p00");
-                persons.insert(head.clone(), PersonData { name: format!("{hid} head"), house: hid.clone(), born: start_year - head_age, parent: None });
+                persons.insert(head.clone(), PersonData { name: format!("{hid} head"), house: hid.clone(), born: start_year - head_age, parent: None, spouse: None });
                 let mut adults = vec![head.clone()];
                 let mut children: Vec<(String, i32)> = Vec::new();
                 for k in 1..size {
@@ -441,7 +449,7 @@ impl Map {
                     } else {
                         (start_year - rng.gen_range(RULER_AGE.0 as i32..=RULER_AGE.1 as i32), None)
                     };
-                    persons.insert(key.clone(), PersonData { name: format!("{hid} {k}"), house: hid.clone(), born, parent: parent.clone() });
+                    persons.insert(key.clone(), PersonData { name: format!("{hid} {k}"), house: hid.clone(), born, parent: parent.clone(), spouse: None });
                     if start_year - born >= params.majority_age {
                         adults.push(key.clone());
                     }
@@ -477,6 +485,49 @@ impl Map {
                 provinces.get_mut(&p).unwrap().governor = Some(g);
             }
         }
+        // Starting relations (E2 step 7): alliances between touching states and a vassal
+        // of a large state, by lot; no wars (the tests open them, decision on #284). The
+        // hand-made extreme worlds are sketches of geography and start with no bond.
+        let state_of = |owner: &str| -> usize { owner[1..].parse().unwrap_or(0) };
+        let mut touching: std::collections::BTreeSet<(usize, usize)> = std::collections::BTreeSet::new();
+        let mut count: BTreeMap<usize, usize> = BTreeMap::new();
+        for p in provinces.values() {
+            let s = state_of(&p.owner);
+            *count.entry(s).or_insert(0) += 1;
+            for n in p.neighbours.iter().chain(p.sea_neighbours.iter()) {
+                let t = state_of(&provinces[n].owner);
+                if s != t {
+                    touching.insert((s.min(t), s.max(t)));
+                }
+            }
+        }
+        let touching: Vec<(usize, usize)> = touching.into_iter().collect();
+        let mut bound: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut alliances = Vec::new();
+        let mut vassals = Vec::new();
+        let mut candidates = touching.clone();
+        let term = (params.treaty_term_years_band[0] as u64, params.treaty_term_years_band[1] as u64);
+        for _ in 0..if bonds { pick(&mut rng, ALLIANCES) } else { 0 } {
+            if candidates.is_empty() {
+                break;
+            }
+            let (a, b) = candidates.remove(rng.gen_range(0..candidates.len()));
+            if bound.contains(&a) || bound.contains(&b) {
+                continue;
+            }
+            bound.insert(a);
+            bound.insert(b);
+            alliances.push(AllianceData { a: sid(a), b: sid(b), until_year: start_year + pick(&mut rng, term) as i32 });
+        }
+        let mut lords: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        for (a, b) in &touching {
+            let (big, small) = if count[a] >= count[b] { (*a, *b) } else { (*b, *a) };
+            if bonds && count[&big] >= 2 * count[&small] && !bound.contains(&small) && !lords.contains(&small) && !bound.contains(&big) && !lords.contains(&big) && rng.gen_bool(VASSAL_CHANCE) {
+                bound.insert(small);
+                lords.insert(big);
+                vassals.push(VassalData { vassal: sid(small), lord: sid(big) });
+            }
+        }
         let verbs = VerbId::ALL.iter().map(|v| (v.key().to_string(), v.key().replace('_', " "))).collect();
         ScenarioData {
             id,
@@ -487,6 +538,7 @@ impl Map {
             provinces,
             houses,
             persons,
+            relations: Some(RelationsData { wars: Vec::new(), alliances, vassals }),
             verbs,
         }
     }
@@ -625,7 +677,7 @@ pub fn generate(seed: u64, params: &Params) -> ScenarioData {
     let diseases = if rng.gen_bool(0.5) { vec![Disease::Plague] } else { Vec::new() };
     // Institutions: a bank for some polities and not others (E0 §4, constraint 4).
     let banks: Vec<bool> = (0..states).map(|_| rng.gen_bool(0.5)).collect();
-    map.into_scenario(format!("gen{seed}"), states, diseases, &|s| banks.get(s).copied().unwrap_or(false), params)
+    map.into_scenario(format!("gen{seed}"), states, diseases, &|s| banks.get(s).copied().unwrap_or(false), true, params)
 }
 
 /// A hand-made map from an ASCII sketch: `.` is sea, a letter is the owning polity
@@ -653,7 +705,7 @@ fn sketch(id: &str, rows: &[&str], land_of: impl Fn(usize) -> Land, area: u64, s
     let comps = map.components();
     map.guarantee_sea_links(&comps);
     map.mark_coast();
-    map.into_scenario(id.to_string(), states, Vec::new(), bank_for, params)
+    map.into_scenario(id.to_string(), states, Vec::new(), bank_for, false, params)
 }
 
 /// The hand-made extreme worlds (owner, plan §12 item 11): each with its name.
@@ -707,7 +759,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 213_264_665_699_613_513;
+    const PINNED_WORLD_ONE: u64 = 9_146_812_683_176_577_038;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

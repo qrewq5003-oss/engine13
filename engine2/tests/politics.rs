@@ -98,8 +98,8 @@ fn by_blood_the_eldest_childs_line_comes_before_a_younger_child_and_by_acclamati
     let p = params();
     let mut base = testworld::five_states_scenario();
     // Give house 1 a second child of the ruler and a grandchild through the first.
-    base.persons.insert("c1b".to_string(), engine2::scenario::PersonData { name: "Child 1 b".into(), house: "h1".into(), born: 1457, parent: Some("r1".into()) });
-    base.persons.insert("g1".to_string(), engine2::scenario::PersonData { name: "Grandchild 1".into(), house: "h1".into(), born: 1474, parent: Some("c1".into()) });
+    base.persons.insert("c1b".to_string(), engine2::scenario::PersonData { name: "Child 1 b".into(), house: "h1".into(), born: 1457, parent: Some("r1".into()), spouse: None });
+    base.persons.insert("g1".to_string(), engine2::scenario::PersonData { name: "Grandchild 1".into(), house: "h1".into(), born: 1474, parent: Some("c1".into()), spouse: None });
     let s1 = ActorId(1);
     for (rule, expected, standing) in [(Succession::Blood, "g1", Standing::Hereditary), (Succession::Acclamation, "c1b", Standing::Acclaimed), (Succession::Election, "c1b", Standing::Elected), (Succession::Mixed, "g1", Standing::Confirmed)] {
         let mut s = base.clone();

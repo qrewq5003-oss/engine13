@@ -161,25 +161,51 @@ impl World {
         self.provinces.iter().filter(|(_, pr)| pr.governor == Some(p)).map(|(id, _)| *id).collect()
     }
 
-    /// The legitimacy norm of a polity's ruler by standing, the regency norm while the
-    /// ruler is a minor (E0 §1.7, kind (в) checked through В5).
+    /// The legitimacy norm a standing carries (E0 §1.7, kind (в) checked through В5).
+    pub fn norm_of_standing(standing: Standing, params: &Params) -> f64 {
+        match standing {
+            Standing::Hereditary => params.legitimacy_norm_hereditary,
+            Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
+            Standing::Elected => params.legitimacy_norm_elected,
+            Standing::Acclaimed => params.legitimacy_norm_acclaimed,
+            Standing::Usurper => params.legitimacy_norm_usurper,
+        }
+    }
+
+    /// The legitimacy norm of a polity's ruler by standing alone, the regency norm while
+    /// the ruler is a minor: the norm before any decision of the ruler shifts it.
+    pub fn standing_norm(&self, a: ActorId, params: &Params) -> f64 {
+        let actor = &self.actors[&a];
+        if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
+            return params.legitimacy_norm_regency;
+        }
+        Self::norm_of_standing(actor.standing, params)
+    }
+
+    /// The norm of lawful rule in this polity: the standing's norm — or, for a usurper, the
+    /// norm of the standing the polity's own rule of succession gives, since the usurper
+    /// holds a throne that is owed to someone else. The share of the tax collected is
+    /// measured against this (`economy.rs`): an elected or an acclaimed ruler at its own
+    /// norm collects everything, as a hereditary one does (the owner's correction on
+    /// #286), while a usurper is short of the collection by the whole gap to lawful rule.
+    /// Measured on the test world: with the usurper's own norm (30) as the base, the greedy
+    /// ruler — taxed to the top, soon usurped — collected 0.86 and gained a third over the
+    /// plain one; against lawful rule it gains nothing, as before the correction.
+    pub fn lawful_norm(&self, a: ActorId, params: &Params) -> f64 {
+        let actor = &self.actors[&a];
+        if actor.standing == Standing::Usurper {
+            return Self::norm_of_standing(standing_of_rule(actor.succession), params);
+        }
+        self.standing_norm(a, params)
+    }
+
+    /// The norm legitimacy moves towards: the standing's norm shifted by the ruler's
+    /// lasting decisions — the tax above the tithe, the closed credit.
     pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
         let actor = &self.actors[&a];
-        let by_standing = if self.person_alive(actor.ruler) && !self.is_adult(actor.ruler, params) {
-            params.legitimacy_norm_regency
-        } else {
-            match actor.standing {
-                Standing::Hereditary => params.legitimacy_norm_hereditary,
-                Standing::Confirmed => (params.legitimacy_norm_hereditary + params.legitimacy_norm_acclaimed) / 2.0,
-                Standing::Elected => params.legitimacy_norm_elected,
-                Standing::Acclaimed => params.legitimacy_norm_acclaimed,
-                Standing::Usurper => params.legitimacy_norm_usurper,
-            }
-        };
-        // Lasting decisions shift the norm: the tax above the tithe, the closed credit.
         let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
         let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
-        (by_standing - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default).clamp(0.0, 100.0)
+        (self.standing_norm(a, params) - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default).clamp(0.0, 100.0)
     }
 
     /// Who would take the throne by force: the regent, else a governor, else the eldest
@@ -351,7 +377,7 @@ impl World {
             self.next_person += 1;
             self.names.persons.push((format!("{hsid}.{}", i + 1), format!("{hname} {}", i + 1)));
             let age = FOUNDER_AGE + if i == 0 { 0 } else { HOUSEHOLD_AGE_OFFSETS[(i - 1) % HOUSEHOLD_AGE_OFFSETS.len()] };
-            self.persons.insert(id, Person { house, born: self.year() - age, parent: None, died: None });
+            self.persons.insert(id, Person { house, born: self.year() - age, parent: None, spouse: None, died: None });
         }
         self.emit(Event::NewDynasty { actor: a, house, founder, from, household: persons - 1 });
         Ok(Some(founder))
@@ -406,7 +432,7 @@ impl World {
         let k = self.persons.values().filter(|p| p.house == house).count() + 1;
         let (hsid, hname) = &self.names.houses[house.index()];
         self.names.persons.push((format!("{hsid}.{k}"), format!("{hname} {k}")));
-        self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), died: None });
+        self.persons.insert(id, Person { house, born: self.year(), parent: Some(parent), spouse: None, died: None });
         self.emit(Event::PersonBorn { person: id, house, parent });
         id
     }
@@ -427,7 +453,7 @@ impl World {
     }
 
     /// Pay or receive legitimacy, kept inside 0–100.
-    fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
+    pub(crate) fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
         let actor = self.actors.get_mut(&a).unwrap();
         actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
     }
