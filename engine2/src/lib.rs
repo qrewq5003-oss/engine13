@@ -41,6 +41,7 @@ pub mod movement;
 #[cfg(feature = "sentinel")]
 pub mod observe;
 pub mod opportunity;
+pub mod par;
 pub mod params;
 pub mod politics;
 pub mod population;

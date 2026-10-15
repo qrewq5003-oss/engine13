@@ -94,9 +94,9 @@ fn two_hundred_seeds_three_hundred_ticks_no_flags() {
     let params = Params::load().unwrap();
     let mut m = Matrix::new();
     let mut possible: Vec<String> = Vec::new();
-    for seed in 1..=200u64 {
-        let s = worldgen::generate(seed, &params);
-        let (summary, kinds) = play_summary(&format!("seed {seed}"), &s, 300);
+    // Every world on its own thread (`engine2::par`), gathered in the order of the seeds.
+    let seeds: Vec<u64> = (1..=200).collect();
+    for (summary, kinds) in engine2::par::map(&seeds, |seed| play_summary(&format!("seed {seed}"), &worldgen::generate(*seed, &params), 300)) {
         for k in kinds {
             if !possible.contains(&k) {
                 possible.push(k);

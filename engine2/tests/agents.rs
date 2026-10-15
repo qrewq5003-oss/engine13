@@ -327,12 +327,172 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     assert!(kinds.contains(&None) && kinds.len() >= n_choices.min(3), "hot: the choices spread, doing nothing among them: {kinds:?} of {n_choices}");
 }
 
-/// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
-/// В7, В8, А11, А12, Д3, Э8; no polity falls but by conquest; goals are reached and put aside.
-#[test]
-fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_by_conquest() {
-    let p = params();
-    let band = |k: &str| p.entries[k].band.unwrap();
+/// What one generated world adds to the measures of E2 with the bots (one world per thread,
+/// `engine2::par`; folded in the order of the seeds — the run of the worlds one after
+/// another, byte for byte).
+#[derive(Default)]
+struct Measures {
+    reigns: Vec<f64>,
+    usurpations: u64,
+    polity_centuries: f64,
+    risings: u64,
+    large_ticks: u64,
+    polities_start: usize,
+    polities_century: usize,
+    war_ticks: u64,
+    polity_ticks: u64,
+    at_peace_ticks: u64,
+    army_at_war: i64,
+    people_at_war: i64,
+    army_at_peace: i64,
+    people_at_peace: i64,
+    bound_century: usize,
+    alive_century: usize,
+    tax: i64,
+    production: i64,
+    falls: u64,
+    falls_by_conquest: u64,
+    reached: u64,
+    dropped: u64,
+    verbs: BTreeMap<VerbId, u64>,
+    rejections: BTreeMap<String, u64>,
+    per_polity_war_share: Vec<f64>,
+    rates: Vec<f64>,
+    revolt_ticks: u64,
+    province_ticks: u64,
+    revolt_lengths: Vec<u32>,
+    revolts_started: u64,
+    revolts_ended: u64,
+    revolts_per_province: BTreeMap<(u64, ProvinceId), u32>,
+    tax_changes: u64,
+    tax_undone: u64,
+    declarations: u64,
+    declared_after_peace: u64,
+    declared_unpaid: u64,
+    war_lengths: Vec<u32>,
+    declared_within_two_years: u64,
+    opportunities: BTreeMap<String, u64>,
+    elections: u64,
+    elections_turned: u64,
+}
+
+/// The measures of E2/E3 with the bots, read off the worlds' sums.
+struct Rates {
+    b5: f64,
+    b6: f64,
+    b7: f64,
+    b8: f64,
+    a11_war: f64,
+    a11_peace: f64,
+    a12: f64,
+    d3: f64,
+    e8: f64,
+    b9: f64,
+}
+
+impl Rates {
+    /// Each measure with its band in the file: `(name, value, band, inside)`.
+    fn against_bands(&self, p: &Params) -> Vec<(&'static str, f64, [f64; 2], bool)> {
+        let band = |k: &str| p.entries[k].band.unwrap();
+        [
+            ("В5", self.b5, band("reign.observed_years")),
+            ("В6", self.b6, band("usurpation.observed_per_century")),
+            ("В7", self.b7, band("revolt.observed_per_century")),
+            ("В8", self.b8, band("collapse.observed_polities_after_a_century")),
+            ("А11", self.a11_peace, band("army.observed_share_of_population")),
+            ("А12", self.a12, band("war.observed_share_of_years")),
+            ("Д3", self.d3, band("diplomacy.observed_bound_share")),
+            ("Э8", self.e8, band("tax.observed_share_of_production")),
+            ("В9", self.b9, band("revolt.observed_share_of_provinces")),
+        ]
+        .into_iter()
+        .map(|(n, v, b)| (n, v, b, (b[0]..=b[1]).contains(&v)))
+        .collect()
+    }
+}
+
+impl Measures {
+    fn rates(&self) -> Rates {
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+        Rates {
+            b5: mean(&self.reigns),
+            b6: self.usurpations as f64 / self.polity_centuries,
+            b7: self.risings as f64 / (self.large_ticks as f64 / 200.0),
+            b8: self.polities_century as f64 / self.polities_start as f64,
+            a11_war: self.army_at_war as f64 / self.people_at_war.max(1) as f64,
+            a11_peace: self.army_at_peace as f64 / self.people_at_peace.max(1) as f64,
+            a12: self.war_ticks as f64 / self.polity_ticks as f64,
+            d3: self.bound_century as f64 / self.alive_century as f64,
+            e8: self.tax as f64 / self.production as f64,
+            b9: self.revolt_ticks as f64 / self.province_ticks as f64,
+        }
+    }
+
+    /// The measures over `seeds`, one world per thread, folded in the order of the seeds.
+    fn over(seeds: &[u64], p: &Params) -> Measures {
+        let mut m = Measures::default();
+        for w in engine2::par::map(seeds, |seed| measure_world(*seed, p)) {
+            m.add(w);
+        }
+        m
+    }
+
+    fn add(&mut self, o: Measures) {
+        self.reigns.extend(o.reigns);
+        self.usurpations += o.usurpations;
+        self.polity_centuries += o.polity_centuries;
+        self.risings += o.risings;
+        self.large_ticks += o.large_ticks;
+        self.polities_start += o.polities_start;
+        self.polities_century += o.polities_century;
+        self.war_ticks += o.war_ticks;
+        self.polity_ticks += o.polity_ticks;
+        self.at_peace_ticks += o.at_peace_ticks;
+        self.army_at_war += o.army_at_war;
+        self.people_at_war += o.people_at_war;
+        self.army_at_peace += o.army_at_peace;
+        self.people_at_peace += o.people_at_peace;
+        self.bound_century += o.bound_century;
+        self.alive_century += o.alive_century;
+        self.tax += o.tax;
+        self.production += o.production;
+        self.falls += o.falls;
+        self.falls_by_conquest += o.falls_by_conquest;
+        self.reached += o.reached;
+        self.dropped += o.dropped;
+        for (key, v) in o.verbs {
+            *self.verbs.entry(key).or_insert(0) += v;
+        }
+        for (key, v) in o.rejections {
+            *self.rejections.entry(key).or_insert(0) += v;
+        }
+        self.per_polity_war_share.extend(o.per_polity_war_share);
+        self.rates.extend(o.rates);
+        self.revolt_ticks += o.revolt_ticks;
+        self.province_ticks += o.province_ticks;
+        self.revolt_lengths.extend(o.revolt_lengths);
+        self.revolts_started += o.revolts_started;
+        self.revolts_ended += o.revolts_ended;
+        for (key, v) in o.revolts_per_province {
+            *self.revolts_per_province.entry(key).or_insert(0) += v;
+        }
+        self.tax_changes += o.tax_changes;
+        self.tax_undone += o.tax_undone;
+        self.declarations += o.declarations;
+        self.declared_after_peace += o.declared_after_peace;
+        self.declared_unpaid += o.declared_unpaid;
+        self.war_lengths.extend(o.war_lengths);
+        self.declared_within_two_years += o.declared_within_two_years;
+        for (key, v) in o.opportunities {
+            *self.opportunities.entry(key).or_insert(0) += v;
+        }
+        self.elections += o.elections;
+        self.elections_turned += o.elections_turned;
+    }
+}
+
+/// One generated world with the bots, 300 ticks: what it adds to the measures.
+fn measure_world(seed: u64, p: &Params) -> Measures {
     let (mut reigns, mut usurpations, mut polity_centuries) = (Vec::<f64>::new(), 0u64, 0.0f64);
     let (mut risings, mut large_ticks) = (0u64, 0u64);
     let (mut polities_start, mut polities_century) = (0usize, 0usize);
@@ -350,170 +510,171 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
     let mut declared_within_two_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
-    let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
     let (mut elections, mut elections_turned) = (0u64, 0u64);
-    for seed in 1..=20u64 {
-        let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
-        let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
-        let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
-        let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
-        let n0 = g.world().actors.len();
-        polities_start += n0;
-        let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
-        let mut war_by_actor: BTreeMap<ActorId, (u64, u64)> = BTreeMap::new();
-        for t in 0..300u32 {
-            let w = g.world();
-            let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
-            let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
-            for a in &living {
-                let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
-                let people: i64 = w.actors[a].provinces.iter().map(|q| w.population(*q)).sum();
-                let army = w.army_size(*a);
-                polity_ticks += 1;
-                let e = war_by_actor.entry(*a).or_insert((0, 0));
-                e.1 += 1;
-                if at_war {
-                    war_ticks += 1;
-                    e.0 += 1;
-                    army_at_war += army;
-                    people_at_war += people;
-                } else {
-                    at_peace_ticks += 1;
-                    army_at_peace += army;
-                    people_at_peace += people;
-                }
-                if w.actors[a].provinces.len() >= 5 {
-                    large_ticks += 1;
-                }
-                production += w.production_per_tick(*a, &p);
-            }
-            let sizes: BTreeMap<ActorId, usize> = living.iter().map(|a| (*a, w.actors[a].provinces.len())).collect();
-            province_ticks += w.provinces.len() as u64;
-            revolt_ticks += w.provinces.values().filter(|pr| pr.revolt.is_some()).count() as u64;
-            let started: BTreeMap<ProvinceId, u32> = w.provinces.iter().filter_map(|(q, pr)| pr.revolt.map(|t| (*q, t.0))).collect();
-            let r = g.tick(&[]).unwrap();
-            if t == 199 {
-                let w = g.world();
-                // The polities living a century on: since the orders of step (б) a polity
-                // can fall, and its record stays.
-                polities_century += w.actors.keys().filter(|a| w.alive(**a)).count();
-                alive_century += w.actors.keys().filter(|a| w.alive(**a)).count();
-                bound_century += w.actors.keys().filter(|a| w.alive(**a) && (!w.allies_of(**a).is_empty() || w.lord_of(**a).is_some() || !w.vassals_of(**a).is_empty())).count();
-            }
-            let conquered_this_tick: Vec<ActorId> = r.events.iter().filter_map(|e| match e.event {
-                Event::ProvinceChangedHands { from, how: engine2::event::Transfer::Conquest, .. } => Some(from),
-                _ => None,
-            }).collect();
-            for e in &r.events {
-                match &e.event {
-                    Event::RulerDied { actor, .. } => reigns.push(f64::from(t + 1 - since.get(actor).copied().unwrap_or(t + 1)) / 2.0),
-                    Event::Succession { actor, how, .. } => {
-                        since.insert(*actor, t + 1);
-                        if *how == engine2::Standing::Usurper && actor.index() < n0 {
-                            usurpations += 1;
-                        }
-                    }
-                    Event::ActorBorn { actor, from, .. } => {
-                        since.insert(*actor, t + 1);
-                        if sizes.get(from).copied().unwrap_or(0) >= 5 {
-                            risings += 1;
-                        }
-                    }
-                    Event::Revolt { from, province } => {
-                        revolts_started += 1;
-                        *revolts_per_province.entry((seed, *province)).or_insert(0) += 1;
-                        if sizes.get(from).copied().unwrap_or(0) >= 5 {
-                            risings += 1;
-                        }
-                    }
-                    Event::RevoltEnded { province, .. } => {
-                        revolts_ended += 1;
-                        if let Some(s) = started.get(province) {
-                            revolt_lengths.push(t + 1 - s);
-                        }
-                    }
-                    Event::ActorDied { actor } => {
-                        falls += 1;
-                        if conquered_this_tick.contains(actor) {
-                            falls_by_conquest += 1;
-                        }
-                    }
-                    Event::Verb { actor: engine2::ActorRef::Ruler(a), verb: VerbId::DeclareWar, target: engine2::Target::Actor(b) } => {
-                        *verbs.entry(VerbId::DeclareWar).or_insert(0) += 1;
-                        declarations += 1;
-                        if unpaid_seen.get(a).copied().unwrap_or(false) {
-                            declared_unpaid += 1;
-                        }
-                        if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t0 + 1 == t) {
-                            declared_after_peace += 1;
-                        }
-                        if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t <= t0 + 4) {
-                            declared_within_two_years += 1;
-                        }
-                    }
-                    Event::War { a, b } => {
-                        war_since.insert(((*a).min(*b), (*a).max(*b)), t);
-                    }
-                    Event::Peace { a, b } => {
-                        let k = ((*a).min(*b), (*a).max(*b));
-                        last_peace.insert(k, t);
-                        if let Some(t0) = war_since.remove(&k) {
-                            war_lengths.push(t - t0);
-                        }
-                    }
-                    Event::TaxRateChanged { actor, from_ppm, to_ppm } => {
-                        tax_changes += 1;
-                        let up = to_ppm > from_ppm;
-                        if last_tax.get(actor).is_some_and(|(last, was_up)| last + 1 == t && *was_up != up) {
-                            tax_undone += 1;
-                        }
-                        last_tax.insert(*actor, (t, up));
-                    }
-                    Event::OpportunityOpened { opportunity } => {
-                        kind_of.insert(opportunity.id, opportunity.what.kind());
-                        *opportunities.entry(format!("{} opened", opportunity.what.kind())).or_insert(0) += 1;
-                    }
-                    Event::Elected { interim, winner, .. } => {
-                        elections += 1;
-                        elections_turned += u64::from(interim != winner);
-                    }
-                    Event::OpportunityTaken { id, .. } => *opportunities.entry(format!("{} taken", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
-                    Event::OpportunityDeclined { id, .. } => *opportunities.entry(format!("{} declined", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
-                    Event::OpportunityVoid { id, .. } => *opportunities.entry(format!("{} void", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
-                    Event::OpportunityLapsed { id, .. } => *opportunities.entry(format!("{} lapsed", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
-                    Event::GoalReached { .. } => reached += 1,
-                    Event::GoalDropped { .. } => dropped += 1,
-                    Event::Verb { verb, .. } => *verbs.entry(*verb).or_insert(0) += 1,
-                    _ => {}
-                }
-            }
-            tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
-        }
-        polity_centuries += n0 as f64 * 1.5;
+    let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
+    let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
+    let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
+    let n0 = g.world().actors.len();
+    polities_start += n0;
+    let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
+    let mut war_by_actor: BTreeMap<ActorId, (u64, u64)> = BTreeMap::new();
+    for t in 0..300u32 {
         let w = g.world();
-        rates.extend(w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(_, x)| x.tax_rate_ppm as f64 / 1e6));
-        for (k, v) in g.preempted_reasons() {
-            *rejections.entry(k.clone()).or_insert(0) += v;
-        }
-        for (_, (w, n)) in war_by_actor {
-            if n >= 100 {
-                per_polity_war_share.push(w as f64 / n as f64);
+        let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+        let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
+        for a in &living {
+            let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
+            let people: i64 = w.actors[a].provinces.iter().map(|q| w.population(*q)).sum();
+            let army = w.army_size(*a);
+            polity_ticks += 1;
+            let e = war_by_actor.entry(*a).or_insert((0, 0));
+            e.1 += 1;
+            if at_war {
+                war_ticks += 1;
+                e.0 += 1;
+                army_at_war += army;
+                people_at_war += people;
+            } else {
+                at_peace_ticks += 1;
+                army_at_peace += army;
+                people_at_peace += people;
             }
+            if w.actors[a].provinces.len() >= 5 {
+                large_ticks += 1;
+            }
+            production += w.production_per_tick(*a, p);
+        }
+        let sizes: BTreeMap<ActorId, usize> = living.iter().map(|a| (*a, w.actors[a].provinces.len())).collect();
+        province_ticks += w.provinces.len() as u64;
+        revolt_ticks += w.provinces.values().filter(|pr| pr.revolt.is_some()).count() as u64;
+        let started: BTreeMap<ProvinceId, u32> = w.provinces.iter().filter_map(|(q, pr)| pr.revolt.map(|t| (*q, t.0))).collect();
+        let r = g.tick(&[]).unwrap();
+        if t == 199 {
+            let w = g.world();
+            // The polities living a century on: since the orders of step (б) a polity
+            // can fall, and its record stays.
+            polities_century += w.actors.keys().filter(|a| w.alive(**a)).count();
+            alive_century += w.actors.keys().filter(|a| w.alive(**a)).count();
+            bound_century += w.actors.keys().filter(|a| w.alive(**a) && (!w.allies_of(**a).is_empty() || w.lord_of(**a).is_some() || !w.vassals_of(**a).is_empty())).count();
+        }
+        let conquered_this_tick: Vec<ActorId> = r.events.iter().filter_map(|e| match e.event {
+            Event::ProvinceChangedHands { from, how: engine2::event::Transfer::Conquest, .. } => Some(from),
+            _ => None,
+        }).collect();
+        for e in &r.events {
+            match &e.event {
+                Event::RulerDied { actor, .. } => reigns.push(f64::from(t + 1 - since.get(actor).copied().unwrap_or(t + 1)) / 2.0),
+                Event::Succession { actor, how, .. } => {
+                    since.insert(*actor, t + 1);
+                    if *how == engine2::Standing::Usurper && actor.index() < n0 {
+                        usurpations += 1;
+                    }
+                }
+                Event::ActorBorn { actor, from, .. } => {
+                    since.insert(*actor, t + 1);
+                    if sizes.get(from).copied().unwrap_or(0) >= 5 {
+                        risings += 1;
+                    }
+                }
+                Event::Revolt { from, province } => {
+                    revolts_started += 1;
+                    *revolts_per_province.entry((seed, *province)).or_insert(0) += 1;
+                    if sizes.get(from).copied().unwrap_or(0) >= 5 {
+                        risings += 1;
+                    }
+                }
+                Event::RevoltEnded { province, .. } => {
+                    revolts_ended += 1;
+                    if let Some(s) = started.get(province) {
+                        revolt_lengths.push(t + 1 - s);
+                    }
+                }
+                Event::ActorDied { actor } => {
+                    falls += 1;
+                    if conquered_this_tick.contains(actor) {
+                        falls_by_conquest += 1;
+                    }
+                }
+                Event::Verb { actor: engine2::ActorRef::Ruler(a), verb: VerbId::DeclareWar, target: engine2::Target::Actor(b) } => {
+                    *verbs.entry(VerbId::DeclareWar).or_insert(0) += 1;
+                    declarations += 1;
+                    if unpaid_seen.get(a).copied().unwrap_or(false) {
+                        declared_unpaid += 1;
+                    }
+                    if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t0 + 1 == t) {
+                        declared_after_peace += 1;
+                    }
+                    if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t <= t0 + 4) {
+                        declared_within_two_years += 1;
+                    }
+                }
+                Event::War { a, b } => {
+                    war_since.insert(((*a).min(*b), (*a).max(*b)), t);
+                }
+                Event::Peace { a, b } => {
+                    let k = ((*a).min(*b), (*a).max(*b));
+                    last_peace.insert(k, t);
+                    if let Some(t0) = war_since.remove(&k) {
+                        war_lengths.push(t - t0);
+                    }
+                }
+                Event::TaxRateChanged { actor, from_ppm, to_ppm } => {
+                    tax_changes += 1;
+                    let up = to_ppm > from_ppm;
+                    if last_tax.get(actor).is_some_and(|(last, was_up)| last + 1 == t && *was_up != up) {
+                        tax_undone += 1;
+                    }
+                    last_tax.insert(*actor, (t, up));
+                }
+                Event::OpportunityOpened { opportunity } => {
+                    kind_of.insert(opportunity.id, opportunity.what.kind());
+                    *opportunities.entry(format!("{} opened", opportunity.what.kind())).or_insert(0) += 1;
+                }
+                Event::Elected { interim, winner, .. } => {
+                    elections += 1;
+                    elections_turned += u64::from(interim != winner);
+                }
+                Event::OpportunityTaken { id, .. } => *opportunities.entry(format!("{} taken", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                Event::OpportunityDeclined { id, .. } => *opportunities.entry(format!("{} declined", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                Event::OpportunityVoid { id, .. } => *opportunities.entry(format!("{} void", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                Event::OpportunityLapsed { id, .. } => *opportunities.entry(format!("{} lapsed", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                Event::GoalReached { .. } => reached += 1,
+                Event::GoalDropped { .. } => dropped += 1,
+                Event::Verb { verb, .. } => *verbs.entry(*verb).or_insert(0) += 1,
+                _ => {}
+            }
+        }
+        tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
+    }
+    polity_centuries += n0 as f64 * 1.5;
+    let w = g.world();
+    rates.extend(w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(_, x)| x.tax_rate_ppm as f64 / 1e6));
+    for (k, v) in g.preempted_reasons() {
+        *rejections.entry(k.clone()).or_insert(0) += v;
+    }
+    for (_, (w, n)) in war_by_actor {
+        if n >= 100 {
+            per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
-    let b5 = mean(&reigns);
-    let b6 = usurpations as f64 / polity_centuries;
-    let b7 = risings as f64 / (large_ticks as f64 / 200.0);
-    let b8 = polities_century as f64 / polities_start as f64;
-    let a11_war = army_at_war as f64 / people_at_war.max(1) as f64;
-    let a11_peace = army_at_peace as f64 / people_at_peace.max(1) as f64;
-    let a12 = war_ticks as f64 / polity_ticks as f64;
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_two_years, opportunities, elections, elections_turned }
+}
+
+/// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
+/// В7, В8, А11, А12, Д3, Э8; no polity falls but by conquest; goals are reached and put aside.
+#[test]
+fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_by_conquest() {
+    let p = params();
+    let band = |k: &str| p.entries[k].band.unwrap();
+    let seeds: Vec<u64> = (1..=20).collect();
+    let m = Measures::over(&seeds, &p);
+    let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9 } = m.rates();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_two_years, opportunities, elections, elections_turned } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
-    let d3 = bound_century as f64 / alive_century as f64;
-    let e8 = tax as f64 / production as f64;
     eprintln!(
         "with bots, 20 worlds × 300 ticks: В5 {b5:.1} years ({} reigns); В6 {b6:.1} per century per polity; В7 {b7:.2}; В8 {b8:.2}; А11 at war {a11_war:.4}, at peace {a11_peace:.4} ({at_peace_ticks} peace polity-ticks); А12 share of polity-ticks at war {a12:.3} — polities under a tenth {never}, over nine tenths {always} of {}; Д3 at a century {d3:.2}; Э8 {e8:.3}; falls {falls} of which by conquest {falls_by_conquest}; goals reached {reached}, put aside {dropped}; verbs {verbs:?}; calls preempted by the tick's conflicts {rejections:?}; tax rates at the end — mean {:.3}, below the tithe {}, at it {}, above {}",
         reigns.len(),
@@ -567,7 +728,6 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
     let d3_band = band("diplomacy.observed_bound_share");
     assert!((d3_band[0]..=d3_band[1]).contains(&d3), "Д3 {d3:.2} outside {d3_band:?}");
-    let b9 = revolt_ticks as f64 / province_ticks as f64;
     revolt_lengths.sort();
     let repeated = revolts_per_province.values().filter(|n| **n > 1).count();
     eprintln!(
@@ -599,7 +759,10 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
 fn the_outcome_depends_on_the_strategy_and_on_the_seed_and_a_run_with_bots_saves_bit_for_bit() {
     let p = params();
     let (mut world_differs, mut differs_by_strategy, mut differs_by_seed) = (0usize, 0usize, 0usize);
-    for seed in 1..=10u64 {
+    // Every world on its own thread (`engine2::par`), counted in the order of the seeds.
+    let seeds: Vec<u64> = (1..=10).collect();
+    for (world, strategy, by_seed) in engine2::par::map(&seeds, |seed| {
+        let seed = *seed;
         let s = worldgen::generate(seed, &p);
         let run = |player: Option<ActorRef>, game_seed: u64| {
             let mut g = Game::new(&s, params(), game_seed).unwrap();
@@ -612,15 +775,11 @@ fn the_outcome_depends_on_the_strategy_and_on_the_seed_and_a_run_with_bots_saves
         // The bot in the seat against a player who sits on its hands.
         let bots = run(None, seed);
         let idle = run(Some(ActorRef::Ruler(ActorId(0))), seed);
-        if bots.0 != idle.0 || bots.1 != idle.1 || bots.2 != idle.2 {
-            world_differs += 1;
-        }
-        if bots.0.outcome() != idle.0.outcome() {
-            differs_by_strategy += 1;
-        }
-        if bots.0.outcome() != run(None, seed + 100).0.outcome() {
-            differs_by_seed += 1;
-        }
+        (bots.0 != idle.0 || bots.1 != idle.1 || bots.2 != idle.2, bots.0.outcome() != idle.0.outcome(), bots.0.outcome() != run(None, seed + 100).0.outcome())
+    }) {
+        world_differs += usize::from(world);
+        differs_by_strategy += usize::from(strategy);
+        differs_by_seed += usize::from(by_seed);
     }
     eprintln!("the bot in the seat against an idle player: the world differs in {world_differs} of 10, the outcome (who lives, who owns what) in {differs_by_strategy} of 10; the outcome differs by seed in {differs_by_seed} of 10");
     // The bot's choices move the world everywhere; the outcome of brief §1 — who lives, who
@@ -968,13 +1127,14 @@ fn the_outcome_depends_on_the_players_strategy_and_on_the_seed_the_sentinel_matr
     const TICKS: u32 = 150;
     let (mut strategy_flags, mut seed_flags, mut matrices) = (0usize, 0usize, 0usize);
     let mut flagged: Vec<String> = Vec::new();
+    // Every run on its own thread (`engine2::par`), gathered in the order of the runs.
+    let worlds: Vec<ScenarioData> = (1..=WORLDS).map(|w| worldgen::generate(w, &p)).collect();
+    let runs: Vec<(usize, u64, &str)> = (0..worlds.len()).flat_map(|w| [1u64, 2, 3].into_iter().flat_map(move |seed| ["none", "idle", "conqueror"].into_iter().map(move |st| (w, seed, st)))).collect();
+    let mut summaries = engine2::par::map(&runs, |(w, seed, st)| play_strategy(&worlds[*w], *seed, st, TICKS)).into_iter();
     for world in 1..=WORLDS {
-        let s = worldgen::generate(world, &p);
         let mut m = sentinel::Matrix::new();
-        for seed in [1u64, 2, 3] {
-            for strategy in ["none", "idle", "conqueror"] {
-                m.add(play_strategy(&s, seed, strategy, TICKS));
-            }
+        for _ in 0..9 {
+            m.add(summaries.next().expect("nine runs a world"));
         }
         matrices += 1;
         for f in m.flags(&sentinel::Thresholds::default(), &[], None) {
@@ -999,14 +1159,60 @@ fn the_outcome_depends_on_the_players_strategy_and_on_the_seed_the_sentinel_matr
         s.actors.get_mut(k).unwrap().aspirations = vec![AspirationData { kind: GoalKind::Take, target: Some(format!("p{:02}", 5 + k[1..].parse::<usize>().unwrap() - 1)), route: None }];
     }
     let mut m = sentinel::Matrix::new();
-    for seed in [1u64, 2, 3] {
-        for strategy in ["none", "idle", "conqueror"] {
-            m.add(play_strategy(&s, seed, strategy, TICKS));
-        }
+    let runs: Vec<(u64, &str)> = [1u64, 2, 3].into_iter().flat_map(|seed| ["none", "idle", "conqueror"].into_iter().map(move |st| (seed, st))).collect();
+    for summary in engine2::par::map(&runs, |(seed, st)| play_strategy(&s, *seed, st, TICKS)) {
+        m.add(summary);
     }
     let test_world: Vec<sentinel::Flag> = m.flags(&sentinel::Thresholds::default(), &[], None).into_iter().filter(|f| matches!(f, sentinel::Flag::StrategyIndependent { .. } | sentinel::Flag::SeedIndependent { .. })).collect();
     eprintln!("the test world: {test_world:?}");
     assert!(test_world.is_empty(), "the brief's acceptance on the test world: {test_world:?}");
     assert_eq!(strategy_flags, 0, "the outcome does not depend on the strategy: {flagged:?}");
     assert_eq!(seed_flags, 0, "the outcome does not depend on the seed: {flagged:?}");
+}
+
+/// The held-out seeds (owner's rules after #293): the parameters are calibrated on the seeds
+/// 1–20; the acceptance is read also on 100–129, which no calibration has seen. Printed in
+/// this step; checked from step (е) on.
+#[test]
+fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let r = Measures::over(&seeds, &p).rates();
+        let row: Vec<String> = r.against_bands(&p).into_iter().map(|(n, v, b, ok)| format!("{n} {v:.3}{}", if ok { String::new() } else { format!(" OUTSIDE {b:?}") })).collect();
+        eprintln!("{label}: {}", row.join("; "));
+    }
+}
+
+/// The narrow-window rule (owner's rules after #293): a measure inside its band only in a
+/// narrow window of a parameter is a sign about the model, not a point to pick. A sweep of
+/// the (в) values fitted to bands, each over a range around its value, on the calibration
+/// seeds: the measure it is checked through at every point, and where all the bands hold.
+/// Run on demand: `cargo test --release -p engine2 --all-features --test agents windows -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn windows_of_the_fitted_values() {
+    let base = params();
+    let seeds: Vec<u64> = (1..=20).collect();
+    type Set = fn(&mut Params, f64);
+    let sweeps: [(&str, &[f64], Set); 4] = [
+        ("agent.weight_throne → В6", &[0.75, 1.0, 1.125, 1.25, 1.375, 1.5, 2.0], |p, v| p.agent_weight_throne = v),
+        ("usurpation.per_year → В6", &[0.02, 0.03, 0.04, 0.05, 0.06, 0.08], |p, v| p.usurpation_per_tick = v / 2.0),
+        ("revolt.per_year → В7, В9", &[0.0015, 0.002, 0.0025, 0.003, 0.004, 0.005], |p, v| p.revolt_per_tick = v / 2.0),
+        ("agent.weight_independence → В8", &[0.5, 1.0, 1.5, 2.0, 3.0], |p, v| p.agent_weight_independence = v),
+    ];
+    for (name, values, set) in sweeps {
+        let mut inside = Vec::new();
+        for v in values {
+            let mut p = base.clone();
+            set(&mut p, *v);
+            let rates = Measures::over(&seeds, &p).rates().against_bands(&p);
+            let all = rates.iter().all(|(_, _, _, ok)| *ok);
+            let row: Vec<String> = rates.iter().map(|(n, x, _, ok)| format!("{n} {x:.3}{}", if *ok { "" } else { "!" })).collect();
+            eprintln!("{name} = {v}: {}{}", row.join(" "), if all { "  — all bands" } else { "" });
+            if all {
+                inside.push(*v);
+            }
+        }
+        eprintln!("{name}: all bands at {inside:?} of {values:?}");
+    }
 }
