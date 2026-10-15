@@ -26,6 +26,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 #[test]
 fn faith_and_tongue_are_facts_of_the_scenario_interned_in_sorted_order_and_the_polity_prays_as_its_ruling_house_does() {
     let mut s = testworld::five_states_scenario();
@@ -43,7 +60,7 @@ fn faith_and_tongue_are_facts_of_the_scenario_interned_in_sorted_order_and_the_p
     let c = s.compile(&params()).unwrap();
     assert_eq!(c.names.religions, vec!["f0".to_string(), "f1".to_string()]);
     assert_eq!(c.names.cultures, vec!["c0".to_string(), "c1".to_string()]);
-    let g = Game::new(&s, params(), 1).unwrap();
+    let g = bare(&s, params(), 1).unwrap();
     let w = g.world();
     let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
     assert_eq!(w.polity_religion(s1), ReligionId(1));
@@ -57,7 +74,7 @@ fn faith_and_tongue_are_facts_of_the_scenario_interned_in_sorted_order_and_the_p
     assert!(!w.alienated(ProvinceId(0)));
     assert!(w.actors[&s1].provinces.iter().all(|p| !w.alienated(*p)), "a polity whose court prays as its people do");
     // The take is untouched by alienation (owner's answer on §20): the same share collected.
-    let plain = Game::new(&testworld::five_states_scenario(), params(), 1).unwrap();
+    let plain = bare(&testworld::five_states_scenario(), params(), 1).unwrap();
     assert_eq!(w.collection_share_ppm(s0, &params()), plain.world().collection_share_ppm(s0, &params()));
     assert_eq!(w.yearly_income(s0, &params()), plain.world().yearly_income(s0, &params()));
 }
@@ -169,7 +186,7 @@ fn the_generator_mixes_tongues_and_faiths_and_gives_the_policy_to_some_and_the_e
     let (mut mixed_provinces, mut provinces, mut with_policy, mut polities, mut newcomer_houses) = (0usize, 0usize, 0usize, 0usize, 0usize);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let g = Game::new(&s, params(), seed).unwrap();
+        let g = bare(&s, params(), seed).unwrap();
         let w = g.world();
         let (nc, nr) = (w.names.cultures.len(), w.names.religions.len());
         assert!((2..=4).contains(&nc) && (2..=3).contains(&nr), "seed {seed}: {nc} tongues, {nr} faiths");
@@ -366,7 +383,7 @@ fn on_generated_worlds_conversions_happen_but_not_everywhere() {
     let (mut alienated_at_start, mut converted, mut assimilated, mut alienated_at_end) = (0usize, 0usize, 0usize, 0usize);
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         alienated_at_start += g.world().provinces.keys().filter(|q| g.world().alienated(**q)).count();
         for _ in 0..300 {
             let r = g.tick(&[]).unwrap();
@@ -447,7 +464,7 @@ fn on_generated_worlds_the_bank_spreads_to_r3_in_a_century_and_is_not_always_in_
     let mut worlds_all_banked_at_end = 0usize;
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         let n = g.world().actors.len();
         let banks = |g: &Game| g.world().actors.iter().filter(|(a, x)| a.index() < n && x.institutions.contains(&Institution::Bank)).count();
         polities += n;

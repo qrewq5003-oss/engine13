@@ -37,8 +37,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+use crate::agents::GoalKind;
 use crate::params::Params;
-use crate::scenario::{ActorData, AllianceData, DisplayCurrency, HouseData, PersonData, ProvinceData, RelationsData, ScenarioData, VassalData};
+use crate::scenario::{ActorData, AllianceData, AspirationData, DisplayCurrency, HouseData, PersonData, ProvinceData, RegionData, RelationsData, ScenarioData, VassalData};
 use crate::verbs::VerbId;
 use crate::world::{Disease, Institution, Land, Succession};
 
@@ -85,6 +86,9 @@ const OTHER_HOUSES: (u64, u64) = (2, 4);
 /// (в), checked through В8 — the number of polities a century on.
 const GOVERNOR_CHANCE: f64 = 0.3;
 const GOVERNOR_FROM_OTHER_HOUSE: f64 = 0.7;
+/// Provinces a region holds at most (E3): a kingdom's worth on a map of tens of provinces,
+/// kind (в); the target of «unite» is a region, never a people (owner's rule on §23).
+const REGION_SIZE: usize = 6;
 /// Tongues and faiths per world (E2 step 8): each state draws one of each; a province that
 /// touches another state takes that state's with `BORDER_FAITH_CHANCE` — the mixed march
 /// where conversion and friction have something to work on. Houses take the capital's,
@@ -533,7 +537,7 @@ impl Map {
                 2 => Succession::Election,
                 _ => Succession::Mixed,
             };
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: own_soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession });
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: own_soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession, aspirations: Vec::new() });
             // Governors of the provinces that are not the capital (owner's rule on #289:
             // the secession of a house must be reachable, so the houses that do not rule
             // hold seats): each province with `GOVERNOR_CHANCE`, the seat to a free adult
@@ -598,6 +602,107 @@ impl Map {
                 vassals.push(VassalData { vassal: sid(small), lord: sid(big) });
             }
         }
+        // Regions (E3): a kingdom's worth of provinces — each landmass cut into blocks of
+        // up to `REGION_SIZE` by breadth-first walk from its lowest id; every province in
+        // exactly one region.
+        let mut regions: BTreeMap<String, RegionData> = BTreeMap::new();
+        {
+            let mut seen: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
+            let mut k = 0usize;
+            let mut keys: Vec<&String> = provinces.keys().collect();
+            keys.sort();
+            for start in keys {
+                if seen.contains(start) {
+                    continue;
+                }
+                let mut block: Vec<String> = Vec::new();
+                let mut queue = std::collections::VecDeque::from([start]);
+                seen.insert(start);
+                while let Some(c) = queue.pop_front() {
+                    block.push(c.clone());
+                    if block.len() >= REGION_SIZE {
+                        break;
+                    }
+                    for n in &provinces[c].neighbours {
+                        if seen.insert(n) {
+                            queue.push_back(n);
+                        }
+                    }
+                }
+                // Whatever was queued but not taken is free again for the next block.
+                for n in queue {
+                    seen.remove(n);
+                }
+                regions.insert(format!("r{k:02}"), RegionData { name: format!("Region {k}"), provinces: block });
+                k += 1;
+            }
+        }
+        // Starting aspirations (E3, owner's answer 3 on §23): a weighted lot over the
+        // reachable kinds — hold the largest province, an alliance against the largest
+        // neighbour, take the largest bordering province, subdue the smallest neighbour,
+        // unite the capital's region; a vassal wants to be free. Two per polity, distinct.
+        if bonds {
+            let mut asp_rng = ChaCha8Rng::seed_from_u64(fnv(id.as_bytes()) ^ 0xa5b1_u64);
+            let region_of = |p: &str| regions.iter().find(|(_, r)| r.provinces.iter().any(|q| q == p)).map(|(k, _)| k.clone());
+            for s in 0..states {
+                let me = sid(s);
+                let mine: Vec<(&String, &ProvinceData)> = provinces.iter().filter(|(_, p)| p.owner == me).collect();
+                let neighbours: Vec<(String, u64)> = {
+                    let mut by: BTreeMap<String, u64> = BTreeMap::new();
+                    for (_, p) in &mine {
+                        for n in p.neighbours.iter().chain(p.sea_neighbours.iter()) {
+                            let o = &provinces[n].owner;
+                            if *o != me {
+                                *by.entry(o.clone()).or_insert(0) += provinces[n].population;
+                            }
+                        }
+                    }
+                    by.into_iter().collect()
+                };
+                let mut goals: Vec<AspirationData> = Vec::new();
+                if vassals.iter().any(|v| v.vassal == me) {
+                    goals.push(AspirationData { kind: GoalKind::Free, target: None, route: None });
+                }
+                let total: f64 = params.aspiration_weights.iter().map(|(_, w)| w).sum();
+                let mut tried = 0;
+                while goals.len() < 2 && tried < 8 {
+                    tried += 1;
+                    let mut x = asp_rng.gen_range(0.0..total);
+                    let mut kind = GoalKind::Hold;
+                    for (k, w) in params.aspiration_weights {
+                        if x < w {
+                            kind = k;
+                            break;
+                        }
+                        x -= w;
+                    }
+                    if goals.iter().any(|g| g.kind == kind) {
+                        continue;
+                    }
+                    let largest_own = mine.iter().max_by_key(|(k, p)| (p.population, std::cmp::Reverse((*k).clone()))).map(|(k, _)| (*k).clone());
+                    let largest_neighbour = neighbours.iter().max_by_key(|(k, pop)| (*pop, std::cmp::Reverse(k.clone()))).map(|(k, _)| k.clone());
+                    let smallest_neighbour = neighbours.iter().min_by_key(|(k, pop)| (*pop, k.clone())).map(|(k, _)| k.clone());
+                    let bordering_province = mine
+                        .iter()
+                        .flat_map(|(_, p)| p.neighbours.iter().chain(p.sea_neighbours.iter()))
+                        .filter(|n| provinces[*n].owner != me)
+                        .max_by_key(|n| (provinces[*n].population, std::cmp::Reverse((*n).clone())))
+                        .cloned();
+                    let goal = match kind {
+                        GoalKind::Hold => largest_own.map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        GoalKind::AllianceAgainst => largest_neighbour.map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        GoalKind::Take => bordering_province.map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        GoalKind::Subdue => smallest_neighbour.map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        GoalKind::Unite => region_of(&pid(capital.get(&s).map(|c| c.1).unwrap_or(0))).map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        _ => None,
+                    };
+                    if let Some(g) = goal {
+                        goals.push(g);
+                    }
+                }
+                actors.get_mut(&me).unwrap().aspirations = goals;
+            }
+        }
         let verbs = VerbId::ALL.iter().map(|v| (v.key().to_string(), v.key().replace('_', " "))).collect();
         ScenarioData {
             id,
@@ -609,6 +714,7 @@ impl Map {
             houses,
             persons,
             relations: Some(RelationsData { wars: Vec::new(), alliances, vassals }),
+            regions: Some(regions),
             verbs,
         }
     }
@@ -819,8 +925,9 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the governors version of the generator (E2 step 9, review of #289; before:
-    /// the houses version of step 6a, the sea-links version of step 2). If this changes, every seed
+    /// Pinned on the regions-and-aspirations version of the generator (E3 (а); before: the
+    /// governors version of E2 step 9, the houses version of step 6a, the sea-links version
+    /// of step 2). If this changes, every seed
     /// plays a different world and "fails on seed N" stops reproducing: bump it only with a
     /// deliberate change of the generator, never with a dependency update.
     #[test]
@@ -829,7 +936,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 2_814_808_447_088_233_671;
+    const PINNED_WORLD_ONE: u64 = 11_939_064_792_086_652_868;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

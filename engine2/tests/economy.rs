@@ -20,6 +20,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 fn people_of(w: &World, a: ActorId) -> i64 {
     w.actors[&a].provinces.iter().map(|p| w.population(*p)).sum()
 }
@@ -217,7 +234,7 @@ fn a_loan_needs_a_bank() {
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("take_loan".to_string(), "Take a loan".to_string());
-    let mut g = Game::new(&s, p, 1).unwrap();
+    let mut g = bare(&s, p, 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
     // No bank in the test world: the loan is refused.
     assert!(g.verbs(who).iter().all(|o| o.verb != VerbId::TakeLoan || !o.available));
@@ -237,7 +254,7 @@ fn wheat_is_accounted_by_source_and_the_observed_shares_are_reported() {
     let (mut tax_shares, mut military_shares) = (Vec::new(), Vec::new());
     for seed in 1..=10u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), 1).unwrap();
+        let mut g = bare(&s, params(), 1).unwrap();
         let mut by_source: std::collections::BTreeMap<Source, i64> = std::collections::BTreeMap::new();
         let mut production = 0i64;
         for _ in 0..40 {

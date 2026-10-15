@@ -23,6 +23,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 fn total_people(g: &Game) -> i64 {
     g.world().provinces.keys().map(|p| g.world().population(*p)).sum()
 }
@@ -34,7 +51,7 @@ fn yearly_growth(start: i64, end: i64, ticks: u32) -> f64 {
 }
 
 fn play(scenario: &ScenarioData, seed: u64, ticks: u32) -> (Game, Vec<engine2::TickReport>) {
-    let mut g = Game::new(scenario, params(), seed).unwrap();
+    let mut g = bare(scenario, params(), seed).unwrap();
     let mut reports = Vec::new();
     for _ in 0..ticks {
         reports.push(g.tick(&[]).unwrap());
@@ -49,7 +66,7 @@ fn growth_of_plague_free_worlds_lies_in_the_observed_band_p7() {
     for seed in 1..=20u64 {
         let mut s = worldgen::generate(seed, &p);
         s.diseases.clear();
-        let g0 = Game::new(&s, params(), 1).unwrap();
+        let g0 = bare(&s, params(), 1).unwrap();
         let start = total_people(&g0);
         let (g, _) = play(&s, 1, 100);
         let growth = yearly_growth(start, total_people(&g), 100);
@@ -64,7 +81,7 @@ fn migration_conserves_people_exactly_and_moves_toward_emptier_neighbours() {
     for seed in 1..=20u64 {
         let mut s = worldgen::generate(seed, &p);
         s.diseases.clear();
-        let g0 = Game::new(&s, params(), 1).unwrap();
+        let g0 = bare(&s, params(), 1).unwrap();
         let before = total_people(&g0);
         let (g, reports) = play(&s, 1, 50);
         let after = total_people(&g);
@@ -100,7 +117,7 @@ fn plague_worlds_are_played_with_several_game_seeds_and_the_matrix_is_read() {
         let mut stocks = Vec::new();
         let mut possible = Vec::new();
         for game_seed in [1u64, 2, 3] {
-            let mut g = Game::new(&s, params(), game_seed).unwrap();
+            let mut g = bare(&s, params(), game_seed).unwrap();
             let start = total_people(&g);
             let (sen, summary) = sentinel::run(&mut g, 100, game_seed, "none", Thresholds::default(), |g| {
                 g.tick(&[]).unwrap();
@@ -133,7 +150,7 @@ fn famine_strikes_a_province_above_its_capacity_until_it_fits() {
     let p = params();
     let mut s = worldgen::generate(3, &p);
     s.diseases.clear();
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let prov = *g.world().provinces.keys().next().unwrap();
     let cap = g.world().provinces[&prov].capacity as i64;
     let now = g.world().population(prov);

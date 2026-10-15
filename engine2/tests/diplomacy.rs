@@ -38,6 +38,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 fn scenario_with(relations: RelationsData) -> ScenarioData {
     let mut s = testworld::five_states_scenario();
     s.relations = Some(relations);
@@ -62,7 +79,7 @@ fn starting_relations_are_facts_of_the_scenario_and_the_schema_refuses_the_malfo
     let mut s = scenario_with(relations(&[("s1", "s0")], vec![alliance("s2", "s3", 1497)], vec![vassal("s4", "s3")]));
     s.persons.get_mut("r0").unwrap().spouse = Some("r1".to_string());
     s.persons.get_mut("r1").unwrap().spouse = Some("r0".to_string());
-    let g = Game::new(&s, params(), 1).unwrap();
+    let g = bare(&s, params(), 1).unwrap();
     let w = g.world();
     let (s0, s1, s2, s3, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
     assert!(w.at_war(s0, s1) && w.at_war(s1, s0), "the pair is at war either way round");
@@ -115,7 +132,7 @@ fn starting_relations_are_facts_of_the_scenario_and_the_schema_refuses_the_malfo
     s.persons.get_mut("c0").unwrap().spouse = Some("r0".to_string());
     refused(s, "spouses of one house");
     // Relations absent: a world without bonds, every pair at the base less the border.
-    let g = Game::new(&testworld::five_states_scenario(), params(), 1).unwrap();
+    let g = bare(&testworld::five_states_scenario(), params(), 1).unwrap();
     assert!(g.world().wars.is_empty() && g.world().treaties.is_empty());
     assert_eq!(g.world().relations.len(), 10);
 }
@@ -192,8 +209,8 @@ fn a_run_with_relations_saves_and_loads_bit_for_bit() {
     let mut s = scenario_with(relations(&[("s0", "s1")], vec![alliance("s2", "s3", 1490)], vec![vassal("s4", "s3")]));
     s.persons.get_mut("r2").unwrap().spouse = Some("r4".to_string());
     s.persons.get_mut("r4").unwrap().spouse = Some("r2".to_string());
-    let mut straight = Game::new(&s, params(), 7).unwrap();
-    let mut first = Game::new(&s, params(), 7).unwrap();
+    let mut straight = bare(&s, params(), 7).unwrap();
+    let mut first = bare(&s, params(), 7).unwrap();
     let mut straight_reports = Vec::new();
     let mut reports = Vec::new();
     for _ in 0..40 {
@@ -204,7 +221,7 @@ fn a_run_with_relations_saves_and_loads_bit_for_bit() {
     }
     let save = first.to_save().unwrap();
     assert!(save.contains("\"treaties\"") && save.contains("\"relations\"") && save.contains("\"vassal_of\""));
-    let mut second = Game::from_save(&s, params(), &save).unwrap();
+    let mut second = bare_load(&s, params(), &save).unwrap();
     for _ in 0..20 {
         reports.push(second.tick(&[]).unwrap());
     }
@@ -223,7 +240,7 @@ fn on_generated_worlds_the_bound_share_at_the_start_lies_in_d3_and_without_agent
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         let w = g.world();
         let n = w.actors.len();
         let bound = w.actors.keys().filter(|a| !w.allies_of(**a).is_empty() || w.lord_of(**a).is_some() || !w.vassals_of(**a).is_empty()).count();
@@ -407,7 +424,7 @@ fn take(w: &mut World, a: ActorId, p: engine2::ProvinceId, params: &Params) {
 fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_and_a_vassal_fights_only_its_lord() {
     use engine2::VerbId;
     let p = params();
-    let mut g = Game::new(&scenario_with_verbs(), params(), 11).unwrap();
+    let mut g = bare(&scenario_with_verbs(), params(), 11).unwrap();
     let (s0, s1, s2, s3, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
     let offer = g.verbs(engine2::ActorRef::Ruler(s0)).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
     assert!(offer.available && offer.cost_legitimacy == p.legitimacy_cost_declare_war.round() as i64 && offer.threshold.is_none());
@@ -524,7 +541,7 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
 fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accepted_at_the_threshold() {
     use engine2::VerbId;
     let p = params();
-    let mut g = Game::new(&scenario_with_verbs(), params(), 17).unwrap();
+    let mut g = bare(&scenario_with_verbs(), params(), 17).unwrap();
     let (s0, s1, s2, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(4));
     let who = engine2::ActorRef::Ruler(s0);
     let cost = g.world().embassy_cost(s0, &p);
@@ -574,7 +591,7 @@ fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accep
 fn a_gift_moves_between_treasuries_and_pushes_in_proportion_to_what_it_is_worth_to_the_receiver() {
     use engine2::VerbId;
     let p = params();
-    let mut g = Game::new(&scenario_with_verbs(), params(), 18).unwrap();
+    let mut g = bare(&scenario_with_verbs(), params(), 18).unwrap();
     let (s0, s1) = (ActorId(0), ActorId(1));
     let gift = g.world().gift_size(s0, &p);
     assert!(gift > 0 && (0.01..=0.02).contains(&(p.bribe_share_ppm as f64 / 1e6)), "inside Д2");
@@ -598,7 +615,7 @@ fn a_gift_moves_between_treasuries_and_pushes_in_proportion_to_what_it_is_worth_
 fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open_to_every_house_of_a_polity() {
     use engine2::{ActorRef, HouseId, Target, VerbCall, VerbId};
     let p = params();
-    let mut g = Game::new(&scenario_with_verbs(), params(), 19).unwrap();
+    let mut g = bare(&scenario_with_verbs(), params(), 19).unwrap();
     let (s0, s1) = (ActorId(0), ActorId(1));
     let (h0, h1, h2, o0) = (HouseId(0), HouseId(1), HouseId(2), HouseId(5));
     assert_eq!(g.world().houses[&o0].polity, s0, "the other house of polity 0");

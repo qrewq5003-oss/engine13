@@ -25,10 +25,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, ReligionId};
+use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, RegionId, ReligionId};
 use crate::params::Params;
 use crate::verbs::VerbId;
-use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, RelationFacts, Succession};
+use crate::world::{ActorFact, Disease, Facts, HouseFact, Institution, Land, Names, PersonFact, ProvinceFact, RegionFact, RelationFacts, Succession};
 
 /// The scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -52,8 +52,32 @@ pub struct ScenarioData {
     /// Starting relations between polities (E2 step 7): wars, alliances, vassals — facts,
     /// a column of their own (E0 §6); absent means none.
     pub relations: Option<RelationsData>,
+    /// Regions (E3): named sets of provinces, the target of the aspiration «unite» — a
+    /// kingdom or an empire as the scenario names it, never a people (owner's rule on
+    /// §23); absent means none. Keyed by the scenario's string id of the region.
+    pub regions: Option<BTreeMap<String, RegionData>>,
     /// Enabled verbs and their display names, keyed by `VerbId::key`.
     pub verbs: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegionData {
+    pub name: String,
+    pub provinces: Vec<String>,
+}
+
+/// A starting aspiration (brief §4, E0 §6): a kind of the engine's closed list and a target
+/// in the facts of the world — a province, a polity, a region, a faith, a route of two
+/// provinces. Which of `target` / `route` is read depends on the kind.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AspirationData {
+    pub kind: crate::agents::GoalKind,
+    /// The target's scenario id: a province, an actor, a region or a religion string.
+    pub target: Option<String>,
+    /// For a route: the two provinces it runs between.
+    pub route: Option<[String; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -139,6 +163,8 @@ pub struct ActorData {
     pub regent: Option<String>,
     /// The rule of succession (E0 §4).
     pub succession: Succession,
+    /// Starting aspirations (brief §4, E0 §6), in the facts of the world.
+    pub aspirations: Vec<AspirationData>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -226,6 +252,12 @@ pub enum SchemaError {
     TwoLords(String),
     #[error("actor '{0}' is a vassal and a lord at once")]
     VassalWithVassals(String),
+    #[error("region '{0}' names unknown province '{1}'")]
+    UnknownRegionProvince(String, String),
+    #[error("actor '{0}': aspiration {1:?} names unknown target '{2}'")]
+    UnknownAspirationTarget(String, crate::agents::GoalKind, String),
+    #[error("actor '{0}': aspiration {1:?} needs {2}")]
+    AspirationTarget(String, crate::agents::GoalKind, &'static str),
 }
 
 /// Everything a scenario compiles to.
@@ -365,6 +397,19 @@ impl ScenarioData {
             provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor, culture: culture(&p.culture), religion: religion(&p.religion) });
         }
 
+        // Regions (E3): every province known; ids in sorted order of the string ids.
+        let region_index: BTreeMap<&str, RegionId> = self.regions.iter().flatten().enumerate().map(|(i, (k, _))| (k.as_str(), RegionId(i as u32))).collect();
+        let mut regions = Vec::new();
+        for (key, r) in self.regions.iter().flatten() {
+            let mut provinces = Vec::with_capacity(r.provinces.len());
+            for p in &r.provinces {
+                provinces.push(*province_index.get(p.as_str()).ok_or_else(|| SchemaError::UnknownRegionProvince(key.clone(), p.clone()))?);
+            }
+            provinces.sort();
+            provinces.dedup();
+            regions.push(RegionFact { provinces });
+        }
+
         let mut actors = Vec::with_capacity(self.actors.len());
         for (key, a) in &self.actors {
             let capital = province_index.get(a.capital.as_str()).copied();
@@ -379,7 +424,47 @@ impl ScenarioData {
             let ruler = seat(key, &a.ruler, id)?;
             let heir = a.heir.as_deref().map(|h| seat(key, h, id)).transpose()?;
             let regent = a.regent.as_deref().map(|r| seat(key, r, id)).transpose()?;
-            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions, ruler, heir, regent, succession: a.succession });
+            // Aspirations: the target resolved by the kind, every reference known.
+            let mut goals = Vec::with_capacity(a.aspirations.len());
+            for asp in &a.aspirations {
+                use crate::agents::{GoalKind, GoalTarget};
+                let unknown = |t: &String| SchemaError::UnknownAspirationTarget(key.clone(), asp.kind, t.clone());
+                let target = match asp.kind {
+                    GoalKind::Free => GoalTarget::None,
+                    GoalKind::Union => {
+                        let t = asp.target.as_ref().ok_or(SchemaError::AspirationTarget(key.clone(), asp.kind, "a religion"))?;
+                        GoalTarget::Religion(religions.iter().position(|r| r == t).map(|i| ReligionId(i as u32)).ok_or_else(|| unknown(t))?)
+                    }
+                    GoalKind::Subdue | GoalKind::AllianceAgainst => {
+                        let t = asp.target.as_ref().ok_or(SchemaError::AspirationTarget(key.clone(), asp.kind, "a polity"))?;
+                        GoalTarget::Polity(*actor_index.get(t.as_str()).ok_or_else(|| unknown(t))?)
+                    }
+                    GoalKind::Unite => {
+                        let t = asp.target.as_ref().ok_or(SchemaError::AspirationTarget(key.clone(), asp.kind, "a region"))?;
+                        GoalTarget::Region(*region_index.get(t.as_str()).ok_or_else(|| unknown(t))?)
+                    }
+                    GoalKind::Hold | GoalKind::Take => {
+                        if let Some([x, y]) = &asp.route {
+                            let x = *province_index.get(x.as_str()).ok_or_else(|| unknown(x))?;
+                            let y = *province_index.get(y.as_str()).ok_or_else(|| unknown(y))?;
+                            GoalTarget::Route(x, y)
+                        } else {
+                            let t = asp.target.as_ref().ok_or(SchemaError::AspirationTarget(key.clone(), asp.kind, "a province, a polity, a region or a route"))?;
+                            if let Some(p) = province_index.get(t.as_str()) {
+                                GoalTarget::Province(*p)
+                            } else if let Some(b) = actor_index.get(t.as_str()) {
+                                GoalTarget::Polity(*b)
+                            } else if let Some(r) = region_index.get(t.as_str()) {
+                                GoalTarget::Region(*r)
+                            } else {
+                                return Err(unknown(t));
+                            }
+                        }
+                    }
+                };
+                goals.push(crate::agents::GoalFact { kind: asp.kind, target });
+            }
+            actors.push(ActorFact { treasury_kg: a.treasury_kg, capital, soldiers: a.soldiers, institutions, ruler, heir, regent, succession: a.succession, goals });
         }
 
         // Starting relations: every actor known, nobody bound to itself, each pair bound
@@ -432,7 +517,7 @@ impl ScenarioData {
         verbs.sort_by_key(|(id, _)| *id);
 
         Ok(Compiled {
-            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors, houses, persons, relations },
+            facts: Facts { scenario_id: self.id.clone(), start_year: self.start_year, diseases: self.diseases.clone(), provinces, actors, houses, persons, relations, regions },
             names: Names {
                 actors: self.actors.iter().map(|(k, a)| (k.clone(), a.name.clone())).collect(),
                 provinces: self.provinces.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
@@ -440,6 +525,7 @@ impl ScenarioData {
                 persons: self.persons.iter().map(|(k, p)| (k.clone(), p.name.clone())).collect(),
                 cultures,
                 religions,
+                regions: self.regions.iter().flatten().map(|(k, r)| (k.clone(), r.name.clone())).collect(),
             },
             display: Display { verbs, currency: self.display_currency.clone() },
         })
@@ -465,6 +551,7 @@ soldiers = 20
 institutions = ["Bank"]
 ruler = "bob"
 succession = "Election"
+aspirations = [{ kind = "Take", target = "p1" }, { kind = "Hold", route = ["p2", "p3"] }]
 [actors.a]
 name = "A"
 treasury_kg = 20
@@ -474,6 +561,10 @@ institutions = []
 ruler = "ann"
 heir = "ann_jr"
 succession = "Blood"
+aspirations = [{ kind = "Unite", target = "west" }, { kind = "Subdue", target = "b" }]
+[regions.west]
+name = "The West"
+provinces = ["p1", "p3"]
 [houses.ha]
 name = "House A"
 polity = "a"
@@ -580,6 +671,17 @@ raise_tax = "Поднять налог"
         assert_eq!(c.facts.provinces[2].governor, Some(PersonId(1)));
         assert!(ScenarioData::parse(&OK.replacen("succession = \"Blood\"", "succession = \"Lottery\"", 1)).is_err());
         assert_eq!(c.facts.diseases, vec![Disease::Plague]);
+        // Regions and aspirations (E3): resolved to ids by kind.
+        use crate::agents::{GoalFact, GoalKind, GoalTarget};
+        assert_eq!(c.names.regions, vec![("west".to_string(), "The West".to_string())]);
+        assert_eq!(c.facts.regions[0].provinces, vec![ProvinceId(0), ProvinceId(2)]);
+        assert_eq!(c.facts.actors[0].goals, vec![GoalFact { kind: GoalKind::Unite, target: GoalTarget::Region(RegionId(0)) }, GoalFact { kind: GoalKind::Subdue, target: GoalTarget::Polity(ActorId(1)) }]);
+        assert_eq!(c.facts.actors[1].goals, vec![GoalFact { kind: GoalKind::Take, target: GoalTarget::Province(ProvinceId(0)) }, GoalFact { kind: GoalKind::Hold, target: GoalTarget::Route(ProvinceId(1), ProvinceId(2)) }]);
+        let bad = OK.replacen("{ kind = \"Subdue\", target = \"b\" }", "{ kind = \"Subdue\", target = \"nobody\" }", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownAspirationTarget(..))));
+        let bad = OK.replacen("provinces = [\"p1\", \"p3\"]", "provinces = [\"p1\", \"p9\"]", 1);
+        assert!(matches!(ScenarioData::parse(&bad).unwrap().compile(&params()), Err(SchemaError::UnknownRegionProvince(..))));
+        assert!(ScenarioData::parse(&OK.replacen("kind = \"Unite\"", "kind = \"Conquer\"", 1)).is_err());
         let no_plague = ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = []", 1)).unwrap();
         assert!(no_plague.compile(&params()).unwrap().facts.diseases.is_empty());
         assert!(ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = [\"Dragonpox\"]", 1)).is_err());

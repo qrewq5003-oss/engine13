@@ -9,12 +9,13 @@
 //! (AGENTS §8, owner's review of PR #278).
 
 use crate::economy::VerbError;
+use crate::ids::ActorId;
 use crate::event::{Event, Stamped};
 use crate::params::Params;
 use crate::world::Institution;
 use crate::save::{self, SaveError};
 use crate::scenario::{Display, ScenarioData, SchemaError};
-use crate::verbs::{ActorRef, VerbCall, VerbId, VerbOffer};
+use crate::verbs::{ActorRef, Target, VerbCall, VerbId, VerbOffer};
 use crate::view::{self, ChronicleSnapshot, WorldView};
 use crate::world::{TickReport, World, WorldError};
 
@@ -48,6 +49,29 @@ pub trait Simulation: Sized {
     fn from_save(scenario: &ScenarioData, params: Params, save: &str) -> Result<Self, SimError>;
 }
 
+/// The order every call of a tick is applied in (owner's rule on #291): by the polity of the
+/// caller — a ruler's polity, a house's polity — the ruler before the houses, the houses by
+/// id, then the order the calls came in. The player's calls stand at the place of the
+/// player's actor, a bot's at its own: one order for all.
+pub fn application_order(world: &World, calls: &[VerbCall]) -> Vec<VerbCall> {
+    let key = |c: &VerbCall| match c.actor {
+        ActorRef::Ruler(a) => (a, 0u8, 0u32),
+        ActorRef::House(h) => (world.houses.get(&h).map(|x| x.polity).unwrap_or(ActorId(u32::MAX)), 1, h.0),
+    };
+    let mut v: Vec<(usize, VerbCall)> = calls.iter().copied().enumerate().collect();
+    v.sort_by_key(|(i, c)| (key(c), *i));
+    v.into_iter().map(|(_, c)| c).collect()
+}
+
+/// The bond a call makes between a pair — a peace or a war — that the other side of the
+/// pair may make in the same tick too; the second is nothing.
+fn bond_of(call: &VerbCall) -> Option<(VerbId, (ActorId, ActorId))> {
+    match (call.verb, call.actor, call.target) {
+        (VerbId::MakePeace | VerbId::DeclareWar, ActorRef::Ruler(a), Target::Actor(b)) if a != b => Some((call.verb, crate::army::pair(a, b))),
+        _ => None,
+    }
+}
+
 /// A run: the world plus what the scenario contributed besides facts.
 #[derive(Debug)]
 pub struct Game {
@@ -56,11 +80,57 @@ pub struct Game {
     params: Params,
     /// Events of the last played tick, for the chronicle snapshot.
     last_events: Vec<Stamped>,
+    /// The actor the player plays, if any (E3): its decisions are the player's calls, every
+    /// other living polity is a bot. `None` — a run without a player (the sentinel's
+    /// player-less run, the paired run's bot side).
+    player: Option<ActorRef>,
+    /// Calls preempted at application, by verb and reason — the player's and the bots'
+    /// alike. Everyone decides on the state at the tick's start (brief §3), so an earlier
+    /// call of the same tick can close a later one — two houses asking for the same bride;
+    /// what was not on offer at the decision is never called by a bot (B42, tested), and a
+    /// player's call that is not on offer is an error before anything is touched.
+    preempted: std::collections::BTreeMap<String, u64>,
+    /// Whether the bots decide at all. On in a game; the acceptance tests of the systems of
+    /// E2 drive the world by hand and switch them off (`set_bots`).
+    bots: bool,
 }
 
 impl Game {
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Who the player plays; `None` — nobody, every polity is a bot.
+    pub fn player(&self) -> Option<ActorRef> {
+        self.player
+    }
+
+    /// Give the player a role (E3): that actor's calls come from `tick(player)`, the bots
+    /// leave it alone. `None` hands it back to the bots.
+    pub fn set_player(&mut self, who: Option<ActorRef>) {
+        self.player = who;
+    }
+
+    /// Calls preempted so far by an earlier call of the same tick (the player's and the
+    /// bots' alike).
+    pub fn preempted(&self) -> u64 {
+        self.preempted.values().sum()
+    }
+
+    /// The preempted calls by verb and reason.
+    pub fn preempted_reasons(&self) -> &std::collections::BTreeMap<String, u64> {
+        &self.preempted
+    }
+
+    /// Switch the bots on or off. Off, every polity waits for the player's calls — the
+    /// world of E2 as the tests of its systems drive it; on (the default), every living
+    /// polity but the player's decides every tick.
+    pub fn set_bots(&mut self, on: bool) {
+        self.bots = on;
+    }
+
+    pub fn bots(&self) -> bool {
+        self.bots
     }
 
     /// The constants this run plays with (the sentinel's observer reads the horizons).
@@ -186,18 +256,65 @@ impl Simulation for Game {
     fn new(scenario: &ScenarioData, params: Params, seed: u64) -> Result<Game, SimError> {
         let c = scenario.compile(&params)?;
         let world = World::from_facts(&c.facts, c.names, &params, seed)?;
-        Ok(Game { world, display: c.display, params, last_events: Vec::new() })
+        Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, preempted: std::collections::BTreeMap::new(), bots: true })
     }
 
     fn tick(&mut self, player: &[VerbCall]) -> Result<TickReport, SimError> {
         // Validate every call before touching the world, so an error leaves nothing
-        // half-played.
+        // half-played: the verb enabled, and every call of the player on offer on the state
+        // as it stands. Tried on a copy in the order of application (a loan and the hire it
+        // pays for); a call refused there but on offer by itself is a conflict of the tick,
+        // not an error — the same rule as a bot's.
         if let Some(bad) = player.iter().find(|c| !self.enabled(c.verb)) {
             return Err(SimError::VerbNotEnabled(bad.verb));
         }
-        for call in player {
-            self.world.apply_verb(call, &self.params)?;
-            self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target });
+        if !player.is_empty() {
+            let mut probe = self.world.clone();
+            let mut bonded: std::collections::BTreeSet<(VerbId, (ActorId, ActorId))> = std::collections::BTreeSet::new();
+            for call in application_order(&self.world, player) {
+                let bond = bond_of(&call);
+                if bond.is_some_and(|k| bonded.contains(&k)) {
+                    continue;
+                }
+                match probe.apply_verb(&call, &self.params) {
+                    Ok(()) => bonded.extend(bond),
+                    Err(e) => {
+                        let mut alone = self.world.clone();
+                        if alone.apply_verb(&call, &self.params).is_err() {
+                            return Err(e.into());
+                        }
+                    }
+                }
+            }
+        }
+        // First all decide — the bots on the state as it stands, before any call lands —
+        // then all is applied in **one order for all** (owner's rule on #291): by the
+        // polity of the caller, the player's calls at the place of the player's actor. A
+        // player first would win every conflict of the tick, and the paired run player
+        // against bot would measure the queue, not the strategy.
+        let enabled: Vec<VerbId> = self.display.verbs.iter().map(|(v, _)| *v).collect();
+        let mut calls: Vec<VerbCall> = player.to_vec();
+        if self.bots {
+            calls.extend(self.world.decide_all(&enabled, self.player, &self.params));
+        }
+        let mut bonded: std::collections::BTreeSet<(VerbId, (ActorId, ActorId))> = std::collections::BTreeSet::new();
+        for call in application_order(&self.world, &calls) {
+            // A peace or a war the other side of the pair already made this tick is nothing
+            // (owner's rule on #291): both proposed it, it is made once.
+            let bond = bond_of(&call);
+            if bond.is_some_and(|k| bonded.contains(&k)) {
+                continue;
+            }
+            match self.world.apply_verb(&call, &self.params) {
+                Ok(()) => {
+                    bonded.extend(bond);
+                    self.world.emit(Event::Verb { actor: call.actor, verb: call.verb, target: call.target });
+                }
+                Err(e) => {
+                    *self.preempted.entry(format!("{:?}: {e}", call.verb)).or_insert(0) += 1;
+                    self.world.emit(Event::Preempted { actor: call.actor, verb: call.verb, target: call.target });
+                }
+            }
         }
         let report = self.world.tick(&self.params)?;
         self.last_events = report.events.clone();
@@ -232,6 +349,6 @@ impl Simulation for Game {
                 scenario_hash,
             });
         }
-        Ok(Game { world, display: c.display, params, last_events: Vec::new() })
+        Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, preempted: std::collections::BTreeMap::new(), bots: true })
     }
 }

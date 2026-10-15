@@ -43,6 +43,23 @@ fn params() -> Params {
     Params::load().unwrap()
 }
 
+/// A game whose bots are off: the test drives the world by hand (E3 (а)).
+fn bare(s: &engine2::ScenarioData, p: Params, seed: u64) -> Result<Game, engine2::sim::SimError> {
+    Game::new(s, p, seed).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
+/// A game loaded with its bots off, to continue a bare run.
+#[allow(dead_code)]
+fn bare_load(s: &engine2::ScenarioData, p: Params, save: &str) -> Result<Game, engine2::sim::SimError> {
+    Game::from_save(s, p, save).map(|mut g| {
+        g.set_bots(false);
+        g
+    })
+}
+
 fn world() -> World {
     testworld::world(1)
 }
@@ -100,7 +117,7 @@ fn the_tax_verbs_move_the_rate_one_step_for_a_price_in_legitimacy_and_close_at_t
 fn the_offer_carries_the_price_in_legitimacy_closes_at_the_edge_with_its_reason_and_a_house_is_offered_nothing() {
     let p = params();
     let s = testworld::five_states_scenario();
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let who = ActorRef::Ruler(ActorId(0));
     let offer = |g: &Game, v: VerbId| g.verbs(who).into_iter().find(|o| o.verb == v).unwrap();
     let raise = offer(&g, VerbId::RaiseTax);
@@ -134,7 +151,7 @@ fn enforce_order_buys_legitimacy_with_a_share_of_a_years_revenue_and_closes_when
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("enforce_order".to_string(), "Enforce order".to_string());
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let a = ActorId(0);
     let who = ActorRef::Ruler(a);
     let offer = |g: &Game| g.verbs(who).into_iter().find(|o| o.verb == VerbId::EnforceOrder).unwrap();
@@ -195,7 +212,7 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("take_loan".to_string(), "Take a loan".to_string());
-    let mut g = Game::new(&s, params(), 1).unwrap();
+    let mut g = bare(&s, params(), 1).unwrap();
     let a = ActorId(0);
     let who = ActorRef::Ruler(a);
     let loan = VerbCall { actor: who, verb: VerbId::TakeLoan, target: Target::None };
@@ -338,7 +355,7 @@ fn on_generated_worlds_usurpations_per_century_per_polity_lie_in_b6_neither_neve
     let mut quiet_centuries = 0u64;
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
-        let mut g = Game::new(&s, params(), seed).unwrap();
+        let mut g = bare(&s, params(), seed).unwrap();
         let mut per_actor: BTreeMap<ActorId, u64> = g.world().actors.keys().map(|a| (*a, 0)).collect();
         let mut first_century: BTreeMap<ActorId, u64> = per_actor.clone();
         for t in 0..300u32 {
@@ -577,7 +594,7 @@ fn play_worlds(p: &Params) -> (BTreeMap<&'static str, f64>, Vec<f64>, f64) {
         let s = worldgen::generate(seed, p);
         let mut per_world: BTreeMap<&str, i64> = BTreeMap::new();
         for strategy in ["plain", "greedy"] {
-            let mut g = Game::new(&s, p.clone(), seed).unwrap();
+            let mut g = bare(&s, p.clone(), seed).unwrap();
             let ids: Vec<ActorId> = g.world().actors.keys().copied().collect();
             let (mut tax, mut production, mut spent) = (0i64, 0i64, 0i64);
             for _ in 0..100 {

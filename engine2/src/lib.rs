@@ -14,6 +14,8 @@
 //! the throne (`politics.rs`) — people, houses, seats, deaths, births, succession, regency.
 //! E2 step 9: collapse (`collapse.rs`) — provinces rise, a house takes its land into a
 //! polity of its own, the successor gets provinces and a war, not a copy of metrics.
+//! E3 (а): agents (`agents.rs`) — goals as state, utility without learning, softmax over
+//! the offers, every bot deciding on the snapshot before anything is applied.
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -26,6 +28,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agents;
 pub mod army;
 pub mod collapse;
 pub mod diplomacy;
@@ -52,8 +55,9 @@ pub mod world;
 #[cfg(feature = "worldgen")]
 pub mod worldgen;
 
+pub use agents::{Goal, GoalFact, GoalKind, GoalTarget};
 pub use event::{Event, Stamped};
-pub use ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, ReligionId, UnitId};
+pub use ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId, RegionId, ReligionId, UnitId};
 pub use ledger::{Account, Ledger, Posting, Source};
 pub use params::Params;
 pub use rng::{Draw, DrawPoint, RngDraw};

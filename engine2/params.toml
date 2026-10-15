@@ -989,3 +989,73 @@ kind = "b"
 band = [0.5, 1.6]
 unit = "polities a century on, per polity at the start"
 e0 = "В8"
+
+# ---- agents (E3 (а), plan §23) ----
+
+# (в) The agents' choice (brief §3: utility without learning, softmax with a temperature
+# from params.toml through the world's RNG). Every bot scores the offers it has — a goal's
+# progress the verb would move, less its price — and draws one by softmax at this
+# temperature; «do nothing» is always in the set at nothing. Checked through А12 (the share
+# of years at war: too hot and every polity fights, too cold and nobody moves).
+[agent.temperature]
+kind = "c"
+value = 0.3
+unit = "temperature of the softmax over utilities"
+checked_by = "А12"
+
+# (в) What a price weighs against a goal's progress (progress runs 0–1): a point of
+# legitimacy per hundred, and a kilogram per year of the polity's revenue. Checked
+# through А12.
+[agent.weight_price_legitimacy]
+kind = "c"
+value = 2.0
+unit = "utility per 100 points of legitimacy"
+checked_by = "А12"
+
+[agent.weight_price_treasury]
+kind = "c"
+value = 1.0
+unit = "utility per year of revenue"
+checked_by = "А12"
+
+# (в) A goal that made no progress for this long is put aside and the next reachable one
+# taken (plan §23.2 p. 1: goals change by the rules, not by the lot). Checked through А12.
+[goal.horizon_years]
+kind = "c"
+value = 25.0
+unit = "years"
+checked_by = "А12"
+
+# (в) The generator's lottery of starting aspirations on the generated worlds (owner's
+# answer 3 on §23): «hold» and «alliance against» heavier than «take» and «subdue», else
+# every polity is greedy and А12 goes to «always»; «free» is every vassal's; «union» and the
+# house's goals come with the opportunities channel (E3 (в)). Checked through А12.
+[aspiration.weight_hold]
+kind = "c"
+value = 3.0
+unit = "weight in the lottery"
+checked_by = "А12"
+
+[aspiration.weight_alliance]
+kind = "c"
+value = 1.5
+unit = "weight in the lottery"
+checked_by = "А12"
+
+[aspiration.weight_take]
+kind = "c"
+value = 1.0
+unit = "weight in the lottery"
+checked_by = "А12"
+
+[aspiration.weight_subdue]
+kind = "c"
+value = 1.0
+unit = "weight in the lottery"
+checked_by = "А12"
+
+[aspiration.weight_unite]
+kind = "c"
+value = 1.0
+unit = "weight in the lottery"
+checked_by = "А12"
