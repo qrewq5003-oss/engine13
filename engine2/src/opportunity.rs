@@ -32,9 +32,15 @@
 //! offers the court the policy instead, at `policy.cost_legitimacy` — a court's decision,
 //! not a practice caught from a neighbour (§20).
 //!
-//! **Lifetime.** Opened in a tick's phases (`opened` = that tick), answered at the start of
-//! the next tick, before the verbs: the answer meets the world as the opening tick left it,
-//! and the effect is checked again — a province taken meanwhile, a candidate dead, a ruler
+//! **A marriage offered to a house** (owner's correction on §23): `propose_marriage` no
+//! longer marries by the rule of the state — it offers the match to the other house, which
+//! answers at the next turn; taken, the two marry and the proposer's dowry is paid then, out
+//! of what its treasury holds at the wedding. Two offers for one bride: the first taken in
+//! the order they were made marries, the other is void.
+//!
+//! **Lifetime.** Opened in a tick's phases or by a verb of its turn (`opened` = that tick),
+//! answered at the start of the next tick, before the verbs: the answer meets the world as
+//! the opening tick left it, and the effect is checked again — a province taken meanwhile, a candidate dead, a ruler
 //! changed: the opportunity is void (`OpportunityVoid`), not an error. A world ticked
 //! without the contract — the systems' tests of E2, a game with its bots off — settles what
 //! nobody answered by **the rule of E2** (a house takes its chance; nothing else is
@@ -78,6 +84,8 @@ pub enum Chance {
     Union { polity: ActorId, faith: crate::ids::ReligionId },
     /// The court of `polity` may adopt the policy of conversion, met at `from`.
     Policy { polity: ActorId, from: ActorId },
+    /// House `from` offers `a`, its member, to `b` of the house answering.
+    Marriage { from: crate::ids::HouseId, a: PersonId, b: PersonId },
 }
 
 impl Chance {
@@ -89,6 +97,7 @@ impl Chance {
             Chance::Vote { .. } => "Vote",
             Chance::Union { .. } => "Union",
             Chance::Policy { .. } => "Policy",
+            Chance::Marriage { .. } => "Marriage",
         }
     }
 }
@@ -168,7 +177,7 @@ impl World {
             match (&o.what, a.reply) {
                 (Chance::Vote { candidates, .. }, Reply::Vote(c)) if !candidates.contains(&c) => return Err(AnswerError::BadReply(a.opportunity, "not a candidate")),
                 (Chance::Vote { .. }, Reply::Take) => return Err(AnswerError::BadReply(a.opportunity, "a vote names its candidate")),
-                (Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Union { .. } | Chance::Policy { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
+                (Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Union { .. } | Chance::Policy { .. } | Chance::Marriage { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
                 _ => {}
             }
         }
@@ -177,10 +186,11 @@ impl World {
 
     /// The rule of E2 for an opportunity nobody answered in a world without the contract:
     /// a house takes its chance; nobody votes (the interim stays, as E2 elected); a court
-    /// keeps its faith and takes no policy (E2 had neither decision).
+    /// keeps its faith and takes no policy (E2 had neither decision); a house takes the
+    /// match it is offered (E2 married by the rule of the state).
     fn rule_reply(o: &Opportunity) -> Option<Reply> {
         match o.what {
-            Chance::Secession { .. } | Chance::Usurpation { .. } => Some(Reply::Take),
+            Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Marriage { .. } => Some(Reply::Take),
             Chance::Vote { .. } => None,
             Chance::Union { .. } | Chance::Policy { .. } => Some(Reply::Decline),
         }
@@ -190,7 +200,10 @@ impl World {
     /// applied; what nobody answered lapses — or, `by_rule`, is settled by the rule of E2,
     /// except what `player` answers (a player's silence is a choice).
     pub(crate) fn settle_opportunities(&mut self, answers: &[Answer], player: Option<ActorRef>, by_rule: bool, params: &Params) -> Result<(), WorldError> {
-        let open = std::mem::take(&mut self.opportunities);
+        // Only what an earlier tick opened is due: a match offered by a verb of this turn
+        // waits for the next turn like everything else.
+        let (open, waiting): (Vec<Opportunity>, Vec<Opportunity>) = std::mem::take(&mut self.opportunities).into_iter().partition(|o| o.opened < self.tick);
+        self.opportunities = waiting;
         // The votes of each election, counted once all are in.
         let mut elections: std::collections::BTreeMap<ActorId, (PersonId, Vec<Vote>)> = std::collections::BTreeMap::new();
         for o in open {
@@ -314,6 +327,28 @@ impl World {
                 self.actors.get_mut(&polity).unwrap().institutions.insert(institution);
                 self.pay_legitimacy(polity, params.policy_cost_legitimacy);
                 self.emit(Event::Adopted { actor: polity, institution, from });
+                Ok(Ok(()))
+            }
+            Chance::Marriage { from, a, b } => {
+                let ActorRef::House(g) = o.to else { return Ok(Err("a match is a house's")) };
+                let free = |w: &World, p: PersonId, h: crate::ids::HouseId| w.person_alive(p) && w.is_adult(p, params) && w.persons[&p].house == h && !w.persons[&p].spouse.is_some_and(|s| w.person_alive(s));
+                if !free(self, a, from) || !free(self, b, g) {
+                    return Ok(Err("one of the pair is no longer free to marry"));
+                }
+                // The threshold of the relation gated the offer; the answer is the house's.
+                // Only a war since makes the match void.
+                let (pa, pb) = (self.houses[&from].polity, self.houses[&g].polity);
+                if pa != pb && self.at_war(pa, pb) {
+                    return Ok(Err("the polities are at war"));
+                }
+                let dowry = self.dowry(from, params);
+                if dowry > 0 {
+                    self.post(crate::ledger::Account::HouseTreasury(from), crate::ledger::Source::Dowry, -dowry * 1000)?;
+                    self.post(crate::ledger::Account::HouseTreasury(g), crate::ledger::Source::Dowry, dowry * 1000)?;
+                }
+                self.persons.get_mut(&a).unwrap().spouse = Some(b);
+                self.persons.get_mut(&b).unwrap().spouse = Some(a);
+                self.emit(Event::Marriage { a, b, dowry_kg: dowry as u64 });
                 Ok(Ok(()))
             }
         }

@@ -553,8 +553,20 @@ impl World {
             (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
             (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
             (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
+            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_utility(g, *from, params) > 0.0,
             _ => false,
         }
+    }
+
+    /// The utility of a match offered to house `g` by house `from`: the bond — with its own
+    /// polity's ruling house or with a polity its own wants as an ally, as the proposer
+    /// weighs it (0.4, else −0.2) — and the dowry, at the bot's price of wheat in shares of
+    /// its polity's revenue.
+    pub fn marriage_utility(&self, g: crate::ids::HouseId, from: crate::ids::HouseId, params: &Params) -> f64 {
+        let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
+        let bond = if mine == theirs || self.wanted_allies(mine).contains(&theirs) { 0.4 } else { -0.2 };
+        let income = self.yearly_income(mine, params).max(1) as f64;
+        bond + self.dowry(from, params) as f64 / income * params.agent_weight_price_treasury
     }
 
     /// The utility of the union for a court (owner's answer 6 on §23): its goal reached, 1,

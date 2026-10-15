@@ -661,8 +661,19 @@ fn every_call_of_a_tick_is_applied_in_one_order_for_all_the_player_at_the_place_
     // The order: by the caller's polity, whatever order the calls came in.
     let order = engine2::sim::application_order(g.world(), &[marry(3, h4), marry(1, h4), VerbCall { actor: ActorRef::House(h3), verb: VerbId::ProposeMarriage, target: Target::House(h4) }]);
     assert_eq!(order.iter().map(|c| c.actor).collect::<Vec<_>>(), vec![ActorRef::Ruler(ActorId(1)), ActorRef::Ruler(ActorId(3)), ActorRef::House(h3)]);
-    // Played: polity 1 comes first and marries; polity 3's call is preempted, not an error.
-    let r = g.tick(&[marry(3, h4), marry(1, h4)]).unwrap();
+    // Played: both offers go to house 4 in that order (E3 (в): a marriage is the other
+    // house's answer); at the next turn polity 1's is taken first and marries, polity 3's is
+    // void — the bride is married — not an error.
+    let opened = g.tick(&[marry(3, h4), marry(1, h4)]).unwrap();
+    let offers: Vec<(u32, engine2::HouseId)> = opened.events.iter().filter_map(|e| match &e.event {
+        Event::OpportunityOpened { opportunity } => match opportunity.what {
+            engine2::Chance::Marriage { from, .. } => Some((opportunity.id, from)),
+            _ => None,
+        },
+        _ => None,
+    }).collect();
+    assert_eq!(offers.iter().map(|(_, h)| *h).collect::<Vec<_>>(), vec![h1, h3], "offered in the one order");
+    let r = g.tick(&[]).unwrap();
     let married = r.events.iter().find_map(|e| match e.event {
         Event::Marriage { a, b, .. } => Some((a, b)),
         _ => None,
@@ -670,8 +681,8 @@ fn every_call_of_a_tick_is_applied_in_one_order_for_all_the_player_at_the_place_
     let (x, y) = married.expect("one marriage");
     let houses_married = [g.world().persons[&x].house, g.world().persons[&y].house];
     assert!(houses_married.contains(&h1) && houses_married.contains(&h4), "the lower polity married: {houses_married:?}");
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Preempted { actor: ActorRef::Ruler(ActorId(3)), verb: VerbId::ProposeMarriage, .. })));
-    assert_eq!(g.preempted(), 1);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::OpportunityVoid { id, .. } if id == offers[1].0)), "polity 3's offer is void");
+    assert_eq!(g.preempted(), 0);
     // The player at the place of its actor: a player playing polity 3 against a bot of
     // polity 1 loses the bride the same way; playing polity 0 it would win — the queue is
     // the actors', not the player's.
@@ -679,8 +690,13 @@ fn every_call_of_a_tick_is_applied_in_one_order_for_all_the_player_at_the_place_
     g.set_bots(false);
     friendly(&mut g);
     g.set_player(Some(ActorRef::Ruler(ActorId(3))));
-    let r = g.tick(&[marry(1, h4), marry(3, h4)]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Preempted { actor: ActorRef::Ruler(ActorId(3)), .. })), "the player's call came first in the list and still goes after polity 1");
+    g.tick(&[marry(3, h4), marry(1, h4)]).unwrap();
+    let r = g.tick(&[]).unwrap();
+    let (x, y) = r.events.iter().find_map(|e| match e.event {
+        Event::Marriage { a, b, .. } => Some((a, b)),
+        _ => None,
+    }).expect("one marriage");
+    assert!([g.world().persons[&x].house, g.world().persons[&y].house].contains(&h1), "the player's call came first in the list and still goes after polity 1");
     let _ = p;
 }
 

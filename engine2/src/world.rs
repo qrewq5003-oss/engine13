@@ -938,9 +938,9 @@ impl World {
     /// — one keyed draw per deciding actor — come before the tick, through
     /// [`World::decide_all`] (E3; the E1 stand-in draw is gone).
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
-        // Opportunities of the last tick nobody settled through the contract (a world
+        // Opportunities of an earlier tick nobody settled through the contract (a world
         // ticked without a game): by the rule of E2 (`opportunity.rs`).
-        if !self.opportunities.is_empty() {
+        if self.opportunities.iter().any(|o| o.opened < self.tick) {
             self.settle_opportunities(&[], None, true, params)?;
         }
         self.phase_movement(params)?;

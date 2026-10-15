@@ -470,21 +470,15 @@ impl World {
     }
 
     /// Apply a diplomatic verb (the systems compute the effect; acceptance is a rule of the
-    /// state, not another agent's choice).
+    /// state, not another agent's choice — but a marriage is offered to the other house,
+    /// which decides at the next turn, E3 (в), `opportunity.rs`).
     pub(crate) fn apply_diplomacy_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
         let ledger = |_: WorldError| VerbError::NotAvailable(call.verb, "ledger");
         if call.verb == VerbId::ProposeMarriage {
             let h = self.house_of_caller(call.actor)?;
             let Target::House(g) = call.target else { return Err(VerbError::BadTarget(call.verb, "a house to marry into")) };
             let (p, q) = self.marriage_room(h, g, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
-            let dowry = self.dowry(h, params);
-            if dowry > 0 {
-                self.post(Account::HouseTreasury(h), Source::Dowry, -dowry * 1000).map_err(ledger)?;
-                self.post(Account::HouseTreasury(g), Source::Dowry, dowry * 1000).map_err(ledger)?;
-            }
-            self.persons.get_mut(&p).unwrap().spouse = Some(q);
-            self.persons.get_mut(&q).unwrap().spouse = Some(p);
-            self.emit(Event::Marriage { a: p, b: q, dowry_kg: dowry as u64 });
+            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q });
             return Ok(());
         }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };

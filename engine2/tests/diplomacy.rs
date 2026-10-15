@@ -627,11 +627,19 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.world_mut().relations.insert((s0, s1), p.treaty_accept_at_relation);
+    // E3 (в): the call offers the match to the other house; it answers at the next turn
+    // (here a world with its bots off: by the rule of E2, it takes it).
     let r = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.to == ActorRef::House(h1))), "the match offered to the house");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "not married before its answer");
+    // The dowry is paid at the wedding, out of what the house holds then (its seat's income
+    // of the tick the offer was made in).
+    let at_wedding = g.world().dowry(h0, &p);
+    let r = g.tick(&[]).unwrap();
     let (a, b) = r.events.iter().find_map(|e| match e.event {
-        Event::Marriage { a, b, dowry_kg: 0 } => Some((a, b)),
+        Event::Marriage { a, b, dowry_kg } if dowry_kg == at_wedding as u64 => Some((a, b)),
         _ => None,
-    }).expect("a marriage with no dowry: the house has nothing yet");
+    }).expect("a marriage with the dowry the house holds at the wedding");
     let w = g.world();
     assert_eq!((w.persons[&a].house, w.persons[&b].house), (h0, h1));
     assert_eq!(w.persons[&a].spouse, Some(b));
@@ -652,8 +660,9 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     assert!(offer.available && offer.cost_kg == dowry, "{:?}", offer.why);
     let err = g.tick(&[marry(ActorRef::House(o0), HouseId(3))]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
-    let r = g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)));
+    g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
+    let r = g.tick(&[]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)), "the dowry paid at the wedding");
     assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -dowry);
     assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), dowry);
     let _ = h2;

@@ -399,3 +399,38 @@ fn the_price_of_the_policy_is_paid_in_legitimacy_on_taking_it() {
     let (a, b) = (g.world().actors[&ActorId(0)].legitimacy, declined.world().actors[&ActorId(0)].legitimacy);
     assert!((b - a - p.policy_cost_legitimacy * (1.0 - p.legitimacy_rate_per_tick)).abs() < 1e-6, "the price once, then drawn toward the norm: {b} − {a}");
 }
+
+// ---------- a marriage offered to a house (owner's correction on §23) ----------
+
+#[test]
+fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_turn() {
+    let s = scenario();
+    let (h0, o0) = (house(&s, "h0"), house(&s, "o0"));
+    let offer = |player: Option<ActorRef>| {
+        let mut s = scenario();
+        for v in ["propose_marriage"] {
+            s.verbs.insert(v.to_string(), v.to_string());
+        }
+        let mut g = Game::new(&s, params(), 12).unwrap();
+        g.set_bots(false);
+        g.set_player(player);
+        let call = engine2::VerbCall { actor: ActorRef::Ruler(ActorId(0)), verb: engine2::VerbId::ProposeMarriage, target: engine2::Target::House(o0) };
+        let r = g.tick(&[call]).unwrap();
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "nobody married before the answer");
+        g
+    };
+    let marriage = |r: &engine2::TickReport| r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. }));
+    // The other house of the polity, played: declined — nothing; taken — married.
+    let mut g = offer(Some(ActorRef::House(o0)));
+    let mine = g.opportunities(ActorRef::House(o0));
+    let Chance::Marriage { from, .. } = mine[0].what else { panic!("a match offered") };
+    assert_eq!(from, h0);
+    let answer = |id, reply| Turn { answers: vec![Answer { who: ActorRef::House(o0), opportunity: id, reply }], ..Turn::default() };
+    assert!(!marriage(&g.play(&answer(mine[0].id, engine2::Reply::Decline)).unwrap()), "declined: nobody marries");
+    let mut g = offer(Some(ActorRef::House(o0)));
+    let id = g.opportunities(ActorRef::House(o0))[0].id;
+    assert!(marriage(&g.play(&answer(id, engine2::Reply::Take)).unwrap()), "taken: the two marry");
+    // The bot of a house takes a match with its own polity's ruling house.
+    let g = offer(None);
+    assert!(g.world().marriage_utility(o0, h0, g.params()) > 0.0);
+}
