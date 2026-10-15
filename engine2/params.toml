@@ -545,8 +545,11 @@ unit = "share of production per call"
 checked_by = "Э8"
 origin = "выбран: шаг глагола налога внутри полосы Э4"
 
-# (в) The prices in legitimacy: raising the tax costs it, lowering gives half back. Checked
-# through В6 — the coups legitimacy lets in.
+# (в) The prices in legitimacy: raising the tax costs it, lowering gives half back — half of
+# what a raise would take at the level the ruler stands, so that a step and the step back
+# lose in either order at every level (no conversion at a profit, #286; with a fixed gain of 5
+# the saturating prices of #293 made the round trip gain below legitimacy ≈ 34, and the bots
+# of E3 (е1) found it). Checked through В6 — the coups legitimacy lets in.
 [legitimacy.cost_raise_tax]
 kind = "c"
 value = 10.0
@@ -554,10 +557,10 @@ unit = "legitimacy, 0–100"
 checked_by = "В6"
 origin = "выбран: цена шага налога"
 
-[legitimacy.gain_lower_tax]
+[legitimacy.lower_tax_gives_back]
 kind = "c"
-value = 5.0
-unit = "legitimacy, 0–100"
+value = 0.5
+unit = "share of what a raise would take at the level the ruler stands"
 checked_by = "В6"
 origin = "выбран: половина цены подъёма"
 

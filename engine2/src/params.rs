@@ -159,7 +159,7 @@ pub struct Params {
     pub tax_step_ppm: i64,
     /// (в) What raising the tax costs in legitimacy; what lowering it gives.
     pub legitimacy_cost_raise_tax: f64,
-    pub legitimacy_gain_lower_tax: f64,
+    pub legitimacy_lower_tax_gives_back: f64,
     /// (в) `enforce_order`: its price as parts per million of yearly revenue, and its gain.
     pub order_cost_share_ppm: i64,
     pub order_gain: f64,
@@ -376,7 +376,7 @@ impl Params {
         let tax_band = band("tax.default_rate")?;
         let tax_step = value("tax.step")?;
         let cost_raise_tax = value("legitimacy.cost_raise_tax")?;
-        let gain_lower_tax = value("legitimacy.gain_lower_tax")?;
+        let lower_tax_gives_back = value("legitimacy.lower_tax_gives_back")?;
         let order_cost = value("order.cost_share_of_revenue")?;
         let order_gain = value("order.gain")?;
         let cost_default = value("legitimacy.cost_default")?;
@@ -475,7 +475,7 @@ impl Params {
             tax_band_ppm: ((tax_band[0] * 1_000_000.0).round() as i64, (tax_band[1] * 1_000_000.0).round() as i64),
             tax_step_ppm: (tax_step * 1_000_000.0).round() as i64,
             legitimacy_cost_raise_tax: cost_raise_tax,
-            legitimacy_gain_lower_tax: gain_lower_tax,
+            legitimacy_lower_tax_gives_back: lower_tax_gives_back,
             order_cost_share_ppm: (order_cost * 1_000_000.0).round() as i64,
             order_gain,
             legitimacy_cost_default: cost_default,

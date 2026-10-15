@@ -812,7 +812,7 @@ impl World {
         let need = 1.0 / (self.paid_share_seen_ppm(a) as f64 / 1e6).max(0.25);
         let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
         let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_unclamped - unclamped);
-        let once = params.agent_weight_price_legitimacy / 100.0 * if up { -params.legitimacy_cost_raise_tax } else { params.legitimacy_gain_lower_tax };
+        let once = params.agent_weight_price_legitimacy / 100.0 * -self.tax_step_cost(a, up, params);
         take + lasting + once
     }
 

@@ -78,9 +78,12 @@ fn the_tax_verbs_move_the_rate_one_step_for_a_price_in_legitimacy_and_close_at_t
     // The price saturates (owner's rule on #293): its share of what is left, never the bound.
     let after = engine2::politics::saturate(l0, -p.legitimacy_cost_raise_tax);
     assert!((w.actors[&a].legitimacy - after).abs() < 1e-9, "the exact price");
+    let gives = -w.tax_step_cost(a, false, &p);
+    assert!((gives - p.legitimacy_lower_tax_gives_back * (after - engine2::politics::saturate(after, -p.legitimacy_cost_raise_tax))).abs() < 1e-12, "half of what a raise would take here");
     w.apply_verb(&lower, &p).unwrap();
     assert_eq!(w.actors[&a].tax_rate_ppm, rate0);
-    assert!((w.actors[&a].legitimacy - engine2::politics::saturate(after, p.legitimacy_gain_lower_tax)).abs() < 1e-9, "lowering gives the gain back, its share of what is missing");
+    assert!((w.actors[&a].legitimacy - engine2::politics::saturate(after, gives)).abs() < 1e-9, "lowering gives the gain back, its share of what is missing");
+    assert!(w.actors[&a].legitimacy < l0, "the round trip loses");
     // A target the verb does not take is refused and changes nothing.
     let bad = VerbCall { target: Target::Actor(a), ..raise };
     assert!(matches!(w.apply_verb(&bad, &p), Err(engine2::economy::VerbError::BadTarget(VerbId::RaiseTax, _))));
@@ -127,7 +130,8 @@ fn the_offer_carries_the_price_in_legitimacy_closes_at_the_edge_with_its_reason_
     assert_eq!((raise.cost_kg, raise.cost_legitimacy), (0, p.legitimacy_cost_raise_tax.round() as i64));
     let lower = offer(&g, VerbId::LowerTax);
     assert!(lower.available);
-    assert_eq!(lower.cost_legitimacy, -(p.legitimacy_gain_lower_tax.round() as i64), "lowering gives: a negative price");
+    assert_eq!(lower.cost_legitimacy, g.world().tax_step_cost(ActorId(0), false, &p).round() as i64, "lowering gives: a negative price");
+    assert!(lower.cost_legitimacy < 0);
     // A house does not rule the polity: nothing on offer.
     let house = g.verbs(ActorRef::House(engine2::HouseId(0)));
     assert!(house.iter().filter(|o| matches!(o.verb, VerbId::RaiseTax | VerbId::LowerTax)).all(|o| !o.available && o.why.as_deref() == Some("a house does not rule the polity")));
@@ -791,3 +795,26 @@ fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_gains_at
 /// (owner's rule on #292): a trace by the ordinary arithmetic of the step, never the free
 /// 11–17 % of the clamped norm.
 const BOTTOM_GAIN_CEILING: f64 = 0.02;
+
+/// No conversion at a profit (#286) under the saturating prices (#293): a step of the tax and
+/// the step back lose legitimacy **at every level and in either order** — with a fixed gain
+/// of 5 the round trip gained below legitimacy ≈ 34 (a saturating blow of 10 takes 0.095·L, a
+/// saturating gain of 5 gives 0.049·(100 − L)), and the bots of E3 (е1), reading the world's
+/// prices, raised and lowered by turns (12 % of their changes undone the next tick).
+#[test]
+fn a_step_of_the_tax_and_the_step_back_lose_legitimacy_at_every_level() {
+    let p = params();
+    let a = ActorId(0);
+    let raise = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
+    let lower = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::LowerTax, target: Target::None };
+    for level in (0..=200).map(|i| f64::from(i) * 0.5) {
+        for (first, second) in [(raise, lower), (lower, raise)] {
+            let mut w = world();
+            w.actors.get_mut(&a).unwrap().legitimacy = level;
+            w.apply_verb(&first, &p).unwrap();
+            w.apply_verb(&second, &p).unwrap();
+            let end = w.actors[&a].legitimacy;
+            assert!(end <= level && (level == 0.0 || end < level), "{:?} then {:?} at {level}: {end}", first.verb, second.verb);
+        }
+    }
+}

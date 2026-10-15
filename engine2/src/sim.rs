@@ -238,7 +238,7 @@ impl Game {
                         }
                     }
                     (VerbId::LowerTax, ActorRef::Ruler(a)) => {
-                        cost_legitimacy = -(self.params.legitimacy_gain_lower_tax.round() as i64);
+                        cost_legitimacy = self.world.tax_step_cost(a, false, &self.params).round() as i64;
                         match self.world.tax_room(a, VerbId::LowerTax, &self.params) {
                             Ok(()) => (true, None),
                             Err(why) => (false, Some(why)),

@@ -56,7 +56,8 @@
 //!
 //! **Legitimacy as a price (6b, plan §18.3).** The tax verbs: `raise_tax` moves the rate up
 //! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
-//! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
+//! moves it down and gives back `legitimacy.lower_tax_gives_back` of what a raise would take
+//! at the level the ruler stands (`World::tax_step_cost`). The offer carries the price
 //! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
 //! reason. **A lasting decision shifts the norm** (brief §2; review of #286): the norm falls
 //! by `legitimacy.norm_per_tax_step` for every step of the rate above the tithe and rises
@@ -634,6 +635,23 @@ impl World {
         }
     }
 
+    /// The points of legitimacy a step of the tax costs (> 0, raising) or gives (< 0,
+    /// lowering), before `pay_legitimacy` saturates them: a raise costs
+    /// `legitimacy.cost_raise_tax`; a lowering gives back `legitimacy.lower_tax_gives_back`
+    /// of what a raise would take at the level the ruler stands — so a step and the step back
+    /// lose legitimacy in either order and at every level (the rule of #286: no conversion at
+    /// a profit). With a fixed gain the round trip **gained** below L ≈ 34, where a
+    /// saturating blow of 10 takes less than a saturating gain of 5 gives (owner's rule on
+    /// #293 made the prices saturate); the bots of E3 (е1), reading the world's prices, found
+    /// it — 12 % of their changes of the tax undone the next tick, 2 % with the gain removed.
+    pub fn tax_step_cost(&self, a: ActorId, up: bool, params: &Params) -> f64 {
+        if up {
+            return params.legitimacy_cost_raise_tax;
+        }
+        let l = self.actors[&a].legitimacy;
+        -params.legitimacy_lower_tax_gives_back * (l - saturate(l, -params.legitimacy_cost_raise_tax))
+    }
+
     /// What `enforce_order` costs now: the share of a year's revenue, kg.
     pub fn order_cost(&self, a: ActorId, params: &Params) -> i64 {
         self.yearly_income(a, params) * params.order_cost_share_ppm / 1_000_000
@@ -657,11 +675,9 @@ impl World {
                 }
                 self.tax_room(a, call.verb, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
                 let from_ppm = self.actors[&a].tax_rate_ppm;
-                let (to_ppm, cost) = if call.verb == VerbId::RaiseTax {
-                    (from_ppm + params.tax_step_ppm, params.legitimacy_cost_raise_tax)
-                } else {
-                    (from_ppm - params.tax_step_ppm, -params.legitimacy_gain_lower_tax)
-                };
+                let up = call.verb == VerbId::RaiseTax;
+                let to_ppm = if up { from_ppm + params.tax_step_ppm } else { from_ppm - params.tax_step_ppm };
+                let cost = self.tax_step_cost(a, up, params);
                 self.actors.get_mut(&a).unwrap().tax_rate_ppm = to_ppm;
                 self.pay_legitimacy(a, cost);
                 self.emit(Event::TaxRateChanged { actor: a, from_ppm, to_ppm });
