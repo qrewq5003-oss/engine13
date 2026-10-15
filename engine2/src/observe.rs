@@ -129,6 +129,7 @@ impl Observed for Game {
                 Event::Converted { province, .. } => ObsEvent::Other(format!("Converted@{}", self.province_id(*province).0)),
                 Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
                 Event::Adopted { actor, institution, .. } => ObsEvent::Other(format!("Adopted@{}:{institution:?}", self.actor_id(*actor).0)),
+                Event::HouseConverted { house, .. } => ObsEvent::Other(format!("HouseConverted@{}", self.house_id(*house).0)),
             })
             .collect()
     }
@@ -139,10 +140,34 @@ impl Observed for Game {
     /// capacity shocks — with war); migration happens only with a fill gap. A declared kind
     /// that never occurs across the matrix is the sentinel's `Never`; registering kinds that
     /// nothing can cause yet would flag the absence of later systems, not a defect.
-    fn possible_kinds(&self) -> Vec<String> {
+    fn possible_kinds(&self, horizon_ticks: u32) -> Vec<String> {
         let mut out = vec!["PersonDied".to_string(), "PersonBorn".to_string()];
-        if self.world().diseases.contains(&crate::world::Disease::Plague) {
+        let w = self.world();
+        if w.diseases.contains(&crate::world::Disease::Plague) {
             out.push("Plague".to_string());
+        }
+        // A conversion (E2 step 8): declared when some province has a channel at the start
+        // and the curve at that channel's rate turns the majority inside the horizon; the
+        // slow drift of the neighbourhood takes two centuries and is declared only then.
+        let p = self.params();
+        let turns_within = |rate_ppm: i64| {
+            let mut share = p.conversion_seed_ppm;
+            for _ in 0..horizon_ticks {
+                share = (share + rate_ppm * share / 1_000_000 * (1_000_000 - share) / 1_000_000).min(1_000_000);
+                if share >= 500_000 {
+                    return true;
+                }
+            }
+            false
+        };
+        if w.provinces.keys().any(|q| w.conversion_channel(*q, p).is_some_and(|(_, _, rate)| turns_within(rate))) {
+            out.push("Converted".to_string());
+        }
+        // An adoption: declared when some polity has a channel to an institution it lacks
+        // and the horizon expects at least half an adoption of it.
+        let expected = f64::from(horizon_ticks) * p.institution_adoption_per_tick;
+        if expected >= 0.5 && w.actors.keys().any(|a| crate::faith::SPREADING.iter().any(|i| w.adoption_source(*a, *i).is_some())) {
+            out.push("Adopted".to_string());
         }
         out
     }

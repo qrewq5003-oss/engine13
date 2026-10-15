@@ -147,6 +147,10 @@ pub enum Event {
     /// A polity took up an institution along a channel of contact — trade with a neighbour,
     /// a marriage, a treaty — from a polity that holds it (E0 §2 variant 3; E2 step 8).
     Adopted { actor: ActorId, institution: Institution, from: ActorId },
+    /// A house that took a throne took the faith of the court with it (owner's rule on
+    /// #288: a foreign dynasty took the faith of the land — «Paris is worth a mass»); its
+    /// tongue stays its own.
+    HouseConverted { house: HouseId, from: ReligionId, to: ReligionId },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

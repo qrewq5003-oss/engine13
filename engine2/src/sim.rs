@@ -63,6 +63,11 @@ impl Game {
         &self.world
     }
 
+    /// The constants this run plays with (the sentinel's observer reads the horizons).
+    pub fn params(&self) -> &Params {
+        &self.params
+    }
+
     /// Mutable access for the acceptance tests (orders, injected stocks) until the verbs and
     /// agents of E3 give orders through the contract. Behind the `testing` feature so that
     /// nothing in a game build can change the world past the rules (review of PR #283).

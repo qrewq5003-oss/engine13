@@ -6,8 +6,10 @@
 //! The engine never reads which tongue or faith is which: the scenario's strings are
 //! interned to `CultureId`/`ReligionId` at compile time, and every rule compares ids for
 //! equality alone. A polity speaks and prays as its **ruling house** does (owner's answer on
-//! §20), so a new dynasty may change the faith of the court — a house raised from the people
-//! takes its capital's.
+//! §20) — and a house that takes the throne takes the faith of the court (owner's rule on
+//! #288: a foreign dynasty took the faith of the land; `politics.rs`), its tongue staying
+//! its own, so the court's faith changes only by its own decision (the union, E3). A house
+//! raised from the people prays as the court did and speaks as its capital does.
 //!
 //! **Conversion** (Р1). A province keeps its majority and one minority on the move
 //! (`Shift`): the share won to another faith grows along the logistic curve

@@ -80,10 +80,12 @@ fn two_courts_of_another_faith_or_tongue_have_the_norm_of_their_relation_lower_b
     }
     assert!((w.relation_norm(a, b, &p) - base).abs() < 1e-9, "a court of the same faith over people of another: no friction between the courts");
     assert!(w.actors[&b].provinces.iter().all(|pr| w.alienated(*pr)), "but every province of that polity is alienated from its court");
-    // A new dynasty raised from the people takes its capital's faith (owner's answer 6).
+    // A new dynasty raised from the people prays as the court did and speaks as its
+    // capital does (owner's rule on #288: whoever takes the throne takes the court's faith).
     let mut w = testworld::world(3);
     let capital = w.actors[&b].capital;
     w.provinces.get_mut(&capital).unwrap().religion = ReligionId(1);
+    w.provinces.get_mut(&capital).unwrap().culture = CultureId(1);
     for member in w.members(house_b) {
         w.persons.get_mut(&member).unwrap().died = Some(w.tick);
     }
@@ -91,8 +93,51 @@ fn two_courts_of_another_faith_or_tongue_have_the_norm_of_their_relation_lower_b
     w.tick(&p).unwrap();
     assert!(w.houses.len() > before, "a house rose");
     let new_house = HouseId(before as u32);
-    assert_eq!(w.houses[&new_house].religion, ReligionId(1));
-    assert_eq!(w.polity_religion(b), ReligionId(1), "the court now prays as its capital does");
+    assert_eq!(w.houses[&new_house].religion, ReligionId(0), "the court's faith goes on");
+    assert_eq!(w.houses[&new_house].culture, CultureId(1), "the capital's tongue");
+    assert_eq!(w.polity_religion(b), ReligionId(0));
+    assert!(w.alienated(capital), "the capital of another faith stays alienated: nothing changed by the rise");
+}
+
+#[test]
+fn a_house_that_takes_the_throne_takes_the_faith_of_the_court_and_keeps_its_tongue() {
+    let p = params();
+    // Polity 0 has a second house (o0) of another faith and tongue; the ruling house dies
+    // out; o0 takes the throne — and the court's faith, not its own; its tongue stays.
+    let mut w = testworld::world(5);
+    let s0 = ActorId(0);
+    let (h0, o0) = (HouseId(0), HouseId(5));
+    assert_eq!(w.houses[&o0].polity, s0);
+    w.houses.get_mut(&o0).unwrap().religion = ReligionId(1);
+    w.houses.get_mut(&o0).unwrap().culture = CultureId(1);
+    let court = w.polity_religion(s0);
+    for member in w.members(h0) {
+        w.persons.get_mut(&member).unwrap().died = Some(w.tick);
+    }
+    let r = w.tick(&p).unwrap();
+    assert_eq!(w.persons[&w.actors[&s0].ruler].house, o0, "the other house took the throne");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::HouseConverted { house, from, to } if house == o0 && from == ReligionId(1) && to == court)));
+    assert_eq!(w.houses[&o0].religion, court);
+    assert_eq!(w.polity_religion(s0), court, "the court prays as before");
+    assert_eq!(w.polity_culture(s0), CultureId(1), "and speaks as the new house does");
+    assert!(w.actors[&s0].provinces.iter().all(|q| !w.alienated(*q) || w.provinces[q].culture != CultureId(1)), "no province is alienated by the faith of the new dynasty");
+    // The same at a usurpation.
+    let mut w = testworld::world(6);
+    w.houses.get_mut(&o0).unwrap().religion = ReligionId(1);
+    // The governor goes first among candidates: leave the seat vacant so that the eldest
+    // adult — of the other house — is the usurper.
+    w.provinces.get_mut(&ProvinceId(5)).unwrap().governor = None;
+    let usurper = w.members(o0).into_iter().find(|q| w.is_adult(*q, &p)).unwrap();
+    let r = w.usurp_now(s0, &p).unwrap();
+    assert_eq!(r, Some(usurper), "the adult of the other house usurps");
+    assert_eq!(w.houses[&o0].religion, court, "the usurper's house takes the court's faith");
+    // A house of the court's own faith changes nothing and says nothing.
+    let mut w = testworld::world(7);
+    for member in w.members(h0) {
+        w.persons.get_mut(&member).unwrap().died = Some(w.tick);
+    }
+    let r = w.tick(&p).unwrap();
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::HouseConverted { .. })));
 }
 
 #[test]

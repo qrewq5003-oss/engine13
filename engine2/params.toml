@@ -872,9 +872,11 @@ e0 = "Р3"
 # a polity in contact with one that holds an institution — a neighbour by land or sea, an
 # ally, a lord or vassal, a house married into — takes it up with this chance a year, by a
 # keyed draw. Only what is a practice spreads (the bank); a policy is not caught from a
-# neighbour. Checked through Р3.
+# neighbour. Checked through Р3: 0.01 gave 0.76 a century on and every polity banked in 8
+# small worlds of 20 by 150 years; 0.005 gives the middle of Р3 (owner's rule on #288 — a
+# bank never became universal: Byzantium and the Ottomans had none).
 [institution.adoption_per_year]
 kind = "c"
-value = 0.01
+value = 0.005
 unit = "chance per year with a channel"
 checked_by = "Р3"

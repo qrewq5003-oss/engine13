@@ -220,9 +220,22 @@ impl World {
         self.eldest(&governors, true, params).or_else(|| self.eldest(&adults, true, params))
     }
 
+    /// A house that takes the throne takes the faith of the court (owner's rule on #288: a
+    /// foreign dynasty took the faith of the land — Henri IV, Bernadotte); its tongue stays
+    /// its own. A change of the court's faith by its own decision — the union — is E3's.
+    fn keep_court_faith(&mut self, court: crate::ids::ReligionId, next: PersonId) {
+        let house = self.persons[&next].house;
+        let from = self.houses[&house].religion;
+        if from != court {
+            self.houses.get_mut(&house).unwrap().religion = court;
+            self.emit(Event::HouseConverted { house, from, to: court });
+        }
+    }
+
     /// The usurpation itself: the ruler executed, the usurper seated.
     fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
         let dead = self.actors[&a].ruler;
+        let court = self.polity_religion(a);
         self.die(dead, Cause::Execution, params)?;
         {
             let actor = self.actors.get_mut(&a).unwrap();
@@ -232,6 +245,7 @@ impl World {
             actor.standing = Standing::Usurper;
             actor.legitimacy = actor.legitimacy.min(params.legitimacy_norm_usurper);
         }
+        self.keep_court_faith(court, usurper);
         self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
         for province in self.governed_by(usurper) {
             self.pass_governorship(province, usurper, params)?;
@@ -369,8 +383,9 @@ impl World {
         let (asid, aname) = &self.names.actors[a.index()];
         let (hsid, hname) = (format!("{asid}.h{k}"), format!("{aname} new house {k}"));
         self.names.houses.push((hsid.clone(), hname.clone()));
-        // The new house speaks and prays as its capital does (owner's answer on §20).
-        let (culture, religion) = (self.provinces[&capital].culture, self.provinces[&capital].religion);
+        // The new house speaks as its capital does and prays as the court did (owner's
+        // rule on #288: whoever takes the throne takes the faith of the court).
+        let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
         self.houses.insert(house, House { polity: a, culture, religion });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);
@@ -389,6 +404,7 @@ impl World {
     /// one from the people. The polity falls only when it has no people at all.
     fn succeed(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
         let dead = self.actors[&a].ruler;
+        let court = self.polity_religion(a);
         let rule = self.actors[&a].succession;
         let designated = self.actors[&a].heir.filter(|h| self.person_alive(*h));
         let (next, how) = if let Some(h) = designated {
@@ -418,6 +434,7 @@ impl World {
             actor.regent = None;
             actor.standing = how;
         }
+        self.keep_court_faith(court, next);
         self.emit(Event::Succession { actor: a, from: dead, to: next, how });
         // One seat per person: a governor who takes the throne leaves the governorship.
         for province in self.governed_by(next) {
