@@ -512,6 +512,13 @@ impl World {
         }
     }
 
+    /// Whether `b`'s army is too strong for `a` to march against: the bot's units advance
+    /// only at `agent.advance_ratio` of the enemy's whole army (`bot_orders`), and the war
+    /// and the peace weigh the enemy's strength by the same measure.
+    fn outweighed(&self, a: ActorId, b: ActorId, params: &Params) -> bool {
+        (self.army_size(a) as f64) < params.agent_advance_ratio * self.army_size(b) as f64
+    }
+
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         Context {
@@ -538,8 +545,18 @@ impl World {
         let price_l = |l: f64| l / 100.0 * params.agent_weight_price_legitimacy;
         match (call.verb, call.target) {
             (VerbId::DeclareWar, Target::Actor(b)) => {
-                let mut u = self.war_wanted(a, b);
-                if self.army_size(b) > self.army_size(a) * 3 / 2 {
+                // What the war is worth: the goals it serves — nothing for a ruler whose army
+                // is unpaid, since an unpaid army is an exhausted one by the rule of the
+                // peace (`diplomacy::peace_room`) and the war ends at the first peace the
+                // other side offers (measured: four fifths of the declarations came the tick
+                // after a peace of the same pair, most of them by a declarer already short of
+                // its pay — a war a tick long, a peace treaty broken every other tick).
+                let mut u = if unpaid { 0.0 } else { self.war_wanted(a, b) };
+                // A war the bot would not march in is not worth declaring: its units advance
+                // only at `agent.advance_ratio` of the enemy's army (`bot_orders`), and a
+                // declarer that stays home loses provinces, accepts the peace as the loser
+                // and declares again the next tick (measured: 128 of 170 renewals).
+                if self.outweighed(a, b, params) {
                     u -= 1.0;
                 }
                 if at_war {
@@ -548,16 +565,21 @@ impl World {
                 u - price_l(self.war_price(a, b, params))
             }
             (VerbId::MakePeace, Target::Actor(b)) => {
+                // The peace is the war the other way round: worth what going on would lose —
+                // the goals the war serves, less the strength of the enemy, weighed as the
+                // declaration weighed them (an army the bot would not march against); a
+                // losing war is worth ending, and with nothing to win the peace is wanted.
+                // (Measured: «stronger» was every larger army here and half again as large at
+                // the declaration, and a bot ended the next tick the war it had just declared.)
                 let losing = self.losing_side(a, b) == Some(a);
                 let wanted = self.war_wanted(a, b);
-                let mut u = 0.0;
-                if losing || enemy == Some(b) {
+                let strength = if self.outweighed(a, b, params) { 1.0 } else { 0.0 };
+                let mut u = strength - wanted;
+                if losing {
                     u += 1.0;
                 }
                 if wanted <= 0.0 {
                     u += 0.3;
-                } else if !losing {
-                    u -= 0.5;
                 }
                 u
             }

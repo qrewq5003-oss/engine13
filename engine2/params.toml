@@ -590,9 +590,13 @@ checked_by = "Э9"
 # 150 years; at 0.03 — see `tests/legitimacy.rs`. The form caps at twice the base (legitimacy
 # 0), so the Roman end of the band (23 a century, 284–395) is out of its reach: that needs
 # civil war and co-rulers, drivers of the collapse system and E3, not a higher base.
+# Recalibrated with the bots (E3 (в), plan §23g): 0.03 → 0.04. The bots' tax and wars swung
+# by turns and burned their legitimacy — a step of the tax 10 − 5 points a turn, a peace
+# treaty broken every other tick 20 — and the usurpations it invited held В6 at 2.4; with
+# the swings gone it fell to 1.9 below the band (0.035 — 2.1, 0.04 — 2.6, 0.045 — 3.0).
 [usurpation.per_year]
 kind = "c"
-value = 0.03
+value = 0.04
 unit = "share per year at legitimacy 50"
 checked_by = "В6"
 
@@ -1108,9 +1112,11 @@ checked_by = "А12"
 # of one tick jumps at war from 0.08 to 1.0 and back; read by the tick, the need in the
 # tax's utility flipped with it and the bot raised and lowered the tax by turns: 715 of
 # 2 820 changes on 20 worlds undone the next tick, each turn 10 − 5 points of legitimacy,
-# usurpations of the bots' own making. Checked through В6.
+# usurpations of the bots' own making. 4 ticks (the owner's example) held it at 4.5 %, half a
+# point under the bar of the test; once the wars stopped swinging it rose to 5.2 % — 6 ticks:
+# 4.2 % (plan §23g). Checked through В6.
 [agent.pay_memory_ticks]
 kind = "c"
-value = 4.0
+value = 6.0
 unit = "ticks"
 checked_by = "В6"

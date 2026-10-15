@@ -42,7 +42,7 @@ fn all_verbs(mut s: ScenarioData) -> ScenarioData {
 /// — the bride two houses asked for, a war closed by a peace of its principal pair (plan
 /// §23b: first all decide, then all is applied in one order). A peace or a war both sides
 /// made in one tick is not among them: the second is nothing (owner's rule on #291).
-const CONFLICTS: [&str; 5] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord"];
+const CONFLICTS: [&str; 6] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord", "a vassal makes no alliance"];
 
 fn assert_conflicts_only(g: &Game) {
     let r = g.preempted_reasons();
@@ -332,10 +332,13 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let (mut revolt_ticks, mut province_ticks, mut revolt_lengths, mut revolts_started, mut revolts_ended) = (0u64, 0u64, Vec::<u32>::new(), 0u64, 0u64);
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
+    let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
         let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
+        let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
+        let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
         let n0 = g.world().actors.len();
         polities_start += n0;
         let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
@@ -343,6 +346,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         for t in 0..300u32 {
             let w = g.world();
             let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+            let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
             for a in &living {
                 let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
                 let people: i64 = w.actors[a].provinces.iter().map(|q| w.population(*q)).sum();
@@ -416,6 +420,26 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                             falls_by_conquest += 1;
                         }
                     }
+                    Event::Verb { actor: engine2::ActorRef::Ruler(a), verb: VerbId::DeclareWar, target: engine2::Target::Actor(b) } => {
+                        *verbs.entry(VerbId::DeclareWar).or_insert(0) += 1;
+                        declarations += 1;
+                        if unpaid_seen.get(a).copied().unwrap_or(false) {
+                            declared_unpaid += 1;
+                        }
+                        if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t0 + 1 == t) {
+                            declared_after_peace += 1;
+                        }
+                    }
+                    Event::War { a, b } => {
+                        war_since.insert(((*a).min(*b), (*a).max(*b)), t);
+                    }
+                    Event::Peace { a, b } => {
+                        let k = ((*a).min(*b), (*a).max(*b));
+                        last_peace.insert(k, t);
+                        if let Some(t0) = war_since.remove(&k) {
+                            war_lengths.push(t - t0);
+                        }
+                    }
                     Event::TaxRateChanged { actor, from_ppm, to_ppm } => {
                         tax_changes += 1;
                         let up = to_ppm > from_ppm;
@@ -470,6 +494,21 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     // one tick raised and lowered by turns, 28 % of their changes, and usurped themselves.
     let undone = tax_undone as f64 / tax_changes.max(1) as f64;
     eprintln!("tax changes {tax_changes}, undone the next tick {tax_undone} ({undone:.3})");
+    // No war with an unpaid army (E3 (в), the class of the tax's swing): by the rule of the
+    // peace an unpaid declarer is exhausted and the war ends at the first peace offered —
+    // the bots declared four fifths of their wars the tick after a peace of the same pair,
+    // most of them already short of their pay. What is left of the renewals is the loser's
+    // revanche (a declarer that lost a province accepts the peace by the rule and declares
+    // again) — printed, a question to the owner (plan §23g).
+    let renewed = declared_after_peace as f64 / declarations.max(1) as f64;
+    war_lengths.sort();
+    eprintln!(
+        "war declarations {declarations}, by an unpaid army {declared_unpaid}, the tick after a peace of the same pair {declared_after_peace} ({renewed:.3}); wars ended {}, length median {} ticks, of one tick {}",
+        war_lengths.len(),
+        war_lengths.get(war_lengths.len() / 2).copied().unwrap_or(0),
+        war_lengths.iter().filter(|l| **l <= 1).count()
+    );
+    assert_eq!(declared_unpaid, 0, "a bot declared war with an unpaid army");
     assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
     // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
     // by their utility — the mean rate inside a step of it.
