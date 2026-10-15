@@ -272,7 +272,7 @@ impl World {
     }
 
     /// A province changes hands; the loser's capital moves or the loser falls.
-    fn transfer(&mut self, p: ProvinceId, from: ActorId, to: ActorId, how: Transfer) -> Result<(), WorldError> {
+    pub(crate) fn transfer(&mut self, p: ProvinceId, from: ActorId, to: ActorId, how: Transfer) -> Result<(), WorldError> {
         self.provinces.get_mut(&p).unwrap().siege = None;
         self.provinces.get_mut(&p).unwrap().owner = to;
         let f = self.actors.get_mut(&from).unwrap();
@@ -321,7 +321,7 @@ impl World {
 
     /// Disband a unit: a levy back to the people of the province it stands in, mercenaries
     /// out of the world. Both legs signed `Disband`.
-    fn disband_unit(&mut self, unit: UnitId) -> Result<u64, WorldError> {
+    pub(crate) fn disband_unit(&mut self, unit: UnitId) -> Result<u64, WorldError> {
         let (at, mercenary) = (self.units[&unit].position, self.units[&unit].mercenary);
         let soldiers = self.soldiers(unit);
         if soldiers > 0 {
@@ -335,10 +335,10 @@ impl World {
         Ok(soldiers as u64)
     }
 
-    fn new_unit(&mut self, owner: ActorId, at: ProvinceId, mercenary: bool) -> Result<UnitId, WorldError> {
+    pub(crate) fn new_unit(&mut self, owner: ActorId, at: ProvinceId, mercenary: bool) -> Result<UnitId, WorldError> {
         let id = UnitId(self.next_unit);
         self.next_unit += 1;
-        self.units.insert(id, Unit { owner, position: at, quality: 50.0, destination: None, mercenary });
+        self.units.insert(id, Unit { owner, position: at, quality: 50.0, destination: None, mercenary, house: None });
         self.ledger.open(self.tick, Account::Soldiers(id), 0)?;
         Ok(id)
     }
@@ -357,7 +357,7 @@ impl World {
                 if n <= 0 {
                     return Err(VerbError::NotAvailable(call.verb, "at the levy ceiling"));
                 }
-                let unit = match self.units.iter().find(|(_, u)| u.owner == a && u.position == p && !u.mercenary) {
+                let unit = match self.units.iter().find(|(_, u)| u.owner == a && u.position == p && !u.mercenary && u.house.is_none()) {
                     Some((id, _)) => *id,
                     None => self.new_unit(a, p, false).map_err(ledger)?,
                 };

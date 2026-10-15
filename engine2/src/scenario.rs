@@ -93,6 +93,9 @@ pub struct HouseData {
     /// chooses; the engine interns them and never reads which is which.
     pub culture: String,
     pub religion: String,
+    /// The house's own men at the start (E0 Х2: the famiglia ducale, the despot's retinue):
+    /// a unit of the polity at its capital, marked with the house.
+    pub soldiers: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -274,7 +277,7 @@ impl ScenarioData {
         let mut houses = Vec::with_capacity(self.houses.len());
         for (key, h) in &self.houses {
             let polity = *actor_index.get(h.polity.as_str()).ok_or_else(|| SchemaError::UnknownHousePolity(key.clone(), h.polity.clone()))?;
-            houses.push(HouseFact { polity, treasury_kg: h.treasury_kg, culture: culture(&h.culture), religion: religion(&h.religion) });
+            houses.push(HouseFact { polity, treasury_kg: h.treasury_kg, culture: culture(&h.culture), religion: religion(&h.religion), soldiers: h.soldiers });
         }
         let mut persons = Vec::with_capacity(self.persons.len());
         for (key, p) in &self.persons {
@@ -477,12 +480,14 @@ polity = "a"
 treasury_kg = 5
 culture = "west"
 religion = "latin"
+soldiers = 0
 [houses.hb]
 name = "House B"
 polity = "b"
 treasury_kg = 0
 culture = "east"
 religion = "greek"
+soldiers = 4
 [persons.ann]
 name = "Ann"
 house = "ha"
@@ -560,7 +565,8 @@ raise_tax = "Поднять налог"
         // Houses and persons in sorted order of their ids; seats resolved to them.
         assert_eq!(c.names.houses, vec![("ha".to_string(), "House A".to_string()), ("hb".to_string(), "House B".to_string())]);
         assert_eq!(c.names.persons[0].0, "ann");
-        assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5, culture: CultureId(1), religion: ReligionId(1) });
+        assert_eq!(c.facts.houses[0], HouseFact { polity: ActorId(0), treasury_kg: 5, culture: CultureId(1), religion: ReligionId(1), soldiers: 0 });
+        assert_eq!(c.facts.houses[1].soldiers, 4);
         // Cultures and religions interned in sorted order: east < west, greek < latin.
         assert_eq!(c.names.cultures, vec!["east".to_string(), "west".to_string()]);
         assert_eq!(c.names.religions, vec!["greek".to_string(), "latin".to_string()]);

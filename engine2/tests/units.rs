@@ -67,7 +67,7 @@ fn the_enclave_is_unreachable_without_passage_but_its_garrison_is_paid_like_the_
     // budget it keeps its men without any land link home.
     let garrison = UnitId(w.next_unit);
     w.next_unit += 1;
-    w.units.insert(garrison, engine2::world::Unit { owner: b, position: enclave, quality: 50.0, destination: None, mercenary: false });
+    w.units.insert(garrison, engine2::world::Unit { owner: b, position: enclave, quality: 50.0, destination: None, mercenary: false, house: None });
     let room = w.sustainable_soldiers(b, &params()) - w.units_of(b).iter().map(|u| w.soldiers(*u)).sum::<i64>();
     let size = (room / 2).max(1);
     w.ledger.open(w.tick, engine2::Account::Soldiers(garrison), size).unwrap();

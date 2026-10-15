@@ -178,8 +178,9 @@ impl World {
         for p in provinces {
             let owner = self.provinces[&p].owner;
             let here: Vec<(UnitId, ActorId, i64)> = self.units.iter().filter(|(_, u)| u.position == p).map(|(id, u)| (*id, u.owner, self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0))).collect();
-            // At home or on friendly land: the paid share is fed, the unpaid share melts.
-            let fed: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, _)| self.friendly(*o, owner)).map(|(id, o, s)| (*id, s - s * self.actors[o].paid_share_ppm / 1_000_000)).collect();
+            // At home or on friendly land: the paid share is fed, the unpaid share melts —
+            // the polity's share for its own men, the house's for a house's retinue (Х2).
+            let fed: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, _)| self.friendly(*o, owner)).map(|(id, _, s)| (*id, s - s * self.unit_paid_share_ppm(*id) / 1_000_000)).collect();
             for (id, unsupplied) in fed {
                 self.melt(id, unsupplied, params)?;
             }

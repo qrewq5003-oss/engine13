@@ -261,7 +261,7 @@ fn a_shortfall_is_shared_pro_rata_among_the_polity_s_units() {
     let home = w.units[&first].position;
     let second = UnitId(w.next_unit);
     w.next_unit += 1;
-    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None, mercenary: false });
+    w.units.insert(second, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None, mercenary: false, house: None });
     w.ledger.open(w.tick, engine2::Account::Soldiers(second), 0).unwrap();
     let limit = w.sustainable_soldiers(a, &p);
     let (big, small) = (limit * 3 / 2, limit / 2);

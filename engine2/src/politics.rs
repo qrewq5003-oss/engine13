@@ -71,13 +71,14 @@
 //!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
-//! `Source::Seat` from the treasury to the house's treasury. **A house's treasury has no
-//! spending in E2** (bribes went to diplomacy, house troops to the collapse system): it
-//! grows without an outlet until then — recorded here so that the growth is not read as a
-//! defect (owner's note on §18).
+//! `Source::Seat` from the treasury to the house's treasury. A house's treasury has two
+//! outlets: the dowry (diplomacy, E2 step 7) and — since E2 step 9 — the pay of its own men
+//! (E0 Х2) when the house does not rule (`economy.rs`); the ruling house's retinue is the
+//! polity's charge (owner's rule on §21). A house that dies out loses its men to the people
+//! where they stand.
 
 use crate::event::{Cause, Event};
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::params::Params;
 use crate::economy::VerbError;
@@ -308,8 +309,35 @@ impl World {
         let house = self.persons[&p].house;
         if self.members(house).is_empty() {
             self.emit(Event::HouseExtinct { house });
+            // The house's own men (Х2) have no master left: back to the people where they
+            // stand, as at the fall of a polity.
+            for u in self.units_of_house(house) {
+                self.disband_unit(u)?;
+            }
         }
         Ok(())
+    }
+
+    /// The house on the throne of a polity.
+    pub fn ruling_house(&self, a: ActorId) -> HouseId {
+        self.persons[&self.actors[&a].ruler].house
+    }
+
+    /// Whether a unit's pay is the polity's charge or its house's: the polity pays its own
+    /// levies, its hired men and the retinue of the ruling house (owner's rule on §21: the
+    /// famiglia ducale was kept by the duchy); a house that does not rule pays its own.
+    pub fn house_pays(&self, u: UnitId) -> Option<HouseId> {
+        let unit = &self.units[&u];
+        unit.house.filter(|h| *h != self.ruling_house(unit.owner))
+    }
+
+    /// The share of a unit's pay met this tick: its house's when the house pays, else its
+    /// polity's.
+    pub fn unit_paid_share_ppm(&self, u: UnitId) -> i64 {
+        match self.house_pays(u) {
+            Some(h) => self.houses[&h].paid_share_ppm,
+            None => self.actors[&self.units[&u].owner].paid_share_ppm,
+        }
     }
 
     /// A governorship passes within the house of the holder who left it: the eldest adult
@@ -386,7 +414,7 @@ impl World {
         // The new house speaks as its capital does and prays as the court did (owner's
         // rule on #288: whoever takes the throne takes the faith of the court).
         let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
-        self.houses.insert(house, House { polity: a, culture, religion });
+        self.houses.insert(house, House { polity: a, culture, religion, paid_share_ppm: 1_000_000 });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);
         for i in 0..persons as usize {

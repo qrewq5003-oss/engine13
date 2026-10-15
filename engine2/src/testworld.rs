@@ -74,7 +74,7 @@ pub fn five_states() -> (Facts, Names) {
     person_list.sort_by(|x, y| x.0.cmp(&y.0));
     let person_index = |sid: &str| PersonId(person_list.iter().position(|(k, ..)| k == sid).unwrap() as u32);
     let persons: Vec<PersonFact> = person_list.iter().map(|(_, _, h, born, parent)| PersonFact { house: house_index(h), born: *born, parent: parent.as_deref().map(person_index), spouse: None }).collect();
-    let houses: Vec<HouseFact> = house_list.iter().map(|(_, _, a)| HouseFact { polity: ActorId(*a), treasury_kg: 0, culture: CultureId(0), religion: ReligionId(0) }).collect();
+    let houses: Vec<HouseFact> = house_list.iter().map(|(_, _, a)| HouseFact { polity: ActorId(*a), treasury_kg: 0, culture: CultureId(0), religion: ReligionId(0), soldiers: 0 }).collect();
     provinces[5].governor = Some(person_index("b0"));
     const RULES: [Succession; 5] = [Succession::Blood, Succession::Acclamation, Succession::Election, Succession::Mixed, Succession::Blood];
     let actors = (0..SIDE)
@@ -136,7 +136,7 @@ pub fn five_states_scenario() -> ScenarioData {
     let mut houses = BTreeMap::new();
     for (i, h) in facts.houses.iter().enumerate() {
         let (sid, name) = &names.houses[i];
-        houses.insert(sid.clone(), HouseData { name: name.clone(), polity: names.actors[h.polity.index()].0.clone(), treasury_kg: h.treasury_kg, culture: names.cultures[h.culture.index()].clone(), religion: names.religions[h.religion.index()].clone() });
+        houses.insert(sid.clone(), HouseData { name: name.clone(), polity: names.actors[h.polity.index()].0.clone(), treasury_kg: h.treasury_kg, culture: names.cultures[h.culture.index()].clone(), religion: names.religions[h.religion.index()].clone(), soldiers: h.soldiers });
     }
     let mut persons = BTreeMap::new();
     for (i, p) in facts.persons.iter().enumerate() {

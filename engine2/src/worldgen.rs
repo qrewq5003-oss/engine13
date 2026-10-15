@@ -468,8 +468,13 @@ impl Map {
             if bonds && faith_rng.gen_bool(POLICY_CHANCE) {
                 institutions.push(Institution::ConversionPolicy);
             }
-            // The ruling house and the houses beside it.
+            // The ruling house and the houses beside it. The houses' own men (E0 Х2) are
+            // carved out of the army of А11, not added to it: the ruling house's retinue by
+            // the row, the others' by the (в) share.
             let n_other = pick(&mut rng, OTHER_HOUSES) as usize;
+            let ruling_retinue = soldiers * params.retinue_share_ppm as u64 / 1_000_000;
+            let other_retinue = soldiers * params.other_retinue_share_ppm as u64 / 1_000_000;
+            let own_soldiers = soldiers - ruling_retinue - other_retinue * n_other as u64;
             let mut adults_by_house: Vec<(String, Vec<String>)> = Vec::new();
             let mut ruler = String::new();
             let mut heir = None;
@@ -483,7 +488,8 @@ impl Map {
                 } else {
                     (faith_rng.gen_range(0..n_cultures), faith_rng.gen_range(0..n_religions))
                 };
-                houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg, culture: tongue(house_culture), religion: faith(house_religion) });
+                let retinue = if h == 0 { ruling_retinue } else { other_retinue };
+                houses.insert(hid.clone(), HouseData { name: format!("House {s}{}", (b'A' + h as u8) as char), polity: sid(s), treasury_kg, culture: tongue(house_culture), religion: faith(house_religion), soldiers: retinue });
                 let head_age = pick(&mut rng, RULER_AGE) as i32;
                 let head = format!("{hid}p00");
                 persons.insert(head.clone(), PersonData { name: format!("{hid} head"), house: hid.clone(), born: start_year - head_age, parent: None, spouse: None });
@@ -521,7 +527,7 @@ impl Map {
                 2 => Succession::Election,
                 _ => Succession::Mixed,
             };
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession });
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: own_soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession });
             // A governor of one province that is not the capital: an adult of any house of
             // the polity who is not the ruler.
             let mut own: Vec<String> = provinces.iter().filter(|(_, p)| p.owner == sid(s) && *p != &provinces[&pid(cap_i)]).map(|(k, _)| k.clone()).collect();
@@ -797,17 +803,17 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the houses version of the generator (E2 step 6a; before: the sea-links
-    /// version of step 2). If this changes, every seed plays a different world and "fails on
-    /// seed N" stops reproducing: bump it only with a deliberate change of the generator,
-    /// never with a dependency update.
+    /// Pinned on the house-troops version of the generator (E2 step 9; before: the houses
+    /// version of step 6a, the sea-links version of step 2). If this changes, every seed
+    /// plays a different world and "fails on seed N" stops reproducing: bump it only with a
+    /// deliberate change of the generator, never with a dependency update.
     #[test]
     fn world_one_is_pinned() {
         let p = Params::load().unwrap();
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 8_809_658_219_070_092_627;
+    const PINNED_WORLD_ONE: u64 = 9_472_696_729_354_712_933;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -837,7 +843,8 @@ mod tests {
                 assert!(s.provinces.values().any(|pr| &pr.owner == a), "seed {seed}: {a} owns nothing");
                 assert_eq!(&s.provinces[&actor.capital].owner, a, "seed {seed}: capital of {a} not its own");
                 let people: u64 = s.provinces.values().filter(|pr| &pr.owner == a).map(|pr| pr.population).sum();
-                assert!(actor.soldiers as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
+                let retinues: u64 = s.houses.values().filter(|h| &h.polity == a).map(|h| h.soldiers).sum();
+                assert!((actor.soldiers + retinues) as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
                 let ruler = &s.persons[&actor.ruler];
                 assert_eq!(&s.houses[&ruler.house].polity, a, "seed {seed}: the ruler of {a} is of another polity's house");
                 let age = s.start_year - ruler.born;

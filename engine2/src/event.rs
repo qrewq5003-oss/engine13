@@ -151,6 +151,16 @@ pub enum Event {
     /// #288: a foreign dynasty took the faith of the land — «Paris is worth a mass»); its
     /// tongue stays its own.
     HouseConverted { house: HouseId, from: ReligionId, to: ReligionId },
+    /// A house's treasury could not meet the pay of its own men in full (E0 Х2, E2 step 9).
+    HousePayShortfall { house: HouseId, unpaid_kg: u64 },
+    /// A province rose and a house that does not rule took it — with every province its
+    /// members govern — into a polity of its own (E0 В7, E2 step 9); one event per province.
+    Secession { province: ProvinceId, from: ActorId, house: HouseId },
+    /// A province with no house to carry it rose under a new house of its own people.
+    Revolt { province: ProvinceId, from: ActorId },
+    /// A polity was born out of another: the house that leads it and the provinces it took
+    /// (brief §2a: the successor gets provinces, not a copy of metrics).
+    ActorBorn { actor: ActorId, from: ActorId, house: HouseId, provinces: Vec<ProvinceId> },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

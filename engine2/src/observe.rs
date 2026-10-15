@@ -131,6 +131,11 @@ impl Observed for Game {
                 Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
                 Event::Adopted { .. } => ObsEvent::Other("Adopted".into()),
                 Event::HouseConverted { house, .. } => ObsEvent::Other(format!("HouseConverted@{}", self.house_id(*house).0)),
+                Event::HousePayShortfall { house, .. } => ObsEvent::Other(format!("HousePayShortfall@{}", self.house_id(*house).0)),
+                // Plain kinds (E2 step 9): `Never` is read over them by the horizon.
+                Event::Secession { .. } => ObsEvent::Other("Secession".into()),
+                Event::Revolt { .. } => ObsEvent::Other("Revolt".into()),
+                Event::ActorBorn { actor, .. } => ObsEvent::Born(self.actor_id(*actor)),
             })
             .collect()
     }
