@@ -103,6 +103,19 @@ pub struct GoalFact {
     pub target: GoalTarget,
 }
 
+/// What a bot reads once per decision rather than once per target (E3 (б), measured: the
+/// choice of a world's bots took four times the rest of the tick, four fifths of it the
+/// marriages — every pair of houses scanned every person of the world).
+#[derive(Debug, Clone)]
+pub struct Context {
+    enemy: Option<ActorId>,
+    at_war: bool,
+    income: f64,
+    unpaid: bool,
+    lawful: f64,
+    wanted_allies: Vec<ActorId>,
+}
+
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Option_ {
@@ -334,17 +347,30 @@ impl World {
         want
     }
 
+    /// The context of a bot's decision, read once.
+    pub fn context(&self, a: ActorId, params: &Params) -> Context {
+        Context {
+            enemy: self.outmatched(a),
+            at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
+            income: self.yearly_income(a, params).max(1) as f64,
+            unpaid: self.actors[&a].paid_share_ppm < 1_000_000,
+            lawful: self.lawful_norm(a, params),
+            wanted_allies: self.wanted_allies(a),
+        }
+    }
+
     /// The utility of a call for its ruler (plan §23.2 p. 2): goal progress and survival,
     /// less the price.
     pub fn utility(&self, a: ActorId, call: &VerbCall, params: &Params) -> f64 {
+        self.utility_in(a, call, params, &self.context(a, params))
+    }
+
+    /// The utility of a call in a context read once.
+    fn utility_in(&self, a: ActorId, call: &VerbCall, params: &Params, ctx: &Context) -> f64 {
         let actor = &self.actors[&a];
-        let enemy = self.outmatched(a);
-        let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
-        let income = self.yearly_income(a, params).max(1) as f64;
+        let (enemy, at_war, income, unpaid, lawful) = (ctx.enemy, ctx.at_war, ctx.income, ctx.unpaid, ctx.lawful);
         let price_kg = |kg: i64| kg as f64 / income * params.agent_weight_price_treasury;
         let price_l = |l: f64| l / 100.0 * params.agent_weight_price_legitimacy;
-        let unpaid = actor.paid_share_ppm < 1_000_000;
-        let lawful = self.lawful_norm(a, params);
         match (call.verb, call.target) {
             (VerbId::DeclareWar, Target::Actor(b)) => {
                 let mut u = self.war_wanted(a, b);
@@ -412,7 +438,7 @@ impl World {
             }
             (VerbId::ProposeAlliance, Target::Actor(b)) => {
                 let mut u = 0.0;
-                if self.wanted_allies(a).contains(&b) {
+                if ctx.wanted_allies.contains(&b) {
                     u += 1.0;
                 }
                 if enemy.is_some() && self.army_size(b) > self.army_size(a) {
@@ -421,16 +447,16 @@ impl World {
                 u - price_kg(self.embassy_cost(a, params))
             }
             (VerbId::SendEmbassy, Target::Actor(b)) => {
-                let wanted = self.wanted_allies(a).contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
+                let wanted = ctx.wanted_allies.contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
                 (if wanted { 0.5 } else { 0.0 }) - price_kg(self.embassy_cost(a, params))
             }
             (VerbId::Bribe, Target::Actor(b)) => {
-                let wanted = self.wanted_allies(a).contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
+                let wanted = ctx.wanted_allies.contains(&b) && self.relation(a, b) < params.treaty_accept_at_relation;
                 (if wanted { 0.4 } else { 0.0 }) - price_kg(self.gift_size(a, params))
             }
             (VerbId::ProposeMarriage, Target::House(g)) => {
                 let b = self.houses[&g].polity;
-                if b != a && self.wanted_allies(a).contains(&b) {
+                if b != a && ctx.wanted_allies.contains(&b) {
                     0.4
                 } else {
                     -0.2
@@ -509,8 +535,18 @@ impl World {
                     }
                 }
                 VerbId::ProposeMarriage => {
+                    // The rule of `marriage_room`, with each house's eldest unmarried adult
+                    // read in one pass over the persons instead of one per pair of houses.
                     let h = self.ruling_house(a);
-                    calls.extend(self.houses.keys().copied().filter(|g| *g != h && self.marriage_room(h, *g, params).is_ok()).map(|g| VerbCall { actor: who, verb: *v, target: Target::House(g) }));
+                    let unmarried = self.unmarried_adults(params);
+                    if unmarried.contains_key(&h) {
+                        calls.extend(
+                            self.houses
+                                .iter()
+                                .filter(|(g, x)| **g != h && unmarried.contains_key(g) && (x.polity == a || (!self.at_war(a, x.polity) && self.relation(a, x.polity) >= params.treaty_accept_at_relation)))
+                                .map(|(g, _)| VerbCall { actor: who, verb: *v, target: Target::House(*g) }),
+                        );
+                    }
                 }
                 VerbId::Recruit => {
                     if self.recruit_per_tick(a, params) > 0 {
@@ -541,11 +577,28 @@ impl World {
                 }
             }
         }
+        let ctx = self.context(a, params);
         for call in calls {
-            let utility = self.utility(a, &call, params);
+            let utility = self.utility_in(a, &call, params, &ctx);
             out.push(Option_ { call: Some(call), utility });
         }
         out
+    }
+
+    /// Each house's eldest living adult with no living spouse — `unmarried_adult` for every
+    /// house at once, in one pass over the persons.
+    pub fn unmarried_adults(&self, params: &Params) -> std::collections::BTreeMap<crate::ids::HouseId, crate::ids::PersonId> {
+        let mut out: std::collections::BTreeMap<crate::ids::HouseId, (i32, crate::ids::PersonId)> = std::collections::BTreeMap::new();
+        for (id, p) in &self.persons {
+            if p.died.is_some() || !self.is_adult(*id, params) || p.spouse.is_some_and(|s| self.person_alive(s)) {
+                continue;
+            }
+            let e = out.entry(p.house).or_insert((p.born, *id));
+            if (p.born, *id) < *e {
+                *e = (p.born, *id);
+            }
+        }
+        out.into_iter().map(|(h, (_, id))| (h, id)).collect()
     }
 
     /// The set a bot chooses from: doing nothing at nothing, and for every verb its best
