@@ -29,6 +29,9 @@ fn play_summary(label: &str, scenario: &ScenarioData, ticks: u32) -> (RunSummary
         Ok(g) => g,
         Err(e) => panic!("{label}: cannot build: {e}"),
     };
+    // What the world can produce within the run is read at the start: a channel that has
+    // done its work by the end (a province converted) is no longer there to be seen.
+    let possible = g.possible_kinds(ticks);
     let mut died = 0usize;
     let (s, summary) = sentinel::run(&mut g, ticks, 1, "none", Thresholds::default(), |g| {
         match g.tick(&[]) {
@@ -43,7 +46,7 @@ fn play_summary(label: &str, scenario: &ScenarioData, ticks: u32) -> (RunSummary
     // raises a new one from its people (plan §18.5, owner's rule on #285).
     assert_eq!(died, 0, "{label}: {died} polities fell without war");
     assert_eq!(o.alive.len(), scenario.actors.len(), "{label}: an actor vanished without a system to kill it");
-    (summary, g.possible_kinds(ticks))
+    (summary, possible)
 }
 
 #[test]

@@ -126,9 +126,10 @@ impl Observed for Game {
                 Event::Gift { from, to, .. } => ObsEvent::Other(format!("Gift@{}-{}", self.actor_id(*from).0, self.actor_id(*to).0)),
                 Event::Marriage { .. } => ObsEvent::Other("Marriage".into()),
                 Event::Submission { vassal, .. } => ObsEvent::Other(format!("Submission@{}", self.actor_id(*vassal).0)),
-                Event::Converted { province, .. } => ObsEvent::Other(format!("Converted@{}", self.province_id(*province).0)),
+                // Plain kinds: the sentinel's `Never` is read over them in the full matrix.
+                Event::Converted { .. } => ObsEvent::Other("Converted".into()),
                 Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
-                Event::Adopted { actor, institution, .. } => ObsEvent::Other(format!("Adopted@{}:{institution:?}", self.actor_id(*actor).0)),
+                Event::Adopted { .. } => ObsEvent::Other("Adopted".into()),
                 Event::HouseConverted { house, .. } => ObsEvent::Other(format!("HouseConverted@{}", self.house_id(*house).0)),
             })
             .collect()
