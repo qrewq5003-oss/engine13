@@ -300,7 +300,8 @@ fn the_usurper_is_the_regent_else_a_governor_else_the_eldest_adult_of_any_house_
     assert_eq!(w.actors[&s0].ruler, b0);
     assert_eq!(w.actors[&s0].standing, Standing::Usurper);
     assert_eq!(w.actors[&s0].heir, None, "the designated heir of the executed ruler is set aside");
-    assert_eq!(w.provinces[&ProvinceId(5)].governor, None, "one seat per person: the governorship fell vacant (the house has no adult without a seat)");
+    assert_eq!(w.provinces[&ProvinceId(5)].governor, Some(other), "one seat per person: the seat the usurper leaves goes to another house (owner's rule on #289)");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province: ProvinceId(5), from, to: Some(to) } if from == b0 && to == other)));
     assert!(l0 > p.legitimacy_norm_usurper && w.actors[&s0].legitimacy <= p.legitimacy_norm_usurper + 1e-9, "legitimacy fell to the usurper's norm");
     assert!((w.legitimacy_norm(s0, &p) - p.legitimacy_norm_usurper).abs() < 1e-9);
     // The regent first: a child on the throne with the governor as regent.

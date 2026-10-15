@@ -79,6 +79,12 @@ const RULING_HOUSE_SIZE: (u64, u64) = (3, 8);
 const OTHER_HOUSE_SIZE: (u64, u64) = (2, 5);
 /// Houses that do not rule, per polity, kind (в).
 const OTHER_HOUSES: (u64, u64) = (2, 4);
+/// The chance a province that is not the capital has a governor, and the chance the seat
+/// goes to a house that does not rule (E2 step 9, owner's rule on #289: the secession of a
+/// house must be reachable — the Morea under a Palaiologos, Genoa under the Adorno), kind
+/// (в), checked through В8 — the number of polities a century on.
+const GOVERNOR_CHANCE: f64 = 0.3;
+const GOVERNOR_FROM_OTHER_HOUSE: f64 = 0.7;
 /// Tongues and faiths per world (E2 step 8): each state draws one of each; a province that
 /// touches another state takes that state's with `BORDER_FAITH_CHANCE` — the mixed march
 /// where conversion and friction have something to work on. Houses take the capital's,
@@ -528,14 +534,24 @@ impl Map {
                 _ => Succession::Mixed,
             };
             actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: own_soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession });
-            // A governor of one province that is not the capital: an adult of any house of
-            // the polity who is not the ruler.
+            // Governors of the provinces that are not the capital (owner's rule on #289:
+            // the secession of a house must be reachable, so the houses that do not rule
+            // hold seats): each province with `GOVERNOR_CHANCE`, the seat to a free adult
+            // of a house that does not rule with `GOVERNOR_FROM_OTHER_HOUSE`, else of the
+            // ruling house; one seat per person.
             let mut own: Vec<String> = provinces.iter().filter(|(_, p)| p.owner == sid(s) && *p != &provinces[&pid(cap_i)]).map(|(k, _)| k.clone()).collect();
             own.sort();
-            let candidates: Vec<String> = adults_by_house.iter().flat_map(|(_, a)| a.iter().cloned()).filter(|p| *p != ruler).collect();
-            if !own.is_empty() && !candidates.is_empty() && rng.gen_bool(0.5) {
-                let p = own[rng.gen_range(0..own.len())].clone();
-                let g = candidates[rng.gen_range(0..candidates.len())].clone();
+            let mut free_ruling: Vec<String> = adults_by_house[0].1.iter().cloned().filter(|p| *p != ruler).collect();
+            let mut free_other: Vec<String> = adults_by_house[1..].iter().flat_map(|(_, a)| a.iter().cloned()).collect();
+            for p in own {
+                if !rng.gen_bool(GOVERNOR_CHANCE) {
+                    continue;
+                }
+                let pool = if !free_other.is_empty() && (free_ruling.is_empty() || rng.gen_bool(GOVERNOR_FROM_OTHER_HOUSE)) { &mut free_other } else { &mut free_ruling };
+                if pool.is_empty() {
+                    continue;
+                }
+                let g = pool.remove(rng.gen_range(0..pool.len()));
                 provinces.get_mut(&p).unwrap().governor = Some(g);
             }
         }
@@ -803,8 +819,8 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the house-troops version of the generator (E2 step 9; before: the houses
-    /// version of step 6a, the sea-links version of step 2). If this changes, every seed
+    /// Pinned on the governors version of the generator (E2 step 9, review of #289; before:
+    /// the houses version of step 6a, the sea-links version of step 2). If this changes, every seed
     /// plays a different world and "fails on seed N" stops reproducing: bump it only with a
     /// deliberate change of the generator, never with a dependency update.
     #[test]
@@ -813,7 +829,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 9_472_696_729_354_712_933;
+    const PINNED_WORLD_ONE: u64 = 2_814_808_447_088_233_671;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

@@ -206,6 +206,8 @@ pub struct Params {
     /// (в) E0 В7: the base chance per tick that a province of a living polity rises (at
     /// legitimacy 50, no mark of alienation; E2 step 9).
     pub revolt_per_tick: f64,
+    /// (в) What a province rising in revolt costs its ruler in legitimacy, once.
+    pub legitimacy_cost_revolt: f64,
     /// (в) The core tongue of a polity changes only when another tongue outgrows it by this
     /// share of the polity's people, parts per million (owner's rule on §21).
     pub core_switch_margin_ppm: i64,
@@ -359,6 +361,7 @@ impl Params {
         let neighbourhood_factor = value("conversion.neighbourhood_factor")?;
         let adoption = value("institution.adoption_per_year")?;
         let revolt = value("revolt.per_year")?;
+        let cost_revolt = value("legitimacy.cost_revolt")?;
         let core_margin = value("core.switch_margin")?;
         let retinue = value("house.retinue_share_of_army")?;
         let other_retinue = value("house.other_retinue_share")?;
@@ -438,6 +441,7 @@ impl Params {
             conversion_neighbourhood_factor: neighbourhood_factor,
             institution_adoption_per_tick: adoption / 2.0,
             revolt_per_tick: revolt / 2.0,
+            legitimacy_cost_revolt: cost_revolt,
             core_switch_margin_ppm: (core_margin * 1_000_000.0).round() as i64,
             retinue_share_ppm: (retinue * 1_000_000.0).round() as i64,
             other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,

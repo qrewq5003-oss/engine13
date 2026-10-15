@@ -3,7 +3,9 @@
 //! interest — every entry through the ledger and signed with its source.
 //!
 //! Per polity, per tick, in canonical order of actors:
-//! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2);
+//! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2) over the
+//!   provinces not in revolt (E2 step 9: a province in revolt pays no tax and gives no seat
+//!   its income);
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
 //!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) × **the share
 //!   collected** (E2 step 6b, review of #286): the share falls by
@@ -105,7 +107,13 @@ pub enum VerbError {
 impl World {
     /// Production of a polity per tick (half a year), kg of wheat-equivalent.
     pub fn production_per_tick(&self, a: ActorId, params: &Params) -> i64 {
-        self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum::<i64>() * params.output_per_head_kg / 2
+        self.taxable_people(a) * params.output_per_head_kg / 2
+    }
+
+    /// The people a polity taxes: those of its provinces not in revolt (E2 step 9: a
+    /// province in revolt pays nothing).
+    pub fn taxable_people(&self, a: ActorId) -> i64 {
+        self.actors[&a].provinces.iter().filter(|p| !self.in_revolt(**p)).map(|p| self.population(*p)).sum()
     }
 
     /// Soldiers a polity's budget keeps paid: the revenue left after the court, over the pay
@@ -228,6 +236,9 @@ impl World {
             let ruling_house = self.persons[&self.actors[&a].ruler].house;
             let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
             for p in self.actors[&a].provinces.clone() {
+                if self.in_revolt(p) {
+                    continue;
+                }
                 if let Some(g) = self.provinces[&p].governor {
                     let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000 * share / 1_000_000;
                     seats.push((self.persons[&g].house, province_tax * params.seat_income_share_ppm / 1_000_000));

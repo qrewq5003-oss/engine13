@@ -248,8 +248,9 @@ impl World {
         }
         self.keep_court_faith(court, usurper);
         self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
+        // The seats the usurper leaves go to other houses (owner's rule on #289).
         for province in self.governed_by(usurper) {
-            self.pass_governorship(province, usurper, params)?;
+            self.pass_seat(province, usurper, true, params)?;
         }
         Ok(())
     }
@@ -340,14 +341,33 @@ impl World {
         }
     }
 
-    /// A governorship passes within the house of the holder who left it: the eldest adult
-    /// member with no seat; nobody — the seat is vacant.
+    /// A governorship passes from the holder who left it: within the house first — the
+    /// eldest adult member with no seat — else to a house of the polity that does not rule,
+    /// else to the ruling house; nobody — the seat is vacant. (Owner's rule on #289: a seat
+    /// must not stay vacant while a house could hold it, so that the houses that can carry
+    /// a secession keep their seats.)
     pub(crate) fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
+        self.pass_seat(province, from, false, params)
+    }
+
+    /// The passing of a seat; with `other_houses_first` the holder's house comes last —
+    /// the holder took the throne and its house rules now, and the seat it leaves goes to
+    /// another house (owner's rule on #289).
+    pub(crate) fn pass_seat(&mut self, province: ProvinceId, from: PersonId, other_houses_first: bool, params: &Params) -> Result<(), WorldError> {
         let house = self.persons[&from].house;
         let owner = self.provinces[&province].owner;
-        let free = |w: &World, q: PersonId| w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
-        let candidates: Vec<PersonId> = self.members(house).into_iter().filter(|q| *q != from && free(self, *q)).collect();
-        let to = self.eldest(&candidates, false, params);
+        let ruling = self.ruling_house(owner);
+        let free = |w: &World, q: PersonId| q != from && w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
+        let others: Vec<HouseId> = self.houses_of(owner).into_iter().filter(|h| *h != house && *h != ruling).collect();
+        let order: Vec<Vec<HouseId>> = if other_houses_first { vec![others, vec![ruling], vec![house]] } else { vec![vec![house], others, vec![ruling]] };
+        let mut to = None;
+        for group in order {
+            let candidates: Vec<PersonId> = group.iter().flat_map(|h| self.members(*h)).filter(|q| free(self, *q)).collect();
+            if let Some(q) = self.eldest(&candidates, false, params) {
+                to = Some(q);
+                break;
+            }
+        }
         self.provinces.get_mut(&province).unwrap().governor = to;
         self.emit(Event::GovernorChanged { province, from, to });
         Ok(())
@@ -474,9 +494,10 @@ impl World {
         }
         self.keep_court_faith(court, next);
         self.emit(Event::Succession { actor: a, from: dead, to: next, how });
-        // One seat per person: a governor who takes the throne leaves the governorship.
+        // One seat per person: a governor who takes the throne leaves the governorship —
+        // to another house first (owner's rule on #289).
         for province in self.governed_by(next) {
-            self.pass_governorship(province, next, params)?;
+            self.pass_seat(province, next, true, params)?;
         }
         Ok(())
     }

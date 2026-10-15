@@ -391,10 +391,11 @@ fn a_house_that_does_not_rule_takes_the_provinces_its_members_govern_into_a_poli
 }
 
 #[test]
-fn a_province_with_no_house_to_carry_it_rises_alone_under_a_new_house_of_its_own_people_and_a_capital_never_rises() {
+fn a_province_with_no_house_to_carry_it_is_in_revolt_pays_nothing_feeds_nobody_and_stays_so_until_a_unit_of_the_owner_has_stood_there_a_tick() {
     let p = params();
+    let calm = calm();
     let mut s = testworld::five_states_scenario();
-    s.provinces.get_mut("p05").unwrap().religion = "f1".to_string();
+    s.verbs.insert("recruit".to_string(), "Recruit".to_string());
     let mut w = world_of(&s, 32);
     let s0 = ActorId(0);
     let (h0, b0) = (house(&s, "h0"), person(&s, "b0"));
@@ -403,57 +404,59 @@ fn a_province_with_no_house_to_carry_it_rises_alone_under_a_new_house_of_its_own
     assert_eq!(w.secession_carrier(p05), None, "the ruling house does not secede");
     assert_eq!(w.revolt_chance_per_tick(at(0, 0), &p), 0.0, "the capital never rises: that is the coup of В6");
     assert_eq!(w.rise_now(at(0, 0), &p).unwrap(), None);
-    let (houses_before, persons_before, people) = (w.houses.len(), w.persons.len(), w.population(p05));
-    let new = w.rise_now(p05, &p).unwrap().expect("a rising");
-    let r = w.tick(&calm()).unwrap();
+    let (actors_before, houses_before, units_before) = (w.actors.len(), w.houses.len(), w.units.len());
+    let (l0, people) = (w.actors[&s0].legitimacy, w.population(p05));
+    let production_before = w.production_per_tick(s0, &p);
+    assert_eq!(w.rise_now(p05, &p).unwrap(), None, "no polity is born without a house to carry it");
+    // The state, not a polity: nothing born, nobody risen, the ruler paid once.
+    assert!(w.in_revolt(p05));
+    assert_eq!(w.provinces[&p05].revolt, Some(w.tick));
+    assert_eq!((w.actors.len(), w.houses.len(), w.units.len()), (actors_before, houses_before, units_before));
+    assert_eq!(w.provinces[&p05].owner, s0);
+    assert_eq!(w.provinces[&p05].governor, Some(b0), "the seat stays, without income");
+    assert!((w.actors[&s0].legitimacy - (l0 - p.legitimacy_cost_revolt)).abs() < 1e-9, "the exact price, once");
+    assert_eq!(w.revolt_chance_per_tick(p05, &p), 0.0, "a province in revolt draws no more");
+    // No tax from it and no seat income for its governor; the rest of the polity pays.
+    assert_eq!(w.production_per_tick(s0, &p), production_before - people * p.output_per_head_kg / 2);
+    assert_eq!(w.taxable_people(s0) + people, w.actors[&s0].provinces.iter().map(|q| w.population(*q)).sum::<i64>());
+    let r = w.tick(&calm).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Revolt { province, from } if province == p05 && from == s0)));
-    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Secession { .. })));
-    // A new house of the province's people, through the ledger, praying as they do.
-    let new_house = HouseId(houses_before as u32);
-    assert_eq!(w.houses.len(), houses_before + 1);
-    assert_eq!(w.houses[&new_house].polity, new);
-    assert_eq!((w.houses[&new_house].culture, w.houses[&new_house].religion), (w.provinces[&p05].culture, ReligionId(1)), "the house of the people prays as they do");
-    assert_eq!(w.polity_religion(new), ReligionId(1));
-    assert!(!w.alienated(p05), "at one with its own court");
-    let founder = w.actors[&new].ruler;
-    assert_eq!(w.persons[&founder].house, new_house);
-    assert!(founder.index() >= persons_before);
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::NewDynasty { actor, house, founder: f, from, .. } if actor == new && house == new_house && f == founder && from == p05)));
-    let risen: i64 = -r.postings.iter().filter(|q| q.source == Source::Rise).map(|q| q.milli).sum::<i64>() / 1000;
-    assert!((3..=4).contains(&risen));
-    let militia = w.units_of(new);
-    assert_eq!(militia.len(), 1);
-    // The people are all accounted for: the founders and the militia left the province
-    // through the ledger, exactly, and the militia is a transfer. (By the end of the tick
-    // the militia has begun to melt: a polity of one province cannot pay the ceiling of А1
-    // — the budget is the limit for a rising as for any polity.)
-    let raised = on(&r, Account::Soldiers(militia[0]), Source::Recruit) / 1000;
-    assert_eq!(raised, (people - risen) * p.recruit_ceiling_ppm / 1_000_000, "the ceiling of А1 over the people left");
-    assert_eq!(on(&r, Account::Population(p05), Source::Rise), -risen * 1000);
-    assert_eq!(on(&r, Account::Population(p05), Source::Recruit), -raised * 1000);
-    assert!(w.soldiers(militia[0]) <= raised && w.soldiers(militia[0]) > raised / 2);
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == new)), "the militia at the ceiling of А1 is more than one province's budget pays");
-    // The governor of the ruling house lost the seat and stayed with the parent.
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province, from, to: None } if province == p05 && from == b0)));
-    assert_eq!(w.provinces[&p05].governor, None);
-    assert_eq!(w.persons[&b0].house, h0);
-    assert_eq!(w.houses[&h0].polity, s0);
-    assert_eq!(w.actors[&new].provinces, vec![p05]);
-    assert_eq!(w.actors[&new].capital, p05);
-    assert!(w.at_war(new, s0));
-    assert_eq!(w.actors[&s0].provinces.len(), 4);
-    assert!(w.alive(s0) && w.alive(new));
-    assert_eq!(w.actors[&new].standing, Standing::Acclaimed);
-    // No province of the parent is left dangling: every seat, every unit, every war whole.
-    for (q, pr) in &w.provinces {
-        assert!(w.actors[&pr.owner].provinces.contains(q));
-        if let Some(g) = pr.governor {
-            assert_eq!(w.houses[&w.persons[&g].house].polity, pr.owner);
-        }
-    }
-    assert_eq!(w.names.actors.len(), w.actors.len());
-    assert_eq!(w.names.houses.len(), w.houses.len());
-    assert_eq!(w.names.persons.len(), w.persons.len());
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorBorn { .. } | Event::Secession { .. } | Event::NewDynasty { .. })));
+    let throne_share = on(&r, Account::Treasury(s0), Source::Tax) / 1000 * p.seat_income_share_ppm / 1_000_000;
+    assert_eq!(on(&r, Account::HouseTreasury(h0), Source::Seat), throne_share * 1000, "the throne's share alone: the governorship of a province in revolt yields nothing");
+    assert!(on(&r, Account::Treasury(s0), Source::Tax) > 0);
+    assert!(w.in_revolt(p05), "it stands: nobody stood there");
+    // The levy is refused there.
+    let err = w.apply_verb(&VerbCall { actor: engine2::ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(p05) }, &p).unwrap_err();
+    assert!(err.to_string().contains("in revolt"), "{err}");
+    // The owner's men standing there are fed as on foreign land: they forage and ruin it;
+    // and having stood there a tick, they put the revolt down.
+    let u0 = w.units_of(s0)[0];
+    w.order_move(u0, p05).unwrap();
+    let r = w.tick(&calm).unwrap();
+    assert_eq!(w.units[&u0].position, p05);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == p05)), "the suppressing army forages on the province");
+    assert!(on(&r, Account::Population(p05), Source::Ruin) < 0);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::RevoltEnded { province, actor } if province == p05 && actor == s0)));
+    assert!(!w.in_revolt(p05));
+    assert!(w.revolt_chance_per_tick(p05, &p) > 0.0, "it may rise again");
+    // Back in the polity: the tax and the seat's income flow again, the army is fed at home.
+    let r = w.tick(&calm).unwrap();
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Ruin { province, .. } if province == p05)));
+    assert_eq!(w.production_per_tick(s0, &p), w.actors[&s0].provinces.iter().map(|q| w.population(*q)).sum::<i64>() * p.output_per_head_kg / 2);
+    assert!(on(&r, Account::HouseTreasury(h0), Source::Seat) > 0);
+    // A province that changes hands is in revolt no more.
+    let mut w = world_of(&s, 33);
+    w.rise_now(p05, &p).unwrap();
+    assert!(w.in_revolt(p05));
+    let s1 = ActorId(1);
+    w.declare_war(s1, s0).unwrap();
+    let u1 = w.units_of(s1)[0];
+    w.units.get_mut(&u1).unwrap().position = at(1, 1);
+    w.order_move(u1, p05).unwrap();
+    w.tick(&calm).unwrap();
+    assert_eq!(w.provinces[&p05].owner, s1, "stormed within the tick: nobody defends a province in revolt");
+    assert!(!w.in_revolt(p05));
 }
 
 #[test]
@@ -505,41 +508,42 @@ fn call(a: ActorId, verb: VerbId, b: ActorId) -> VerbCall {
 }
 
 #[test]
-fn the_end_of_a_rising_is_the_state_of_the_war_suppression_submission_or_freedom() {
+fn the_end_of_a_secession_is_the_state_of_the_war_suppression_submission_or_freedom() {
     let p = calm();
-    let s0 = ActorId(0);
-    // Suppression: the parent's army beats the militia and takes the province back; the
+    let (s0, s2) = (ActorId(0), ActorId(2));
+    let (p05, p10) = (at(0, 1), at(0, 2));
+    // Suppression: the parent's army beats the militia and takes both provinces back; the
     // polity falls as any conquered one, the militia to the people, the war closed.
-    let mut w = testworld::world(36);
-    let p05 = at(0, 1);
+    let s = carrier_scenario();
+    let mut w = world_of(&s, 36);
     let new = w.rise_now(p05, &p).unwrap().unwrap();
     let u0 = w.units_of(s0)[0];
-    w.post(Account::Soldiers(u0), Source::Test, (6000 - w.soldiers(u0)) * 1000).unwrap();
+    w.post(Account::Soldiers(u0), Source::Test, (9000 - w.soldiers(u0)) * 1000).unwrap();
     let mut fell = false;
-    for _ in 0..20 {
-        if w.units[&u0].destination.is_none() && w.provinces[&p05].owner == new {
-            w.order_move(u0, p05).unwrap();
+    for _ in 0..30 {
+        if w.units[&u0].destination.is_none() {
+            if let Some(target) = [p05, p10].into_iter().find(|q| w.provinces[q].owner == new) {
+                w.order_move(u0, target).unwrap();
+            }
         }
         let r = w.tick(&p).unwrap();
         if r.events.iter().any(|e| matches!(e.event, Event::ActorDied { actor } if actor == new)) {
-            assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, from, to, how: Transfer::Conquest } if province == p05 && from == new && to == s0)));
+            assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { from, to, how: Transfer::Conquest, .. } if from == new && to == s0)));
             assert!(r.postings.iter().filter(|q| q.source == Source::Disband).map(|q| q.milli).sum::<i64>() == 0, "the militia joined the people");
             fell = true;
             break;
         }
     }
-    assert!(fell, "the parent put the rising down");
+    assert!(fell, "the parent put the secession down");
     assert!(!w.alive(new) && w.actors[&new].provinces.is_empty());
     assert!(w.units_of(new).is_empty());
     assert!(!w.wars.keys().any(|(x, y)| *x == new || *y == new), "the war closed with the fall");
-    assert!(w.actors[&s0].provinces.contains(&p05));
+    assert!(w.actors[&s0].provinces.contains(&p05) && w.actors[&s0].provinces.contains(&p10));
     assert!(w.actors.contains_key(&new) && w.names.actors.len() == w.actors.len(), "the record stays");
-    // Submission: a rising of two provinces loses one — half its land — and the parent,
-    // the winner, offers peace: the rising becomes its vassal (Genoa under Milan); the
-    // ally's war, an obligation, closes with it.
-    let s = carrier_scenario();
+    // Submission: a secession of two provinces loses one — half its land — and the
+    // parent, the winner, offers peace: the polity becomes its vassal (Genoa under Milan);
+    // the ally's war, an obligation, closes with it.
     let mut w = world_of(&s, 37);
-    let (s2, p10) = (ActorId(2), at(0, 2));
     let new = w.rise_now(p05, &p).unwrap().unwrap();
     assert!(w.at_war(new, s2));
     let u0 = w.units_of(s0)[0];
@@ -567,23 +571,23 @@ fn the_end_of_a_rising_is_the_state_of_the_war_suppression_submission_or_freedom
     assert_eq!(w.treaty(new, s0).map(|t| t.kind), Some(engine2::TreatyKind::Peace));
     assert!(w.alive(new), "a vassal, alive");
     assert!(on(&r, Account::Treasury(s0), Source::Tribute) > 0, "and the tribute flows");
-    // Freedom: the rising takes a province of the parent and offers peace; the loser
+    // Freedom: the secession takes a province of the parent and offers peace; the loser
     // accepts always — a peace for the term, no lord, the land stays taken.
-    let mut w = testworld::world(38);
+    let mut w = world_of(&s, 38);
     let new = w.rise_now(p05, &p).unwrap().unwrap();
-    let militia = w.units_of(new)[0];
+    let militia = w.units_of(new).into_iter().find(|u| w.units[u].position == p10 && w.units[u].house.is_none()).unwrap();
     w.post(Account::Soldiers(militia), Source::Test, (3000 - w.soldiers(militia)) * 1000).unwrap();
-    let p10 = at(0, 2);
-    assert_eq!(w.provinces[&p10].owner, s0);
-    w.order_move(militia, p10).unwrap();
+    let p15 = at(0, 3);
+    assert_eq!(w.provinces[&p15].owner, s0);
+    w.order_move(militia, p15).unwrap();
     let r = w.tick(&p).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, from, to, how: Transfer::Conquest } if province == p10 && from == s0 && to == new)), "an undefended province of the parent falls within the tick");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, from, to, how: Transfer::Conquest } if province == p15 && from == s0 && to == new)), "an undefended province of the parent falls within the tick");
     assert_eq!(w.losing_side(s0, new), Some(s0));
     w.apply_verb(&call(new, VerbId::MakePeace, s0), &p).unwrap();
     assert!(!w.at_war(new, s0));
     assert_eq!(w.lord_of(new), None, "free");
     assert_eq!(w.treaty(new, s0).map(|t| t.kind), Some(engine2::TreatyKind::Peace));
-    assert_eq!(w.actors[&new].provinces, vec![p05, p10]);
+    assert_eq!(w.actors[&new].provinces, vec![p05, p10, p15]);
     assert!(w.alive(new) && w.alive(s0));
     assert!((w.war_price(s0, new, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9, "war again before the term is a breach");
 }
@@ -594,18 +598,23 @@ use std::collections::BTreeMap;
 
 use sentinel::Observed;
 
-/// В7 on the generated worlds: risings per century per large polity (five provinces and
-/// more), neither never nor always; every successor whole — no dangling seat, unit, war or
-/// name; a rising kills nobody in E2 (nobody marches without an order); the run is
-/// deterministic through a save; the sentinel declares the kinds by the horizon.
+/// В7 on the generated worlds: risings — revolts and secessions — per century per large
+/// polity (five provinces and more), neither never nor always; В8: the polities a century
+/// on, per polity at the start; a polity is born only with a house to carry it, and that
+/// is reachable; every successor whole — no dangling seat, unit, war or name; a rising
+/// kills nobody in E2 (nobody marches without an order); the share of polity-ticks at war
+/// (А12) is reported; the run is deterministic through a save; the sentinel declares the
+/// kinds by the horizon.
 #[test]
-fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_never_nor_always_and_every_successor_is_whole() {
+fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_polities_a_century_on_in_b8_and_every_successor_is_whole() {
     let p = params();
     let band = p.entries["revolt.observed_per_century"].band.unwrap();
+    let band8 = p.entries["collapse.observed_polities_after_a_century"].band.unwrap();
     const LARGE: usize = 5;
     let (mut risings, mut large_ticks, mut carried, mut alone, mut falls, mut provinces_moved) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut by_marks = [0u64; 3];
-    let (mut polities_start, mut polities_end, mut large_start, mut quiet_large) = (0usize, 0usize, 0u64, 0u64);
+    let (mut polities_start, mut polities_century, mut polities_end, mut large_start, mut quiet_large) = (0usize, 0usize, 0usize, 0u64, 0u64);
+    let (mut war_ticks, mut polity_ticks, mut in_revolt_end, mut put_down) = (0u64, 0u64, 0usize, 0u64);
     let (mut alienated_start, mut alienated_end) = (0usize, 0usize);
     let (mut carriers_start, mut carrier_ticks, mut province_ticks) = (0usize, 0u64, 0u64);
     // The expectation of the draws, carried and alone, against what happened.
@@ -631,6 +640,8 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_ne
             let sizes: BTreeMap<ActorId, usize> = w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(a, x)| (*a, x.provinces.len())).collect();
             let marks: BTreeMap<ProvinceId, u32> = w.provinces.keys().map(|q| (*q, w.alienation_marks(*q))).collect();
             large_ticks += sizes.values().filter(|n| **n >= LARGE).count() as u64;
+            polity_ticks += sizes.len() as u64;
+            war_ticks += sizes.keys().filter(|a| w.wars.keys().any(|(x, y)| x == *a || y == *a)).count() as u64;
             carrier_ticks += w.provinces.keys().filter(|q| w.secession_carrier(**q).is_some()).count() as u64;
             province_ticks += w.provinces.len() as u64;
             for q in w.provinces.keys() {
@@ -642,27 +653,35 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_ne
                 }
             }
             let r = g.tick(&[]).unwrap();
+            if t == 199 {
+                polities_century += g.world().actors.len();
+            }
+            let mut rising = |from: &ActorId| {
+                if sizes.get(from).copied().unwrap_or(0) >= LARGE {
+                    risings += 1;
+                    if t < 200 {
+                        if let Some(n) = first_century.get_mut(from) {
+                            *n += 1;
+                        }
+                    }
+                }
+            };
             for e in &r.events {
                 match &e.event {
                     Event::ActorBorn { from, provinces, .. } => {
                         provinces_moved += provinces.len() as u64;
-                        if sizes.get(from).copied().unwrap_or(0) >= LARGE {
-                            risings += 1;
-                            if t < 200 {
-                                if let Some(n) = first_century.get_mut(from) {
-                                    *n += 1;
-                                }
-                            }
-                        }
+                        rising(from);
                     }
                     Event::Secession { province, .. } => {
                         carried += 1;
                         by_marks[marks[province] as usize] += 1;
                     }
-                    Event::Revolt { province, .. } => {
+                    Event::Revolt { province, from } => {
                         alone += 1;
                         by_marks[marks[province] as usize] += 1;
+                        rising(from);
                     }
+                    Event::RevoltEnded { .. } => put_down += 1,
                     Event::ActorDied { .. } => falls += 1,
                     _ => {}
                 }
@@ -674,6 +693,7 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_ne
         quiet_large += first_century.values().filter(|n| **n == 0).count() as u64;
         polities_end += g.world().actors.len();
         alienated_end += g.world().provinces.keys().filter(|q| g.world().alienated(**q)).count();
+        in_revolt_end += g.world().provinces.keys().filter(|q| g.world().in_revolt(**q)).count();
         // Whole: every seat, unit, war, pair and name in place.
         let w = g.world();
         assert_eq!(w.names.actors.len(), w.actors.len(), "seed {seed}: an actor without a name");
@@ -727,8 +747,10 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_ne
         }
     }
     let per_century = risings as f64 / (large_ticks as f64 / 200.0);
+    let ratio_century = polities_century as f64 / polities_start as f64;
+    let at_war = war_ticks as f64 / polity_ticks as f64;
     eprintln!(
-        "В7 risings per century per polity of {LARGE}+ provinces: {per_century:.2} ({risings} over {:.0} polity-centuries; {quiet_large} of {large_start} large polities with none in their first century); {carried} provinces taken by a house, {alone} risen alone; by marks of alienation none/one/two: {:?}; polities {polities_start} -> {polities_end}, {provinces_moved} provinces moved, {falls} fell; alienated provinces {alienated_start} -> {alienated_end}; provinces with a carrier house: {carriers_start} at the start, {:.3} of all province-ticks; the draws expected {expected_carried:.1} carried and {expected_alone:.1} alone; kinds declared for 300 ticks: {declared:?}",
+        "В7 risings per century per polity of {LARGE}+ provinces: {per_century:.2} ({risings} over {:.0} polity-centuries; {quiet_large} of {large_start} large polities with none in their first century); {carried} provinces taken by a house, {alone} risen alone; by marks of alienation none/one/two: {:?}; В8 polities {polities_start} -> {polities_century} at a century ({ratio_century:.2}, band {band8:?}) -> {polities_end}; {provinces_moved} provinces moved, {falls} fell; {in_revolt_end} provinces in revolt at the end, {put_down} revolts put down; А12 share of polity-ticks at war {at_war:.3}; alienated provinces {alienated_start} -> {alienated_end}; provinces with a carrier house: {carriers_start} at the start, {:.3} of all province-ticks; the draws expected {expected_carried:.1} carried and {expected_alone:.1} alone; kinds declared for 300 ticks: {declared:?}",
         large_ticks as f64 / 200.0,
         by_marks,
         carrier_ticks as f64 / province_ticks as f64
@@ -736,10 +758,13 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_neither_ne
     assert!(risings > 0, "never");
     assert!(quiet_large > 0, "always: every large polity saw a rising in its first century");
     assert!((band[0]..=band[1]).contains(&per_century), "В7 {per_century:.2} outside {band:?}");
-    assert!(carried > 0 && alone > 0, "both carriers exist: a house with its provinces and a province alone");
+    assert!((band8[0]..=band8[1]).contains(&ratio_century), "В8 {ratio_century:.2} outside {band8:?}");
+    assert!(carried > 0 && alone > 0, "both exist: a house with its provinces and a province in revolt");
+    assert!(carried as f64 >= expected_carried / 3.0, "the secession of a house is reachable: {carried} against {expected_carried:.1} expected");
     assert!(by_marks[0] > 0 && by_marks[1] + by_marks[2] > 0, "loyal provinces rise too, alienated ones more");
     assert_eq!(falls, 0, "a rising kills nobody in E2: nobody marches without an order (the agents of E3 do)");
     assert!(polities_end > polities_start);
+    assert!(in_revolt_end > 0, "revolts stand in E2: nobody marches to put them down");
     assert!(["Born", "Revolt", "Secession"].iter().all(|k| declared.contains(&k.to_string())), "the kinds are declared by the horizon: {declared:?}");
     assert!(!Game::new(&worldgen::generate(1, &p), params(), 1).unwrap().possible_kinds(10).iter().any(|k| k == "Born"), "and not for a horizon too short to expect one");
 }

@@ -21,18 +21,27 @@
 //! the form of В3 and В6, legitimacy acting through its norm, a loyal province able to rise
 //! too (Volterra 1472 was a tax revolt) and one alienated twice over three times as readily.
 //!
-//! **The carrier is a house** (owner's answers on §21). If the province has a governor of a
-//! house that does **not** rule, that house takes every province its members govern (the
-//! capital excepted) into a polity of its own: the governor on its throne, `Acclaimed`,
-//! the parent's rule of succession, the house changed of polity (E0 §3). **Seceding is the
-//! house's decision, not the lot's** (owner's correction 1): the draw makes the chance, the
-//! house takes it or not — in E2 every house is a bot and a bot takes it
-//! ([`World::house_would_secede`]); in E3 it is the agent's decision, and the house of a
-//! player decides for itself, never dragged by the lot into a war with its own lord. With
-//! no such seat (the governor of the ruling house, or none) the province rises alone under
-//! **a new house of its own people** (`Source::Rise`, as a dynasty rises; it prays and
-//! speaks as the province does), a polity of one province; a governor of the ruling house
-//! loses the seat and stays with the parent.
+//! **A new polity is born only with a house to carry it** (owner's answers on §21 and
+//! rule on #289: the secessions that made states were led by magnates and governors —
+//! Magnus Maximus, the Adorno in Genoa; a rising without a leader — Volterra's tax revolt
+//! — was put down and bore no state). If the province has a governor of a house that does
+//! **not** rule, that house takes every province its members govern (the capital excepted)
+//! into a polity of its own: the governor on its throne, `Acclaimed`, the parent's rule of
+//! succession, the house changed of polity (E0 §3). **Seceding is the house's decision,
+//! not the lot's** (owner's correction 1): the draw makes the chance, the house takes it or
+//! not — in E2 every house is a bot and a bot takes it ([`World::house_would_secede`]); in
+//! E3 it is the agent's decision, and the house of a player decides for itself, never
+//! dragged by the lot into a war with its own lord. For the seat to exist the generator
+//! gives governorships to the houses that do not rule, and a seat a governor leaves for
+//! the throne goes to another house (`politics.rs`, owner's rule on #289).
+//!
+//! **A province with no such seat is in revolt** (`Province::revolt`), not a polity: it
+//! pays no tax and gives no seat its income, its owner's men standing in it are fed as on
+//! foreign land — they forage and ruin it (E0 П6) — and the ruler pays
+//! `legitimacy.cost_revolt` once. The revolt ends when a unit of the owner has stood in
+//! the province a tick (`RevoltEnded`); a province that changes hands is in revolt no more.
+//! In E2 nobody marches without an order, so a revolt stands until the agents of E3 put it
+//! down: lost income, not a polity in an endless war.
 //!
 //! **What the successor gets** (brief §2a): the provinces with their people
 //! (`Transfer::Secession`), the parent's treasury split by the people who left
@@ -59,9 +68,9 @@
 //! expressed through alienation and legitimacy; a second number for the same would be a
 //! dead field (brief §5 rule 7). No verbs: the list of thirteen is closed.
 //!
-//! **The phase** (after faith, before the people): the cores move; then the risings, the
-//! provinces in canonical order, a province taken into a polity born this tick drawing no
-//! more.
+//! **The phase** (after faith, before the people): the cores move; revolts with a unit of
+//! the owner standing there end; then the risings, the provinces in canonical order, a
+//! province in revolt or taken into a polity born this tick drawing no more.
 
 use std::collections::BTreeSet;
 
@@ -118,12 +127,18 @@ impl World {
         u32::from(pr.religion != self.polity_religion(a)) + u32::from(pr.culture != self.actors[&a].core_culture)
     }
 
+    /// Whether a province is in revolt against its owner.
+    pub fn in_revolt(&self, p: ProvinceId) -> bool {
+        self.provinces[&p].revolt.is_some()
+    }
+
     /// The chance per tick that a province rises: the base at legitimacy 50 and no mark,
     /// times one plus the marks, through the legitimacy of its owner's ruler (the form of
-    /// В3 and В6). Nothing for a capital or a province of a fallen polity.
+    /// В3 and В6). Nothing for a capital, a province in revolt already, or a province of a
+    /// fallen polity.
     pub fn revolt_chance_per_tick(&self, p: ProvinceId, params: &Params) -> f64 {
         let owner = self.provinces[&p].owner;
-        if !self.alive(owner) || self.actors[&owner].capital == p {
+        if !self.alive(owner) || self.actors[&owner].capital == p || self.in_revolt(p) {
             return 0.0;
         }
         let legitimacy = self.actors[&owner].legitimacy;
@@ -152,23 +167,27 @@ impl World {
         self.rise(p, params)
     }
 
-    /// The rising of `p`: the successor polity is born and takes its provinces, its share
-    /// of the treasury, its militia, its edges and its war. `None` when nothing can rise —
-    /// a capital, a fallen owner, a province with nobody in it, a house that declines.
+    /// The rising of `p`. With a house to carry it the successor polity is born and takes
+    /// its provinces, its share of the treasury, its militia, its edges and its war; with
+    /// none the province is in revolt. `None` when no polity is born — a revolt, a capital,
+    /// a fallen owner, a province with nobody in it, a house that declines.
     fn rise(&mut self, p: ProvinceId, params: &Params) -> Result<Option<ActorId>, WorldError> {
         let parent = self.provinces[&p].owner;
         let capital = self.actors[&parent].capital;
-        if !self.alive(parent) || capital == p || self.population(p) < 1 {
+        if !self.alive(parent) || capital == p || self.population(p) < 1 || self.in_revolt(p) {
             return Ok(None);
         }
-        let carrier = self.secession_carrier(p);
-        if carrier.is_some_and(|h| !self.house_would_secede(h)) {
+        let Some(house) = self.secession_carrier(p) else {
+            // No house to carry it: the province is in revolt, the ruler pays.
+            self.provinces.get_mut(&p).unwrap().revolt = Some(self.tick);
+            self.pay_legitimacy(parent, params.legitimacy_cost_revolt);
+            self.emit(Event::Revolt { province: p, from: parent });
             return Ok(None);
-        }
-        let provinces: Vec<ProvinceId> = match carrier {
-            Some(h) => self.actors[&parent].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == h)).collect(),
-            None => vec![p],
         };
+        if !self.house_would_secede(house) {
+            return Ok(None);
+        }
+        let provinces: Vec<ProvinceId> = self.actors[&parent].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == house)).collect();
         let people_total: i64 = self.actors[&parent].provinces.iter().map(|q| self.population(*q)).sum();
         let people_gone: i64 = provinces.iter().map(|q| self.population(*q)).sum();
         // The polity's record: a name in the world first (a house rising from the people
@@ -176,18 +195,8 @@ impl World {
         let new = ActorId(self.actors.len() as u32);
         let (psid, pname) = self.names.actors[parent.index()].clone();
         self.names.actors.push((format!("{psid}.{}", new.0), format!("{pname} successor {}", new.0)));
-        let (house, ruler): (HouseId, PersonId) = match carrier {
-            Some(h) => {
-                self.houses.get_mut(&h).unwrap().polity = new;
-                (h, self.provinces[&p].governor.expect("a carrier is the governor's house"))
-            }
-            None => {
-                // The people of the province rise: the new house prays and speaks as they do.
-                let (culture, religion) = (self.provinces[&p].culture, self.provinces[&p].religion);
-                let founder = self.raise_house_at(new, p, culture, religion)?.expect("the province has people");
-                (self.persons[&founder].house, founder)
-            }
-        };
+        self.houses.get_mut(&house).unwrap().polity = new;
+        let ruler: PersonId = self.provinces[&p].governor.expect("a carrier is the governor's house");
         let new_capital = provinces.iter().copied().max_by_key(|q| (self.population(*q), std::cmp::Reverse(*q))).expect("a rising has a province");
         let (succession, tax_rate_ppm, mut institutions) = {
             let pa = &self.actors[&parent];
@@ -221,10 +230,7 @@ impl World {
         // The provinces, with their people; one event per province.
         for q in &provinces {
             self.transfer(*q, parent, new, Transfer::Secession)?;
-            match carrier {
-                Some(h) => self.emit(Event::Secession { province: *q, from: parent, house: h }),
-                None => self.emit(Event::Revolt { province: *q, from: parent }),
-            }
+            self.emit(Event::Secession { province: *q, from: parent, house });
         }
         // The treasury by the people who left; the debt stays with the parent.
         let share = self.treasury(parent) * people_gone / people_total.max(1);
@@ -234,8 +240,7 @@ impl World {
         }
         // Seats. One seat per person: the ruler leaves its governorships to its house. The
         // parent's heir or regent of the carrier house is set aside; a governor of the
-        // carrier house left in the parent (its capital) loses the seat; a governor of the
-        // ruling house in a province that rose alone loses it too and stays with the parent.
+        // carrier house left in the parent (its capital) loses the seat.
         for q in self.governed_by(ruler) {
             self.pass_governorship(q, ruler, params)?;
         }
@@ -254,12 +259,6 @@ impl World {
                     self.provinces.get_mut(&q).unwrap().governor = None;
                     self.emit(Event::GovernorChanged { province: q, from: g, to: None });
                 }
-            }
-        }
-        if carrier.is_none() {
-            if let Some(g) = self.provinces[&p].governor {
-                self.provinces.get_mut(&p).unwrap().governor = None;
-                self.emit(Event::GovernorChanged { province: p, from: g, to: None });
             }
         }
         // The core and the legitimacy of the new throne.
@@ -309,13 +308,24 @@ impl World {
         Ok(())
     }
 
-    /// The phase of collapse: the cores of the living polities settle, then every province
-    /// of a living polity but its capital draws once for a rising, in canonical order; a
-    /// province taken into a polity born this tick draws no more.
+    /// The phase of collapse: the cores of the living polities settle; a revolt with a unit
+    /// of the owner standing in the province ends; then every province of a living polity
+    /// but its capital draws once for a rising, in canonical order; a province in revolt or
+    /// taken into a polity born this tick draws no more.
     pub(crate) fn phase_collapse(&mut self, params: &Params) -> Result<(), WorldError> {
         let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a)).collect();
         for a in &ids {
             self.settle_core(*a, params);
+        }
+        let put_down: Vec<(ProvinceId, ActorId)> = self
+            .provinces
+            .iter()
+            .filter(|(q, pr)| pr.revolt.is_some() && self.units.values().any(|u| u.position == **q && u.owner == pr.owner))
+            .map(|(q, pr)| (*q, pr.owner))
+            .collect();
+        for (q, owner) in put_down {
+            self.provinces.get_mut(&q).unwrap().revolt = None;
+            self.emit(Event::RevoltEnded { province: q, actor: owner });
         }
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().filter(|q| self.revolt_chance_per_tick(*q, params) > 0.0 || self.alive(self.provinces[q].owner)).collect();
         let mut born: BTreeSet<ProvinceId> = BTreeSet::new();

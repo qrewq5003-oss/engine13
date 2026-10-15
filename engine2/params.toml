@@ -939,3 +939,27 @@ kind = "c"
 value = 0.02
 unit = "share of the polity's army"
 checked_by = "Х4"
+
+# (в) What a province rising in revolt costs its ruler in legitimacy — a blow, once (a
+# revolt is an event, not a lasting decision of the ruler; a standing revolt in E2 stands
+# only because nobody marches to put it down, and a norm shift would turn that into a
+# cascade of usurpations). Checked through В7.
+[legitimacy.cost_revolt]
+kind = "c"
+value = 5.0
+unit = "legitimacy, 0–100"
+checked_by = "В7"
+
+# E0 В8 (row added at E2, collapse; owner's rule on #289) — observed: the number of
+# polities a century after the start, relative to the start. By memory: the West of 375
+# fell into half a dozen successor kingdoms by 475 and the East stood — more polities, not
+# three times as many; Italy of 1400 consolidated into the five powers by 1454 (Mallett
+# 1974, ch. 1); the Balkans of 1430 were swallowed by one. One band: a world may fragment or
+# gather, but not threefold in a century. Source to open. The engine answers for the
+# fragmentation (secessions carried by a house); the gathering is the agents' (E3), so the
+# lower edge is theirs to meet. Measured on the generated worlds (`tests/collapse.rs`).
+[collapse.observed_polities_after_a_century]
+kind = "b"
+band = [0.5, 1.6]
+unit = "polities a century on, per polity at the start"
+e0 = "В8"

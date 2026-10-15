@@ -135,6 +135,7 @@ impl Observed for Game {
                 // Plain kinds (E2 step 9): `Never` is read over them by the horizon.
                 Event::Secession { .. } => ObsEvent::Other("Secession".into()),
                 Event::Revolt { .. } => ObsEvent::Other("Revolt".into()),
+                Event::RevoltEnded { province, .. } => ObsEvent::Other(format!("RevoltEnded@{}", self.province_id(*province).0)),
                 Event::ActorBorn { actor, .. } => ObsEvent::Born(self.actor_id(*actor)),
             })
             .collect()
@@ -189,13 +190,11 @@ impl Observed for Game {
                 alone += expected;
             }
         }
-        if alone + carried >= 3.0 {
-            out.push("Born".to_string());
-        }
         if alone >= 3.0 {
             out.push("Revolt".to_string());
         }
         if carried >= 3.0 {
+            out.push("Born".to_string());
             out.push("Secession".to_string());
         }
         out

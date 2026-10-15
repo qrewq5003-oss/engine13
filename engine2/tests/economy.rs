@@ -111,7 +111,11 @@ fn with_a_bank_the_polity_borrows_to_the_ceiling_pays_interest_and_its_treasury_
 
 #[test]
 fn a_loan_does_not_change_the_net_worth_and_repeated_loans_stop_at_the_ceiling() {
-    let p = params();
+    // The ceiling is years of revenue: a province in revolt (E2 step 9) would pull it from
+    // under the debt by another path than the loan — the test is about the loan, so the
+    // base of the rising is at nothing here.
+    let mut p = params();
+    p.revolt_per_tick = 0.0;
     let mut w = testworld::world(2);
     let a = ActorId(0);
     w.actors.get_mut(&a).unwrap().institutions.insert(Institution::Bank);

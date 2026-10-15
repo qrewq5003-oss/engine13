@@ -273,7 +273,9 @@ impl World {
 
     /// A province changes hands; the loser's capital moves or the loser falls.
     pub(crate) fn transfer(&mut self, p: ProvinceId, from: ActorId, to: ActorId, how: Transfer) -> Result<(), WorldError> {
+        // A new owner: the siege is over and so is a revolt against the old one.
         self.provinces.get_mut(&p).unwrap().siege = None;
+        self.provinces.get_mut(&p).unwrap().revolt = None;
         self.provinces.get_mut(&p).unwrap().owner = to;
         let f = self.actors.get_mut(&from).unwrap();
         f.provinces.retain(|x| *x != p);
@@ -352,6 +354,9 @@ impl World {
                 let Target::Province(p) = call.target else { return Err(VerbError::BadTarget(call.verb, "a province to levy from")) };
                 if self.provinces.get(&p).map(|x| x.owner) != Some(a) {
                     return Err(VerbError::BadTarget(call.verb, "not the polity's own province"));
+                }
+                if self.in_revolt(p) {
+                    return Err(VerbError::NotAvailable(call.verb, "the province is in revolt"));
                 }
                 let n = self.recruit_per_tick(a, params).min(self.population(p));
                 if n <= 0 {

@@ -307,6 +307,11 @@ pub struct Province {
     pub religion: ReligionId,
     pub assimilating: Option<Shift<CultureId>>,
     pub converting: Option<Shift<ReligionId>>,
+    /// In revolt since this tick (E2 step 9, owner's rule on #289): a province that rose
+    /// with no house to carry it — no tax, no supply for its owner's men, who forage there
+    /// as on foreign land; it ends when a unit of the owner has stood there a tick
+    /// (`collapse.rs`).
+    pub revolt: Option<Tick>,
 }
 
 /// An army on the graph: owner, position, quality, and where it is ordered to go. Its
@@ -695,6 +700,7 @@ impl World {
                     religion: f.religion,
                     assimilating: None,
                     converting: None,
+                    revolt: None,
                 },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
