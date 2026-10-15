@@ -186,10 +186,16 @@ fn no_source_but_the_tax_puts_wheat_into_a_treasury_without_a_matching_entry() {
             w.post(Account::Soldiers(unit), Source::Recruit, (limit * 2 - w.soldiers(unit)).max(0) * 1000).unwrap();
         }
         for _ in 0..60 {
-            // A house may secede later in the tick it was paid in (E2 step 9): the seat's
-            // income is read against the polity the house belonged to when the tick began.
-            let house_polity: std::collections::BTreeMap<engine2::HouseId, ActorId> = w.houses.iter().map(|(h, x)| (*h, x.polity)).collect();
+            // A house secedes at the start of a tick (E3 (в): its chance, opened the tick
+            // before, is settled first), before the seats are paid: the seat's income is
+            // read against the polity the house belongs to once the secessions are made.
+            let mut house_polity: std::collections::BTreeMap<engine2::HouseId, ActorId> = w.houses.iter().map(|(h, x)| (*h, x.polity)).collect();
             let r = w.tick(&p).unwrap();
+            for e in &r.events {
+                if let engine2::Event::ActorBorn { actor, house, .. } = e.event {
+                    house_polity.insert(house, actor);
+                }
+            }
             for a in &ids {
                 let sum = |account: Account, src: Source| r.postings.iter().filter(|q| q.account == account && q.source == src).map(|q| q.milli).sum::<i64>();
                 let (t, d) = (Account::Treasury(*a), Account::Debt(*a));

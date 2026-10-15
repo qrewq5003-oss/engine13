@@ -42,11 +42,21 @@ fn all_verbs(mut s: ScenarioData) -> ScenarioData {
 /// — the bride two houses asked for, a war closed by a peace of its principal pair (plan
 /// §23b: first all decide, then all is applied in one order). A peace or a war both sides
 /// made in one tick is not among them: the second is nothing (owner's rule on #291).
-const CONFLICTS: [&str; 6] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord", "a vassal makes no alliance"];
+const CONFLICTS: [&str; 9] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord", "a vassal makes no alliance", "at the levy ceiling", "not the polity's own province", "at the debt ceiling"];
+
+/// A conflict of the tick: a call closed by an earlier call of the same tick — or, since
+/// E3 (в), by an opportunity taken at the turn's start: everyone decides on the state as
+/// it stands, the answers to the last tick's opportunities are applied first, and a
+/// secession or a usurpation they bring moves units and ceilings under the orders and
+/// calls decided before it (a house's men leave with it, a usurper's house takes the
+/// retinue of the throne, an extinct house's men go home).
+fn is_conflict(k: &str) -> bool {
+    CONFLICTS.iter().any(|c| k.ends_with(c)) || (k.starts_with("Order:") && (k.contains("does not command unit") || k.contains("unknown unit")))
+}
 
 fn assert_conflicts_only(g: &Game) {
     let r = g.preempted_reasons();
-    assert!(r.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a call preempted for another reason than a conflict of the tick: {r:?}");
+    assert!(r.keys().all(|k| is_conflict(k)), "a call preempted for another reason than a conflict of the tick: {r:?}");
 }
 
 fn world_of(s: &ScenarioData, seed: u64) -> World {
@@ -333,6 +343,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
+    let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
+    let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = Game::new(&s, params(), seed).unwrap();
@@ -448,6 +460,14 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                         }
                         last_tax.insert(*actor, (t, up));
                     }
+                    Event::OpportunityOpened { opportunity } => {
+                        kind_of.insert(opportunity.id, opportunity.what.kind());
+                        *opportunities.entry(format!("{} opened", opportunity.what.kind())).or_insert(0) += 1;
+                    }
+                    Event::OpportunityTaken { id, .. } => *opportunities.entry(format!("{} taken", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                    Event::OpportunityDeclined { id, .. } => *opportunities.entry(format!("{} declined", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                    Event::OpportunityVoid { id, .. } => *opportunities.entry(format!("{} void", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
+                    Event::OpportunityLapsed { id, .. } => *opportunities.entry(format!("{} lapsed", kind_of.get(id).unwrap_or(&"?"))).or_insert(0) += 1,
                     Event::GoalReached { .. } => reached += 1,
                     Event::GoalDropped { .. } => dropped += 1,
                     Event::Verb { verb, .. } => *verbs.entry(*verb).or_insert(0) += 1,
@@ -509,12 +529,13 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         war_lengths.iter().filter(|l| **l <= 1).count()
     );
     assert_eq!(declared_unpaid, 0, "a bot declared war with an unpaid army");
+    eprintln!("opportunities {opportunities:?}");
     assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
     // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
     // by their utility — the mean rate inside a step of it.
     let mean_rate = rates.iter().sum::<f64>() / rates.len().max(1) as f64;
     assert!((mean_rate - 0.10).abs() <= 0.02, "the bots' mean tax {mean_rate:.3} drifted more than a step from the tithe");
-    assert!(rejections.keys().all(|k| CONFLICTS.iter().any(|c| k.ends_with(c))), "a call preempted for another reason than a conflict of the tick: {rejections:?}");
+    assert!(rejections.keys().all(|k| is_conflict(k)), "a call preempted for another reason than a conflict of the tick: {rejections:?}");
     assert_eq!(falls, falls_by_conquest, "a polity falls only by conquest: every fall in the tick its last province was taken");
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");

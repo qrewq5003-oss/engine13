@@ -307,7 +307,9 @@ fn a_house_that_does_not_rule_takes_the_provinces_its_members_govern_into_a_poli
     let (p05, p10) = (at(0, 1), at(0, 2));
     assert_eq!(w.secession_carrier(p05), Some(o0));
     assert_eq!(w.secession_carrier(at(0, 3)), None, "no seat: the province would rise alone");
-    assert!(w.house_would_secede(o0), "E2: a bot house takes the chance");
+    // E3 (в): the chance is the house's to take (the bots answer by utility, a world
+    // without the contract by the rule of E2); here the secession is made at once.
+    assert!(w.secession_room(s0, p05, o0).is_ok(), "the house can take the chance");
     let treasury0 = w.treasury(s0);
     let people0: i64 = w.actors[&s0].provinces.iter().map(|q| w.population(*q)).sum();
     let gone = w.population(p05) + w.population(p10);
@@ -512,12 +514,22 @@ fn the_draw_has_the_form_of_b3_and_b6_once_per_province_but_the_capital_and_a_pr
     }
     let (p05, p10) = (at(0, 1), at(0, 2));
     w.provinces.get_mut(&p05).unwrap().religion = ReligionId(1);
+    // E3 (в): the draw opens the house's chance; a world ticked without the contract
+    // settles it at the next tick's start by the rule of E2 — the house takes it.
     let r = w.tick(&sure).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Secession { province, .. } if province == p05)), "one mark at legitimacy 50 and a base of a half: certain");
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Secession { province, .. } if province == p10)), "taken with its house");
-    assert!(!r.draws.iter().any(|d| d.draw.point == engine2::DrawPoint::Revolt && d.draw.id == p10.0), "a province taken this tick draws no more");
     assert!(r.draws.iter().any(|d| d.draw.point == engine2::DrawPoint::Revolt && d.draw.id == p05.0));
-    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Revolt { from, .. } | Event::Secession { from, .. } if from != s0)), "at legitimacy 100 nothing rises, whatever the marks");
+    assert!(
+        r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.what == engine2::Chance::Secession { polity: s0, province: p05 })),
+        "one mark at legitimacy 50 and a base of a half: certain"
+    );
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Secession { .. })), "the house decides at the next turn");
+    let r2 = w.tick(&sure).unwrap();
+    assert!(r2.events.iter().any(|e| matches!(e.event, Event::Secession { province, .. } if province == p05)), "taken at the next tick's start");
+    assert!(r2.events.iter().any(|e| matches!(e.event, Event::Secession { province, .. } if province == p10)), "taken with its house");
+    assert!(!r2.draws.iter().any(|d| d.draw.point == engine2::DrawPoint::Revolt && (d.draw.id == p10.0 || d.draw.id == p05.0)), "a province taken this tick draws no more");
+    for r in [&r, &r2] {
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Revolt { from, .. } | Event::Secession { from, .. } if from != s0)), "at legitimacy 100 nothing rises, whatever the marks");
+    }
     assert!(w.actors[&s1].provinces.len() == 5);
 }
 
@@ -638,6 +650,7 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
     // The expectation of the draws, carried and alone, against what happened.
     let (mut expected_carried, mut expected_alone) = (0.0f64, 0.0f64);
     let mut declared: Vec<String> = Vec::new();
+    let mut spliced_seed: Option<u64> = None;
     for seed in 1..=20u64 {
         let s = worldgen::generate(seed, &p);
         let mut g = bare(&s, params(), seed).unwrap();
@@ -704,7 +717,7 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
                     _ => {}
                 }
             }
-            if seed == 1 {
+            if spliced_seed.is_none() {
                 reports.push(r);
             }
         }
@@ -748,8 +761,11 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
         for (x, y) in w.wars.keys() {
             assert!(w.alive(*x) && w.alive(*y), "seed {seed}: a war with a fallen polity");
         }
-        if seed == 1 {
-            // Deterministic through a save, risings included.
+        // Deterministic through a save, risings included: on the first run with a polity
+        // born (since E3 (в) a house's chance can be void at the turn — seed 1's governor
+        // took the throne by a usurpation settled first — so the seed is not fixed).
+        if spliced_seed.is_none() && reports.iter().any(|r| r.events.iter().any(|e| matches!(e.event, Event::ActorBorn { .. }))) {
+            spliced_seed = Some(seed);
             let mut g2 = bare(&s, params(), seed).unwrap();
             let mut spliced = Vec::new();
             for _ in 0..150 {
@@ -760,10 +776,10 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
             for _ in 0..150 {
                 spliced.push(g3.tick(&[]).unwrap());
             }
-            assert_eq!(reports, spliced, "seed 1: the run differs through a save");
-            assert!(reports.iter().any(|r| r.events.iter().any(|e| matches!(e.event, Event::ActorBorn { .. }))), "seed 1: the run had a rising to carry");
+            assert_eq!(reports, spliced, "seed {seed}: the run differs through a save");
         }
     }
+    assert!(spliced_seed.is_some(), "some run had a rising to carry through a save");
     let per_century = risings as f64 / (large_ticks as f64 / 200.0);
     let ratio_century = polities_century as f64 / polities_start as f64;
     let at_war = war_ticks as f64 / polity_ticks as f64;

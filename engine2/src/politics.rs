@@ -247,7 +247,7 @@ impl World {
     }
 
     /// The usurpation itself: the ruler executed, the usurper seated.
-    fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
+    pub(crate) fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
         let dead = self.actors[&a].ruler;
         let court = self.polity_religion(a);
         self.die(dead, Cause::Execution, params)?;
@@ -622,8 +622,12 @@ impl World {
             let legitimacy = self.actors[a].legitimacy;
             let per_tick = params.usurpation_per_tick * (100.0 - legitimacy) / 50.0;
             if self.draw_once(DrawPoint::Usurpation, a.0) < per_tick {
+                // The lot makes the chance, the candidate's house decides in the next turn
+                // (owner's rule on #290, E3 (в)).
                 if let Some(u) = self.usurper_candidate(*a, params) {
-                    self.usurp(*a, u, params)?;
+                    let house = self.persons[&u].house;
+                    let ruler = self.actors[a].ruler;
+                    self.open_opportunity(crate::verbs::ActorRef::House(house), crate::opportunity::Chance::Usurpation { polity: *a, candidate: u, ruler });
                 }
             }
         }

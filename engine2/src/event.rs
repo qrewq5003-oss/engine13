@@ -177,6 +177,15 @@ pub enum Event {
     /// houses asking for the same bride): everyone decided on the state at the tick's
     /// start, and the calls are applied in one order for all (E3).
     Preempted { actor: ActorRef, verb: VerbId, target: Target },
+    /// An opportunity opened for its decider, to be answered in the next turn (E3 (в)).
+    OpportunityOpened { opportunity: crate::opportunity::Opportunity },
+    /// An opportunity taken; its effect is in the other events of the tick.
+    OpportunityTaken { id: u32, by: ActorRef },
+    OpportunityDeclined { id: u32, by: ActorRef },
+    /// Nobody answered: the opportunity is gone.
+    OpportunityLapsed { id: u32, to: ActorRef },
+    /// Taken, but the world changed since it was opened (a province lost, a candidate dead).
+    OpportunityVoid { id: u32, why: String },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

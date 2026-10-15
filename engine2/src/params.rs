@@ -231,6 +231,11 @@ pub struct Params {
     /// (в) The ticks over which a bot reads its army's paid share (E3 (в), owner's rule on
     /// #292): the bot's input, smoothed so that its tax does not swing with one tick's pay.
     pub agent_pay_memory_ticks: usize,
+    /// (в) What a house puts on the throne against the risk of a usurpation, and on a
+    /// polity of its own against the risk of a secession (E3 (в)): the houses' appetite,
+    /// checked through В6 and В8.
+    pub agent_weight_throne: f64,
+    pub agent_weight_independence: f64,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
     pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
@@ -391,6 +396,8 @@ impl Params {
         let advance = value("agent.advance_ratio")?;
         let open_goals = value("goal.open_per_polity")?;
         let pay_memory = value("agent.pay_memory_ticks")?;
+        let w_throne = value("agent.weight_throne")?;
+        let w_independence = value("agent.weight_independence")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
             (GoalKind::Hold, value("aspiration.weight_hold")?),
@@ -486,6 +493,8 @@ impl Params {
             agent_advance_ratio: advance,
             goal_open_per_polity: open_goals.round() as usize,
             agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
+            agent_weight_throne: w_throne,
+            agent_weight_independence: w_independence,
             aspiration_weights,
             entries,
         })

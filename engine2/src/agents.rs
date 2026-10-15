@@ -519,6 +519,74 @@ impl World {
         (self.army_size(a) as f64) < params.agent_advance_ratio * self.army_size(b) as f64
     }
 
+    /// The bots' answers to the open opportunities (E3 (в)): every opportunity the player
+    /// does not answer, by its decider's utility, on the state as it stands.
+    pub fn bot_answers(&self, player: Option<ActorRef>, params: &Params) -> Vec<crate::opportunity::Answer> {
+        use crate::opportunity::{Answer, Reply};
+        self.opportunities
+            .iter()
+            .filter(|o| !player.is_some_and(|p| self.answers_for(p, o)))
+            .map(|o| Answer { who: o.to, opportunity: o.id, reply: if self.bot_takes(o, params) { Reply::Take } else { Reply::Decline } })
+            .collect()
+    }
+
+    /// Whether a bot takes an opportunity: its utility above doing nothing.
+    pub fn bot_takes(&self, o: &crate::opportunity::Opportunity, params: &Params) -> bool {
+        use crate::opportunity::Chance;
+        match (o.to, &o.what) {
+            (ActorRef::House(h), Chance::Secession { polity, province }) => self.house_would_secede(h, *polity, *province, params),
+            (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
+            _ => false,
+        }
+    }
+
+    /// The utility of a secession for the house that would carry it (plan §23.2 p. 5): the
+    /// weakness of the ruler it leaves — `1 − L/100` — against the odds of being crushed,
+    /// the parent's army over both armies: the militia the provinces would levy at the
+    /// ceiling of А1 and the house's own men, which go with it.
+    pub fn secession_utility(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> f64 {
+        let capital = self.actors[&polity].capital;
+        let provinces: Vec<ProvinceId> = self.actors[&polity].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == house)).collect();
+        let retinue: i64 = self.units_of_house(house).iter().map(|u| self.soldiers(*u)).sum();
+        let own: i64 = provinces.iter().chain(std::iter::once(&province)).collect::<std::collections::BTreeSet<_>>().into_iter().map(|q| self.population(*q) * params.recruit_ceiling_ppm / 1_000_000).sum::<i64>() + retinue;
+        let parent = (self.army_size(polity) - retinue).max(0);
+        let crushed = if parent + own == 0 { 0.5 } else { parent as f64 / (parent + own) as f64 };
+        params.agent_weight_independence * (1.0 - self.actors[&polity].legitimacy / 100.0) - crushed
+    }
+
+    /// A bot's answer to a chance of secession (E2: always yes; E3 (в): by utility).
+    pub fn house_would_secede(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> bool {
+        self.secession_utility(house, polity, province, params) > 0.0
+    }
+
+    /// The utility of a usurpation for the candidate's house (plan §23.2 p. 5, owner's rule
+    /// on #290): the throne — a goal reached, 1 — against the risk and the price. **The
+    /// risk:** the usurper rules at the usurper's norm, and the throne at that legitimacy
+    /// kills — the next usurpation (the usurper executed) or a murder (E0 В3) — before the
+    /// candidate's natural death within the goal's horizon, by the candidate's age on the
+    /// mortality table: an old man risks less than a young one, since the reign is short
+    /// either way. **The price:** the legitimacy the polity loses down to the usurper's norm,
+    /// at the bot's price of legitimacy. A legitimate ruler is not worth deposing; a weak one
+    /// is.
+    pub fn usurpation_utility(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> f64 {
+        let l = self.actors[&polity].legitimacy;
+        let lu = l.min(params.legitimacy_norm_usurper);
+        let throne = ((params.usurpation_per_tick + params.violent_death_per_tick) * (100.0 - lu) / 50.0).clamp(0.0, 1.0);
+        let age = self.age(candidate);
+        let (mut alive, mut killed) = (1.0, 0.0);
+        for t in 0..params.goal_horizon_ticks {
+            let natural = (params.mortality_per_year(age + (t / 2) as i32) * params.mortality_elite_factor / 2.0).clamp(0.0, 1.0);
+            killed += alive * throne;
+            alive *= (1.0 - throne) * (1.0 - natural);
+        }
+        params.agent_weight_throne - killed - (l - lu) / 100.0 * params.agent_weight_price_legitimacy
+    }
+
+    /// A bot's answer to a chance of usurpation (E2: always yes; E3 (в): by utility).
+    pub fn house_would_usurp(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> bool {
+        self.usurpation_utility(polity, candidate, params) > 0.0
+    }
+
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         Context {

@@ -518,6 +518,11 @@ pub struct World {
     pub next_person: u32,
     /// Regions: named sets of provinces, facts of the scenario (E3); index = `RegionId`.
     pub regions: Vec<Vec<ProvinceId>>,
+    /// The opportunities opened in the last tick, waiting for the next turn's answers
+    /// (E3 (в), `opportunity.rs`): between ticks — where a save is taken — they are open.
+    pub opportunities: Vec<crate::opportunity::Opportunity>,
+    /// Next opportunity id.
+    pub next_opportunity: u32,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -800,6 +805,8 @@ impl World {
             persons,
             next_person,
             regions,
+            opportunities: Vec::new(),
+            next_opportunity: 0,
             names,
             ledger,
             draws: Vec::new(),
@@ -931,6 +938,11 @@ impl World {
     /// — one keyed draw per deciding actor — come before the tick, through
     /// [`World::decide_all`] (E3; the E1 stand-in draw is gone).
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
+        // Opportunities of the last tick nobody settled through the contract (a world
+        // ticked without a game): by the rule of E2 (`opportunity.rs`).
+        if !self.opportunities.is_empty() {
+            self.settle_opportunities(&[], None, true, params)?;
+        }
         self.phase_movement(params)?;
         self.phase_battle(params)?;
         self.phase_siege(params)?;

@@ -154,39 +154,66 @@ impl World {
         self.provinces[&p].governor.map(|g| self.persons[&g].house).filter(|h| *h != ruling)
     }
 
-    /// Whether a house takes the chance to secede the draw gave it. **E2: every house is a
-    /// bot, and a bot takes it.** E3: the agent's decision; a player's house decides for
-    /// itself, and the lot never drags it into a war with its own lord (owner's rule on §21).
-    pub fn house_would_secede(&self, _house: HouseId) -> bool {
-        true
-    }
-
-    /// A rising now, in `p`, outside the tick. For the tests only.
+    /// A rising now, in `p`, outside the tick: a house carrying it secedes at once, without
+    /// the opportunity. For the tests only.
     #[cfg(feature = "testing")]
     pub fn rise_now(&mut self, p: ProvinceId, params: &Params) -> Result<Option<ActorId>, WorldError> {
-        self.rise(p, params)
+        let parent = self.provinces[&p].owner;
+        if !self.alive(parent) || self.actors[&parent].capital == p || self.population(p) < 1 || self.in_revolt(p) {
+            return Ok(None);
+        }
+        match self.secession_carrier(p) {
+            Some(house) => self.secede(p, house, params).map(Some),
+            None => {
+                self.rise(p, params)?;
+                Ok(None)
+            }
+        }
     }
 
-    /// The rising of `p`. With a house to carry it the successor polity is born and takes
-    /// its provinces, its share of the treasury, its militia, its edges and its war; with
-    /// none the province is in revolt. `None` when no polity is born — a revolt, a capital,
-    /// a fallen owner, a province with nobody in it, a house that declines.
-    fn rise(&mut self, p: ProvinceId, params: &Params) -> Result<Option<ActorId>, WorldError> {
+    /// The rising of `p`. With a house to carry it the house gets **the opportunity** to
+    /// secede (E3 (в): the lot makes the chance, the house decides in the next turn — a
+    /// player's house is never dragged by the lot into a war with its own lord, owner's
+    /// rule on §21); with none the province is in revolt.
+    fn rise(&mut self, p: ProvinceId, params: &Params) -> Result<(), WorldError> {
         let parent = self.provinces[&p].owner;
         let capital = self.actors[&parent].capital;
         if !self.alive(parent) || capital == p || self.population(p) < 1 || self.in_revolt(p) {
-            return Ok(None);
+            return Ok(());
         }
         let Some(house) = self.secession_carrier(p) else {
             // No house to carry it: the province is in revolt, the ruler pays.
             self.provinces.get_mut(&p).unwrap().revolt = Some(self.tick);
             self.pay_legitimacy(parent, params.legitimacy_cost_revolt);
             self.emit(Event::Revolt { province: p, from: parent });
-            return Ok(None);
+            return Ok(());
         };
-        if !self.house_would_secede(house) {
-            return Ok(None);
+        self.open_opportunity(crate::verbs::ActorRef::House(house), crate::opportunity::Chance::Secession { polity: parent, province: p });
+        Ok(())
+    }
+
+    /// Whether `house` can still take `province` out of `polity`: the polity alive and
+    /// holding it, not its capital, people in it, not in revolt, governed by the house, the
+    /// house of the polity and not ruling it.
+    pub fn secession_room(&self, polity: ActorId, province: ProvinceId, house: HouseId) -> Result<(), &'static str> {
+        if !self.alive(polity) || self.provinces[&province].owner != polity {
+            return Err("the province is no longer the polity's");
         }
+        if self.actors[&polity].capital == province || self.population(province) < 1 || self.in_revolt(province) {
+            return Err("the province cannot rise");
+        }
+        if self.secession_carrier(province) != Some(house) || self.houses[&house].polity != polity {
+            return Err("the house no longer holds the seat");
+        }
+        Ok(())
+    }
+
+    /// The secession of `house` with the provinces it governs: the successor polity is born
+    /// and takes its provinces, its share of the treasury, its militia, its edges and its
+    /// war.
+    pub(crate) fn secede(&mut self, p: ProvinceId, house: HouseId, params: &Params) -> Result<ActorId, WorldError> {
+        let parent = self.provinces[&p].owner;
+        let capital = self.actors[&parent].capital;
         let provinces: Vec<ProvinceId> = self.actors[&parent].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == house)).collect();
         let people_total: i64 = self.actors[&parent].provinces.iter().map(|q| self.population(*q)).sum();
         let people_gone: i64 = provinces.iter().map(|q| self.population(*q)).sum();
@@ -305,7 +332,7 @@ impl World {
             self.relations.insert(crate::army::pair(new, *b), norm);
         }
         self.emit(Event::ActorBorn { actor: new, from: parent, house, provinces });
-        Ok(Some(new))
+        Ok(new)
     }
 
     /// The militia of a polity born this tick: every province levies up to the ceiling of
@@ -347,9 +374,10 @@ impl World {
             self.emit(Event::RevoltEnded { province: q, actor: owner });
         }
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().filter(|q| self.revolt_chance_per_tick(*q, params) > 0.0 || self.alive(self.provinces[q].owner)).collect();
-        let mut born: BTreeSet<ProvinceId> = BTreeSet::new();
+        // A polity born this tick (a secession taken at the turn) draws no rising yet.
+        let born: BTreeSet<ActorId> = self.events_of_tick().iter().filter_map(|e| if let Event::ActorBorn { actor, .. } = e.event { Some(actor) } else { None }).collect();
         for q in provinces {
-            if born.contains(&q) {
+            if born.contains(&self.provinces[&q].owner) {
                 continue;
             }
             let chance = self.revolt_chance_per_tick(q, params);
@@ -357,9 +385,7 @@ impl World {
                 continue;
             }
             if self.draw_once(DrawPoint::Revolt, q.0) < chance {
-                if let Some(new) = self.rise(q, params)? {
-                    born.extend(self.actors[&new].provinces.iter().copied());
-                }
+                self.rise(q, params)?;
             }
         }
         Ok(())

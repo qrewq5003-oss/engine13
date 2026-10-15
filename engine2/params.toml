@@ -594,9 +594,13 @@ checked_by = "Э9"
 # by turns and burned their legitimacy — a step of the tax 10 − 5 points a turn, a peace
 # treaty broken every other tick 20 — and the usurpations it invited held В6 at 2.4; with
 # the swings gone it fell to 1.9 below the band (0.035 — 2.1, 0.04 — 2.6, 0.045 — 3.0).
+# Then 0.04 → 0.05 when the candidate's house decides (E3 (в), plan §23h): the houses
+# decline a usurpation of a legitimate ruler (110 of 685 chances) — at 0.04 В6 2.3 and В8
+# 0.49–0.51 on the edge, at 0.05 В6 2.6. At 0.06 four deterministic tests of E2 systems saw
+# a usurpation in their window.
 [usurpation.per_year]
 kind = "c"
-value = 0.04
+value = 0.05
 unit = "share per year at legitimacy 50"
 checked_by = "В6"
 
@@ -1120,3 +1124,29 @@ kind = "c"
 value = 6.0
 unit = "ticks"
 checked_by = "В6"
+
+# (в) What a house puts on the throne when the lot offers it a usurpation (E3 (в), owner's
+# rule on #290: the candidate's house decides): weighed against the risk — the throne at the
+# usurper's norm kills, by the next usurpation or a murder, before natural death — and the
+# legitimacy the polity loses. At 1 (a goal reached) a house usurped only a ruler below
+# ~40 legitimacy and В6 fell to 1.2; the base rate cannot lift it, since the risk grows with
+# it (0.06 — 1.6, 0.08 — 1.8, 0.10 — 1.7). At 1.5 the houses declined 3 chances of 533 —
+# no decision left; at 1.25 with the base 0.05 they decline 110 of 685, В6 2.6 (plan §23h).
+# Checked through В6.
+[agent.weight_throne]
+kind = "c"
+value = 1.25
+unit = "goals"
+checked_by = "В6"
+
+# (в) What a house puts on a polity of its own when the lot offers it a secession: weighed by
+# the weakness of the ruler it leaves, against the odds of being crushed by the parent's army
+# (plan §23h). At 1 the houses took 9–13 chances of ~75; at 1.5 they take 23 of 74 (34
+# declined, 17 void — the same house took the throne first); at 2 a ruler at legitimacy 50
+# or below is left whatever its army. В8 barely moves with it (0.51–0.53): the gathering by
+# conquest decides it. Checked through В8.
+[agent.weight_independence]
+kind = "c"
+value = 1.5
+unit = "goals"
+checked_by = "В8"
