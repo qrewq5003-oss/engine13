@@ -203,6 +203,18 @@ pub struct Params {
     /// (в) The chance per tick that a polity takes up an institution a polity it is in
     /// contact with holds (E2 step 8).
     pub institution_adoption_per_tick: f64,
+    /// (в) E0 В7: the base chance per tick that a province of a living polity rises (at
+    /// legitimacy 50, no mark of alienation; E2 step 9).
+    pub revolt_per_tick: f64,
+    /// (в) What a province rising in revolt costs its ruler in legitimacy, once.
+    pub legitimacy_cost_revolt: f64,
+    /// (в) The core tongue of a polity changes only when another tongue outgrows it by this
+    /// share of the polity's people, parts per million (owner's rule on §21).
+    pub core_switch_margin_ppm: i64,
+    /// E0 Х2: the ruling house's retinue as parts per million of the polity's army, and (в)
+    /// the retinue of a house that does not rule.
+    pub retinue_share_ppm: i64,
+    pub other_retinue_share_ppm: i64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -348,6 +360,11 @@ impl Params {
         let conversion_seed = value("conversion.seed_share")?;
         let neighbourhood_factor = value("conversion.neighbourhood_factor")?;
         let adoption = value("institution.adoption_per_year")?;
+        let revolt = value("revolt.per_year")?;
+        let cost_revolt = value("legitimacy.cost_revolt")?;
+        let core_margin = value("core.switch_margin")?;
+        let retinue = value("house.retinue_share_of_army")?;
+        let other_retinue = value("house.other_retinue_share")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -423,6 +440,11 @@ impl Params {
             conversion_seed_ppm: (conversion_seed * 1_000_000.0).round() as i64,
             conversion_neighbourhood_factor: neighbourhood_factor,
             institution_adoption_per_tick: adoption / 2.0,
+            revolt_per_tick: revolt / 2.0,
+            legitimacy_cost_revolt: cost_revolt,
+            core_switch_margin_ppm: (core_margin * 1_000_000.0).round() as i64,
+            retinue_share_ppm: (retinue * 1_000_000.0).round() as i64,
+            other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,
             entries,
         })
     }

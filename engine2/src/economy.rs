@@ -3,7 +3,9 @@
 //! interest — every entry through the ledger and signed with its source.
 //!
 //! Per polity, per tick, in canonical order of actors:
-//! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2);
+//! - **production** = Σ people × `production.output_per_head_kg` / 2 (E0 Э2) over the
+//!   provinces not in revolt (E2 step 9: a province in revolt pays no tax and gives no seat
+//!   its income);
 //! - **tax** = production × the polity's tax rate (`Actor::tax_rate_ppm`, started at
 //!   `tax.default_rate`, E0 Э4 — the tithe as the norm of an agrarian tax) × **the share
 //!   collected** (E2 step 6b, review of #286): the share falls by
@@ -24,14 +26,19 @@
 //! - **court** = tax × `court.share_of_revenue` (E0 Э5) → `Source::Court`;
 //! - **interest** on the debt at `loan.interest_per_year` / 2 (E0 Э6) → `Source::Interest`:
 //!   paid from the treasury when it can; what it cannot pay is added to the debt;
-//! - **pay due** = soldiers × `army.pay_per_soldier_outputs` × output per head / 2 (E0 А3);
-//!   the polity pays what the treasury holds, and — **only with a bank** — borrows the
-//!   shortfall while the debt is under `loan.ceiling_years_of_revenue` × yearly revenue
-//!   (E0 Э7). The paid share is the share of the army that is supplied at home
-//!   (`movement.rs`); the rest melts by А7;
+//! - **pay due** = soldiers × `army.pay_per_soldier_outputs` × output per head / 2 (E0 А3)
+//!   over the polity's own men and the ruling house's retinue (E0 Х2, E2 step 9: the
+//!   famiglia ducale was the duchy's charge — owner's rule on §21); the polity pays what the
+//!   treasury holds, and — **only with a bank** — borrows the shortfall while the debt is
+//!   under `loan.ceiling_years_of_revenue` × yearly revenue (E0 Э7). The paid share is the
+//!   share of the army that is supplied at home (`movement.rs`); the rest melts by А7;
 //! - **repayment**: what is left in the treasury after the pay goes against the debt
 //!   (`Source::Repayment`), so a loan lives as long as it is needed and a polity never sits
-//!   on a reserve while paying interest.
+//!   on a reserve while paying interest;
+//! - **the houses' retinues** (E0 Х2): a house that does not rule pays its own men from its
+//!   treasury (`Source::Upkeep` on `Account::HouseTreasury`), what it holds of the pay; its
+//!   paid share is kept on the house and its unpaid men melt like the polity's
+//!   (`HousePayShortfall`). The house's budget is its limit; no bank lends to a house.
 //!
 //! **Debt is explicit (review of PR #283).** No treasury is ever negative; what a polity
 //! owes is the stock `Account::Debt`. A loan is two entries of the same amount — `+treasury`,
@@ -100,7 +107,13 @@ pub enum VerbError {
 impl World {
     /// Production of a polity per tick (half a year), kg of wheat-equivalent.
     pub fn production_per_tick(&self, a: ActorId, params: &Params) -> i64 {
-        self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum::<i64>() * params.output_per_head_kg / 2
+        self.taxable_people(a) * params.output_per_head_kg / 2
+    }
+
+    /// The people a polity taxes: those of its provinces not in revolt (E2 step 9: a
+    /// province in revolt pays nothing).
+    pub fn taxable_people(&self, a: ActorId) -> i64 {
+        self.actors[&a].provinces.iter().filter(|p| !self.in_revolt(**p)).map(|p| self.population(*p)).sum()
     }
 
     /// Soldiers a polity's budget keeps paid: the revenue left after the court, over the pay
@@ -223,6 +236,9 @@ impl World {
             let ruling_house = self.persons[&self.actors[&a].ruler].house;
             let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
             for p in self.actors[&a].provinces.clone() {
+                if self.in_revolt(p) {
+                    continue;
+                }
                 if let Some(g) = self.provinces[&p].governor {
                     let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000 * share / 1_000_000;
                     seats.push((self.persons[&g].house, province_tax * params.seat_income_share_ppm / 1_000_000));
@@ -255,7 +271,10 @@ impl World {
                     }
                 }
             }
-            let soldiers: i64 = self.units_of(a).iter().map(|u| self.soldiers(*u)).sum();
+            // The polity pays its own men and the ruling house's retinue; a house that does
+            // not rule pays its own below (E0 Х2, owner's rule on §21).
+            let units = self.units_of(a);
+            let soldiers: i64 = units.iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.soldiers(*u)).sum();
             let pay_due = soldiers * params.pay_per_soldier_kg_per_year / 2;
             let shortfall = (pay_due - self.treasury(a)).max(0);
             let borrowed = shortfall.min(self.loan_room(a, params));
@@ -276,6 +295,22 @@ impl World {
             if repaid > 0 {
                 self.post(treasury, Source::Repayment, -repaid * 1000)?;
                 self.post(Account::Debt(a), Source::Repayment, -repaid * 1000)?;
+            }
+            // The retinues of the houses that do not rule (E0 Х2): each house pays its own
+            // men from its treasury, what it holds of the pay; the unpaid share melts at
+            // home by А7 (`movement.rs`) — the house's budget is its limit, as the polity's
+            // is the polity's. No bank lends to a house.
+            for h in self.houses_of(a) {
+                let men: i64 = units.iter().filter(|u| self.house_pays(**u) == Some(h)).map(|u| self.soldiers(*u)).sum();
+                let due = men * params.pay_per_soldier_kg_per_year / 2;
+                let paid = due.min(self.house_treasury(h));
+                if paid > 0 {
+                    self.post(Account::HouseTreasury(h), Source::Upkeep, -paid * 1000)?;
+                }
+                self.houses.get_mut(&h).unwrap().paid_share_ppm = if due == 0 { 1_000_000 } else { paid * 1_000_000 / due };
+                if paid < due {
+                    self.emit(Event::HousePayShortfall { house: h, unpaid_kg: (due - paid) as u64 });
+                }
             }
             out.push((a, Budget { production, income, court, pay_due, paid, borrowed, interest, repaid }));
         }

@@ -12,6 +12,8 @@
 //! the budget as the army's limit, the bank as the first institution. E2 step 5: the army
 //! (`army.rs`) — war, march, battle, siege, the fall of polities. E2 step 6a: the house and
 //! the throne (`politics.rs`) — people, houses, seats, deaths, births, succession, regency.
+//! E2 step 9: collapse (`collapse.rs`) — provinces rise, a house takes its land into a
+//! polity of its own, the successor gets provinces and a war, not a copy of metrics.
 //! No systems yet: a tick advances time, journals one decision draw per actor, runs one
 //! stand-in flow (population toward capacity) and keeps the ledger balanced.
 //!
@@ -25,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 pub mod army;
+pub mod collapse;
 pub mod diplomacy;
 pub mod economy;
 pub mod event;

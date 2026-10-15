@@ -9,7 +9,9 @@
 //! §20) — and a house that takes the throne takes the faith of the court (owner's rule on
 //! #288: a foreign dynasty took the faith of the land; `politics.rs`), its tongue staying
 //! its own, so the court's faith changes only by its own decision (the union, E3). A house
-//! raised from the people prays as the court did and speaks as its capital does.
+//! raised from the people prays as the court did and speaks as its capital does. Alienation
+//! reads the court for the faith and the **core** — the tongue of the polity's majority
+//! (`collapse.rs`) — for the tongue (owner's rule on §21).
 //!
 //! **Conversion** (Р1). A province keeps its majority and one minority on the move
 //! (`Shift`): the share won to another faith grows along the logistic curve
@@ -56,12 +58,14 @@ impl World {
         self.houses[&self.persons[&self.actors[&a].ruler].house].culture
     }
 
-    /// A province whose majority prays or speaks otherwise than its owner's court: the
-    /// entry of collapse (В7, secession by culture and region), with no effect on the take
-    /// in E2 (owner's answer on §20: Э8 stays clean).
+    /// A province whose majority prays otherwise than its owner's **court**, or speaks
+    /// otherwise than its owner's **core** — the tongue of the polity's majority
+    /// (`collapse.rs`; owner's rule on §21: foreign-tongued courts were the norm, what fell
+    /// away were the regions of another tongue and faith than the core): the entry of
+    /// collapse (В7, secession by culture and region), with no effect on the take in E2
+    /// (owner's answer on §20: Э8 stays clean).
     pub fn alienated(&self, p: ProvinceId) -> bool {
-        let pr = &self.provinces[&p];
-        pr.religion != self.polity_religion(pr.owner) || pr.culture != self.polity_culture(pr.owner)
+        self.alienation_marks(p) > 0
     }
 
     /// The one value more than half of a province's neighbours (land and sea) share, if

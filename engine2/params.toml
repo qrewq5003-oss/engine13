@@ -880,3 +880,86 @@ kind = "c"
 value = 0.005
 unit = "chance per year with a channel"
 checked_by = "Р3"
+
+# ---- collapse and successors (E2 step 9, plan §21) ----
+
+# E0 В7 — observed: risings of provinces and secessions per century per large polity (five
+# provinces and more). Rome: Firmus 372, Magnus Maximus 383, Eugenius 392 ≈ 3–5 a century
+# (Ammianus XXIX — по памяти); Italy: Volterra 1472, Genoa 1478, Otranto 1480 ≈ 3–5 a
+# century per large polity (Mallett 1974 — по памяти). One band. Measured on the generated
+# worlds (`tests/collapse.rs`): the rate of risings, not of their success — in E2 nobody
+# marches to put one down (the agents of E3 do), so the rising stands and the war with the
+# parent stays open.
+[revolt.observed_per_century]
+kind = "b"
+band = [2.0, 5.0]
+unit = "risings per century per polity of five provinces and more"
+e0 = "В7"
+
+# (в) The base chance a year that a province of a living polity rises — at legitimacy 50
+# and with no mark of alienation; the capital never (a rising there is the coup of В6).
+# Applied as В7_base/2 × (1 + marks) × (100 − L)/50 a tick, the form of В3 and В6: a loyal
+# province can rise too (Volterra 1472 was a tax revolt), one of another faith and another
+# tongue than the court and the core three times as readily. Checked through В7.
+[revolt.per_year]
+kind = "c"
+value = 0.005
+unit = "share per province per year at legitimacy 50, no alienation"
+checked_by = "В7"
+
+# (в) The core tongue of a polity — the tongue of the majority of its people — changes only
+# when another tongue outgrows it by this share of the polity's people (owner's rule on §21:
+# a core that flipped with the capital would alienate the whole heartland at a siege; a
+# majority by people moves only with large shifts, and the margin keeps a near-even polity
+# from flapping). Checked through В7.
+[core.switch_margin]
+kind = "c"
+value = 0.1
+unit = "share of the polity's people"
+checked_by = "В7"
+
+# E0 Х2 — the ruling house's own men as a share of the polity's army: the famiglia ducale
+# of the Sforza ≈ 2 000 horse of an army ≈ 20 000 (Covini 1998 — по памяти; the 2 000 —
+# открыл (вторичное)). A fact of the scenario (`houses.<id>.soldiers`); the generator draws
+# the ruling house's retinue by this row, inside the army of А11, not on top of it. Paid by
+# the polity (owner's rule on §21: at Х1 ≈ 2 % of the income a house could never keep 10 %
+# of the army).
+[house.retinue_share_of_army]
+kind = "a"
+value = 0.10
+band = [0.05, 0.15]
+unit = "share of the polity's army"
+e0 = "Х2"
+
+# (в) The retinue of a house that does not rule, as a share of the polity's army, paid from
+# the house's own treasury (E0 Х1); what the house cannot pay melts (А7). Checked through
+# Х4 — the great houses' share of the income.
+[house.other_retinue_share]
+kind = "c"
+value = 0.02
+unit = "share of the polity's army"
+checked_by = "Х4"
+
+# (в) What a province rising in revolt costs its ruler in legitimacy — a blow, once (a
+# revolt is an event, not a lasting decision of the ruler; a standing revolt in E2 stands
+# only because nobody marches to put it down, and a norm shift would turn that into a
+# cascade of usurpations). Checked through В7.
+[legitimacy.cost_revolt]
+kind = "c"
+value = 5.0
+unit = "legitimacy, 0–100"
+checked_by = "В7"
+
+# E0 В8 (row added at E2, collapse; owner's rule on #289) — observed: the number of
+# polities a century after the start, relative to the start. By memory: the West of 375
+# fell into half a dozen successor kingdoms by 475 and the East stood — more polities, not
+# three times as many; Italy of 1400 consolidated into the five powers by 1454 (Mallett
+# 1974, ch. 1); the Balkans of 1430 were swallowed by one. One band: a world may fragment or
+# gather, but not threefold in a century. Source to open. The engine answers for the
+# fragmentation (secessions carried by a house); the gathering is the agents' (E3), so the
+# lower edge is theirs to meet. Measured on the generated worlds (`tests/collapse.rs`).
+[collapse.observed_polities_after_a_century]
+kind = "b"
+band = [0.5, 1.6]
+unit = "polities a century on, per polity at the start"
+e0 = "В8"

@@ -119,6 +119,10 @@ pub struct House {
     /// ruling house does; a house raised from the people takes its capital's.
     pub culture: CultureId,
     pub religion: ReligionId,
+    /// Share of the pay of the house's own men met this tick, parts per million (E2 step
+    /// 9, E0 Х2): a house that does not rule pays its retinue from its own treasury
+    /// (`economy.rs`); the ruling house's retinue is the polity's charge.
+    pub paid_share_ppm: i64,
 }
 
 /// A province's majority on the move (E2 step 8): the share of its people already won to
@@ -178,6 +182,11 @@ pub struct Actor {
     /// the outcome of a peace; tribute by E0 Д2 (`economy.rs`), the lord's wars are its
     /// wars (`army.rs`), a war on the lord is the way out.
     pub vassal_of: Option<ActorId>,
+    /// The core tongue of the polity (E2 step 9, owner's rule on §21): the tongue of the
+    /// majority of its people, kept until another tongue outgrows it by the margin
+    /// (`collapse.rs`). A province of another tongue than the core is alienated — not one
+    /// of another tongue than the court, which was the norm before nationalism.
+    pub core_culture: CultureId,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -298,6 +307,11 @@ pub struct Province {
     pub religion: ReligionId,
     pub assimilating: Option<Shift<CultureId>>,
     pub converting: Option<Shift<ReligionId>>,
+    /// In revolt since this tick (E2 step 9, owner's rule on #289): a province that rose
+    /// with no house to carry it — no tax, no supply for its owner's men, who forage there
+    /// as on foreign land; it ends when a unit of the owner has stood there a tick
+    /// (`collapse.rs`).
+    pub revolt: Option<Tick>,
 }
 
 /// An army on the graph: owner, position, quality, and where it is ordered to go. Its
@@ -314,6 +328,11 @@ pub struct Unit {
     /// Hired men (E0 А4): they came from outside the world and leave it when disbanded;
     /// a levy goes back to the people.
     pub mercenary: bool,
+    /// The house whose men these are (E0 Х2, E2 step 9): the retinue of a house marches,
+    /// fights and is supplied as a unit of the house's polity — the owner — and follows the
+    /// house when it takes its provinces into a polity of its own (`collapse.rs`). None for
+    /// the polity's own levies and hired men.
+    pub house: Option<HouseId>,
 }
 
 /// A siege in progress: who besieges and for how many consecutive ticks.
@@ -382,6 +401,9 @@ pub struct HouseFact {
     pub treasury_kg: i64,
     pub culture: CultureId,
     pub religion: ReligionId,
+    /// The house's own men at the start (E0 Х2): one unit at the polity's capital, owned by
+    /// the polity and marked with the house.
+    pub soldiers: u64,
 }
 
 /// One person of the starting facts; all of them alive at the start.
@@ -577,7 +599,7 @@ impl World {
                 return Err(WorldError::UnknownHousePolity(id, h.polity));
             }
             known_faith(h.culture, h.religion)?;
-            houses.insert(id, House { polity: h.polity, culture: h.culture, religion: h.religion });
+            houses.insert(id, House { polity: h.polity, culture: h.culture, religion: h.religion, paid_share_ppm: 1_000_000 });
             ledger.open(tick, Account::HouseTreasury(id), h.treasury_kg)?;
         }
         let mut persons: BTreeMap<PersonId, Person> = BTreeMap::new();
@@ -635,6 +657,8 @@ impl World {
                     credit_closed_until: None,
                     defaulted: false,
                     vassal_of: None,
+                    // Set below, once the provinces and their people are in.
+                    core_culture: CultureId(0),
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -676,6 +700,7 @@ impl World {
                     religion: f.religion,
                     assimilating: None,
                     converting: None,
+                    revolt: None,
                 },
             );
             ledger.open(tick, Account::Population(id), f.population as i64)?;
@@ -690,8 +715,19 @@ impl World {
             if a.soldiers > 0 {
                 let uid = UnitId(next_unit);
                 next_unit += 1;
-                units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None, mercenary: false });
+                units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None, mercenary: false, house: None });
                 ledger.open(tick, Account::Soldiers(uid), a.soldiers as i64)?;
+            }
+        }
+        // The houses' own men (E0 Х2): a unit of the house's polity at its capital, marked
+        // with the house.
+        for (i, h) in facts.houses.iter().enumerate() {
+            if h.soldiers > 0 {
+                let house = HouseId(i as u32);
+                let uid = UnitId(next_unit);
+                next_unit += 1;
+                units.insert(uid, Unit { owner: h.polity, position: facts.actors[h.polity.index()].capital, quality: 50.0, destination: None, mercenary: false, house: Some(house) });
+                ledger.open(tick, Account::Soldiers(uid), h.soldiers as i64)?;
             }
         }
         // The opening postings belong to no tick report; the world starts settled.
@@ -722,11 +758,14 @@ impl World {
             next_seq: 0,
         };
         // Legitimacy starts at the norm of the ruler's standing (a minor on the throne
-        // starts at the regency norm).
+        // starts at the regency norm); the core tongue is the majority's at the start.
         let ids: Vec<ActorId> = world.actors.keys().copied().collect();
         for a in &ids {
             let norm = world.legitimacy_norm(*a, params);
-            world.actors.get_mut(a).unwrap().legitimacy = norm;
+            let core = world.majority_culture(*a);
+            let actor = world.actors.get_mut(a).unwrap();
+            actor.legitimacy = norm;
+            actor.core_culture = core;
         }
         // Starting relations (E2 step 7): wars, alliances to a year, vassals; then every
         // pair's relation at its norm.
@@ -824,7 +863,8 @@ impl World {
     /// (`movement.rs`), battles and sieges (`army.rs`), the economy produces, taxes and
     /// pays (`economy.rs`), units are supplied to the paid share, the house and the throne
     /// (`politics.rs`), treaties run out and relations move to their norms
-    /// (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), people grow, starve,
+    /// (`diplomacy.rs`), provinces convert along Р1 (`faith.rs`), provinces rise and houses
+    /// take their land into polities of their own (`collapse.rs`), people grow, starve,
     /// sicken and migrate (`population.rs`), then `TickPlayed`.
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
         let actor_ids: Vec<u32> = self.actors.keys().map(|a| a.0).collect();
@@ -837,6 +877,7 @@ impl World {
         self.phase_people(params)?;
         self.phase_diplomacy(params)?;
         self.phase_faith(params)?;
+        self.phase_collapse(params)?;
         self.phase_population(params)?;
         self.ledger.check()?;
         self.emit(Event::TickPlayed);
@@ -876,9 +917,14 @@ impl World {
         self.ledger.stock(Account::HouseTreasury(h)).unwrap_or(0)
     }
 
-    /// The units of an actor, in id order.
+    /// The units of an actor, in id order — its own and its houses' (E0 Х2).
     pub fn units_of(&self, a: ActorId) -> Vec<UnitId> {
         self.units.iter().filter(|(_, u)| u.owner == a).map(|(id, _)| *id).collect()
+    }
+
+    /// The units of a house, in id order.
+    pub fn units_of_house(&self, h: HouseId) -> Vec<UnitId> {
+        self.units.iter().filter(|(_, u)| u.house == Some(h)).map(|(id, _)| *id).collect()
     }
 }
 
@@ -953,7 +999,7 @@ mod tests {
         let r = w.tick(&params()).unwrap();
         assert_eq!(r.tick, Tick(0));
         assert_eq!(r.draws.iter().filter(|d| d.draw.point == DrawPoint::Decision).count(), w.actors.len());
-        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth)), "no system of the test world draws elsewhere");
+        assert!(r.draws.iter().all(|d| matches!(d.draw.point, DrawPoint::Decision | DrawPoint::Mortality | DrawPoint::Violence | DrawPoint::Usurpation | DrawPoint::Birth | DrawPoint::Revolt)), "no system of the test world draws elsewhere");
         assert!(r.postings.iter().all(|p| matches!(p.source, Source::Growth | Source::MigrationIn | Source::MigrationOut | Source::Tax | Source::Seat | Source::Court | Source::Upkeep)), "every unit is paid at home: people move and wheat flows, nobody deserts");
         assert!(r.postings.iter().any(|p| p.source == Source::Growth));
         assert!(r.postings.iter().any(|p| p.source == Source::Tax));

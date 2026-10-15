@@ -131,7 +131,11 @@ fn when_the_ruling_house_dies_out_the_throne_passes_to_another_house_of_the_poli
     w.kill(r0, Cause::Murder, &p).unwrap();
     let r = w.tick(&p).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::HouseExtinct { house } if house == house_of(&s, "h0"))));
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province: ProvinceId(5), from, to: None } if from == b0)));
+    // The seat of the dead governor goes to the other house (owner's rule on #289: no seat
+    // stays vacant while a house could hold it) — and falls vacant when its holder takes
+    // the throne, nobody being left.
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province: ProvinceId(5), from, to: Some(to) } if from == b0 && to == other)));
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province: ProvinceId(5), from, to: None } if from == other)));
     assert_eq!(w.provinces[&ProvinceId(5)].governor, None);
     // Blood rule, but the blood is gone: the other house takes the throne by acclamation.
     assert_eq!(succession_of(&r, s0), Some((r0, other, Standing::Acclaimed)));
@@ -282,6 +286,10 @@ fn on_generated_worlds_reigns_lie_in_b5_deaths_are_natural_and_violent_houses_ne
                     Event::HouseExtinct { .. } => extinct += 1,
                     Event::ActorDied { .. } => falls += 1,
                     Event::NewDynasty { .. } => dynasties += 1,
+                    // A polity born of a rising (E2 step 9): its first reign runs from now.
+                    Event::ActorBorn { actor, .. } => {
+                        since.insert(actor, t + 1);
+                    }
                     _ => {}
                 }
             }

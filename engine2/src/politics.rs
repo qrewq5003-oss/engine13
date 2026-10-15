@@ -71,13 +71,14 @@
 //!
 //! The seat income of a house (E0 Х1) is posted by the economy (`economy.rs`): a share of
 //! the polity's tax for the throne, of the province's tax for a governorship, as a transfer
-//! `Source::Seat` from the treasury to the house's treasury. **A house's treasury has no
-//! spending in E2** (bribes went to diplomacy, house troops to the collapse system): it
-//! grows without an outlet until then — recorded here so that the growth is not read as a
-//! defect (owner's note on §18).
+//! `Source::Seat` from the treasury to the house's treasury. A house's treasury has two
+//! outlets: the dowry (diplomacy, E2 step 7) and — since E2 step 9 — the pay of its own men
+//! (E0 Х2) when the house does not rule (`economy.rs`); the ruling house's retinue is the
+//! polity's charge (owner's rule on §21). A house that dies out loses its men to the people
+//! where they stand.
 
 use crate::event::{Cause, Event};
-use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
+use crate::ids::{ActorId, HouseId, PersonId, ProvinceId, UnitId};
 use crate::ledger::{Account, Source};
 use crate::params::Params;
 use crate::economy::VerbError;
@@ -157,7 +158,7 @@ impl World {
     }
 
     /// The seats a person holds besides the throne: the provinces it governs.
-    fn governed_by(&self, p: PersonId) -> Vec<ProvinceId> {
+    pub(crate) fn governed_by(&self, p: PersonId) -> Vec<ProvinceId> {
         self.provinces.iter().filter(|(_, pr)| pr.governor == Some(p)).map(|(id, _)| *id).collect()
     }
 
@@ -247,8 +248,9 @@ impl World {
         }
         self.keep_court_faith(court, usurper);
         self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
+        // The seats the usurper leaves go to other houses (owner's rule on #289).
         for province in self.governed_by(usurper) {
-            self.pass_governorship(province, usurper, params)?;
+            self.pass_seat(province, usurper, true, params)?;
         }
         Ok(())
     }
@@ -265,7 +267,7 @@ impl World {
     /// One keyed draw of a point that draws **once per id per tick** by construction (each
     /// loop of the phase visits an id once), as a fraction in `[0, 1)`; the ordinal is
     /// therefore 0, and `draws_once_per_person` in the tests holds the claim.
-    fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
+    pub(crate) fn draw_once(&mut self, point: DrawPoint, id: u32) -> f64 {
         let d = Draw { point, tick: self.tick, id, n: self.draw_ordinal(point, id) };
         debug_assert_eq!(d.n, 0, "{point:?} draws once per id per tick");
         let value = crate::rng::draw(self.seed, d);
@@ -308,18 +310,64 @@ impl World {
         let house = self.persons[&p].house;
         if self.members(house).is_empty() {
             self.emit(Event::HouseExtinct { house });
+            // The house's own men (Х2) have no master left: back to the people where they
+            // stand, as at the fall of a polity.
+            for u in self.units_of_house(house) {
+                self.disband_unit(u)?;
+            }
         }
         Ok(())
     }
 
-    /// A governorship passes within the house of the holder who left it: the eldest adult
-    /// member with no seat; nobody — the seat is vacant.
-    fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
+    /// The house on the throne of a polity.
+    pub fn ruling_house(&self, a: ActorId) -> HouseId {
+        self.persons[&self.actors[&a].ruler].house
+    }
+
+    /// Whether a unit's pay is the polity's charge or its house's: the polity pays its own
+    /// levies, its hired men and the retinue of the ruling house (owner's rule on §21: the
+    /// famiglia ducale was kept by the duchy); a house that does not rule pays its own.
+    pub fn house_pays(&self, u: UnitId) -> Option<HouseId> {
+        let unit = &self.units[&u];
+        unit.house.filter(|h| *h != self.ruling_house(unit.owner))
+    }
+
+    /// The share of a unit's pay met this tick: its house's when the house pays, else its
+    /// polity's.
+    pub fn unit_paid_share_ppm(&self, u: UnitId) -> i64 {
+        match self.house_pays(u) {
+            Some(h) => self.houses[&h].paid_share_ppm,
+            None => self.actors[&self.units[&u].owner].paid_share_ppm,
+        }
+    }
+
+    /// A governorship passes from the holder who left it: within the house first — the
+    /// eldest adult member with no seat — else to a house of the polity that does not rule,
+    /// else to the ruling house; nobody — the seat is vacant. (Owner's rule on #289: a seat
+    /// must not stay vacant while a house could hold it, so that the houses that can carry
+    /// a secession keep their seats.)
+    pub(crate) fn pass_governorship(&mut self, province: ProvinceId, from: PersonId, params: &Params) -> Result<(), WorldError> {
+        self.pass_seat(province, from, false, params)
+    }
+
+    /// The passing of a seat; with `other_houses_first` the holder's house comes last —
+    /// the holder took the throne and its house rules now, and the seat it leaves goes to
+    /// another house (owner's rule on #289).
+    pub(crate) fn pass_seat(&mut self, province: ProvinceId, from: PersonId, other_houses_first: bool, params: &Params) -> Result<(), WorldError> {
         let house = self.persons[&from].house;
         let owner = self.provinces[&province].owner;
-        let free = |w: &World, q: PersonId| w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
-        let candidates: Vec<PersonId> = self.members(house).into_iter().filter(|q| *q != from && free(self, *q)).collect();
-        let to = self.eldest(&candidates, false, params);
+        let ruling = self.ruling_house(owner);
+        let free = |w: &World, q: PersonId| q != from && w.actors[&owner].ruler != q && w.governed_by(q).is_empty() && w.is_adult(q, params);
+        let others: Vec<HouseId> = self.houses_of(owner).into_iter().filter(|h| *h != house && *h != ruling).collect();
+        let order: Vec<Vec<HouseId>> = if other_houses_first { vec![others, vec![ruling], vec![house]] } else { vec![vec![house], others, vec![ruling]] };
+        let mut to = None;
+        for group in order {
+            let candidates: Vec<PersonId> = group.iter().flat_map(|h| self.members(*h)).filter(|q| free(self, *q)).collect();
+            if let Some(q) = self.eldest(&candidates, false, params) {
+                to = Some(q);
+                break;
+            }
+        }
         self.provinces.get_mut(&province).unwrap().governor = to;
         self.emit(Event::GovernorChanged { province, from, to });
         Ok(())
@@ -375,6 +423,19 @@ impl World {
         let Some(from) = std::iter::once(capital).chain(provinces.into_iter().filter(|p| *p != capital)).find(|p| self.population(*p) >= 1) else {
             return Ok(None);
         };
+        // The new house speaks as its capital does and prays as the court did (owner's
+        // rule on #288: whoever takes the throne takes the faith of the court).
+        let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
+        self.raise_house_at(a, from, culture, religion)
+    }
+
+    /// A house rises from the people of `from` into polity `a` (which may be a polity being
+    /// born, `collapse.rs`: its name must be in the world already, its record need not),
+    /// with the tongue and the faith given. `None` when nobody lives in `from`.
+    pub(crate) fn raise_house_at(&mut self, a: ActorId, from: ProvinceId, culture: crate::ids::CultureId, religion: crate::ids::ReligionId) -> Result<Option<PersonId>, WorldError> {
+        if self.population(from) < 1 {
+            return Ok(None);
+        }
         let household = HOUSEHOLD.0 + self.draw(DrawPoint::Rise, a.0) % (HOUSEHOLD.1 - HOUSEHOLD.0 + 1);
         let persons = (1 + household).min(self.population(from) as u64);
         self.post(Account::Population(from), Source::Rise, -(persons as i64) * 1000)?;
@@ -383,10 +444,7 @@ impl World {
         let (asid, aname) = &self.names.actors[a.index()];
         let (hsid, hname) = (format!("{asid}.h{k}"), format!("{aname} new house {k}"));
         self.names.houses.push((hsid.clone(), hname.clone()));
-        // The new house speaks as its capital does and prays as the court did (owner's
-        // rule on #288: whoever takes the throne takes the faith of the court).
-        let (culture, religion) = (self.provinces[&capital].culture, self.polity_religion(a));
-        self.houses.insert(house, House { polity: a, culture, religion });
+        self.houses.insert(house, House { polity: a, culture, religion, paid_share_ppm: 1_000_000 });
         self.ledger.open(self.tick, Account::HouseTreasury(house), 0)?;
         let founder = PersonId(self.next_person);
         for i in 0..persons as usize {
@@ -436,9 +494,10 @@ impl World {
         }
         self.keep_court_faith(court, next);
         self.emit(Event::Succession { actor: a, from: dead, to: next, how });
-        // One seat per person: a governor who takes the throne leaves the governorship.
+        // One seat per person: a governor who takes the throne leaves the governorship —
+        // to another house first (owner's rule on #289).
         for province in self.governed_by(next) {
-            self.pass_governorship(province, next, params)?;
+            self.pass_seat(province, next, true, params)?;
         }
         Ok(())
     }

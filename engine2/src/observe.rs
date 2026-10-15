@@ -131,6 +131,12 @@ impl Observed for Game {
                 Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
                 Event::Adopted { .. } => ObsEvent::Other("Adopted".into()),
                 Event::HouseConverted { house, .. } => ObsEvent::Other(format!("HouseConverted@{}", self.house_id(*house).0)),
+                Event::HousePayShortfall { house, .. } => ObsEvent::Other(format!("HousePayShortfall@{}", self.house_id(*house).0)),
+                // Plain kinds (E2 step 9): `Never` is read over them by the horizon.
+                Event::Secession { .. } => ObsEvent::Other("Secession".into()),
+                Event::Revolt { .. } => ObsEvent::Other("Revolt".into()),
+                Event::RevoltEnded { province, .. } => ObsEvent::Other(format!("RevoltEnded@{}", self.province_id(*province).0)),
+                Event::ActorBorn { actor, .. } => ObsEvent::Born(self.actor_id(*actor)),
             })
             .collect()
     }
@@ -169,6 +175,27 @@ impl Observed for Game {
         let expected = f64::from(horizon_ticks) * p.institution_adoption_per_tick;
         if expected >= 0.5 && w.actors.keys().any(|a| crate::faith::SPREADING.iter().any(|i| w.adoption_source(*a, *i).is_some())) {
             out.push("Adopted".to_string());
+        }
+        // A rising (E2 step 9): declared when the horizon expects three or more of its kind
+        // over the provinces that can rise — a chance of nineteen in twenty that it happens
+        // in one run, so the flag names a defect and not the luck of a few runs. `Born`
+        // for the polity it bears, `Revolt` for a province rising alone, `Secession` for
+        // one with a house to carry it (`collapse.rs`).
+        let (mut alone, mut carried) = (0.0, 0.0);
+        for q in w.provinces.keys() {
+            let expected = w.revolt_chance_per_tick(*q, p) * f64::from(horizon_ticks);
+            if w.secession_carrier(*q).is_some() {
+                carried += expected;
+            } else {
+                alone += expected;
+            }
+        }
+        if alone >= 3.0 {
+            out.push("Revolt".to_string());
+        }
+        if carried >= 3.0 {
+            out.push("Born".to_string());
+            out.push("Secession".to_string());
         }
         out
     }

@@ -100,6 +100,10 @@ pub enum Source {
     Gift,
     /// A dowry: `−` on the proposing house's treasury and `+` on the other house's.
     Dowry,
+    /// A secession (E2 step 9): the parent's treasury split by the people who left — `−`
+    /// on the parent's treasury and `+` on the new polity's, the same figure; the debt
+    /// stays with the parent (the creditor knows one polity).
+    Secession,
     /// Used by tests of the ledger itself.
     Test,
 }

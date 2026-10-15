@@ -178,13 +178,18 @@ impl World {
         for p in provinces {
             let owner = self.provinces[&p].owner;
             let here: Vec<(UnitId, ActorId, i64)> = self.units.iter().filter(|(_, u)| u.position == p).map(|(id, u)| (*id, u.owner, self.ledger.stock(Account::Soldiers(*id)).unwrap_or(0))).collect();
-            // At home or on friendly land: the paid share is fed, the unpaid share melts.
-            let fed: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, _)| self.friendly(*o, owner)).map(|(id, o, s)| (*id, s - s * self.actors[o].paid_share_ppm / 1_000_000)).collect();
+            // At home or on friendly land: the paid share is fed, the unpaid share melts —
+            // the polity's share for its own men, the house's for a house's retinue (Х2). A
+            // province in revolt feeds its owner's men as foreign land does (E2 step 9):
+            // they forage there, and ruin it.
+            let in_revolt = self.in_revolt(p);
+            let here: Vec<(UnitId, bool, i64)> = here.into_iter().map(|(id, o, s)| (id, self.friendly(o, owner) && !(in_revolt && o == owner), s)).collect();
+            let fed: Vec<(UnitId, i64)> = here.iter().filter(|(_, home, _)| *home).map(|(id, _, s)| (*id, s - s * self.unit_paid_share_ppm(*id) / 1_000_000)).collect();
             for (id, unsupplied) in fed {
                 self.melt(id, unsupplied, params)?;
             }
             // On enemy land: foraging, shared pro rata by need.
-            let needs: Vec<(UnitId, i64)> = here.iter().filter(|(_, o, s)| !self.friendly(*o, owner) && *s > 0).map(|(id, _, s)| (*id, *s)).collect();
+            let needs: Vec<(UnitId, i64)> = here.iter().filter(|(_, home, s)| !*home && *s > 0).map(|(id, _, s)| (*id, *s)).collect();
             let total_need: i64 = needs.iter().map(|(_, n)| n).sum();
             if total_need == 0 {
                 continue;
