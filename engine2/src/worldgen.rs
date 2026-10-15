@@ -541,7 +541,7 @@ impl Map {
             // ruling house; one seat per person.
             let mut own: Vec<String> = provinces.iter().filter(|(_, p)| p.owner == sid(s) && *p != &provinces[&pid(cap_i)]).map(|(k, _)| k.clone()).collect();
             own.sort();
-            let mut free_ruling: Vec<String> = adults_by_house[0].1.iter().cloned().filter(|p| *p != ruler).collect();
+            let mut free_ruling: Vec<String> = adults_by_house[0].1.iter().filter(|p| **p != ruler).cloned().collect();
             let mut free_other: Vec<String> = adults_by_house[1..].iter().flat_map(|(_, a)| a.iter().cloned()).collect();
             for p in own {
                 if !rng.gen_bool(GOVERNOR_CHANCE) {

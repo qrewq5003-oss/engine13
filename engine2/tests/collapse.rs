@@ -331,6 +331,7 @@ fn a_house_that_does_not_rule_takes_the_provinces_its_members_govern_into_a_poli
     // The house's men went with it; the militia rose in every province up to А1.
     assert_eq!(w.units[&retinue].owner, new);
     assert_eq!(w.units[&retinue].house, Some(o0));
+    assert_eq!(w.units[&retinue].position, p10, "home with the house, to its capital — not left at the parent's court");
     assert_eq!(w.house_pays(retinue), None, "now the ruling house: the polity's charge");
     let militia: Vec<UnitId> = w.units_of(new).into_iter().filter(|u| *u != retinue).collect();
     assert_eq!(militia.len(), 2);

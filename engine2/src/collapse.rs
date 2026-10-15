@@ -269,9 +269,16 @@ impl World {
             na.core_culture = core;
             na.legitimacy = legitimacy;
         }
-        // The house's own men go with it; the militia rises from the people.
+        // The house's own men go with it — home, to the new capital: left at the parent's
+        // court they would fight the ruler's army there every tick, and an army that nobody
+        // orders back after a lost battle would hand the court to a retinue (seed 90 of the
+        // full run). On the scale of А5 the march is no brake (§14). The militia rises from
+        // the people.
         for u in self.units_of_house(house) {
-            self.units.get_mut(&u).unwrap().owner = new;
+            let unit = self.units.get_mut(&u).unwrap();
+            unit.owner = new;
+            unit.position = new_capital;
+            unit.destination = None;
         }
         self.levy_militia(new, params)?;
         // Edges: every pair at its norm — with the war with the parent, and the parent's
