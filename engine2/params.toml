@@ -96,12 +96,14 @@ kind = "c"
 value = 0.02
 unit = "share of the fuller province per tick, times the fill gap"
 checked_by = "П7"
+origin = "выбран: E0 П5 без честного источника"
 
 [migration.min_gap]
 kind = "c"
 value = 0.10
 unit = "fill gap (share of capacity) below which nobody moves"
 checked_by = "П7"
+origin = "выбран: порог разницы заполненности"
 
 [population.observed_growth_per_year]
 kind = "b"
@@ -171,6 +173,7 @@ kind = "c"
 value = 0.8
 unit = "exponent"
 checked_by = "А13"
+origin = "подобран по полосе по источнику: А13 (Rotte & Schmidt) на боях сценариев tests/army.rs — временно, перекалибровка на боях агентов в (д)"
 
 # E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
 # Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003) = IZA DP
@@ -221,6 +224,7 @@ kind = "c"
 value = 400.0
 unit = "soldiers per 1 000 inhabitants"
 checked_by = "П7"
+origin = "источник: Roth 1999, Erdkamp 1998 — фуражом 2–3 × А8 на короткий срок"
 
 # (в) E0 П6 — people a province loses per tick of foraging at full load (foragers equal to
 # what it can feed); scaled by the load (owner's rule: ten men do not ruin like ten thousand).
@@ -230,6 +234,7 @@ kind = "c"
 value = 0.02
 unit = "share of the province's people per tick at full load"
 checked_by = "П7"
+origin = "выбран: честного источника нет (E0 §5.1)"
 
 # E0 А1 — the ceiling of the levy as a share of the polity's people: a settled state 2–5 %
 # (Venice 1509: ~40 000 on ~1.6 million; Heather 1996 for a migrating people up to 20 % —
@@ -248,6 +253,7 @@ kind = "c"
 value = 0.25
 unit = "share of the ceiling per tick"
 checked_by = "А11"
+origin = "выбран: доля потолка набора за тик"
 
 # E0 А4 — the advance paid to hire a mercenary: 30 ducats per lance of three in 1448
 # (Mallett & Hale 1984) ≈ one yearly output per head in wheat (E0 §5.3).
@@ -400,6 +406,7 @@ kind = "c"
 value = 0.7
 unit = "factor on the yearly rates of the table"
 checked_by = "В5"
+origin = "выведен: E0 В2 — уровень 6 модели против 2–3 (e₀ 30 против 21)"
 
 # E0 В5 — observed: the length of a reign (principate 7, dominate 11, the Middle Ages
 # 15–20 years; Ramos et al. 2020; Eisner 2011). Measured on the generated worlds.
@@ -461,24 +468,28 @@ kind = "c"
 value = 70.0
 unit = "legitimacy, 0–100"
 checked_by = "В5"
+origin = "выбран: порядок положений E0 §1.7 (наследственный выше выборного выше провозглашённого)"
 
 [legitimacy.norm_elected]
 kind = "c"
 value = 60.0
 unit = "legitimacy, 0–100"
 checked_by = "В5"
+origin = "выбран: порядок положений E0 §1.7"
 
 [legitimacy.norm_acclaimed]
 kind = "c"
 value = 50.0
 unit = "legitimacy, 0–100"
 checked_by = "В5"
+origin = "выбран: порядок положений E0 §1.7"
 
 [legitimacy.norm_regency]
 kind = "c"
 value = 40.0
 unit = "legitimacy, 0–100"
 checked_by = "В5"
+origin = "выбран: регентство ниже всех законных положений"
 
 # (в) How fast legitimacy moves toward its norm: this share of the gap a tick.
 [legitimacy.rate_per_tick]
@@ -486,6 +497,7 @@ kind = "c"
 value = 0.1
 unit = "share of the gap to the norm per tick"
 checked_by = "В5"
+origin = "выбран: доля разрыва до нормы за тик"
 
 # E0 Х1 — a great house's income as a share of the polity's: 0.4–4 % (the senatorial houses
 # of Rome c. 400: Olympiodorus fr. 44 via Cameron 1984 — открыл; Venice 1423: a noble of
@@ -531,6 +543,7 @@ kind = "c"
 value = 0.02
 unit = "share of production per call"
 checked_by = "Э8"
+origin = "выбран: шаг глагола налога внутри полосы Э4"
 
 # (в) The prices in legitimacy: raising the tax costs it, lowering gives half back. Checked
 # through В6 — the coups legitimacy lets in.
@@ -539,12 +552,14 @@ kind = "c"
 value = 10.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: цена шага налога"
 
 [legitimacy.gain_lower_tax]
 kind = "c"
 value = 5.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: половина цены подъёма"
 
 # (в) `enforce_order`: the treasury buys legitimacy — this share of a year's revenue for the
 # gain below. Checked through В6. **No arbitrage between money and legitimacy** (review of
@@ -559,12 +574,14 @@ kind = "c"
 value = 1.5
 unit = "share of yearly revenue per call"
 checked_by = "В6"
+origin = "выведен: гард prices_leave_no_arbitrage — цена × сдвиг нормы ≥ прибавка"
 
 [order.gain]
 kind = "c"
 value = 10.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: прибавка за порядок"
 
 # (в) Default: a debt past the ceiling whose interest the treasury cannot meet is written off
 # (the owner's choice on §18: a write-off with the credit closed, not Venice's suspension of
@@ -576,12 +593,14 @@ kind = "c"
 value = 20.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: удар дефолта"
 
 [default.years_without_credit]
 kind = "c"
 value = 10.0
 unit = "years"
 checked_by = "Э9"
+origin = "выбран: срок закрытого кредита"
 
 # (в) Usurpation (E0 В6): the base chance a year at legitimacy 50 that an adult of the
 # polity's houses takes the throne by force; the rule of succession acts through the norm
@@ -603,6 +622,7 @@ kind = "c"
 value = 0.05
 unit = "share per year at legitimacy 50"
 checked_by = "В6"
+origin = "подобран по полосе по памяти: В6 (нижний край — Италия XV в. по памяти); 0,03 → 0,04 → 0,05"
 
 # (в) The legitimacy norm of a usurper: below every other standing (E0 §1.7). A usurper
 # invites the next usurpation — the cascades of the third century.
@@ -611,6 +631,7 @@ kind = "c"
 value = 30.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: ниже всех положений E0 §1.7"
 
 # (в) A lasting decision shifts the norm, a blow is one-off (brief §2; owner's review of
 # #286: a one-off price for a permanent gain is an arbitrage — legitimacy returns to the
@@ -633,6 +654,7 @@ kind = "c"
 value = 10.0
 unit = "legitimacy per step of the tax rate above the tithe"
 checked_by = "В6"
+origin = "выбран: сдвиг нормы за шаг налога"
 
 # (в) The lasting price of a default: the norm sits this much lower for the whole term of
 # the closed credit; afterwards the bank lends at the top of Э6, never at the old rate
@@ -642,6 +664,7 @@ kind = "c"
 value = 20.0
 unit = "legitimacy, 0–100"
 checked_by = "В6"
+origin = "выбран: сдвиг нормы на срок дефолта"
 
 # (в) Collection (review of #286: legitimacy must cost the polity, not only the person on
 # the throne): collected = rate × production × share, and the share falls by this per point
@@ -664,6 +687,7 @@ kind = "c"
 value = 0.008
 unit = "share of the assigned tax lost per point of legitimacy below the norm of lawful rule"
 checked_by = "Э8"
+origin = "подобран по полосе по источнику: Э8 у жадного равновесия (Pezzolo 2007, Milanovic 2006)"
 
 # ---- diplomacy (E2 step 7, plan §19) ----
 
@@ -714,30 +738,35 @@ kind = "c"
 value = 50.0
 unit = "relation, 0–100"
 checked_by = "Д3"
+origin = "выбран: середина шкалы"
 
 [relation.norm_war]
 kind = "c"
 value = 30.0
 unit = "relation below the base while at war"
 checked_by = "Д3"
+origin = "выбран: сдвиг нормы отношения"
 
 [relation.norm_alliance]
 kind = "c"
 value = 20.0
 unit = "relation above the base under an alliance"
 checked_by = "Д3"
+origin = "выбран: сдвиг нормы отношения"
 
 [relation.norm_marriage]
 kind = "c"
 value = 15.0
 unit = "relation above the base while a marriage binds a house of each"
 checked_by = "Д3"
+origin = "выбран: сдвиг нормы отношения"
 
 [relation.norm_vassalage]
 kind = "c"
 value = 10.0
 unit = "relation above the base between a vassal and its lord"
 checked_by = "Д3"
+origin = "выбран: сдвиг нормы отношения"
 
 # The threat of a neighbour, in E2 only its presence; the weights of threat — strength,
 # intent, distance — are E3's (E0 §1.7).
@@ -746,12 +775,14 @@ kind = "c"
 value = 10.0
 unit = "relation below the base when the two polities' land touches"
 checked_by = "Д3"
+origin = "выбран: сдвиг нормы отношения — до угрозы (г)"
 
 [relation.rate_per_tick]
 kind = "c"
 value = 0.1
 unit = "share of the gap to the norm per tick"
 checked_by = "Д3"
+origin = "выбран: доля разрыва до нормы за тик"
 
 # (в) The verbs of diplomacy (plan §19.3). Acceptance is a rule of the engine's state, the
 # same for the player and the agents (brief §3, rule 8): a proposal is accepted when the
@@ -764,6 +795,7 @@ kind = "c"
 value = 60.0
 unit = "relation, 0–100"
 checked_by = "Д3"
+origin = "выбран: порог приёма"
 
 # (в) A war declared on a polity with a treaty in force — alliance or peace — is a breach:
 # a price, not a prohibition (owner's rule on §19): the legitimacy price times this, the
@@ -773,6 +805,7 @@ kind = "c"
 value = 2.0
 unit = "multiplier of the price of a declaration"
 checked_by = "Д3"
+origin = "выбран: множитель цены нарушения"
 
 # (в) A fresh treaty costs more to break (owner's rule on #293: a price, not a prohibition —
 # a truce that forbade the loser its war would be a ban): this many times the breach on the
@@ -785,12 +818,14 @@ kind = "c"
 value = 4.0
 unit = "multiplier of the breach on the day of signing"
 checked_by = "А12"
+origin = "подобран по цели теста: реванш в тик после мира ниже 10 % (владелец, #293)"
 
 [treaty.fresh_years]
 kind = "c"
 value = 5.0
 unit = "years"
 checked_by = "А12"
+origin = "выбран: срок свежести договора"
 
 # (в) A lost war costs the ruler who lost it (owner's rule on #293: historically a lost war
 # struck at the power — it cost nothing here): points of legitimacy for every province
@@ -800,6 +835,7 @@ kind = "c"
 value = 5.0
 unit = "legitimacy points per province ceded"
 checked_by = "В6"
+origin = "выбран: удар поражения за провинцию (владелец, #293)"
 
 # (в) What a declaration of war costs in legitimacy: the price of the tax raised once (a
 # verb without a price is a degeneration, decision on #284).
@@ -808,6 +844,7 @@ kind = "c"
 value = 10.0
 unit = "legitimacy, 0–100"
 checked_by = "Д3"
+origin = "выбран: цена шага налога"
 
 # (в) An embassy: gifts worth this share of a year's revenue, spent (`Source::Verb`), for a
 # push of the relation by `embassy.gain` with saturation; the same gifts open a proposal of
@@ -817,12 +854,14 @@ kind = "c"
 value = 0.05
 unit = "share of yearly revenue"
 checked_by = "Д3"
+origin = "выбран: доля годового дохода"
 
 [embassy.gain]
 kind = "c"
 value = 10.0
 unit = "relation, pushed once with saturation"
 checked_by = "Д3"
+origin = "выбран: толчок отношения"
 
 # E0 Д2 — the other way round: the subsidy of the strong to the weak, 1–2 % of revenue
 # (Rome's payments to the Huns, 700–2 100 pounds of gold a year against the East's income —
@@ -843,6 +882,7 @@ kind = "c"
 value = 200.0
 unit = "relation per share of the receiver's yearly revenue"
 checked_by = "Д3"
+origin = "выведен: подарок в двадцатую долю дохода толкает как посольство (200 × 0,05 = 10)"
 
 # (в) The dowry: a share of the proposing house's treasury to the other house
 # (`Source::Dowry`) — measured by the house's wealth, not the polity's revenue (owner's rule
@@ -853,6 +893,7 @@ kind = "c"
 value = 0.5
 unit = "share of the house's treasury"
 checked_by = "Д3"
+origin = "выбран: доля казны дома"
 
 # ---- religion and culture (E2 step 8, plan §20) ----
 
@@ -897,6 +938,7 @@ kind = "c"
 value = 0.02
 unit = "share of the province's people"
 checked_by = "Р2"
+origin = "выбран: зерно логистической кривой Р1"
 
 # (в) The neighbourhood's channel against the rule's: a province most of whose neighbours
 # pray otherwise drifts to their faith at this share of Р1 — the slow drift that is all a
@@ -906,6 +948,7 @@ kind = "c"
 value = 0.5
 unit = "share of the rule's rate"
 checked_by = "Р2"
+origin = "выбран: доля Р1 для канала соседства"
 
 # (в) The friction of faith and tongue between two courts (E0 §1.7): the norm of their
 # relation sits lower by these while the courts pray or speak differently. Checked through Р2.
@@ -914,12 +957,14 @@ kind = "c"
 value = 10.0
 unit = "relation below the base between courts of another faith"
 checked_by = "Р2"
+origin = "выбран: трение вер"
 
 [relation.norm_culture]
 kind = "c"
 value = 5.0
 unit = "relation below the base between courts of another tongue"
 checked_by = "Р2"
+origin = "выбран: трение языков"
 
 # E0 Р3 — observed: the share of polities with a bank a century on, where banks exist. By
 # memory: in Italy by 1400 most of the great states — Florence, Venice, Genoa, Siena, Lucca —
@@ -949,6 +994,7 @@ kind = "c"
 value = 0.005
 unit = "chance per year with a channel"
 checked_by = "Р3"
+origin = "подобран по полосе по памяти: середина Р3 (0,01 → 0,005)"
 
 # ---- collapse and successors (E2 step 9, plan §21) ----
 
@@ -978,6 +1024,7 @@ kind = "c"
 value = 0.0025
 unit = "share per province per year at legitimacy 50, no alienation"
 checked_by = "В7"
+origin = "подобран по полосе по памяти: В7 и В9 (0,005 → 0,0025)"
 
 # (в) The core tongue of a polity — the tongue of the majority of its people — changes only
 # when another tongue outgrows it by this share of the polity's people (owner's rule on §21:
@@ -989,6 +1036,7 @@ kind = "c"
 value = 0.1
 unit = "share of the polity's people"
 checked_by = "В7"
+origin = "выбран: запас против мерцания ядра"
 
 # E0 Х2 — the ruling house's own men as a share of the polity's army: the famiglia ducale
 # of the Sforza ≈ 2 000 horse of an army ≈ 20 000 (Covini 1998 — по памяти; the 2 000 —
@@ -1013,6 +1061,7 @@ kind = "c"
 value = 0.02
 unit = "share of the polity's army"
 checked_by = "Х4"
+origin = "выбран: доля армии в свите неправящего дома"
 
 # (в) What a province rising in revolt costs its ruler in legitimacy — a blow, once (a
 # revolt is an event, not a lasting decision of the ruler; a standing revolt in E2 stands
@@ -1023,6 +1072,7 @@ kind = "c"
 value = 5.0
 unit = "legitimacy, 0–100"
 checked_by = "В7"
+origin = "выбран: удар мятежа"
 
 # E0 В8 (row added at E2, collapse; owner's rule on #289) — observed: the number of
 # polities a century after the start, relative to the start. By memory: the West of 375
@@ -1055,6 +1105,7 @@ kind = "c"
 value = 0.3
 unit = "temperature of the softmax over utilities"
 checked_by = "А12"
+origin = "выбран: температура softmax"
 
 # (в) What a price weighs against a goal's progress (progress runs 0–1): a point of
 # legitimacy per hundred, and a kilogram per year of the polity's revenue. Checked
@@ -1064,12 +1115,14 @@ kind = "c"
 value = 2.0
 unit = "utility per 100 points of legitimacy"
 checked_by = "А12"
+origin = "выбран: вес цены легитимности против прогресса цели — к выводу в (е)"
 
 [agent.weight_price_treasury]
 kind = "c"
 value = 1.0
 unit = "utility per year of revenue"
 checked_by = "А12"
+origin = "выбран: вес цены казны против прогресса цели — к выводу в (е)"
 
 # (в) A goal that made no progress for this long is put aside and the next reachable one
 # taken (plan §23.2 p. 1: goals change by the rules, not by the lot). Checked through А12.
@@ -1078,6 +1131,7 @@ kind = "c"
 value = 25.0
 unit = "years"
 checked_by = "А12"
+origin = "выбран: горизонт цели"
 
 # (в) The generator's lottery of starting aspirations on the generated worlds (owner's
 # answer 3 on §23): «hold» and «alliance against» heavier than «take» and «subdue», else
@@ -1088,30 +1142,35 @@ kind = "c"
 value = 3.0
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: мирные виды тяжелее жадных (ответ 3 на §23)"
 
 [aspiration.weight_alliance]
 kind = "c"
 value = 1.5
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: мирные виды тяжелее жадных"
 
 [aspiration.weight_take]
 kind = "c"
 value = 1.0
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: мирные виды тяжелее жадных"
 
 [aspiration.weight_subdue]
 kind = "c"
 value = 1.0
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: мирные виды тяжелее жадных"
 
 [aspiration.weight_unite]
 kind = "c"
 value = 1.0
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: мирные виды тяжелее жадных"
 
 # (в) The union with the faith of a neighbouring court — where a neighbour's court prays
 # otherwise (owner's rule on #293: a mechanism must happen on the worlds, not only in the
@@ -1122,6 +1181,7 @@ kind = "c"
 value = 0.25
 unit = "weight in the lottery"
 checked_by = "А12"
+origin = "выбран: лёгкий вес (владелец, #293)"
 
 # ---- orders and suppression (E3 (б), plan §23, §23c) ----
 
@@ -1133,6 +1193,7 @@ kind = "c"
 value = 1.0
 unit = "own units' soldiers per enemy soldier"
 checked_by = "А12"
+origin = "выбран: перевес для похода — к выводу из формулы боя в (е)"
 
 # E0 В9 (row added at E3, orders; owner's answers on #289 and §23) — observed: the share of
 # province-ticks in revolt. By memory, source to open: revolts were frequent and mostly short
@@ -1159,6 +1220,7 @@ kind = "c"
 value = 2.0
 unit = "goals per polity"
 checked_by = "А12"
+origin = "выбран: слоты целей"
 
 # (в) The ticks over which a bot reads its army's paid share — an input of the bot, not a
 # rule of the world (owner's rule on #292; the peace reads the pay of the tick). The share
@@ -1173,6 +1235,7 @@ kind = "c"
 value = 6.0
 unit = "ticks"
 checked_by = "В6"
+origin = "подобран по цели теста: метание налога ниже 5 % (владелец, #292)"
 
 # (в) What a house puts on the throne when the lot offers it a usurpation (E3 (в), owner's
 # rule on #290: the candidate's house decides): weighed against the risk — the throne at the
@@ -1187,6 +1250,7 @@ kind = "c"
 value = 1.25
 unit = "goals"
 checked_by = "В6"
+origin = "подобран по полосе по памяти: В6 — к выводу в (е) из дохода кресла и риска казни"
 
 # (в) What a house puts on a polity of its own when the lot offers it a secession: weighed by
 # the weakness of the ruler it leaves, against the odds of being crushed by the parent's army
@@ -1204,6 +1268,7 @@ kind = "c"
 value = 1.5
 unit = "goals"
 checked_by = "В8"
+origin = "подобран по полосе по памяти: В8 — к выводу в (е) из дохода державы и шанса быть раздавленным"
 
 # (в) What a court pays in legitimacy for the policy of conversion (owner's answer 6 on §23:
 # a decision of the court with a price in legitimacy): the policy turns the provinces of
@@ -1214,3 +1279,4 @@ kind = "c"
 value = 10.0
 unit = "legitimacy points"
 checked_by = "Р2"
+origin = "выбран: цена шага налога"
