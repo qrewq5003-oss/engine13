@@ -144,22 +144,67 @@ impl World {
         self.contacts(a).into_iter().find(|b| self.actors[b].institutions.contains(&institution))
     }
 
-    /// Institutions spread by contact: one keyed draw per polity and tick.
+    /// A polity whose court could be offered the policy of conversion: the lowest id in
+    /// contact that holds it (E3 (в): the court decides, `opportunity.rs`).
+    pub fn policy_source(&self, a: ActorId) -> Option<ActorId> {
+        let policy = Institution::ConversionPolicy;
+        if self.actors[&a].institutions.contains(&policy) {
+            return None;
+        }
+        self.contacts(a).into_iter().find(|b| self.actors[b].institutions.contains(&policy))
+    }
+
+    /// Institutions spread by contact: one keyed draw per polity and tick. A practice (the
+    /// bank) is taken up; the policy of conversion, met the same way, is offered to the
+    /// court, which decides at the next turn (E3 (в)).
     fn phase_adoption(&mut self, params: &Params) -> Result<(), WorldError> {
         let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a)).collect();
         for a in ids {
-            let wanted: Vec<(Institution, ActorId)> = SPREADING.iter().filter_map(|i| self.adoption_source(a, *i).map(|from| (*i, from))).collect();
+            let mut wanted: Vec<(Institution, ActorId)> = SPREADING.iter().filter_map(|i| self.adoption_source(a, *i).map(|from| (*i, from))).collect();
+            wanted.extend(self.policy_source(a).map(|from| (Institution::ConversionPolicy, from)));
             if wanted.is_empty() {
                 continue;
             }
             let u = crate::rng::unit(self.draw(DrawPoint::Adoption, a.0));
             if u < params.institution_adoption_per_tick {
                 let (institution, from) = wanted[0];
+                if institution == Institution::ConversionPolicy {
+                    self.open_opportunity(crate::verbs::ActorRef::Ruler(a), crate::opportunity::Chance::Policy { polity: a, from });
+                    continue;
+                }
                 self.actors.get_mut(&a).unwrap().institutions.insert(institution);
                 self.emit(Event::Adopted { actor: a, institution, from });
             }
         }
         Ok(())
+    }
+
+    /// The courts with a goal of union with another faith are offered it (E3 (в)).
+    fn open_unions(&mut self) {
+        let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a)).collect();
+        for a in ids {
+            let court = self.polity_religion(a);
+            let wanted = self.actors[&a].goals.iter().find_map(|g| match (g.kind, g.target) {
+                (crate::agents::GoalKind::Union, crate::agents::GoalTarget::Religion(f)) if f != court => Some(f),
+                _ => None,
+            });
+            if let Some(faith) = wanted {
+                self.open_opportunity(crate::verbs::ActorRef::Ruler(a), crate::opportunity::Chance::Union { polity: a, faith });
+            }
+        }
+    }
+
+    /// The share of a polity's people whose province prays `faith`.
+    pub fn people_share_praying(&self, a: ActorId, faith: ReligionId) -> f64 {
+        let (mut of, mut all) = (0i64, 0i64);
+        for p in &self.actors[&a].provinces {
+            let n = self.population(*p);
+            all += n;
+            if self.provinces[p].religion == faith {
+                of += n;
+            }
+        }
+        if all == 0 { 0.0 } else { of as f64 / all as f64 }
     }
 
     /// The phase of faith and tongue, then of the institutions that spread by contact.
@@ -183,6 +228,8 @@ impl World {
                 }
             }
         }
-        self.phase_adoption(params)
+        self.phase_adoption(params)?;
+        self.open_unions();
+        Ok(())
     }
 }

@@ -270,6 +270,12 @@ impl World {
                 let capital = self.actors[&a].capital;
                 self.regions.iter().position(|r| r.contains(&capital) && r.iter().any(|p| self.provinces[p].owner != a)).map(|i| GoalTarget::Region(RegionId(i as u32)))
             }
+            // The faith of the most populous neighbour whose court prays otherwise (owner's
+            // rule on #293).
+            GoalKind::Union => {
+                let court = self.polity_religion(a);
+                border.iter().filter(|(b, _)| self.polity_religion(**b) != court).max_by_key(|(b, n)| (**n, std::cmp::Reverse(**b))).map(|(b, _)| GoalTarget::Religion(self.polity_religion(*b)))
+            }
             _ => None,
         }?;
         if self.actors[&a].goals.iter().any(|g| g.kind == kind && g.target == target) {
@@ -340,10 +346,13 @@ impl World {
             }
             self.actors.get_mut(&a).unwrap().goals = kept;
             // Revanche: a province conquered from the polity this tick, still the
-            // conqueror's — by the rule, beyond the slots.
+            // conqueror's — by the rule, first into the free slots (plan §23d). Beyond the
+            // slots every lost province was a goal of its own against the same enemy, and a
+            // loser that lost three wanted the war three times over: no price of a fresh
+            // treaty held it back (owner's rule on #293, plan §23l).
             for p in conquered.iter().filter(|(_, from)| *from == a).map(|(p, _)| *p) {
                 let target = GoalTarget::Province(p);
-                if self.provinces[&p].owner != a && !self.actors[&a].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == target) {
+                if self.actors[&a].goals.len() < params.goal_open_per_polity && self.provinces[&p].owner != a && !self.actors[&a].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == target) {
                     self.set_goal(a, GoalKind::Take, target)?;
                 }
             }
@@ -499,13 +508,147 @@ impl World {
         self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).flat_map(|a| self.bot_orders(a, params)).collect()
     }
 
+    /// The army's paid share as the bot reads it: the mean over the last
+    /// `agent.pay_memory_ticks` ticks (owner's rule on #292 — an input of the bot, not a
+    /// rule of the world: the peace still reads the pay of the tick, `diplomacy.rs`).
+    pub fn paid_share_seen_ppm(&self, a: ActorId) -> i64 {
+        let actor = &self.actors[&a];
+        let h = &actor.paid_share_history_ppm;
+        if h.is_empty() {
+            actor.paid_share_ppm
+        } else {
+            h.iter().sum::<i64>() / h.len() as i64
+        }
+    }
+
+    /// Whether `b`'s army is too strong for `a` to march against: the bot's units advance
+    /// only at `agent.advance_ratio` of the enemy's whole army (`bot_orders`), and the war
+    /// and the peace weigh the enemy's strength by the same measure.
+    fn outweighed(&self, a: ActorId, b: ActorId, params: &Params) -> bool {
+        (self.army_size(a) as f64) < params.agent_advance_ratio * self.army_size(b) as f64
+    }
+
+    /// The bots' answers to the open opportunities (E3 (в)): every opportunity the player
+    /// does not answer, by its decider's utility, on the state as it stands.
+    pub fn bot_answers(&self, player: Option<ActorRef>, params: &Params) -> Vec<crate::opportunity::Answer> {
+        use crate::opportunity::Answer;
+        self.opportunities
+            .iter()
+            .filter(|o| !player.is_some_and(|p| self.answers_for(p, o)))
+            .map(|o| Answer { who: o.to, opportunity: o.id, reply: self.bot_reply(o, params) })
+            .collect()
+    }
+
+    /// A bot's reply to an opportunity: a vote for its own house's candidate (each house for
+    /// itself — the owner's note on §23: the bargains are E4's), else for the interim; any
+    /// other chance taken when its utility is above doing nothing.
+    pub fn bot_reply(&self, o: &crate::opportunity::Opportunity, params: &Params) -> crate::opportunity::Reply {
+        use crate::opportunity::{Chance, Reply};
+        if let (ActorRef::House(h), Chance::Vote { candidates, interim, .. }) = (o.to, &o.what) {
+            return Reply::Vote(candidates.iter().copied().find(|c| self.persons[c].house == h).unwrap_or(*interim));
+        }
+        if self.bot_takes(o, params) {
+            Reply::Take
+        } else {
+            Reply::Decline
+        }
+    }
+
+    /// Whether a bot takes an opportunity: its utility above doing nothing.
+    pub fn bot_takes(&self, o: &crate::opportunity::Opportunity, params: &Params) -> bool {
+        use crate::opportunity::Chance;
+        match (o.to, &o.what) {
+            (ActorRef::House(h), Chance::Secession { polity, province }) => self.house_would_secede(h, *polity, *province, params),
+            (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
+            (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
+            (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
+            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_utility(g, *from, params) > 0.0,
+            _ => false,
+        }
+    }
+
+    /// The utility of a match offered to house `g` by house `from`: the bond — with its own
+    /// polity's ruling house or with a polity its own wants as an ally, as the proposer
+    /// weighs it (0.4, else −0.2) — and the dowry, at the bot's price of wheat in shares of
+    /// its polity's revenue.
+    pub fn marriage_utility(&self, g: crate::ids::HouseId, from: crate::ids::HouseId, params: &Params) -> f64 {
+        let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
+        let bond = if mine == theirs || self.wanted_allies(mine).contains(&theirs) { 0.4 } else { -0.2 };
+        let income = self.yearly_income(mine, params).max(1) as f64;
+        bond + self.dowry(from, params) as f64 / income * params.agent_weight_price_treasury
+    }
+
+    /// The utility of the union for a court (owner's answer 6 on §23): its goal reached, 1,
+    /// and the change in the people praying with the court — the share of the new faith
+    /// against the share of the old, at twice the goal (the alienation of the old faith is
+    /// the price, owner's rule on §20).
+    pub fn union_utility(&self, polity: ActorId, faith: crate::ids::ReligionId) -> f64 {
+        let court = self.polity_religion(polity);
+        1.0 + 2.0 * (self.people_share_praying(polity, faith) - self.people_share_praying(polity, court))
+    }
+
+    /// The utility of the policy of conversion for a court: the share of its people praying
+    /// otherwise than the court, whom the policy turns, at twice the goal, against its price
+    /// in legitimacy at the bot's price.
+    pub fn policy_utility(&self, polity: ActorId, params: &Params) -> f64 {
+        let other = 1.0 - self.people_share_praying(polity, self.polity_religion(polity));
+        2.0 * other - params.policy_cost_legitimacy / 100.0 * params.agent_weight_price_legitimacy
+    }
+
+    /// The utility of a secession for the house that would carry it (plan §23.2 p. 5): the
+    /// weakness of the ruler it leaves — `1 − L/100` — against the odds of being crushed,
+    /// the parent's army over both armies: the militia the provinces would levy at the
+    /// ceiling of А1 and the house's own men, which go with it.
+    pub fn secession_utility(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> f64 {
+        let capital = self.actors[&polity].capital;
+        let provinces: Vec<ProvinceId> = self.actors[&polity].provinces.iter().copied().filter(|q| *q != capital && self.provinces[q].governor.is_some_and(|g| self.persons[&g].house == house)).collect();
+        let retinue: i64 = self.units_of_house(house).iter().map(|u| self.soldiers(*u)).sum();
+        let own: i64 = provinces.iter().chain(std::iter::once(&province)).collect::<std::collections::BTreeSet<_>>().into_iter().map(|q| self.population(*q) * params.recruit_ceiling_ppm / 1_000_000).sum::<i64>() + retinue;
+        let parent = (self.army_size(polity) - retinue).max(0);
+        let crushed = if parent + own == 0 { 0.5 } else { parent as f64 / (parent + own) as f64 };
+        params.agent_weight_independence * (1.0 - self.actors[&polity].legitimacy / 100.0) - crushed
+    }
+
+    /// A bot's answer to a chance of secession (E2: always yes; E3 (в): by utility).
+    pub fn house_would_secede(&self, house: crate::ids::HouseId, polity: ActorId, province: ProvinceId, params: &Params) -> bool {
+        self.secession_utility(house, polity, province, params) > 0.0
+    }
+
+    /// The utility of a usurpation for the candidate's house (plan §23.2 p. 5, owner's rule
+    /// on #290): the throne — a goal reached, 1 — against the risk and the price. **The
+    /// risk:** the usurper rules at the usurper's norm, and the throne at that legitimacy
+    /// kills — the next usurpation (the usurper executed) or a murder (E0 В3) — before the
+    /// candidate's natural death within the goal's horizon, by the candidate's age on the
+    /// mortality table: an old man risks less than a young one, since the reign is short
+    /// either way. **The price:** the legitimacy the polity loses down to the usurper's norm,
+    /// at the bot's price of legitimacy. A legitimate ruler is not worth deposing; a weak one
+    /// is.
+    pub fn usurpation_utility(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> f64 {
+        let l = self.actors[&polity].legitimacy;
+        let lu = l.min(params.legitimacy_norm_usurper);
+        let throne = ((params.usurpation_per_tick + params.violent_death_per_tick) * (100.0 - lu) / 50.0).clamp(0.0, 1.0);
+        let age = self.age(candidate);
+        let (mut alive, mut killed) = (1.0, 0.0);
+        for t in 0..params.goal_horizon_ticks {
+            let natural = (params.mortality_per_year(age + (t / 2) as i32) * params.mortality_elite_factor / 2.0).clamp(0.0, 1.0);
+            killed += alive * throne;
+            alive *= (1.0 - throne) * (1.0 - natural);
+        }
+        params.agent_weight_throne - killed - (l - lu) / 100.0 * params.agent_weight_price_legitimacy
+    }
+
+    /// A bot's answer to a chance of usurpation (E2: always yes; E3 (в): by utility).
+    pub fn house_would_usurp(&self, polity: ActorId, candidate: crate::ids::PersonId, params: &Params) -> bool {
+        self.usurpation_utility(polity, candidate, params) > 0.0
+    }
+
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         Context {
             enemy: self.outmatched(a),
             at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
             income: self.yearly_income(a, params).max(1) as f64,
-            unpaid: self.actors[&a].paid_share_ppm < 1_000_000,
+            unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             lawful: self.lawful_norm(a, params),
             wanted_allies: self.wanted_allies(a),
         }
@@ -525,8 +668,18 @@ impl World {
         let price_l = |l: f64| l / 100.0 * params.agent_weight_price_legitimacy;
         match (call.verb, call.target) {
             (VerbId::DeclareWar, Target::Actor(b)) => {
-                let mut u = self.war_wanted(a, b);
-                if self.army_size(b) > self.army_size(a) * 3 / 2 {
+                // What the war is worth: the goals it serves — nothing for a ruler whose army
+                // is unpaid, since an unpaid army is an exhausted one by the rule of the
+                // peace (`diplomacy::peace_room`) and the war ends at the first peace the
+                // other side offers (measured: four fifths of the declarations came the tick
+                // after a peace of the same pair, most of them by a declarer already short of
+                // its pay — a war a tick long, a peace treaty broken every other tick).
+                let mut u = if unpaid { 0.0 } else { self.war_wanted(a, b) };
+                // A war the bot would not march in is not worth declaring: its units advance
+                // only at `agent.advance_ratio` of the enemy's army (`bot_orders`), and a
+                // declarer that stays home loses provinces, accepts the peace as the loser
+                // and declares again the next tick (measured: 128 of 170 renewals).
+                if self.outweighed(a, b, params) {
                     u -= 1.0;
                 }
                 if at_war {
@@ -535,16 +688,21 @@ impl World {
                 u - price_l(self.war_price(a, b, params))
             }
             (VerbId::MakePeace, Target::Actor(b)) => {
+                // The peace is the war the other way round: worth what going on would lose —
+                // the goals the war serves, less the strength of the enemy, weighed as the
+                // declaration weighed them (an army the bot would not march against); a
+                // losing war is worth ending, and with nothing to win the peace is wanted.
+                // (Measured: «stronger» was every larger army here and half again as large at
+                // the declaration, and a bot ended the next tick the war it had just declared.)
                 let losing = self.losing_side(a, b) == Some(a);
                 let wanted = self.war_wanted(a, b);
-                let mut u = 0.0;
-                if losing || enemy == Some(b) {
+                let strength = if self.outweighed(a, b, params) { 1.0 } else { 0.0 };
+                let mut u = strength - wanted;
+                if losing {
                     u += 1.0;
                 }
                 if wanted <= 0.0 {
                     u += 0.3;
-                } else if !losing {
-                    u -= 0.5;
                 }
                 u
             }
@@ -651,7 +809,7 @@ impl World {
         if now <= 0.0 || next <= 0.0 {
             return -1.0;
         }
-        let need = 1.0 / (actor.paid_share_ppm as f64 / 1e6).max(0.25);
+        let need = 1.0 / (self.paid_share_seen_ppm(a) as f64 / 1e6).max(0.25);
         let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
         let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_unclamped - unclamped);
         let once = params.agent_weight_price_legitimacy / 100.0 * if up { -params.legitimacy_cost_raise_tax } else { params.legitimacy_gain_lower_tax };

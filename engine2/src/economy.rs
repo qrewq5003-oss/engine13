@@ -162,8 +162,8 @@ impl World {
     fn default(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
         let debt = self.debt(a);
         self.post(Account::Debt(a), Source::Default, -debt * 1000)?;
+        self.pay_legitimacy(a, params.legitimacy_cost_default);
         let actor = self.actors.get_mut(&a).unwrap();
-        actor.legitimacy = (actor.legitimacy - params.legitimacy_cost_default).clamp(0.0, 100.0);
         actor.credit_closed_until = Some(crate::time::Tick(self.tick.0 + params.default_ticks_without_credit));
         actor.defaulted = true;
         self.emit(Event::Default { actor: a, written_off_kg: debt as u64 });
@@ -180,15 +180,16 @@ impl World {
     /// ruler's decisions shift it, so a tax above the tithe keeps costing collection: the
     /// greedy ruler sits at its shifted norm, far below the norm of lawful rule.
     ///
-    /// **Below the bottom the shift keeps costing** (owner's rule on #292): legitimacy stops
-    /// at 0, and so would the price of the next step up — the share no longer fell, the rate
-    /// rose, and a usurper at legitimacy 0 raised the tax from 0.10 to 0.18 for nothing (the
-    /// price vanishing at a bound, the third time after 6b). The points of the norm below
-    /// zero (`World::norm_below_zero`) count as legitimacy lost: at the bottom the share is
-    /// the one at the unclamped norm, and a step up there costs the share what it costs
-    /// above zero.
+    /// **The collection reads the pressure, not the saturated norm** (owner's rules on #292
+    /// and #293): legitimacy saturates and never reaches zero, so the price of a step of the
+    /// tax would fade near the bottom — the share would hardly fall while the rate rose (a
+    /// usurper at the bottom raised the tax from 0.10 to 0.18 for nothing). The share reads
+    /// legitimacy less the distance between the saturated norm and the summed pressure
+    /// (`World::unclamped_legitimacy_norm`): at the norm that is the pressure itself, below
+    /// zero too, and a step up costs the share what it costs anywhere — the same share as
+    /// before the saturation, at every equilibrium.
     pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
-        let legitimacy = self.actors[&a].legitimacy - self.norm_below_zero(a, params);
+        let legitimacy = self.actors[&a].legitimacy - (self.legitimacy_norm(a, params) - self.unclamped_legitimacy_norm(a, params));
         let gap = (self.lawful_norm(a, params) - legitimacy).max(0.0);
         (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
     }
@@ -295,7 +296,13 @@ impl World {
                 self.post(treasury, Source::Upkeep, -paid * 1000)?;
             }
             let share = if pay_due == 0 { 1_000_000 } else { paid * 1_000_000 / pay_due };
-            self.actors.get_mut(&a).unwrap().paid_share_ppm = share;
+            let actor = self.actors.get_mut(&a).unwrap();
+            actor.paid_share_ppm = share;
+            actor.paid_share_history_ppm.push(share);
+            let keep = params.agent_pay_memory_ticks;
+            if actor.paid_share_history_ppm.len() > keep {
+                actor.paid_share_history_ppm.drain(..actor.paid_share_history_ppm.len() - keep);
+            }
             if paid < pay_due {
                 self.emit(Event::PayShortfall { actor: a, unpaid_kg: (pay_due - paid) as u64 });
             }

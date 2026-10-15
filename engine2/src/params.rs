@@ -179,6 +179,12 @@ pub struct Params {
     pub treaty_accept_at_relation: f64,
     /// (в) A war declared on a treaty in force costs this many times the price.
     pub treaty_breach_factor: f64,
+    /// (в) A fresh treaty costs more to break: this many times the breach on the day it was
+    /// signed, falling to the plain breach over `treaty_fresh_ticks` (owner's rule on #293).
+    pub treaty_fresh_breach_factor: f64,
+    pub treaty_fresh_ticks: u32,
+    /// (в) The legitimacy a ruler pays for every province ceded on balance in a lost war.
+    pub legitimacy_cost_province_lost: f64,
     /// (в) What declaring a war costs in legitimacy.
     pub legitimacy_cost_declare_war: f64,
     /// (в) An embassy's gifts as parts per million of yearly revenue, and its push.
@@ -228,9 +234,19 @@ pub struct Params {
     /// (в) The goals a polity keeps at a time; a freed slot is filled by revanche, by the
     /// wish of a vassal to be free, else by the weighted lot (E3 (б)).
     pub goal_open_per_polity: usize,
+    /// (в) The ticks over which a bot reads its army's paid share (E3 (в), owner's rule on
+    /// #292): the bot's input, smoothed so that its tax does not swing with one tick's pay.
+    pub agent_pay_memory_ticks: usize,
+    /// (в) What a house puts on the throne against the risk of a usurpation, and on a
+    /// polity of its own against the risk of a secession (E3 (в)): the houses' appetite,
+    /// checked through В6 and В8.
+    pub agent_weight_throne: f64,
+    pub agent_weight_independence: f64,
+    /// (в) What a court pays in legitimacy for adopting the policy of conversion (E3 (в)).
+    pub policy_cost_legitimacy: f64,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
-    pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
+    pub aspiration_weights: [(crate::agents::GoalKind, f64); 6],
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -387,6 +403,10 @@ impl Params {
         let horizon = value("goal.horizon_years")?;
         let advance = value("agent.advance_ratio")?;
         let open_goals = value("goal.open_per_polity")?;
+        let pay_memory = value("agent.pay_memory_ticks")?;
+        let w_throne = value("agent.weight_throne")?;
+        let w_independence = value("agent.weight_independence")?;
+        let policy_cost = value("policy.cost_legitimacy")?;
         use crate::agents::GoalKind;
         let aspiration_weights = [
             (GoalKind::Hold, value("aspiration.weight_hold")?),
@@ -394,6 +414,7 @@ impl Params {
             (GoalKind::Take, value("aspiration.weight_take")?),
             (GoalKind::Subdue, value("aspiration.weight_subdue")?),
             (GoalKind::Unite, value("aspiration.weight_unite")?),
+            (GoalKind::Union, value("aspiration.weight_union")?),
         ];
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
@@ -458,6 +479,9 @@ impl Params {
             relation_rate_per_tick: relation_rate,
             treaty_accept_at_relation: accept_at,
             treaty_breach_factor: breach_factor,
+            treaty_fresh_breach_factor: value("treaty.fresh_breach_factor")?,
+            treaty_fresh_ticks: (value("treaty.fresh_years")? * 2.0).round() as u32,
+            legitimacy_cost_province_lost: value("legitimacy.cost_province_lost")?,
             legitimacy_cost_declare_war: cost_declare_war,
             embassy_cost_share_ppm: (embassy_cost * 1_000_000.0).round() as i64,
             embassy_gain,
@@ -481,6 +505,10 @@ impl Params {
             goal_horizon_ticks: (horizon * 2.0).round() as u32,
             agent_advance_ratio: advance,
             goal_open_per_polity: open_goals.round() as usize,
+            agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
+            agent_weight_throne: w_throne,
+            agent_weight_independence: w_independence,
+            policy_cost_legitimacy: policy_cost,
             aspiration_weights,
             entries,
         })

@@ -165,6 +165,12 @@ pub struct Actor {
     /// Share of the army's pay met this tick, parts per million: the share of the army that
     /// is supplied at home (`movement.rs`).
     pub paid_share_ppm: i64,
+    /// The paid shares of the last ticks, oldest first, at most `agent.pay_memory_ticks` of
+    /// them: the bot's reading of its pay (E3 (в), owner's rule on #292). The share of one
+    /// tick jumps at war from 0.08 to 1.0 and back, and a bot reading it raised and lowered
+    /// the tax by turns — a quarter of its changes undone the next tick, half a step's
+    /// price in legitimacy each time.
+    pub paid_share_history_ppm: Vec<i64>,
     /// The person on the throne. A polity whose ruler is dead and unreplaced has fallen.
     pub ruler: PersonId,
     /// The designated heir, if any (a fact; the rule gives one otherwise).
@@ -286,6 +292,9 @@ pub enum TreatyKind {
 pub struct Treaty {
     pub kind: TreatyKind,
     pub until: Tick,
+    /// The tick it was signed in play; `None` for a treaty of the scenario's facts, whose
+    /// signing is history (owner's rule on #293: a fresh treaty costs more to break).
+    pub since: Option<Tick>,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -512,6 +521,11 @@ pub struct World {
     pub next_person: u32,
     /// Regions: named sets of provinces, facts of the scenario (E3); index = `RegionId`.
     pub regions: Vec<Vec<ProvinceId>>,
+    /// The opportunities opened in the last tick, waiting for the next turn's answers
+    /// (E3 (в), `opportunity.rs`): between ticks — where a save is taken — they are open.
+    pub opportunities: Vec<crate::opportunity::Opportunity>,
+    /// Next opportunity id.
+    pub next_opportunity: u32,
     pub names: Names,
     pub ledger: Ledger,
     /// Draws of the tick being played; drained into the tick report. The ordinal `n` of a
@@ -679,6 +693,7 @@ impl World {
                     institutions: a.institutions.iter().copied().collect(),
                     tax_rate_ppm: params.tax_default_ppm,
                     paid_share_ppm: 1_000_000,
+                    paid_share_history_ppm: Vec::new(),
                     ruler: a.ruler,
                     heir: a.heir,
                     regent: a.regent,
@@ -793,6 +808,8 @@ impl World {
             persons,
             next_person,
             regions,
+            opportunities: Vec::new(),
+            next_opportunity: 0,
             names,
             ledger,
             draws: Vec::new(),
@@ -835,7 +852,7 @@ impl World {
                 return Err(WorldError::RelationWithSelf(a));
             }
             let until = Tick((year - facts.start_year).max(0) as u32 * 2);
-            world.treaties.insert(crate::army::pair(a, b), Treaty { kind: TreatyKind::Alliance, until });
+            world.treaties.insert(crate::army::pair(a, b), Treaty { kind: TreatyKind::Alliance, until, since: None });
         }
         for &(vassal, lord) in &facts.relations.vassals {
             known(vassal)?;
@@ -924,6 +941,11 @@ impl World {
     /// — one keyed draw per deciding actor — come before the tick, through
     /// [`World::decide_all`] (E3; the E1 stand-in draw is gone).
     pub fn tick(&mut self, params: &Params) -> Result<TickReport, WorldError> {
+        // Opportunities of an earlier tick nobody settled through the contract (a world
+        // ticked without a game): by the rule of E2 (`opportunity.rs`).
+        if self.opportunities.iter().any(|o| o.opened < self.tick) {
+            self.settle_opportunities(&[], None, true, params)?;
+        }
         self.phase_movement(params)?;
         self.phase_battle(params)?;
         self.phase_siege(params)?;

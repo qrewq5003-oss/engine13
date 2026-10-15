@@ -72,3 +72,7 @@ required-features = ["sentinel", "worldgen", "testing"]
 [[test]]
 name = "agents"
 required-features = ["sentinel", "worldgen", "testing"]
+
+[[test]]
+name = "opportunities"
+required-features = ["testing"]

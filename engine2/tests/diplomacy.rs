@@ -433,19 +433,36 @@ fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_an
     assert!(r.events.iter().any(|e| matches!(e.event, Event::War { a, b } if (a, b) == (s0, s1))));
     assert!(g.world().at_war(s0, s1));
     let paid = l0 - g.world().actors[&s0].legitimacy;
-    let drift = p.legitimacy_rate_per_tick * (g.world().legitimacy_norm(s0, &p) - (l0 - p.legitimacy_cost_declare_war));
-    assert!((paid - (p.legitimacy_cost_declare_war - drift)).abs() < 1e-6, "the exact price, then the tick's drift: paid {paid}");
-    // A breach: twice the price, the treaty gone, the victim's allies' relations to nothing.
+    // The price saturates (owner's rule on #293): its share of what legitimacy has left.
+    let after = engine2::politics::saturate(l0, -p.legitimacy_cost_declare_war);
+    let drift = p.legitimacy_rate_per_tick * (g.world().legitimacy_norm(s0, &p) - after);
+    assert!((paid - (l0 - after - drift)).abs() < 1e-6, "the exact price, then the tick's drift: paid {paid}");
+    // A breach: the factor of the price, the treaty gone, the victim's allies' relations to
+    // nothing. A fresh treaty costs more (owner's rule on #293): the fresh factor on the day
+    // it was signed, falling in a line to the plain breach over the fresh years; a treaty of
+    // the scenario's facts is not fresh.
     g.world_mut().ally_now(s0, s2, &p).unwrap();
     g.world_mut().ally_now(s2, s3, &p).unwrap();
     assert!(g.world().relation(s0, s3) > 0.0);
+    let breach = p.legitimacy_cost_declare_war * p.treaty_breach_factor;
+    assert!((g.world().war_price(s0, s2, &p) - breach * p.treaty_fresh_breach_factor).abs() < 1e-9, "signed today: the fresh factor");
+    let now = g.world().tick;
+    let at_age = |g: &mut Game, age: u32| {
+        g.world_mut().treaties.get_mut(&(s0, s2)).unwrap().since = Some(Tick(now.0.wrapping_sub(age)));
+        g.world().war_price(s0, s2, &p)
+    };
+    if now.0 >= p.treaty_fresh_ticks {
+        assert!((at_age(&mut g, p.treaty_fresh_ticks / 2) - breach * (1.0 + (p.treaty_fresh_breach_factor - 1.0) / 2.0)).abs() < 1e-9, "half way: half the excess");
+        assert!((at_age(&mut g, p.treaty_fresh_ticks) - breach).abs() < 1e-9, "past the fresh years: the plain breach");
+    }
+    g.world_mut().treaties.get_mut(&(s0, s2)).unwrap().since = None;
+    assert!((g.world().war_price(s0, s2, &p) - breach).abs() < 1e-9, "a treaty of the facts is not fresh");
     let l0 = g.world().actors[&s0].legitimacy;
     let norm_before = g.world().legitimacy_norm(s0, &p);
-    assert!((g.world().war_price(s0, s2, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9);
     let r = g.tick(&[call(s0, VerbId::DeclareWar, s2)]).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::TreatyBroken { a, b, kind: TreatyKind::Alliance } if (a, b) == (s0, s2))));
     assert!(g.world().treaty(s0, s2).is_none() && g.world().at_war(s0, s2));
-    let after_price = l0 - p.legitimacy_cost_declare_war * p.treaty_breach_factor;
+    let after_price = engine2::politics::saturate(l0, -breach);
     let expected = after_price + p.legitimacy_rate_per_tick * (norm_before - after_price);
     assert!((g.world().actors[&s0].legitimacy - expected).abs() < 1e-6, "the breach costs the factor");
     let drifted = p.relation_rate_per_tick * g.world().relation_norm(s0, s3, &p);
@@ -478,7 +495,7 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert!(!w.at_war(s0, s1) && w.peace_in_force(s0, s1));
     assert_eq!(w.treaty(s0, s1).unwrap().until, Tick(w.tick.0 + p.treaty_term_ticks));
-    assert!((w.war_price(s0, s1, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9, "war again before the term is a breach");
+    assert!((w.war_price(s0, s1, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor * p.treaty_fresh_breach_factor).abs() < 1e-9, "war again before the term is a breach — a fresh one");
     assert_eq!(w.peace_room(s0, s1, &p), Err("not at war"));
     // The winner takes a province: the loser's proposal is refused at the norm of war, the
     // winner's accepted; the loser accepts at the threshold.
@@ -627,11 +644,19 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.world_mut().relations.insert((s0, s1), p.treaty_accept_at_relation);
+    // E3 (в): the call offers the match to the other house; it answers at the next turn
+    // (here a world with its bots off: by the rule of E2, it takes it).
     let r = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.to == ActorRef::House(h1))), "the match offered to the house");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "not married before its answer");
+    // The dowry is paid at the wedding, out of what the house holds then (its seat's income
+    // of the tick the offer was made in).
+    let at_wedding = g.world().dowry(h0, &p);
+    let r = g.tick(&[]).unwrap();
     let (a, b) = r.events.iter().find_map(|e| match e.event {
-        Event::Marriage { a, b, dowry_kg: 0 } => Some((a, b)),
+        Event::Marriage { a, b, dowry_kg } if dowry_kg == at_wedding as u64 => Some((a, b)),
         _ => None,
-    }).expect("a marriage with no dowry: the house has nothing yet");
+    }).expect("a marriage with the dowry the house holds at the wedding");
     let w = g.world();
     assert_eq!((w.persons[&a].house, w.persons[&b].house), (h0, h1));
     assert_eq!(w.persons[&a].spouse, Some(b));
@@ -652,8 +677,9 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     assert!(offer.available && offer.cost_kg == dowry, "{:?}", offer.why);
     let err = g.tick(&[marry(ActorRef::House(o0), HouseId(3))]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
-    let r = g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)));
+    g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
+    let r = g.tick(&[]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)), "the dowry paid at the wedding");
     assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -dowry);
     assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), dowry);
     let _ = h2;

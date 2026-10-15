@@ -212,7 +212,7 @@ impl World {
             return Err(WorldError::RelationWithSelf(a));
         }
         let until = Tick(self.tick.0 + params.treaty_term_ticks);
-        self.treaties.insert(pair(a, b), Treaty { kind, until });
+        self.treaties.insert(pair(a, b), Treaty { kind, until, since: Some(self.tick) });
         Ok(until)
     }
 
@@ -271,9 +271,20 @@ impl World {
     }
 
     /// The price of declaring war on `b` in legitimacy: the base, times the breach factor
-    /// when a treaty with `b` is in force.
+    /// when a treaty with `b` is in force — and **a fresh treaty costs more to break**
+    /// (owner's rule on #293: a price, not a prohibition): `treaty.fresh_breach_factor` times
+    /// more on the day it was signed, falling in a line to the plain breach over
+    /// `treaty.fresh_years`. A treaty of the scenario's facts is not fresh.
     pub fn war_price(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
-        params.legitimacy_cost_declare_war * if self.treaty(a, b).is_some() { params.treaty_breach_factor } else { 1.0 }
+        let Some(t) = self.treaty(a, b) else { return params.legitimacy_cost_declare_war };
+        let fresh = match t.since {
+            Some(since) if params.treaty_fresh_ticks > 0 => {
+                let left = 1.0 - f64::from(self.tick.0.saturating_sub(since.0)) / f64::from(params.treaty_fresh_ticks);
+                1.0 + (params.treaty_fresh_breach_factor - 1.0) * left.max(0.0)
+            }
+            _ => 1.0,
+        };
+        params.legitimacy_cost_declare_war * params.treaty_breach_factor * fresh
     }
 
     /// Would `b` accept peace from `a`? By the state of the war (§19) and its declarer
@@ -470,21 +481,15 @@ impl World {
     }
 
     /// Apply a diplomatic verb (the systems compute the effect; acceptance is a rule of the
-    /// state, not another agent's choice).
+    /// state, not another agent's choice — but a marriage is offered to the other house,
+    /// which decides at the next turn, E3 (в), `opportunity.rs`).
     pub(crate) fn apply_diplomacy_verb(&mut self, call: &VerbCall, params: &Params) -> Result<(), VerbError> {
         let ledger = |_: WorldError| VerbError::NotAvailable(call.verb, "ledger");
         if call.verb == VerbId::ProposeMarriage {
             let h = self.house_of_caller(call.actor)?;
             let Target::House(g) = call.target else { return Err(VerbError::BadTarget(call.verb, "a house to marry into")) };
             let (p, q) = self.marriage_room(h, g, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
-            let dowry = self.dowry(h, params);
-            if dowry > 0 {
-                self.post(Account::HouseTreasury(h), Source::Dowry, -dowry * 1000).map_err(ledger)?;
-                self.post(Account::HouseTreasury(g), Source::Dowry, dowry * 1000).map_err(ledger)?;
-            }
-            self.persons.get_mut(&p).unwrap().spouse = Some(q);
-            self.persons.get_mut(&q).unwrap().spouse = Some(p);
-            self.emit(Event::Marriage { a: p, b: q, dowry_kg: dowry as u64 });
+            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q });
             return Ok(());
         }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };
@@ -597,6 +602,11 @@ impl World {
         };
         if let Some(loser) = loser {
             let winner = if loser == key.0 { key.1 } else { key.0 };
+            // A lost war costs the ruler who lost it (owner's rule on #293): the provinces
+            // ceded on balance, each at `legitimacy.cost_province_lost`.
+            let ceded = war.taken.0.abs_diff(war.taken.1);
+            self.pay_legitimacy(loser, f64::from(ceded) * params.legitimacy_cost_province_lost);
+            self.emit(Event::Defeat { actor: loser, by: winner, provinces: ceded });
             if self.lord_of(winner) == Some(loser) {
                 self.actors.get_mut(&winner).unwrap().vassal_of = None;
                 self.emit(Event::Released { vassal: winner, lord: loser });

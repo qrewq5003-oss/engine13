@@ -640,7 +640,9 @@ impl Map {
         // Starting aspirations (E3, owner's answer 3 on §23): a weighted lot over the
         // reachable kinds — hold the largest province, an alliance against the largest
         // neighbour, take the largest bordering province, subdue the smallest neighbour,
-        // unite the capital's region; a vassal wants to be free. Two per polity, distinct.
+        // unite the capital's region, the union with the faith of the largest neighbour whose
+        // court prays otherwise (owner's rule on #293); a vassal wants to be free. Two per
+        // polity, distinct.
         if bonds {
             let mut asp_rng = ChaCha8Rng::seed_from_u64(fnv(id.as_bytes()) ^ 0xa5b1_u64);
             let region_of = |p: &str| regions.iter().find(|(_, r)| r.provinces.iter().any(|q| q == p)).map(|(k, _)| k.clone());
@@ -694,6 +696,11 @@ impl Map {
                         GoalKind::Take => bordering_province.map(|t| AspirationData { kind, target: Some(t), route: None }),
                         GoalKind::Subdue => smallest_neighbour.map(|t| AspirationData { kind, target: Some(t), route: None }),
                         GoalKind::Unite => region_of(&pid(capital.get(&s).map(|c| c.1).unwrap_or(0))).map(|t| AspirationData { kind, target: Some(t), route: None }),
+                        GoalKind::Union => neighbours
+                            .iter()
+                            .filter_map(|(k, pop)| k[1..].parse::<usize>().ok().filter(|o| state_religion[*o] != state_religion[s]).map(|o| (o, *pop, k.clone())))
+                            .max_by_key(|(_, pop, k)| (*pop, std::cmp::Reverse(k.clone())))
+                            .map(|(o, _, _)| AspirationData { kind, target: Some(faith(state_religion[o])), route: None }),
                         _ => None,
                     };
                     if let Some(g) = goal {
@@ -925,9 +932,9 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the regions-and-aspirations version of the generator (E3 (а); before: the
-    /// governors version of E2 step 9, the houses version of step 6a, the sea-links version
-    /// of step 2). If this changes, every seed
+    /// Pinned on the union-aspiration version of the generator (E3 (в), owner's rule on #293;
+    /// before: the regions-and-aspirations version of E3 (а), the governors version of E2
+    /// step 9, the houses version of step 6a, the sea-links version of step 2). If this changes, every seed
     /// plays a different world and "fails on seed N" stops reproducing: bump it only with a
     /// deliberate change of the generator, never with a dependency update.
     #[test]
@@ -936,7 +943,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 11_939_064_792_086_652_868;
+    const PINNED_WORLD_ONE: u64 = 8_417_907_754_458_249_782;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

@@ -590,9 +590,17 @@ checked_by = "Э9"
 # 150 years; at 0.03 — see `tests/legitimacy.rs`. The form caps at twice the base (legitimacy
 # 0), so the Roman end of the band (23 a century, 284–395) is out of its reach: that needs
 # civil war and co-rulers, drivers of the collapse system and E3, not a higher base.
+# Recalibrated with the bots (E3 (в), plan §23g): 0.03 → 0.04. The bots' tax and wars swung
+# by turns and burned their legitimacy — a step of the tax 10 − 5 points a turn, a peace
+# treaty broken every other tick 20 — and the usurpations it invited held В6 at 2.4; with
+# the swings gone it fell to 1.9 below the band (0.035 — 2.1, 0.04 — 2.6, 0.045 — 3.0).
+# Then 0.04 → 0.05 when the candidate's house decides (E3 (в), plan §23h): the houses
+# decline a usurpation of a legitimate ruler (110 of 685 chances) — at 0.04 В6 2.3 and В8
+# 0.49–0.51 on the edge, at 0.05 В6 2.6. At 0.06 four deterministic tests of E2 systems saw
+# a usurpation in their window.
 [usurpation.per_year]
 kind = "c"
-value = 0.03
+value = 0.05
 unit = "share per year at legitimacy 50"
 checked_by = "В6"
 
@@ -608,9 +616,18 @@ checked_by = "В6"
 # #286: a one-off price for a permanent gain is an arbitrage — legitimacy returns to the
 # norm in a few years, the rate stays). The legitimacy norm falls by this much for every
 # step of the tax rate above the tithe (`tax.default_rate`) and rises by it for every step
-# below, as long as the rate holds: the tithe doubled (+5 steps) puts a hereditary king
-# below a usurper (70 − 50 = 20). Checked through В6; bound to the price of order by the
+# below, as long as the rate holds. Checked through В6; bound to the price of order by the
 # no-arbitrage guard above.
+# **Every shift of the norm and every blow or gain of legitimacy saturates** (owner's rule
+# on #293, `politics::saturate`): the points here and in `legitimacy.cost_*`,
+# `legitimacy.gain_*`, `legitimacy.norm_penalty_in_default`, `order.gain`, `policy.cost_*`
+# take their share of the distance left to the bound — `v·e^(−p/100)` down, the mirror up —
+# so legitimacy and its norm never reach 0 or 100: summed on a bounded scale, usurper 30 −
+# default 20 − one step of the tax 10 sat on the bound for the term of a default (seeds 35,
+# 113, 180 of the full run). The collection reads the same shifts **summed**, unbounded (the
+# pressure, `World::unclamped_legitimacy_norm`): the tithe doubled (+5 steps) still costs a
+# hereditary king the collection of a norm of 70 − 50 = 20, while its legitimacy settles at
+# 70·e^(−0.5) ≈ 42.
 [legitimacy.norm_per_tax_step]
 kind = "c"
 value = 10.0
@@ -756,6 +773,33 @@ kind = "c"
 value = 2.0
 unit = "multiplier of the price of a declaration"
 checked_by = "Д3"
+
+# (в) A fresh treaty costs more to break (owner's rule on #293: a price, not a prohibition —
+# a truce that forbade the loser its war would be a ban): this many times the breach on the
+# day the treaty was signed, falling in a line to the plain breach over
+# `treaty.fresh_years`. Measured before: a third of the bots' declarations came the tick
+# after a peace of the same pair — the loser of the last war, wanting its province back
+# (plan §23l). Checked through А12.
+[treaty.fresh_breach_factor]
+kind = "c"
+value = 4.0
+unit = "multiplier of the breach on the day of signing"
+checked_by = "А12"
+
+[treaty.fresh_years]
+kind = "c"
+value = 5.0
+unit = "years"
+checked_by = "А12"
+
+# (в) A lost war costs the ruler who lost it (owner's rule on #293: historically a lost war
+# struck at the power — it cost nothing here): points of legitimacy for every province
+# ceded on balance, paid at the peace. Checked through В6.
+[legitimacy.cost_province_lost]
+kind = "c"
+value = 5.0
+unit = "legitimacy points per province ceded"
+checked_by = "В6"
 
 # (в) What a declaration of war costs in legitimacy: the price of the tax raised once (a
 # verb without a price is a degeneration, decision on #284).
@@ -990,6 +1034,9 @@ checked_by = "В7"
 # ones). The engine answers for the
 # fragmentation (secessions carried by a house); the gathering is the agents' (E3), so the
 # lower edge is theirs to meet. Measured on the generated worlds (`tests/collapse.rs`).
+# Checked on #293 (E0 §5.8): Abramson 2017 opened — Europe's mean state doubled in size
+# 1400–1790, ≈ 0.85 of the polities a century; Italy of the XIV–XV centuries not opened. The
+# band stands.
 [collapse.observed_polities_after_a_century]
 kind = "b"
 band = [0.5, 1.6]
@@ -1066,6 +1113,16 @@ value = 1.0
 unit = "weight in the lottery"
 checked_by = "А12"
 
+# (в) The union with the faith of a neighbouring court — where a neighbour's court prays
+# otherwise (owner's rule on #293: a mechanism must happen on the worlds, not only in the
+# tests; Jogaila's baptism, the Union of Florence, the conversions of Scandinavian kings).
+# Light: a court rarely wants its faith changed. Checked through А12 with the lottery.
+[aspiration.weight_union]
+kind = "c"
+value = 0.25
+unit = "weight in the lottery"
+checked_by = "А12"
+
 # ---- orders and suppression (E3 (б), plan §23, §23c) ----
 
 # (в) A bot's units advance on the enemy when they are at least this share of the enemy's
@@ -1102,3 +1159,58 @@ kind = "c"
 value = 2.0
 unit = "goals per polity"
 checked_by = "А12"
+
+# (в) The ticks over which a bot reads its army's paid share — an input of the bot, not a
+# rule of the world (owner's rule on #292; the peace reads the pay of the tick). The share
+# of one tick jumps at war from 0.08 to 1.0 and back; read by the tick, the need in the
+# tax's utility flipped with it and the bot raised and lowered the tax by turns: 715 of
+# 2 820 changes on 20 worlds undone the next tick, each turn 10 − 5 points of legitimacy,
+# usurpations of the bots' own making. 4 ticks (the owner's example) held it at 4.5 %, half a
+# point under the bar of the test; once the wars stopped swinging it rose to 5.2 % — 6 ticks:
+# 4.2 % (plan §23g). Checked through В6.
+[agent.pay_memory_ticks]
+kind = "c"
+value = 6.0
+unit = "ticks"
+checked_by = "В6"
+
+# (в) What a house puts on the throne when the lot offers it a usurpation (E3 (в), owner's
+# rule on #290: the candidate's house decides): weighed against the risk — the throne at the
+# usurper's norm kills, by the next usurpation or a murder, before natural death — and the
+# legitimacy the polity loses. At 1 (a goal reached) a house usurped only a ruler below
+# ~40 legitimacy and В6 fell to 1.2; the base rate cannot lift it, since the risk grows with
+# it (0.06 — 1.6, 0.08 — 1.8, 0.10 — 1.7). At 1.5 the houses declined 3 chances of 533 —
+# no decision left; at 1.25 with the base 0.05 they decline 110 of 685, В6 2.6 (plan §23h).
+# Checked through В6.
+[agent.weight_throne]
+kind = "c"
+value = 1.25
+unit = "goals"
+checked_by = "В6"
+
+# (в) What a house puts on a polity of its own when the lot offers it a secession: weighed by
+# the weakness of the ruler it leaves, against the odds of being crushed by the parent's army
+# (plan §23h). At 1 the houses took 9–13 chances of ~75; at 1.5 they take 23 of 74 (34
+# declined, 17 void — the same house took the throne first); at 2 a ruler at legitimacy 50
+# or below is left whatever its army, and the army decides against one above. В8 barely
+# moves with it (0.51–0.53): the gathering by conquest decides it. Raised to 2 when the
+# policy of conversion came (plan §23j): fewer alienated provinces, fewer chances, В8 0.49
+# at 1.5 — 0.52 at 2 (revolt.per_year 0.003 would give 0.53 with В7 at 4.8 under its top 5).
+# Back to 1.5 by the owner's rule on #293: at 2 a house left any ruler at legitimacy 50 or
+# below whatever the army against it — a suicide — and В8 hardly answers to the weight: the
+# conquests move it. В8 stays at the edge, marked (plan §23l). Checked through В8.
+[agent.weight_independence]
+kind = "c"
+value = 1.5
+unit = "goals"
+checked_by = "В8"
+
+# (в) What a court pays in legitimacy for the policy of conversion (owner's answer 6 on §23:
+# a decision of the court with a price in legitimacy): the policy turns the provinces of
+# other faiths to the court's by Р1 at the full rate, and the people resent the pressure —
+# a step of the tax's price, once. Checked through Р2 (the share converted in a century).
+[policy.cost_legitimacy]
+kind = "c"
+value = 10.0
+unit = "legitimacy points"
+checked_by = "Р2"

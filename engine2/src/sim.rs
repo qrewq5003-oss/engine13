@@ -11,6 +11,7 @@
 use crate::economy::VerbError;
 use crate::ids::ActorId;
 use crate::event::{Event, Stamped};
+use crate::opportunity::{Answer, AnswerError, Opportunity};
 use crate::params::Params;
 use crate::world::Institution;
 use crate::save::{self, SaveError};
@@ -35,6 +36,17 @@ pub enum SimError {
     Verb(#[from] VerbError),
     #[error("{0}")]
     Order(#[from] crate::movement::OrderError),
+    #[error("{0}")]
+    Answer(#[from] AnswerError),
+}
+
+/// What the player brings to a tick (E3): calls of verbs, orders to units, answers to the
+/// opportunities opened in the last tick (`opportunity.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Turn {
+    pub calls: Vec<VerbCall>,
+    pub orders: Vec<Order>,
+    pub answers: Vec<Answer>,
 }
 
 pub trait Simulation: Sized {
@@ -47,9 +59,18 @@ pub trait Simulation: Sized {
     /// Play one tick with the player's calls and orders to units (E3 (б): orders are a
     /// channel of the contract, not a verb). An order to a unit the caller does not command
     /// is an error, and nothing is played.
-    fn tick_turn(&mut self, player: &[VerbCall], orders: &[Order]) -> Result<TickReport, SimError>;
+    fn tick_turn(&mut self, player: &[VerbCall], orders: &[Order]) -> Result<TickReport, SimError> {
+        self.play(&Turn { calls: player.to_vec(), orders: orders.to_vec(), answers: Vec::new() })
+    }
+    /// Play one tick with the player's whole turn: calls, orders and answers to the
+    /// opportunities open to the player (E3 (в)). An answer to an opportunity that is not
+    /// open, not the player's, or answered twice is an error, and nothing is played; an
+    /// opportunity the player leaves unanswered lapses.
+    fn play(&mut self, turn: &Turn) -> Result<TickReport, SimError>;
     /// The verbs on offer to `who`, computed by the one function agents use too.
     fn verbs(&self, who: ActorRef) -> Vec<VerbOffer>;
+    /// The opportunities `who` answers in the coming turn (E3 (в)), the same the bots get.
+    fn opportunities(&self, who: ActorRef) -> Vec<Opportunity>;
     fn view(&self) -> WorldView;
     fn chronicle(&self) -> ChronicleSnapshot;
     fn to_save(&self) -> Result<String, SimError>;
@@ -279,10 +300,18 @@ impl Simulation for Game {
         Ok(Game { world, display: c.display, params, last_events: Vec::new(), player: None, preempted: std::collections::BTreeMap::new(), bots: true })
     }
 
-    fn tick_turn(&mut self, player: &[VerbCall], orders: &[Order]) -> Result<TickReport, SimError> {
+    fn play(&mut self, turn: &Turn) -> Result<TickReport, SimError> {
+        let (player, orders) = (&turn.calls[..], &turn.orders[..]);
         // Every order of the player must be possible on the state as it stands.
         for o in orders {
             self.world.order_room(o)?;
+        }
+        // Every answer of the player to an opportunity open to the player's role.
+        if let Some(a) = turn.answers.first() {
+            match self.player {
+                Some(p) => self.world.answers_room(p, &turn.answers)?,
+                None => return Err(AnswerError::NotYours(a.opportunity, a.who).into()),
+            }
         }
         // Validate every call before touching the world, so an error leaves nothing
         // half-played: the verb enabled, and every call of the player on offer on the state
@@ -319,10 +348,16 @@ impl Simulation for Game {
         let enabled: Vec<VerbId> = self.display.verbs.iter().map(|(v, _)| *v).collect();
         let mut calls: Vec<VerbCall> = player.to_vec();
         let mut all_orders: Vec<Order> = orders.to_vec();
+        let mut answers: Vec<Answer> = turn.answers.clone();
         if self.bots {
+            answers.extend(self.world.bot_answers(self.player, &self.params));
             all_orders.extend(self.world.bot_orders_all(self.player, &self.params));
             calls.extend(self.world.decide_all(&enabled, self.player, &self.params));
         }
+        // The answers to the last tick's opportunities first: they answer the world as that
+        // tick left it. With the bots off what nobody answered is settled by the rule of E2,
+        // the player's silence excepted.
+        self.world.settle_opportunities(&answers, self.player, !self.bots, &self.params)?;
         let mut bonded: std::collections::BTreeSet<(VerbId, (ActorId, ActorId))> = std::collections::BTreeSet::new();
         let mut disbanded: std::collections::BTreeSet<crate::ids::UnitId> = std::collections::BTreeSet::new();
         for call in application_order(&self.world, &calls) {
@@ -364,6 +399,10 @@ impl Simulation for Game {
 
     fn verbs(&self, who: ActorRef) -> Vec<VerbOffer> {
         self.offers(who)
+    }
+
+    fn opportunities(&self, who: ActorRef) -> Vec<Opportunity> {
+        self.world.opportunities_for(who)
     }
 
     fn view(&self) -> WorldView {

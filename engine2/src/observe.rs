@@ -146,6 +146,13 @@ impl Observed for Game {
                 Event::GoalReached { .. } => ObsEvent::Other("GoalReached".into()),
                 Event::GoalDropped { .. } => ObsEvent::Other("GoalDropped".into()),
                 Event::Preempted { verb, .. } => ObsEvent::Other(format!("Preempted:{}", verb.key())),
+                Event::OpportunityOpened { opportunity } => ObsEvent::Other(format!("OpportunityOpened:{}", opportunity.what.kind())),
+                Event::OpportunityTaken { .. } => ObsEvent::Other("OpportunityTaken".into()),
+                Event::OpportunityDeclined { .. } => ObsEvent::Other("OpportunityDeclined".into()),
+                Event::OpportunityLapsed { .. } => ObsEvent::Other("OpportunityLapsed".into()),
+                Event::OpportunityVoid { .. } => ObsEvent::Other("OpportunityVoid".into()),
+                Event::Elected { actor, .. } => ObsEvent::Other(format!("Elected@{}", self.actor_id(*actor).0)),
+                Event::Defeat { actor, .. } => ObsEvent::Other(format!("Defeat@{}", self.actor_id(*actor).0)),
             })
             .collect()
     }
