@@ -12,7 +12,7 @@ use crate::ledger::{Account, Source};
 use crate::movement::Way;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbId};
-use crate::world::{Standing, TreatyKind};
+use crate::world::{Institution, Standing, TreatyKind};
 
 /// Outcome of a battle for the attacker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +144,9 @@ pub enum Event {
     Converted { province: ProvinceId, from: ReligionId, to: ReligionId, by: Channel },
     /// A province's majority took the tongue of its neighbourhood.
     Assimilated { province: ProvinceId, from: CultureId, to: CultureId },
+    /// A polity took up an institution along a channel of contact — trade with a neighbour,
+    /// a marriage, a treaty — from a polity that holds it (E0 §2 variant 3; E2 step 8).
+    Adopted { actor: ActorId, institution: Institution, from: ActorId },
 }
 
 /// The channel a conversion or an assimilation came by (plan §20.2).

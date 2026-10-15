@@ -14,7 +14,10 @@
 //!   inside Р2; without the policy rule converts nothing in four centuries (Crete) and only
 //!   the neighbourhood drifts, slower; a change of target starts from the seed; the tongue
 //!   follows the neighbourhood alone; on generated worlds conversions are neither never nor
-//!   always.
+//!   always;
+//! - the bank spreads by contact — a neighbour, an ally, a lord or vassal, a house married
+//!   into — by a keyed draw, never without a channel; the policy is not caught; on generated
+//!   worlds the share with a bank a century on lies in Р3 and is not «always» in 300 ticks.
 
 use engine2::sim::{Game, Simulation};
 use engine2::{from_save, testworld, to_save, worldgen, ActorId, CultureId, HouseId, Institution, Params, ProvinceId, ReligionId};
@@ -335,4 +338,88 @@ fn on_generated_worlds_conversions_happen_but_not_everywhere() {
     eprintln!("20 worlds × 300 ticks: alienated provinces {alienated_at_start} at the start, {alienated_at_end} at the end; {converted} conversions, {assimilated} assimilations");
     assert!(converted > 0, "conversions are not never");
     assert!(alienated_at_end > 0, "and not always: the mixed march does not vanish in 150 years");
+}
+
+#[test]
+fn an_institution_spreads_by_contact_with_a_keyed_draw_and_never_without_a_channel() {
+    let p = params();
+    // Polity 0 banks; polity 1 borders it, polity 4 touches nobody who banks.
+    let mut s = testworld::five_states_scenario();
+    s.actors.get_mut("s0").unwrap().institutions.push(Institution::Bank);
+    let mut w = world_of(&s, 26);
+    let (s0, s1, s4) = (ActorId(0), ActorId(1), ActorId(4));
+    let contacts = w.contacts(s1);
+    assert!(contacts.contains(&s0) && contacts.contains(&ActorId(2)) && !contacts.contains(&s4), "neighbours by land and sea are contacts: {contacts:?}");
+    assert_eq!(w.adoption_source(s1, Institution::Bank), Some(s0));
+    assert_eq!(w.adoption_source(s0, Institution::Bank), None, "nothing to take up: it banks already");
+    assert_eq!(w.adoption_source(s4, Institution::Bank), None, "no channel to a bank");
+    let mut adopted_at = None;
+    for tick in 0..600u32 {
+        let with_channel: Vec<u32> = w.actors.keys().filter(|a| w.adoption_source(**a, Institution::Bank).is_some()).map(|a| a.0).collect();
+        let r = w.tick(&p).unwrap();
+        if let Some(e) = r.events.iter().find_map(|e| match e.event {
+            Event::Adopted { actor, institution, from } if actor == s1 => Some((institution, from)),
+            _ => None,
+        }) {
+            assert_eq!(e, (Institution::Bank, s0));
+            adopted_at = Some(tick);
+            break;
+        }
+        assert!(r.draws.iter().filter(|d| d.draw.point == engine2::DrawPoint::Adoption).all(|d| with_channel.contains(&d.draw.id)), "only polities with a channel draw (tick {tick})");
+    }
+    assert!(adopted_at.is_some(), "with a channel the bank comes in the end");
+    assert!(w.actors[&s1].institutions.contains(&Institution::Bank));
+    // The policy is not caught: polity 0 with the policy, polity 1 in contact — never.
+    let mut s = testworld::five_states_scenario();
+    s.actors.get_mut("s0").unwrap().institutions.push(Institution::ConversionPolicy);
+    let mut w = world_of(&s, 27);
+    assert_eq!(w.adoption_source(s1, Institution::ConversionPolicy), None, "a policy is not a practice");
+    for _ in 0..400 {
+        w.tick(&p).unwrap();
+    }
+    assert!(!w.actors[&s1].institutions.contains(&Institution::ConversionPolicy));
+    // A treaty and a marriage are channels too.
+    let mut s = testworld::five_states_scenario();
+    s.actors.get_mut("s0").unwrap().institutions.push(Institution::Bank);
+    let mut w = world_of(&s, 28);
+    assert_eq!(w.adoption_source(s4, Institution::Bank), None);
+    w.ally_now(s4, s0, &p).unwrap();
+    assert_eq!(w.adoption_source(s4, Institution::Bank), Some(s0), "an ally is a contact");
+    let mut w = world_of(&s, 29);
+    let (r0, r4) = (w.actors[&s0].ruler, w.actors[&s4].ruler);
+    w.marry_now(r0, r4);
+    assert_eq!(w.adoption_source(s4, Institution::Bank), Some(s0), "a house married into is a contact");
+}
+
+#[test]
+fn on_generated_worlds_the_bank_spreads_to_r3_in_a_century_and_is_not_always_in_three() {
+    let p = params();
+    let band = p.entries["institution.observed_bank_share_after_a_century"].band.unwrap();
+    let (mut at_start, mut at_century, mut at_end, mut polities, mut adoptions) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut worlds_all_banked_at_end = 0usize;
+    let banks = |g: &Game| g.world().actors.values().filter(|a| a.institutions.contains(&Institution::Bank)).count();
+    for seed in 1..=20u64 {
+        let s = worldgen::generate(seed, &p);
+        let mut g = Game::new(&s, params(), seed).unwrap();
+        let n = g.world().actors.len();
+        polities += n;
+        at_start += banks(&g);
+        for tick in 0..300 {
+            let r = g.tick(&[]).unwrap();
+            adoptions += r.events.iter().filter(|e| matches!(e.event, Event::Adopted { .. })).count();
+            if tick == 199 {
+                at_century += banks(&g);
+            }
+        }
+        at_end += banks(&g);
+        if banks(&g) == n {
+            worlds_all_banked_at_end += 1;
+        }
+    }
+    let (start, century, end) = (at_start as f64 / polities as f64, at_century as f64 / polities as f64, at_end as f64 / polities as f64);
+    eprintln!("Р3 share of polities with a bank: start {start:.2}, a century {century:.2} (band {band:?}), 150 years {end:.2}; {adoptions} adoptions; {worlds_all_banked_at_end} of 20 worlds all banked at the end");
+    assert!((band[0]..=band[1]).contains(&century), "Р3 {century:.2} outside {band:?}");
+    assert!(adoptions > 0, "not never");
+    assert!(end < 1.0, "the bank is not «always» in 300 ticks (owner's check on §20)");
+    assert!(worlds_all_banked_at_end < 20);
 }

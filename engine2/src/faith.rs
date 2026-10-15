@@ -24,12 +24,24 @@
 //! **Assimilation** of the tongue goes by the neighbourhood alone: no court has a policy
 //! for the tongue in E2 (Crete stayed Greek-speaking as it stayed Orthodox).
 //!
-//! **Phase** (after diplomacy, before the people): provinces in canonical order.
+//! **Institutions by the same channels** (E0 §2 variant 3: one mechanism with faith). A
+//! polity in contact with one that holds a practice — a neighbour by land or sea (trade),
+//! an ally, a lord or a vassal (a treaty), a house married into (marriage) — takes it up
+//! with `institution.adoption_per_year` by a keyed draw at `DrawPoint::Adoption`
+//! (`Adopted`). The bank spreads; the conversion policy does not: a policy is a court's
+//! decision, not a practice caught from a neighbour (E3 may make it one).
+//!
+//! **Phase** (after diplomacy, before the people): provinces in canonical order, then the
+//! polities.
 
 use crate::event::{Channel, Event};
 use crate::ids::{ActorId, CultureId, ProvinceId, ReligionId};
 use crate::params::Params;
-use crate::world::{Shift, World, WorldError};
+use crate::rng::DrawPoint;
+use crate::world::{Institution, Shift, World, WorldError};
+
+/// The institutions that spread by contact (a practice, not a policy).
+pub const SPREADING: [Institution; 1] = [Institution::Bank];
 
 impl World {
     /// The faith of a polity's court: its ruling house's.
@@ -106,7 +118,45 @@ impl World {
         }
     }
 
-    /// The phase of faith and tongue.
+    /// The polities `a` is in contact with: neighbours by land or sea, allies, lord and
+    /// vassals, and those a house of `a` is married into — the channels an institution
+    /// spreads along.
+    pub fn contacts(&self, a: ActorId) -> Vec<ActorId> {
+        self.actors
+            .keys()
+            .copied()
+            .filter(|b| *b != a && self.alive(*b) && (self.borders(a, *b) || self.allied(a, *b) || self.bound_by_vassalage(a, *b) || self.married_across(a, *b)))
+            .collect()
+    }
+
+    /// A polity `a` could take `institution` from: the lowest id in contact that holds it;
+    /// nothing for an institution that does not spread, or one `a` holds already.
+    pub fn adoption_source(&self, a: ActorId, institution: Institution) -> Option<ActorId> {
+        if !SPREADING.contains(&institution) || self.actors[&a].institutions.contains(&institution) {
+            return None;
+        }
+        self.contacts(a).into_iter().find(|b| self.actors[b].institutions.contains(&institution))
+    }
+
+    /// Institutions spread by contact: one keyed draw per polity and tick.
+    fn phase_adoption(&mut self, params: &Params) -> Result<(), WorldError> {
+        let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a)).collect();
+        for a in ids {
+            let wanted: Vec<(Institution, ActorId)> = SPREADING.iter().filter_map(|i| self.adoption_source(a, *i).map(|from| (*i, from))).collect();
+            if wanted.is_empty() {
+                continue;
+            }
+            let u = crate::rng::unit(self.draw(DrawPoint::Adoption, a.0));
+            if u < params.institution_adoption_per_tick {
+                let (institution, from) = wanted[0];
+                self.actors.get_mut(&a).unwrap().institutions.insert(institution);
+                self.emit(Event::Adopted { actor: a, institution, from });
+            }
+        }
+        Ok(())
+    }
+
+    /// The phase of faith and tongue, then of the institutions that spread by contact.
     pub(crate) fn phase_faith(&mut self, params: &Params) -> Result<(), WorldError> {
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().collect();
         for p in provinces {
@@ -127,6 +177,6 @@ impl World {
                 }
             }
         }
-        Ok(())
+        self.phase_adoption(params)
     }
 }

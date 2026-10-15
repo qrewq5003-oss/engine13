@@ -200,6 +200,9 @@ pub struct Params {
     pub conversion_rate_ppm_per_tick: i64,
     pub conversion_seed_ppm: i64,
     pub conversion_neighbourhood_factor: f64,
+    /// (в) The chance per tick that a polity takes up an institution a polity it is in
+    /// contact with holds (E2 step 8).
+    pub institution_adoption_per_tick: f64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -344,6 +347,7 @@ impl Params {
         let conversion_rate = value("conversion.rate_per_year")?;
         let conversion_seed = value("conversion.seed_share")?;
         let neighbourhood_factor = value("conversion.neighbourhood_factor")?;
+        let adoption = value("institution.adoption_per_year")?;
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
             famine_mortality_ppm_per_tick: (famine / 2.0 * 1_000_000.0).round() as i64,
@@ -418,6 +422,7 @@ impl Params {
             conversion_rate_ppm_per_tick: (conversion_rate / 2.0 * 1_000_000.0).round() as i64,
             conversion_seed_ppm: (conversion_seed * 1_000_000.0).round() as i64,
             conversion_neighbourhood_factor: neighbourhood_factor,
+            institution_adoption_per_tick: adoption / 2.0,
             entries,
         })
     }

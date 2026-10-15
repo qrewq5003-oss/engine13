@@ -128,6 +128,7 @@ impl Observed for Game {
                 Event::Submission { vassal, .. } => ObsEvent::Other(format!("Submission@{}", self.actor_id(*vassal).0)),
                 Event::Converted { province, .. } => ObsEvent::Other(format!("Converted@{}", self.province_id(*province).0)),
                 Event::Assimilated { province, .. } => ObsEvent::Other(format!("Assimilated@{}", self.province_id(*province).0)),
+                Event::Adopted { actor, institution, .. } => ObsEvent::Other(format!("Adopted@{}:{institution:?}", self.actor_id(*actor).0)),
             })
             .collect()
     }

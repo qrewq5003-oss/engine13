@@ -853,3 +853,28 @@ kind = "c"
 value = 5.0
 unit = "relation below the base between courts of another tongue"
 checked_by = "Р2"
+
+# E0 Р3 — observed: the share of polities with a bank a century on, where banks exist. By
+# memory: in Italy by 1400 most of the great states — Florence, Venice, Genoa, Siena, Lucca —
+# banked, and the Medici branches reached Bruges, London, Geneva and Avignon in the 1440s
+# while the kingdoms beyond the Alps borrowed from them rather than keeping their own.
+# Sources to open: de Roover, The Rise and Decline of the Medici Bank (1963); Goldthwaite,
+# The Economy of Renaissance Florence (2009). Owner's rule on §20: checked on the generator —
+# the bank must not become «always» in 300 ticks (half the polities start with one and the
+# channel of trade is contact).
+[institution.observed_bank_share_after_a_century]
+kind = "b"
+band = [0.4, 0.9]
+unit = "share of polities with a bank a century after the start"
+e0 = "Р3"
+
+# (в) The spread of institutions along the channels of E0 §2 (3) — one mechanism with faith:
+# a polity in contact with one that holds an institution — a neighbour by land or sea, an
+# ally, a lord or vassal, a house married into — takes it up with this chance a year, by a
+# keyed draw. Only what is a practice spreads (the bank); a policy is not caught from a
+# neighbour. Checked through Р3.
+[institution.adoption_per_year]
+kind = "c"
+value = 0.01
+unit = "chance per year with a channel"
+checked_by = "Р3"
