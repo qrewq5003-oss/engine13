@@ -74,6 +74,13 @@
 
 use std::collections::BTreeSet;
 
+/// The chance per tick that a province with `marks` of alienation rises under a ruler at
+/// `legitimacy` (E0 В7): `revolt.per_year / 2 × (1 + marks) × (100 − L)/50` — the formula
+/// the phase draws by and the bots' worth reads (E3 (е1)).
+pub fn rising_hazard(marks: u32, legitimacy: f64, params: &crate::params::Params) -> f64 {
+    params.revolt_per_tick * (1.0 + f64::from(marks)) * (100.0 - legitimacy) / 50.0
+}
+
 use crate::event::{Event, Transfer};
 use crate::ids::{ActorId, CultureId, HouseId, PersonId, ProvinceId};
 use crate::ledger::{Account, Source};
@@ -141,8 +148,7 @@ impl World {
         if !self.alive(owner) || self.actors[&owner].capital == p || self.in_revolt(p) {
             return 0.0;
         }
-        let legitimacy = self.actors[&owner].legitimacy;
-        params.revolt_per_tick * (1.0 + f64::from(self.alienation_marks(p))) * (100.0 - legitimacy) / 50.0
+        rising_hazard(self.alienation_marks(p), self.actors[&owner].legitimacy, params)
     }
 
     /// The house that would carry a rising of `p` into a polity of its own: the house of
@@ -341,7 +347,7 @@ impl World {
     fn levy_militia(&mut self, a: ActorId, params: &Params) -> Result<(), WorldError> {
         let mut room = self.recruit_room(a, params);
         for q in self.actors[&a].provinces.clone() {
-            let n = (self.population(q) * params.recruit_ceiling_ppm / 1_000_000).min(room);
+            let n = self.province_levy(q, params).min(room);
             if n <= 0 {
                 continue;
             }

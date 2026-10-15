@@ -116,6 +116,29 @@ pub fn saturate(value: f64, points: f64) -> f64 {
     }
 }
 
+/// The chance a tick that a ruler at `legitimacy` meets a chance of usurpation (E0 В6):
+/// `usurpation.per_year / 2 × (100 − L)/50` — the formula the phase draws by and the bots'
+/// worth reads (E3 (е1)).
+pub fn usurpation_hazard(legitimacy: f64, params: &Params) -> f64 {
+    params.usurpation_per_tick * (100.0 - legitimacy) / 50.0
+}
+
+/// The chance a tick that a person of `age` dies a natural death: the mortality table at the
+/// elite's factor (E0 В1, В2).
+pub fn natural_death_hazard(age: i32, params: &Params) -> f64 {
+    params.mortality_per_year(age) * params.mortality_elite_factor / 2.0
+}
+
+/// The chance a tick that a ruler at `legitimacy` is murdered (E0 В3).
+pub fn violent_death_hazard(legitimacy: f64, params: &Params) -> f64 {
+    params.violent_death_per_tick * (100.0 - legitimacy) / 50.0
+}
+
+/// Legitimacy after a tick's drift toward its norm (`legitimacy.rate_per_tick`).
+pub fn drift_toward(legitimacy: f64, norm: f64, params: &Params) -> f64 {
+    legitimacy + (norm - legitimacy) * params.legitimacy_rate_per_tick
+}
+
 pub fn standing_of_rule(rule: Succession) -> Standing {
     match rule {
         Succession::Blood => Standing::Hereditary,
@@ -217,7 +240,7 @@ impl World {
 
     /// The shifts of the norm by the ruler's lasting decisions, in points: the tax away from
     /// the tithe (down above it, up below it) and the closed credit.
-    fn norm_shifts(&self, a: ActorId, params: &Params) -> (f64, f64) {
+    pub(crate) fn norm_shifts(&self, a: ActorId, params: &Params) -> (f64, f64) {
         let actor = &self.actors[&a];
         let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
         let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
@@ -403,6 +426,17 @@ impl World {
         self.provinces.get_mut(&province).unwrap().governor = to;
         self.emit(Event::GovernorChanged { province, from, to });
         Ok(())
+    }
+
+    /// Who would take the throne of `a` were its ruler to die now: the designated heir, else
+    /// the next by the rule inside the ruling house (`None` when the house has nobody left —
+    /// the throne would pass to another house; E3 (е1): the worth of a murder reads it).
+    pub fn next_ruler(&self, a: ActorId, params: &Params) -> Option<PersonId> {
+        let actor = &self.actors[&a];
+        actor.heir.filter(|h| self.person_alive(*h)).or_else(|| {
+            let ruler = actor.ruler;
+            self.heir_by_rule(ruler, actor.succession, params).filter(|p| *p != ruler)
+        })
     }
 
     /// The next ruler by the rule, inside the ruling house (`None` when the house has no
@@ -659,8 +693,7 @@ impl World {
         // 1. Deaths, every living person in id order.
         let living: Vec<PersonId> = self.persons.iter().filter(|(_, p)| p.died.is_none()).map(|(id, _)| *id).collect();
         for p in &living {
-            let age = year - self.persons[p].born;
-            let per_tick = params.mortality_per_year(age) * params.mortality_elite_factor / 2.0;
+            let per_tick = natural_death_hazard(year - self.persons[p].born, params);
             if self.draw_once(DrawPoint::Mortality, p.0) < per_tick {
                 self.die(*p, Cause::Natural, params)?;
             }
@@ -671,8 +704,7 @@ impl World {
             if !self.alive(*a) {
                 continue;
             }
-            let legitimacy = self.actors[a].legitimacy;
-            let per_tick = params.violent_death_per_tick * (100.0 - legitimacy) / 50.0;
+            let per_tick = violent_death_hazard(self.actors[a].legitimacy, params);
             if self.draw_once(DrawPoint::Violence, a.0) < per_tick {
                 let ruler = self.actors[a].ruler;
                 self.die(ruler, Cause::Murder, params)?;
@@ -683,8 +715,7 @@ impl World {
             if !self.alive(*a) {
                 continue;
             }
-            let legitimacy = self.actors[a].legitimacy;
-            let per_tick = params.usurpation_per_tick * (100.0 - legitimacy) / 50.0;
+            let per_tick = usurpation_hazard(self.actors[a].legitimacy, params);
             if self.draw_once(DrawPoint::Usurpation, a.0) < per_tick {
                 // The lot makes the chance, the candidate's house decides in the next turn
                 // (owner's rule on #290, E3 (в)).
@@ -747,7 +778,7 @@ impl World {
             }
             let norm = self.legitimacy_norm(*a, params);
             let actor = self.actors.get_mut(a).unwrap();
-            actor.legitimacy += (norm - actor.legitimacy) * params.legitimacy_rate_per_tick;
+            actor.legitimacy = drift_toward(actor.legitimacy, norm, params);
         }
         Ok(())
     }
