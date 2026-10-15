@@ -396,10 +396,12 @@ fn the_price_of_the_policy_is_paid_in_legitimacy_on_taking_it() {
     let mut declined = Game::from_save(&testworld::five_states_scenario(), p.clone(), &g.to_save().unwrap()).unwrap();
     declined.set_player(Some(s0));
     let take = |id| Turn { answers: vec![Answer { who: s0, opportunity: id, reply: engine2::Reply::Take }], ..Turn::default() };
+    let l0 = g.world().actors[&ActorId(0)].legitimacy;
     g.play(&take(offer.id)).unwrap();
     declined.play(&Turn { answers: vec![Answer { who: s0, opportunity: offer.id, reply: engine2::Reply::Decline }], ..Turn::default() }).unwrap();
     let (a, b) = (g.world().actors[&ActorId(0)].legitimacy, declined.world().actors[&ActorId(0)].legitimacy);
-    assert!((b - a - p.policy_cost_legitimacy * (1.0 - p.legitimacy_rate_per_tick)).abs() < 1e-6, "the price once, then drawn toward the norm: {b} − {a}");
+    let paid = l0 - engine2::politics::saturate(l0, -p.policy_cost_legitimacy);
+    assert!((b - a - paid * (1.0 - p.legitimacy_rate_per_tick)).abs() < 1e-6, "the price once, saturating, then drawn toward the norm: {b} − {a}");
 }
 
 // ---------- a marriage offered to a house (owner's correction on §23) ----------

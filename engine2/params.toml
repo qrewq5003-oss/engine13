@@ -616,9 +616,18 @@ checked_by = "В6"
 # #286: a one-off price for a permanent gain is an arbitrage — legitimacy returns to the
 # norm in a few years, the rate stays). The legitimacy norm falls by this much for every
 # step of the tax rate above the tithe (`tax.default_rate`) and rises by it for every step
-# below, as long as the rate holds: the tithe doubled (+5 steps) puts a hereditary king
-# below a usurper (70 − 50 = 20). Checked through В6; bound to the price of order by the
+# below, as long as the rate holds. Checked through В6; bound to the price of order by the
 # no-arbitrage guard above.
+# **Every shift of the norm and every blow or gain of legitimacy saturates** (owner's rule
+# on #293, `politics::saturate`): the points here and in `legitimacy.cost_*`,
+# `legitimacy.gain_*`, `legitimacy.norm_penalty_in_default`, `order.gain`, `policy.cost_*`
+# take their share of the distance left to the bound — `v·e^(−p/100)` down, the mirror up —
+# so legitimacy and its norm never reach 0 or 100: summed on a bounded scale, usurper 30 −
+# default 20 − one step of the tax 10 sat on the bound for the term of a default (seeds 35,
+# 113, 180 of the full run). The collection reads the same shifts **summed**, unbounded (the
+# pressure, `World::unclamped_legitimacy_norm`): the tithe doubled (+5 steps) still costs a
+# hereditary king the collection of a norm of 70 − 50 = 20, while its legitimacy settles at
+# 70·e^(−0.5) ≈ 42.
 [legitimacy.norm_per_tax_step]
 kind = "c"
 value = 10.0

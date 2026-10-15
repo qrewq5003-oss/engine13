@@ -433,8 +433,10 @@ fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_an
     assert!(r.events.iter().any(|e| matches!(e.event, Event::War { a, b } if (a, b) == (s0, s1))));
     assert!(g.world().at_war(s0, s1));
     let paid = l0 - g.world().actors[&s0].legitimacy;
-    let drift = p.legitimacy_rate_per_tick * (g.world().legitimacy_norm(s0, &p) - (l0 - p.legitimacy_cost_declare_war));
-    assert!((paid - (p.legitimacy_cost_declare_war - drift)).abs() < 1e-6, "the exact price, then the tick's drift: paid {paid}");
+    // The price saturates (owner's rule on #293): its share of what legitimacy has left.
+    let after = engine2::politics::saturate(l0, -p.legitimacy_cost_declare_war);
+    let drift = p.legitimacy_rate_per_tick * (g.world().legitimacy_norm(s0, &p) - after);
+    assert!((paid - (l0 - after - drift)).abs() < 1e-6, "the exact price, then the tick's drift: paid {paid}");
     // A breach: the factor of the price, the treaty gone, the victim's allies' relations to
     // nothing. A fresh treaty costs more (owner's rule on #293): the fresh factor on the day
     // it was signed, falling in a line to the plain breach over the fresh years; a treaty of
@@ -460,7 +462,7 @@ fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_an
     let r = g.tick(&[call(s0, VerbId::DeclareWar, s2)]).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::TreatyBroken { a, b, kind: TreatyKind::Alliance } if (a, b) == (s0, s2))));
     assert!(g.world().treaty(s0, s2).is_none() && g.world().at_war(s0, s2));
-    let after_price = l0 - breach;
+    let after_price = engine2::politics::saturate(l0, -breach);
     let expected = after_price + p.legitimacy_rate_per_tick * (norm_before - after_price);
     assert!((g.world().actors[&s0].legitimacy - expected).abs() < 1e-6, "the breach costs the factor");
     let drifted = p.relation_rate_per_tick * g.world().relation_norm(s0, s3, &p);

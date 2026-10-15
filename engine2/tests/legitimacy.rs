@@ -75,10 +75,12 @@ fn the_tax_verbs_move_the_rate_one_step_for_a_price_in_legitimacy_and_close_at_t
     assert_eq!(rate0, p.tax_default_ppm);
     w.apply_verb(&raise, &p).unwrap();
     assert_eq!(w.actors[&a].tax_rate_ppm, rate0 + p.tax_step_ppm);
-    assert!((w.actors[&a].legitimacy - (l0 - p.legitimacy_cost_raise_tax)).abs() < 1e-9, "the exact price");
+    // The price saturates (owner's rule on #293): its share of what is left, never the bound.
+    let after = engine2::politics::saturate(l0, -p.legitimacy_cost_raise_tax);
+    assert!((w.actors[&a].legitimacy - after).abs() < 1e-9, "the exact price");
     w.apply_verb(&lower, &p).unwrap();
     assert_eq!(w.actors[&a].tax_rate_ppm, rate0);
-    assert!((w.actors[&a].legitimacy - (l0 - p.legitimacy_cost_raise_tax + p.legitimacy_gain_lower_tax)).abs() < 1e-9, "lowering gives the gain back");
+    assert!((w.actors[&a].legitimacy - engine2::politics::saturate(after, p.legitimacy_gain_lower_tax)).abs() < 1e-9, "lowering gives the gain back, its share of what is missing");
     // A target the verb does not take is refused and changes nothing.
     let bad = VerbCall { target: Target::Actor(a), ..raise };
     assert!(matches!(w.apply_verb(&bad, &p), Err(engine2::economy::VerbError::BadTarget(VerbId::RaiseTax, _))));
@@ -177,7 +179,7 @@ fn enforce_order_buys_legitimacy_with_a_share_of_a_years_revenue_and_closes_when
     let call = VerbCall { actor: who, verb: VerbId::EnforceOrder, target: Target::None };
     w.apply_verb(&call, &p).unwrap();
     assert_eq!(w.treasury(a), t0 - cost);
-    assert!((w.actors[&a].legitimacy - (l0 + p.order_gain).min(100.0)).abs() < 1e-9);
+    assert!((w.actors[&a].legitimacy - engine2::politics::saturate(l0, p.order_gain)).abs() < 1e-9, "the gain saturates toward 100");
     // Through the contract: the posting is one entry signed `Verb`, with its event. The
     // direct purchase left the treasury short; the economy fills it again.
     while !offer(&g).available {
@@ -242,7 +244,7 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     assert!(-off[0].milli / 1000 >= debt, "the interest of the tick was on the debt when it was written off");
     // The price: legitimacy, with the tick's drift toward the norm on top.
     let norm = w.legitimacy_norm(a, &p);
-    let after_price = (l0 - p.legitimacy_cost_default).clamp(0.0, 100.0);
+    let after_price = engine2::politics::saturate(l0, -p.legitimacy_cost_default);
     let expected = after_price + (norm - after_price) * p.legitimacy_rate_per_tick;
     assert!((w.actors[&a].legitimacy - expected).abs() < 1e-9, "{} vs {expected}", w.actors[&a].legitimacy);
     // No credit: the verb is closed with its reason, and the pay borrows nothing.
@@ -268,7 +270,7 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
         if g.world().credit_closed(a) {
             let w = g.world();
             if w.actors[&a].standing == Standing::Hereditary && w.is_adult(w.actors[&a].ruler, &p) {
-                assert!((w.legitimacy_norm(a, &p) - (p.legitimacy_norm_hereditary - p.legitimacy_norm_penalty_in_default)).abs() < 1e-9, "the norm sits lower for the whole term");
+                assert!((w.legitimacy_norm(a, &p) - engine2::politics::saturate(p.legitimacy_norm_hereditary, -p.legitimacy_norm_penalty_in_default)).abs() < 1e-9, "the norm sits lower for the whole term");
             }
             norm_closed = w.legitimacy_norm(a, &p);
             ruler_closed = w.actors[&a].ruler;
@@ -285,7 +287,9 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
     // stays at the top of Э6.
     let w = g.world();
     if w.actors[&a].ruler == ruler_closed && w.actors[&a].standing == standing_closed {
-        assert!((w.legitimacy_norm(a, &p) - (norm_closed + p.legitimacy_norm_penalty_in_default)).abs() < 1e-9, "the norm is back after the term");
+        // The closed credit is the last shift (owner's rule on #293: saturating), so lifting
+        // it divides it out.
+        assert!((w.legitimacy_norm(a, &p) - norm_closed * (p.legitimacy_norm_penalty_in_default / 100.0).exp()).abs() < 1e-9, "the norm is back after the term");
     }
     assert!(w.actors[&a].defaulted);
     assert_eq!(w.interest_ppm_per_tick(a, &p), p.loan_interest_after_default_ppm_per_tick);
@@ -408,9 +412,11 @@ fn every_step_of_the_tax_above_the_tithe_lowers_the_norm_while_the_rate_holds_an
     let base = w.legitimacy_norm(a, &p);
     assert!((base - p.legitimacy_norm_hereditary).abs() < 1e-9);
     w.apply_verb(&raise, &p).unwrap();
-    assert!((w.legitimacy_norm(a, &p) - (base - p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "one step up: the norm one step lower");
+    // Saturating (owner's rule on #293): each step its share of what is left; two steps one
+    // shift of their sum.
+    assert!((w.legitimacy_norm(a, &p) - engine2::politics::saturate(base, -p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "one step up: the norm one step lower");
     w.apply_verb(&raise, &p).unwrap();
-    assert!((w.legitimacy_norm(a, &p) - (base - 2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9);
+    assert!((w.legitimacy_norm(a, &p) - engine2::politics::saturate(base, -2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9);
     // Legitimacy drifts to the shifted norm and stays there as long as the rate holds: the
     // one-off blow is never recovered above it.
     for _ in 0..60 {
@@ -419,14 +425,19 @@ fn every_step_of_the_tax_above_the_tithe_lowers_the_norm_while_the_rate_holds_an
             return; // the draws changed the throne: the shape is covered by the paired run
         }
     }
-    let shifted = base - 2.0 * p.legitimacy_norm_per_tax_step;
+    let shifted = engine2::politics::saturate(base, -2.0 * p.legitimacy_norm_per_tax_step);
     assert!((w.actors[&a].legitimacy - shifted).abs() < 1.0, "{} vs {shifted}", w.actors[&a].legitimacy);
     // Down below the tithe: the norm rises above the standing's.
     for _ in 0..4 {
         w.apply_verb(&lower, &p).unwrap();
     }
-    assert!((w.legitimacy_norm(a, &p) - (base + 2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "two steps below the tithe: the norm two steps higher");
-    assert!(w.legitimacy_norm(a, &p) <= 100.0);
+    assert!((w.legitimacy_norm(a, &p) - engine2::politics::saturate(base, 2.0 * p.legitimacy_norm_per_tax_step)).abs() < 1e-9, "two steps below the tithe: the norm two steps higher");
+    assert!(w.legitimacy_norm(a, &p) < 100.0, "and never the top");
+    // Far past the bottom the norm approaches zero and never reaches it; the pressure the
+    // collection reads goes on below it.
+    w.actors.get_mut(&a).unwrap().standing = Standing::Usurper;
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_band_ppm.1;
+    assert!(w.legitimacy_norm(a, &p) > 0.0 && w.unclamped_legitimacy_norm(a, &p) < 0.0, "the usurper at the top of the band: the norm above zero, the pressure below");
 }
 
 /// The greedy ruler may gain at most this over the plain one in net income: the arithmetic
@@ -572,13 +583,14 @@ fn the_tax_collected_falls_with_legitimacy_below_the_norm_of_the_standing_and_la
     assert!(usurper_gap > 0);
     assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - usurper_gap * p.tax_evasion_ppm_per_legitimacy_point, "a usurper at its norm is short of the collection");
     // The gap is from the norm of lawful rule, not from the shifted norm: a ruler at the
-    // top of the tax band, settled at its shifted norm, still loses the collection.
+    // top of the tax band, settled at its shifted norm, still loses the collection — by the
+    // pressure of the shifts summed, not by the saturated norm (owner's rule on #293).
     w.actors.get_mut(&a).unwrap().standing = Standing::Hereditary;
     let raise = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
     while w.apply_verb(&raise, &p).is_ok() {}
     let shifted = w.legitimacy_norm(a, &p);
     w.actors.get_mut(&a).unwrap().legitimacy = shifted;
-    let gap = (w.lawful_norm(a, &p) - shifted).round() as i64;
+    let gap = (w.lawful_norm(a, &p) - w.unclamped_legitimacy_norm(a, &p)).round() as i64;
     assert!(gap > 0, "the tax at the top of the band shifts the norm down");
     assert_eq!(w.collection_share_ppm(a, &p), 1_000_000 - gap * p.tax_evasion_ppm_per_legitimacy_point, "the greedy ruler at its shifted norm is still short of the collection");
 }
@@ -683,13 +695,14 @@ fn net_take(w: &mut World, a: ActorId, p: &Params) -> i64 {
     r.postings.iter().filter(|q| q.account == engine2::Account::Treasury(a) && matches!(q.source, Source::Tax | Source::Court | Source::Seat)).map(|q| q.milli).sum::<i64>() / 1000
 }
 
-/// Owner's rule on #292: at the bottom of legitimacy a step of the tax up keeps its price.
-/// Legitimacy stops at 0 and the norm with it, so the share collected stopped falling while
-/// the rate rose: a usurper at legitimacy 0 raised the tax from 0.10 to 0.18 for nothing.
-/// Now the points of the norm below zero count as legitimacy lost for the collection.
-/// Every reachable bottom state — each lawful norm (the four standings, the regency, the
-/// usurper under each rule of succession), with and without a default, at every rate of
-/// the band where the norm sits at zero or below — at legitimacy 0: a step up lowers the
+/// Owner's rules on #292 and #293: at the bottom of legitimacy a step of the tax up keeps its
+/// price. Legitimacy once stopped at 0 and the norm with it, so the share collected stopped
+/// falling while the rate rose: a usurper at legitimacy 0 raised the tax from 0.10 to 0.18
+/// for nothing. Now legitimacy saturates and never reaches zero, and the collection reads
+/// the pressure of the shifts summed. Every reachable bottom state — each lawful norm (the
+/// four standings, the regency, the usurper under each rule of succession), with and
+/// without a default, at every rate of the band where the pressure sits at zero or below —
+/// at legitimacy at its (saturated) norm: a step up lowers the
 /// share by what it costs above zero, the net take of a tick gains at most
 /// `BOTTOM_GAIN_CEILING` (owner's rule on #292: two states gain a trace by the ordinary
 /// arithmetic of the step, named below; the rest lose), and the bot never wants the step.
@@ -726,19 +739,20 @@ fn at_the_bottom_of_legitimacy_a_step_of_the_tax_up_keeps_its_price_and_gains_at
                     }
                     actor.tax_rate_ppm = rate;
                     actor.credit_closed_until = if default { Some(engine2::time::Tick(w.tick.0 + 100)) } else { None };
-                    actor.legitimacy = 0.0;
                 }
                 let label = format!("{name}, default {default}, rate {:.2}", rate as f64 / 1e6);
                 if w.unclamped_legitimacy_norm(a, &p) > 1e-9 {
                     rate += p.tax_step_ppm;
                     continue;
                 }
+                let settled = w.legitimacy_norm(a, &p);
+                w.actors.get_mut(&a).unwrap().legitimacy = settled;
                 states += 1;
                 let share = w.collection_share_ppm(a, &p);
                 let mut raised = w.clone();
                 let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::RaiseTax, target: Target::None };
                 raised.apply_verb(&call, &p).unwrap();
-                assert_eq!(raised.actors[&a].legitimacy, 0.0, "{label}: the rating stays at the bottom");
+                assert!(raised.actors[&a].legitimacy > 0.0 && raised.actors[&a].legitimacy < settled, "{label}: the rating falls, saturating, and never to zero");
                 assert_eq!(raised.collection_share_ppm(a, &p), (share - step_share).max(0), "{label}: the step costs the share what it costs above zero");
                 // The bot reads the same prices, the lasting shift included: at the bottom a
                 // step up is never worth it, not even with the army's pay unmet (the need at

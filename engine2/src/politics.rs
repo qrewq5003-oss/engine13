@@ -101,6 +101,21 @@ const HOUSEHOLD: (u64, u64) = (2, 3);
 const HOUSEHOLD_AGE_OFFSETS: [i32; 3] = [-5, 5, -10];
 
 /// The standing a succession by rule gives.
+/// A shift of `points` on the scale of legitimacy (0–100), **saturating** (owner's rule on
+/// #293): the shift takes its share of the distance left to the bound it moves toward —
+/// the relations' push (`push_relation`) in its continuous form, so that two shifts of 10
+/// are one of 20 and no shift, however large, reaches the bound. Downward: `v·e^(−p/100)`;
+/// upward: `100 − (100 − v)·e^(−p/100)`. The norm was a sum of shifts on a bounded scale —
+/// usurper 30 − default 20 − a step of the tax 10 = 0 — and a ruler sat on the bound for
+/// the term of its default (seeds 35, 113, 180 of the full run).
+pub fn saturate(value: f64, points: f64) -> f64 {
+    if points >= 0.0 {
+        100.0 - (100.0 - value) * (-points / 100.0).exp()
+    } else {
+        value * (points / 100.0).exp()
+    }
+}
+
 pub fn standing_of_rule(rule: Succession) -> Standing {
     match rule {
         Succession::Blood => Standing::Hereditary,
@@ -200,26 +215,30 @@ impl World {
         self.standing_norm(a, params)
     }
 
-    /// The norm legitimacy moves towards: the standing's norm shifted by the ruler's
-    /// lasting decisions — the tax above the tithe, the closed credit — kept inside 0–100.
-    pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
-        self.unclamped_legitimacy_norm(a, params).clamp(0.0, 100.0)
-    }
-
-    /// The same norm before it is kept inside 0–100: below zero when the ruler's decisions
-    /// shift it past the bottom. Legitimacy, a rating, stops at 0; the collection does not
-    /// (owner's rule on #292, `World::collection_share_ppm`).
-    pub fn unclamped_legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
+    /// The shifts of the norm by the ruler's lasting decisions, in points: the tax away from
+    /// the tithe (down above it, up below it) and the closed credit.
+    fn norm_shifts(&self, a: ActorId, params: &Params) -> (f64, f64) {
         let actor = &self.actors[&a];
         let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
         let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
-        self.standing_norm(a, params) - steps_above_tithe * params.legitimacy_norm_per_tax_step - in_default
+        (-steps_above_tithe * params.legitimacy_norm_per_tax_step, -in_default)
     }
 
-    /// How far the norm sits below zero, in points: the part of the ruler's shift the
-    /// bottom of the rating swallows.
-    pub fn norm_below_zero(&self, a: ActorId, params: &Params) -> f64 {
-        (-self.unclamped_legitimacy_norm(a, params)).max(0.0)
+    /// The norm legitimacy moves towards: the standing's norm shifted by the ruler's
+    /// lasting decisions — the tax, then the closed credit — each shift **saturating**
+    /// (`saturate`, owner's rule on #293): it approaches the bounds and never reaches them.
+    pub fn legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
+        let (tax, default) = self.norm_shifts(a, params);
+        saturate(saturate(self.standing_norm(a, params), tax), default)
+    }
+
+    /// **The pressure** on the collection: the standing's norm with the same shifts
+    /// **summed**, unbounded — below zero when the ruler's decisions push past the bottom
+    /// (owner's rules on #292 and #293: the collection reads it, so a step of the tax at the
+    /// bottom keeps its price in money while legitimacy, saturating, never reaches zero).
+    pub fn unclamped_legitimacy_norm(&self, a: ActorId, params: &Params) -> f64 {
+        let (tax, default) = self.norm_shifts(a, params);
+        self.standing_norm(a, params) + tax + default
     }
 
     /// Who would take the throne by force: the regent, else a governor, else the eldest
@@ -586,10 +605,12 @@ impl World {
         self.yearly_income(a, params) * params.order_cost_share_ppm / 1_000_000
     }
 
-    /// Pay or receive legitimacy, kept inside 0–100.
+    /// Pay or receive legitimacy, saturating (`saturate`, owner's rule on #293): a blow
+    /// takes its share of what is left, a gain its share of what is missing — never the
+    /// bound, never a price swallowed by it.
     pub(crate) fn pay_legitimacy(&mut self, a: ActorId, cost: f64) {
         let actor = self.actors.get_mut(&a).unwrap();
-        actor.legitimacy = (actor.legitimacy - cost).clamp(0.0, 100.0);
+        actor.legitimacy = saturate(actor.legitimacy, -cost);
     }
 
     /// The verbs of internal politics: `raise_tax` / `lower_tax` / `enforce_order` (no

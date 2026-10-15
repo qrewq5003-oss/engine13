@@ -434,7 +434,7 @@ fn a_province_with_no_house_to_carry_it_is_in_revolt_pays_nothing_feeds_nobody_a
     assert_eq!((w.actors.len(), w.houses.len(), w.units.len()), (actors_before, houses_before, units_before));
     assert_eq!(w.provinces[&p05].owner, s0);
     assert_eq!(w.provinces[&p05].governor, Some(b0), "the seat stays, without income");
-    assert!((w.actors[&s0].legitimacy - (l0 - p.legitimacy_cost_revolt)).abs() < 1e-9, "the exact price, once");
+    assert!((w.actors[&s0].legitimacy - engine2::politics::saturate(l0, -p.legitimacy_cost_revolt)).abs() < 1e-9, "the exact price, once, saturating (owner's rule on #293)");
     assert_eq!(w.revolt_chance_per_tick(p05, &p), 0.0, "a province in revolt draws no more");
     // No tax from it and no seat income for its governor; the rest of the polity pays.
     assert_eq!(w.production_per_tick(s0, &p), production_before - people * p.output_per_head_kg / 2);
