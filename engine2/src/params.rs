@@ -34,7 +34,24 @@ pub struct Entry {
     pub checked_by: Option<String>,
     /// (а)/(б): the E0 §5 row the band comes from.
     pub e0: Option<String>,
+    /// (в) only: **where the value comes from** — the registry of (в) parameters (owner's
+    /// rule after #293), beginning with one of [`ORIGINS`].
+    pub origin: Option<String>,
 }
+
+/// The origins a (в) value may have (owner's rules after #293: a band remembered rather than
+/// sourced never justifies a weight; fitting to one is marked so that it shows).
+pub const ORIGINS: [&str; 6] = [
+    "источник:",
+    "выведен:",
+    "выбран:",
+    "подобран по цели теста:",
+    "подобран по полосе по источнику:",
+    "подобран по полосе по памяти:",
+];
+
+/// The origin of (в) values fitted to a band that is itself only remembered.
+pub const FITTED_BY_MEMORY: &str = "подобран по полосе по памяти:";
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ParamsError {
@@ -48,6 +65,8 @@ pub enum ParamsError {
     ObservedNoBand(String),
     #[error("{0}: kind (c) needs value and checked_by")]
     ModelIncomplete(String),
+    #[error("{0}: kind (c) needs an origin beginning with one of the registry's (owner's rule after #293)")]
+    NoOrigin(String),
     #[error("{0}: kinds (a) and (b) need e0 — without a source no entry")]
     NoSource(String),
     #[error("{name}: checked_by '{row}' names no (b) row of this file")]
@@ -549,6 +568,9 @@ fn validate(name: &str, e: &Entry) -> Result<(), ParamsError> {
             if e.value.is_none() || e.checked_by.as_deref().is_none_or(str::is_empty) {
                 return Err(ParamsError::ModelIncomplete(name.to_string()));
             }
+            if !e.origin.as_deref().is_some_and(|o| ORIGINS.iter().any(|p| o.starts_with(p) && o.trim().len() > p.len())) {
+                return Err(ParamsError::NoOrigin(name.to_string()));
+            }
         }
     }
     Ok(())
@@ -559,6 +581,25 @@ mod tests {
     use super::*;
 
     /// Money and legitimacy must not be convertible at a profit (review of #286): a step
+    /// The registry of (в) parameters (owner's rules after #293): every value says where it
+    /// comes from; the count is printed for every PR; **a value fitted to a band that is
+    /// itself only remembered never joins the list silently** — the five there now are named,
+    /// and a new one fails here until the owner decides (a source first, then the model).
+    #[test]
+    fn the_registry_of_model_parameters_names_every_origin_and_holds_the_ones_fitted_by_memory() {
+        let p = Params::load().unwrap();
+        let model: Vec<(&String, &Entry)> = p.entries.iter().filter(|(_, e)| e.kind == Kind::Model).collect();
+        let mut by_origin: BTreeMap<&str, usize> = BTreeMap::new();
+        for (_, e) in &model {
+            let o = e.origin.as_deref().unwrap_or_default();
+            *by_origin.entry(ORIGINS.iter().copied().find(|x| o.starts_with(x)).unwrap()).or_insert(0) += 1;
+        }
+        let of_bots = model.iter().filter(|(n, _)| n.starts_with("agent.") || n.starts_with("aspiration.") || n.starts_with("goal.")).count();
+        let by_memory: Vec<&str> = model.iter().filter(|(_, e)| e.origin.as_deref().is_some_and(|o| o.starts_with(FITTED_BY_MEMORY))).map(|(n, _)| n.as_str()).collect();
+        eprintln!("registry of (в): {} parameters, of the bots {of_bots}; by origin {by_origin:?}; fitted to a band by memory: {by_memory:?}", model.len());
+        assert_eq!(by_memory, ["agent.weight_independence", "agent.weight_throne", "institution.adoption_per_year", "revolt.per_year", "usurpation.per_year"], "a (в) value fitted to a band by memory joined or left the registry: the owner decides");
+    }
+
     /// of the tax gives 0.2 of a year's revenue a year and lowers the norm by one step's
     /// worth; buying that back costs 0.2 × step × price / gain a year.
     #[test]
@@ -655,7 +696,11 @@ band = [0.005, 0.010]", 1);
         assert!(matches!(Params::parse(b_nosrc), Err(ParamsError::NoSource(_))));
         let c_noref = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\n";
         assert!(matches!(Params::parse(c_noref), Err(ParamsError::ModelIncomplete(_))));
-        let c_badref = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\nchecked_by = \"Я9\"\n";
+        let c_noorigin = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\nchecked_by = \"Я9\"\n";
+        assert!(matches!(Params::parse(c_noorigin), Err(ParamsError::NoOrigin(_))), "a (в) value without its origin");
+        let c_badorigin = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\nchecked_by = \"Я9\"\norigin = \"просто так\"\n";
+        assert!(matches!(Params::parse(c_badorigin), Err(ParamsError::NoOrigin(_))), "an origin outside the registry's");
+        let c_badref = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\nchecked_by = \"Я9\"\norigin = \"выбран: тест\"\n";
         assert!(matches!(Params::parse(c_badref), Err(ParamsError::CheckedByUnknown { .. })));
         let unknown = "[x.y]\nkind = \"c\"\nvalue = 0.5\nunit = \"u\"\nchecked_by = \"П7\"\nfoo = 1\n";
         assert!(matches!(Params::parse(unknown), Err(ParamsError::Toml(_))));
