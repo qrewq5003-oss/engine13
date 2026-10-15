@@ -111,7 +111,10 @@ e0 = "П7"
 
 # E0 А8 — soldiers the polity's economy can sustain per 1 000 inhabitants (Э8 × Э2, Roth 1999
 # for the ration): a polity-wide observed band. Until E2 step 4 it stood in for local supply;
-# now the budget itself is the limit (economy.rs) and this row is measured, never read.
+# now the budget itself is the limit (economy.rs) and this row is measured, never read. The
+# standing armies of А11 opened before E3 (E0 §5.8): Venice 1450 — 3 461 lances and 5 144
+# infantry, about 1 % of its people; Milan under Galeazzo Maria — 42 000 on the books, half
+# of them permanent, about 1.7 % (Mallett and Hale 1984 — открыл (вторичное)).
 [army.observed_soldiers_per_1000_people]
 kind = "b"
 band = [90.0, 200.0]
@@ -170,10 +173,13 @@ unit = "exponent"
 checked_by = "А13"
 
 # E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
-# Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003), on Dupuy's
-# base of 625 battles 1600–1973: numbers raise the chance of victory but decide far from
-# always — about two thirds for the larger side (по памяти; the source is to be opened
-# before E3, owner's rule on PR #284).
+# Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003) = IZA DP
+# 491 — открыл (E0 §5.8): 625 battles 1600–1973 from Helmbold's base (built like Dupuy's
+# QJM/TNDM); the attacker won 3 battles in 5 at a mean force ratio of about 2, and at double
+# strength another 10 % of men add 2 points to the chance — numbers raise the chance of
+# victory but decide far from always. The share won by the stronger side is not reported:
+# the band is derived from those figures (owner's rule on PR #284: the exponent is
+# recalibrated at E3 on the agents' battles).
 [battle.observed_win_share_of_the_stronger]
 kind = "b"
 band = [0.6, 0.8]
@@ -293,7 +299,10 @@ unit = "yearly outputs per head (Э2) per soldier per year"
 e0 = "А3"
 
 # E0 Э6 — interest where a bank exists (de Roover 1963; Pezzolo 2003; Molho 1971: Monte
-# 4–5 %, deposits 7–8 %, loans to princes 10–15 %). An institution's row, not an era's.
+# 4–5 %, deposits 7–8 %, loans to princes 10–15 %; Pezzolo 2007 — открыл, E0 §5.8: the Monte
+# 5 % in Florence and Venice, 7 % in Genoa, short loans in Florence at most 12–14 %, the
+# Aragonese crown of Naples up to 40 % — a prince without a Monte, which in the engine is a
+# polity without a bank and without a loan at all). An institution's row, not an era's.
 [loan.interest_per_year]
 kind = "a"
 value = 0.08
@@ -401,7 +410,10 @@ unit = "years, mean over the reigns that ended"
 e0 = "В5"
 
 # E0 В4 — births: 4–6 legitimate children per ruler, i.e. per couple, over a reproductive
-# life (Sundell, Kokkonen, Møller, Krishnarajan 2021, Dataverse — по памяти). The model has
+# life (Kokkonen, Krishnarajan, Møller, Sundell, JOP 83/4 (2021) — открыл, E0 §5.8: 27
+# monarchies 1000–1799, 22 % of monarch-years with five children or more and 38 % with
+# none; the mean is not in the text and the Dataverse is not opened — the band stays by
+# memory). The model has
 # no sex and no marriage: each person is the one parent of its children, and the half of the
 # children that marries out of the house (the daughters) is not modelled — so the row is
 # В4 ÷ 2 per person, over the fertile window 16–45 (29 years) the unit is defined on:
@@ -657,9 +669,12 @@ e0 = "Д2"
 
 # E0 Д3 — observed: the share of polities bound by an alliance or by vassalage at a time.
 # Italy 1455: five powers of the league among eight to ten states; the Balkans 1430: Serbia,
-# Wallachia, Byzantium tributaries of the Ottomans; Rome 375: the federates. **By memory** —
-# sources to open: Mallett, «Mercenaries and their Masters», ch. 1 (Lodi and the league);
-# Ivanović 2019 (opened for Д2); Heather, «The Fall of the Roman Empire» (the federates).
+# Wallachia, Byzantium tributaries of the Ottomans; Rome 375: the federates. Opened before
+# E3 (E0 §5.8): Lodi 1454 and the league of 1455 bound the five powers for 25 years, and by
+# 1455 every Italian state but Genoa and Rimini — EBSCO, открыл (вторичное); the federates
+# of 382 — the treaty's terms are a reconstruction (Halsall), открыл (вторичное); Mallett,
+# «Mercenaries and their Masters», ch. 1 and Heather, «The Fall of the Roman Empire» — по
+# памяти; Ivanović 2019 (opened for Д2).
 # Owner's rule on §19: an honest measure only with the agents of E3 — in E2 the starting
 # bonds run out and nobody makes new ones, so here the row checks the generator at the
 # start, not the engine.
@@ -795,13 +810,18 @@ checked_by = "Д3"
 # ---- religion and culture (E2 step 8, plan §20) ----
 
 # E0 Р2 — observed: the share of a province's people won to the faith of its ruler a
-# century after the change of rule. **By memory**, two edges: Bulliet's Iran, where
-# conversion was rewarded — about half by the second century (Conversion to Islam in the
-# Medieval Period, 1979, ch. 3; the curve 2.5 / 13.5 / 34 / 34 / 16 % per quarter-century);
-# Ottoman Rumelia after eighty years — about a fifth Muslim, settlers included (Barkan's
-# registers of the 1520s–30s); Radushev 2010 — one highly converted district, not the
-# Balkans; Venetian Crete — Orthodox after four and a half centuries. Sources to open:
-# Bulliet, Barkan, Radushev. Owner's rule on §20: rule converts only under the institution
+# century after the change of rule. Two edges: Bulliet's Iran, where conversion was
+# rewarded — about half by the second century (Conversion to Islam in the Medieval Period,
+# 1979, ch. 3 — по памяти; the method, the five groups and the 2.5 % of innovators —
+# открыл через Radushev E., «The Spread of Islam in the Ottoman Balkans: Revisiting
+# Bulliet's Method», Oriente Moderno 90 (2010); «80 percent or more of Iranians» Muslim by
+# c. 950 — Encyclopaedia Iranica, «Conversion ii», открыл); Ottoman Rumelia after eighty
+# years — about a fifth Muslim, settlers included (Barkan's registers of the 1520s–30s:
+# 18.8 % only in unreliable retellings, the 1958 essay closed — по памяти; the towns under
+# Suleiman — Edirne 82 %, Sofia 66 %, Skopje 75 %, Athens 0.5 % Muslim — открыл
+# (вторичное)); Radushev 2010 — one highly converted district, not the Balkans; Venetian
+# Crete — Orthodox after four and a half centuries (по памяти). Owner's rule on §20: rule
+# converts only under the institution
 # `ConversionPolicy`; without it a province drifts with its neighbourhood alone.
 [conversion.observed_share_after_a_century]
 kind = "b"
@@ -856,10 +876,12 @@ checked_by = "Р2"
 
 # E0 Р3 — observed: the share of polities with a bank a century on, where banks exist. By
 # memory: in Italy by 1400 most of the great states — Florence, Venice, Genoa, Siena, Lucca —
-# banked, and the Medici branches reached Bruges, London, Geneva and Avignon in the 1440s
-# while the kingdoms beyond the Alps borrowed from them rather than keeping their own.
-# Sources to open: de Roover, The Rise and Decline of the Medici Bank (1963); Goldthwaite,
-# The Economy of Renaissance Florence (2009). Owner's rule on §20: checked on the generator —
+# banked, and the Medici branches reached Geneva (1435), Bruges (1439), London and Avignon
+# (1446) — the dates открыл (вторичное, popular surveys of de Roover, The Rise and Decline
+# of the Medici Bank, 1963; the book itself not opened) — while the kingdoms beyond the
+# Alps borrowed from them rather than keeping their own; Goldthwaite, The Economy of
+# Renaissance Florence (2009) — not opened; the band stays by memory (E0 §5.8). Owner's
+# rule on §20: checked on the generator —
 # the bank must not become «always» in 300 ticks (half the polities start with one and the
 # channel of trade is contact).
 [institution.observed_bank_share_after_a_century]
@@ -920,7 +942,9 @@ checked_by = "В7"
 
 # E0 Х2 — the ruling house's own men as a share of the polity's army: the famiglia ducale
 # of the Sforza ≈ 2 000 horse of an army ≈ 20 000 (Covini 1998 — по памяти; the 2 000 —
-# открыл (вторичное)). A fact of the scenario (`houses.<id>.soldiers`); the generator draws
+# открыл (вторичное); the army — Mallett and Hale 1984: 42 000 on the books, about half
+# permanent — открыл (вторичное); Treccani: 200 famigli da corazza in the column of 1476 —
+# открыл, E0 §5.8). A fact of the scenario (`houses.<id>.soldiers`); the generator draws
 # the ruling house's retinue by this row, inside the army of А11, not on top of it. Paid by
 # the polity (owner's rule on §21: at Х1 ≈ 2 % of the income a house could never keep 10 %
 # of the army).
@@ -955,7 +979,9 @@ checked_by = "В7"
 # fell into half a dozen successor kingdoms by 475 and the East stood — more polities, not
 # three times as many; Italy of 1400 consolidated into the five powers by 1454 (Mallett
 # 1974, ch. 1); the Balkans of 1430 were swallowed by one. One band: a world may fragment or
-# gather, but not threefold in a century. Source to open. The engine answers for the
+# gather, but not threefold in a century. Source to open (E0 §5.8: no count of the states
+# of 1400 against 1454 was found; EBSCO names the five principal states and «lesser»
+# ones). The engine answers for the
 # fragmentation (secessions carried by a house); the gathering is the agents' (E3), so the
 # lower edge is theirs to meet. Measured on the generated worlds (`tests/collapse.rs`).
 [collapse.observed_polities_after_a_century]
