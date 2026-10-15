@@ -179,6 +179,12 @@ pub struct Params {
     pub treaty_accept_at_relation: f64,
     /// (в) A war declared on a treaty in force costs this many times the price.
     pub treaty_breach_factor: f64,
+    /// (в) A fresh treaty costs more to break: this many times the breach on the day it was
+    /// signed, falling to the plain breach over `treaty_fresh_ticks` (owner's rule on #293).
+    pub treaty_fresh_breach_factor: f64,
+    pub treaty_fresh_ticks: u32,
+    /// (в) The legitimacy a ruler pays for every province ceded on balance in a lost war.
+    pub legitimacy_cost_province_lost: f64,
     /// (в) What declaring a war costs in legitimacy.
     pub legitimacy_cost_declare_war: f64,
     /// (в) An embassy's gifts as parts per million of yearly revenue, and its push.
@@ -240,7 +246,7 @@ pub struct Params {
     pub policy_cost_legitimacy: f64,
     /// (в) The generator's lottery of starting aspirations (owner's answer 3 on §23):
     /// hold, alliance, take, subdue, unite — the peaceful kinds heavier than the greedy.
-    pub aspiration_weights: [(crate::agents::GoalKind, f64); 5],
+    pub aspiration_weights: [(crate::agents::GoalKind, f64); 6],
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -408,6 +414,7 @@ impl Params {
             (GoalKind::Take, value("aspiration.weight_take")?),
             (GoalKind::Subdue, value("aspiration.weight_subdue")?),
             (GoalKind::Unite, value("aspiration.weight_unite")?),
+            (GoalKind::Union, value("aspiration.weight_union")?),
         ];
         Ok(Params {
             population_growth_ppm_per_tick: (growth / 2.0 * 1_000_000.0).round() as i64,
@@ -472,6 +479,9 @@ impl Params {
             relation_rate_per_tick: relation_rate,
             treaty_accept_at_relation: accept_at,
             treaty_breach_factor: breach_factor,
+            treaty_fresh_breach_factor: value("treaty.fresh_breach_factor")?,
+            treaty_fresh_ticks: (value("treaty.fresh_years")? * 2.0).round() as u32,
+            legitimacy_cost_province_lost: value("legitimacy.cost_province_lost")?,
             legitimacy_cost_declare_war: cost_declare_war,
             embassy_cost_share_ppm: (embassy_cost * 1_000_000.0).round() as i64,
             embassy_gain,

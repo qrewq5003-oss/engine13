@@ -765,6 +765,33 @@ value = 2.0
 unit = "multiplier of the price of a declaration"
 checked_by = "Д3"
 
+# (в) A fresh treaty costs more to break (owner's rule on #293: a price, not a prohibition —
+# a truce that forbade the loser its war would be a ban): this many times the breach on the
+# day the treaty was signed, falling in a line to the plain breach over
+# `treaty.fresh_years`. Measured before: a third of the bots' declarations came the tick
+# after a peace of the same pair — the loser of the last war, wanting its province back
+# (plan §23l). Checked through А12.
+[treaty.fresh_breach_factor]
+kind = "c"
+value = 4.0
+unit = "multiplier of the breach on the day of signing"
+checked_by = "А12"
+
+[treaty.fresh_years]
+kind = "c"
+value = 5.0
+unit = "years"
+checked_by = "А12"
+
+# (в) A lost war costs the ruler who lost it (owner's rule on #293: historically a lost war
+# struck at the power — it cost nothing here): points of legitimacy for every province
+# ceded on balance, paid at the peace. Checked through В6.
+[legitimacy.cost_province_lost]
+kind = "c"
+value = 5.0
+unit = "legitimacy points per province ceded"
+checked_by = "В6"
+
 # (в) What a declaration of war costs in legitimacy: the price of the tax raised once (a
 # verb without a price is a degeneration, decision on #284).
 [legitimacy.cost_declare_war]
@@ -998,6 +1025,9 @@ checked_by = "В7"
 # ones). The engine answers for the
 # fragmentation (secessions carried by a house); the gathering is the agents' (E3), so the
 # lower edge is theirs to meet. Measured on the generated worlds (`tests/collapse.rs`).
+# Checked on #293 (E0 §5.8): Abramson 2017 opened — Europe's mean state doubled in size
+# 1400–1790, ≈ 0.85 of the polities a century; Italy of the XIV–XV centuries not opened. The
+# band stands.
 [collapse.observed_polities_after_a_century]
 kind = "b"
 band = [0.5, 1.6]
@@ -1074,6 +1104,16 @@ value = 1.0
 unit = "weight in the lottery"
 checked_by = "А12"
 
+# (в) The union with the faith of a neighbouring court — where a neighbour's court prays
+# otherwise (owner's rule on #293: a mechanism must happen on the worlds, not only in the
+# tests; Jogaila's baptism, the Union of Florence, the conversions of Scandinavian kings).
+# Light: a court rarely wants its faith changed. Checked through А12 with the lottery.
+[aspiration.weight_union]
+kind = "c"
+value = 0.25
+unit = "weight in the lottery"
+checked_by = "А12"
+
 # ---- orders and suppression (E3 (б), plan §23, §23c) ----
 
 # (в) A bot's units advance on the enemy when they are at least this share of the enemy's
@@ -1147,10 +1187,12 @@ checked_by = "В6"
 # moves with it (0.51–0.53): the gathering by conquest decides it. Raised to 2 when the
 # policy of conversion came (plan §23j): fewer alienated provinces, fewer chances, В8 0.49
 # at 1.5 — 0.52 at 2 (revolt.per_year 0.003 would give 0.53 with В7 at 4.8 under its top 5).
-# Checked through В8.
+# Back to 1.5 by the owner's rule on #293: at 2 a house left any ruler at legitimacy 50 or
+# below whatever the army against it — a suicide — and В8 hardly answers to the weight: the
+# conquests move it. В8 stays at the edge, marked (plan §23l). Checked through В8.
 [agent.weight_independence]
 kind = "c"
-value = 2.0
+value = 1.5
 unit = "goals"
 checked_by = "В8"
 

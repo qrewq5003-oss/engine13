@@ -186,6 +186,9 @@ pub enum Event {
     OpportunityLapsed { id: u32, to: ActorRef },
     /// Taken, but the world changed since it was opened (a province lost, a candidate dead).
     OpportunityVoid { id: u32, why: String },
+    /// A war lost at its peace: the loser ceded `provinces` on balance and paid for them in
+    /// legitimacy (owner's rule on #293).
+    Defeat { actor: ActorId, by: ActorId, provinces: u32 },
     /// An election counted (E3 (в)): the winner by the houses' weights — `weight` of the
     /// `total` cast; the interim stays on a tie or when it wins.
     Elected { actor: ActorId, interim: PersonId, winner: PersonId, weight: u64, total: u64 },

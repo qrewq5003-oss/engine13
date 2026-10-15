@@ -152,6 +152,7 @@ impl Observed for Game {
                 Event::OpportunityLapsed { .. } => ObsEvent::Other("OpportunityLapsed".into()),
                 Event::OpportunityVoid { .. } => ObsEvent::Other("OpportunityVoid".into()),
                 Event::Elected { actor, .. } => ObsEvent::Other(format!("Elected@{}", self.actor_id(*actor).0)),
+                Event::Defeat { actor, .. } => ObsEvent::Other(format!("Defeat@{}", self.actor_id(*actor).0)),
             })
             .collect()
     }

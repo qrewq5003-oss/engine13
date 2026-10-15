@@ -270,6 +270,12 @@ impl World {
                 let capital = self.actors[&a].capital;
                 self.regions.iter().position(|r| r.contains(&capital) && r.iter().any(|p| self.provinces[p].owner != a)).map(|i| GoalTarget::Region(RegionId(i as u32)))
             }
+            // The faith of the most populous neighbour whose court prays otherwise (owner's
+            // rule on #293).
+            GoalKind::Union => {
+                let court = self.polity_religion(a);
+                border.iter().filter(|(b, _)| self.polity_religion(**b) != court).max_by_key(|(b, n)| (**n, std::cmp::Reverse(**b))).map(|(b, _)| GoalTarget::Religion(self.polity_religion(*b)))
+            }
             _ => None,
         }?;
         if self.actors[&a].goals.iter().any(|g| g.kind == kind && g.target == target) {
@@ -340,10 +346,13 @@ impl World {
             }
             self.actors.get_mut(&a).unwrap().goals = kept;
             // Revanche: a province conquered from the polity this tick, still the
-            // conqueror's — by the rule, beyond the slots.
+            // conqueror's — by the rule, first into the free slots (plan §23d). Beyond the
+            // slots every lost province was a goal of its own against the same enemy, and a
+            // loser that lost three wanted the war three times over: no price of a fresh
+            // treaty held it back (owner's rule on #293, plan §23l).
             for p in conquered.iter().filter(|(_, from)| *from == a).map(|(p, _)| *p) {
                 let target = GoalTarget::Province(p);
-                if self.provinces[&p].owner != a && !self.actors[&a].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == target) {
+                if self.actors[&a].goals.len() < params.goal_open_per_polity && self.provinces[&p].owner != a && !self.actors[&a].goals.iter().any(|g| g.kind == GoalKind::Take && g.target == target) {
                     self.set_goal(a, GoalKind::Take, target)?;
                 }
             }

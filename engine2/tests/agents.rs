@@ -101,6 +101,10 @@ fn aspirations_and_regions_are_facts_and_the_generator_draws_them_by_a_weighted_
                     (GoalKind::Subdue, GoalTarget::Polity(b)) | (GoalKind::AllianceAgainst, GoalTarget::Polity(b)) => assert!(w.borders(*a, b), "seed {seed}: {b:?} is no neighbour of {a:?}"),
                     (GoalKind::Unite, GoalTarget::Region(r)) => assert!(w.regions[r.index()].contains(&actor.capital), "seed {seed}: the region to unite is not the capital's"),
                     (GoalKind::Free, GoalTarget::None) => {}
+                    (GoalKind::Union, GoalTarget::Religion(f)) => {
+                        assert_ne!(f, w.polity_religion(*a), "seed {seed}: a union with its own faith");
+                        assert!(w.actors.keys().any(|b| w.borders(*a, *b) && w.polity_religion(*b) == f), "seed {seed}: a union with a faith no neighbouring court prays");
+                    }
                     other => panic!("seed {seed}: the generator drew {other:?}"),
                 }
                 assert_eq!(g.since, engine2::Tick(0));
@@ -108,6 +112,7 @@ fn aspirations_and_regions_are_facts_and_the_generator_draws_them_by_a_weighted_
         }
     }
     eprintln!("aspirations over {polities} polities: {by_kind:?}; {vassals_free} vassals wanting to be free");
+    assert!(by_kind.get(&GoalKind::Union).copied().unwrap_or(0) > 0, "the generator draws a union where neighbouring courts pray otherwise (owner's rule on #293)");
     let n = |k: GoalKind| by_kind.get(&k).copied().unwrap_or(0);
     assert!(n(GoalKind::Hold) + n(GoalKind::AllianceAgainst) > n(GoalKind::Take) + n(GoalKind::Subdue), "the peaceful kinds outweigh the greedy (owner's answer 3)");
     assert!(n(GoalKind::Take) > 0 && n(GoalKind::Subdue) > 0 && n(GoalKind::Unite) > 0, "every drawn kind exists");
@@ -343,6 +348,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
+    let mut declared_within_two_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
     let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
     let (mut elections, mut elections_turned) = (0u64, 0u64);
@@ -442,6 +448,9 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
                         if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t0 + 1 == t) {
                             declared_after_peace += 1;
                         }
+                        if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t <= t0 + 4) {
+                            declared_within_two_years += 1;
+                        }
                     }
                     Event::War { a, b } => {
                         war_since.insert(((*a).min(*b), (*a).max(*b)), t);
@@ -522,19 +531,25 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     // No war with an unpaid army (E3 (в), the class of the tax's swing): by the rule of the
     // peace an unpaid declarer is exhausted and the war ends at the first peace offered —
     // the bots declared four fifths of their wars the tick after a peace of the same pair,
-    // most of them already short of their pay. What is left of the renewals is the loser's
-    // revanche (a declarer that lost a province accepts the peace by the rule and declares
-    // again) — printed, a question to the owner (plan §23g).
+    // most of them already short of their pay. And no revanche the tick after the peace
+    // (owner's rule on #293: a fresh treaty costs more to break, a lost war costs
+    // legitimacy): under a tenth of the declarations (plan §23l).
     let renewed = declared_after_peace as f64 / declarations.max(1) as f64;
     war_lengths.sort();
     eprintln!(
-        "war declarations {declarations}, by an unpaid army {declared_unpaid}, the tick after a peace of the same pair {declared_after_peace} ({renewed:.3}); wars ended {}, length median {} ticks, of one tick {}",
+        "war declarations {declarations}, by an unpaid army {declared_unpaid}, the tick after a peace of the same pair {declared_after_peace} ({renewed:.3}), within two years of it {declared_within_two_years}; wars ended {}, length median {} ticks, of one tick {}",
         war_lengths.len(),
         war_lengths.get(war_lengths.len() / 2).copied().unwrap_or(0),
         war_lengths.iter().filter(|l| **l <= 1).count()
     );
     assert_eq!(declared_unpaid, 0, "a bot declared war with an unpaid army");
+    assert!(renewed < 0.10, "the loser's revanche: {declared_after_peace} of {declarations} declarations the tick after a peace of the same pair");
     eprintln!("opportunities {opportunities:?}; elections {elections}, the throne to another than the interim {elections_turned}");
+    // Every chance of the channel happens on the worlds, not only in the tests (owner's
+    // rule on #293: an unreachable condition is a defect).
+    for kind in ["Secession", "Usurpation", "Vote", "Union", "Policy", "Marriage"] {
+        assert!(opportunities.get(&format!("{kind} taken")).copied().unwrap_or(0) > 0, "no {kind} taken on 20 worlds: {opportunities:?}");
+    }
     assert!(undone < 0.05, "the bots' tax swings: {tax_undone} of {tax_changes} changes undone the next tick");
     // The tax as a flow (owner's rule on #291): no anchor, the bots keep near the tithe
     // by their utility — the mean rate inside a step of it.

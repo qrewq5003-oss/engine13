@@ -202,10 +202,10 @@ fn the_bots_usurp_a_weak_ruler_not_a_legitimate_one_and_secede_only_with_a_chanc
     w.actors.get_mut(&s0).unwrap().legitimacy = 70.0;
     assert!(w.usurpation_utility(s0, o0a, &p) < 0.0, "a legitimate one is not: {:.2}", w.usurpation_utility(s0, o0a, &p));
     // The secession: the ruler's weakness, at `agent.weight_independence`, against the odds
-    // of being crushed. Against a hereditary ruler at its norm the parent's army decides;
-    // with the shipped weight (2) a ruler at legitimacy 50 or below is left whatever its
-    // army (plan §23j).
-    w.actors.get_mut(&s0).unwrap().legitimacy = 70.0;
+    // of being crushed. With the shipped weight (1.5, owner's rule on #293) the parent's
+    // army decides against any ruler above a third of legitimacy; below it a house leaves
+    // even a strong one.
+    w.actors.get_mut(&s0).unwrap().legitimacy = 60.0;
     let u = w.secession_utility(h, s0, at(0, 1), &p);
     assert!(u > 0.0, "a militia of two provinces against the parent's 600: {u:.2}");
     let unit = w.units_of(s0)[0];
@@ -213,7 +213,9 @@ fn the_bots_usurp_a_weak_ruler_not_a_legitimate_one_and_secede_only_with_a_chanc
     let u = w.secession_utility(h, s0, at(0, 1), &p);
     assert!(u < 0.0, "against an army a hundred times its own: {u:.2}");
     w.actors.get_mut(&s0).unwrap().legitimacy = 40.0;
-    assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a weak ruler is left even with a hopeless rising");
+    assert!(w.secession_utility(h, s0, at(0, 1), &p) < 0.0, "at 40 the army still decides");
+    w.actors.get_mut(&s0).unwrap().legitimacy = 20.0;
+    assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a ruler with a fifth of legitimacy is left even with a hopeless rising");
 }
 
 // ---------- elections (owner's answer 5 on §23) ----------

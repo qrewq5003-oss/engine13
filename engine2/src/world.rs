@@ -292,6 +292,9 @@ pub enum TreatyKind {
 pub struct Treaty {
     pub kind: TreatyKind,
     pub until: Tick,
+    /// The tick it was signed in play; `None` for a treaty of the scenario's facts, whose
+    /// signing is history (owner's rule on #293: a fresh treaty costs more to break).
+    pub since: Option<Tick>,
 }
 
 /// A province as the engine sees it: owner, land, the capacity the engine derived, and its
@@ -849,7 +852,7 @@ impl World {
                 return Err(WorldError::RelationWithSelf(a));
             }
             let until = Tick((year - facts.start_year).max(0) as u32 * 2);
-            world.treaties.insert(crate::army::pair(a, b), Treaty { kind: TreatyKind::Alliance, until });
+            world.treaties.insert(crate::army::pair(a, b), Treaty { kind: TreatyKind::Alliance, until, since: None });
         }
         for &(vassal, lord) in &facts.relations.vassals {
             known(vassal)?;

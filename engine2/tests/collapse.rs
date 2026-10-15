@@ -619,7 +619,7 @@ fn the_end_of_a_secession_is_the_state_of_the_war_suppression_submission_or_free
     assert_eq!(w.treaty(new, s0).map(|t| t.kind), Some(engine2::TreatyKind::Peace));
     assert_eq!(w.actors[&new].provinces, vec![p05, p10, p15]);
     assert!(w.alive(new) && w.alive(s0));
-    assert!((w.war_price(s0, new, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor).abs() < 1e-9, "war again before the term is a breach");
+    assert!((w.war_price(s0, new, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor * p.treaty_fresh_breach_factor).abs() < 1e-9, "war again before the term is a breach — a fresh one");
 }
 
 // ---------- the worlds (в) ----------
