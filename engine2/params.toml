@@ -638,7 +638,10 @@ checked_by = "В6"
 # and the take 12 % of production: inside Э8, a fifth above the tithe, never double it. The
 # usurper's gap is from lawful rule, not from its own norm of 30: measured with its own
 # norm, the greedy ruler — soon usurped — collected 0.86 and gained a third over the plain
-# one, above the ceiling of the acceptance. Checked through Э8.
+# one, above the ceiling of the acceptance. Below the bottom the norm keeps counting (owner's
+# rule on #292): the points the ruler's shift puts the norm below zero count as legitimacy
+# lost, so a step of the tax at legitimacy 0 costs the share what it costs above zero.
+# Checked through Э8.
 [tax.evasion_per_legitimacy_point]
 kind = "c"
 value = 0.008

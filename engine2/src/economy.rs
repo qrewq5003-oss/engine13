@@ -179,8 +179,17 @@ impl World {
     /// every point of legitimacy below it. The gap is taken from the norm before the
     /// ruler's decisions shift it, so a tax above the tithe keeps costing collection: the
     /// greedy ruler sits at its shifted norm, far below the norm of lawful rule.
+    ///
+    /// **Below the bottom the shift keeps costing** (owner's rule on #292): legitimacy stops
+    /// at 0, and so would the price of the next step up — the share no longer fell, the rate
+    /// rose, and a usurper at legitimacy 0 raised the tax from 0.10 to 0.18 for nothing (the
+    /// price vanishing at a bound, the third time after 6b). The points of the norm below
+    /// zero (`World::norm_below_zero`) count as legitimacy lost: at the bottom the share is
+    /// the one at the unclamped norm, and a step up there costs the share what it costs
+    /// above zero.
     pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
-        let gap = (self.lawful_norm(a, params) - self.actors[&a].legitimacy).max(0.0);
+        let legitimacy = self.actors[&a].legitimacy - self.norm_below_zero(a, params);
+        let gap = (self.lawful_norm(a, params) - legitimacy).max(0.0);
         (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
     }
 

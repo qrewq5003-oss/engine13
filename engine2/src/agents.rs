@@ -436,7 +436,8 @@ impl World {
     /// The orders a bot gives its units (E3 (б), plan §23.2 p. 4; the same channel as the
     /// player's): no draws, by the state alone. **At peace, revolts first** — for every
     /// province in revolt the nearest unit by path goes there and stands (owner's rule on
-    /// #289: the suppression is an ordinary decision of the bot); at war a revolt waits;
+    /// #289: the suppression is an ordinary decision of the bot); at war a revolt waits (a
+    /// stub, owner on #292: to be chosen by utility, the front against the suppression);
     /// **at war** — the enemy whose land a
     /// goal wants most (ties: the lower id), its wanted province or its capital, when the
     /// units are at least `agent.advance_ratio` of the enemy's whole army, else home to the
@@ -456,10 +457,12 @@ impl World {
                 out.push(Order { actor: who, unit: u, to });
             }
         };
-        // At war the army goes to the war and a revolt waits for the peace: a ruler did not
-        // turn the field army from a stronger enemy to a province up in arms (measured: with
-        // the revolts put down at once, mid-war, they lasted a year and recurred, and no base
-        // rate of the rising kept both В7 and В9 in their bands).
+        // STUB (owner on #292): at war the army goes to the war and a revolt waits for the
+        // peace — a rule of behaviour written by hand, like the tax anchored to the tithe
+        // that #291 removed, not a utility. To be replaced by the choice «the front or the
+        // suppression» by utility: the worth of the war goal against the loss to the revolt.
+        // Measured: with the revolts put down at once, mid-war, they lasted a year and
+        // recurred, and no base rate of the rising kept both В7 and В9 in their bands.
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b) && self.alive(*b));
         let revolts: Vec<ProvinceId> = if at_war { Vec::new() } else { self.actors[&a].provinces.iter().copied().filter(|p| self.in_revolt(*p)).collect() };
         for p in revolts {
@@ -628,24 +631,29 @@ impl World {
     /// `agent.weight_price_legitimacy`; the blow or the gain: once. With the shipped
     /// weights the equilibrium is the tithe — both steps from it cost — and the bot comes
     /// back to it from either side by itself; at war with half the pay unmet a step up is
-    /// still not worth it, at a third it is.
+    /// still not worth it, at a third it is. **No bound in the prices** (owner's rule on
+    /// #292): the take reads the share as the world collects it, at the unclamped norm below
+    /// the bottom, and the lasting shift is the unclamped norm's too — clamped, a ruler at
+    /// legitimacy 0 saw no price in a step up and no gain in a step down, raised the tax at
+    /// the bottom and stayed there for the term of its default (seed 35 of the full run).
+    /// A step at the bottom costs what it costs above zero, in the world and in the bot.
     pub fn tax_utility(&self, a: ActorId, verb: VerbId, params: &Params) -> f64 {
         let actor = &self.actors[&a];
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
         let lawful = self.lawful_norm(a, params);
-        let norm = self.legitimacy_norm(a, params);
+        let unclamped = self.unclamped_legitimacy_norm(a, params);
         let up = verb == VerbId::RaiseTax;
         let step = if up { params.tax_step_ppm } else { -params.tax_step_ppm } as f64 / 1e6;
-        let next_norm = (norm + if up { -params.legitimacy_norm_per_tax_step } else { params.legitimacy_norm_per_tax_step }).clamp(0.0, 100.0);
+        let next_unclamped = unclamped + if up { -params.legitimacy_norm_per_tax_step } else { params.legitimacy_norm_per_tax_step };
         let collected = |l: f64| (1.0 - (lawful - l).max(0.0) * params.tax_evasion_ppm_per_legitimacy_point as f64 / 1e6).max(0.0);
         let rate = actor.tax_rate_ppm as f64 / 1e6;
-        let (now, next) = (rate * collected(norm), (rate + step) * collected(next_norm));
+        let (now, next) = (rate * collected(unclamped), (rate + step) * collected(next_unclamped));
         if now <= 0.0 || next <= 0.0 {
             return -1.0;
         }
         let need = 1.0 / (actor.paid_share_ppm as f64 / 1e6).max(0.25);
         let take = years * params.agent_weight_price_treasury * need * (next / now).ln();
-        let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_norm - norm);
+        let lasting = years * params.agent_weight_price_legitimacy / 100.0 * (next_unclamped - unclamped);
         let once = params.agent_weight_price_legitimacy / 100.0 * if up { -params.legitimacy_cost_raise_tax } else { params.legitimacy_gain_lower_tax };
         take + lasting + once
     }
