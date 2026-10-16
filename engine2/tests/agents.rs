@@ -383,6 +383,8 @@ struct Measures {
     deficit_share: f64,
     deficit_samples: u64,
     deficit_heavy: u64,
+    pay: i64,
+    court: i64,
 }
 
 /// The measures of E2/E3 with the bots, read off the worlds' sums.
@@ -510,6 +512,8 @@ impl Measures {
         self.deficit_share += o.deficit_share;
         self.deficit_samples += o.deficit_samples;
         self.deficit_heavy += o.deficit_heavy;
+        self.pay += o.pay;
+        self.court += o.court;
     }
 }
 
@@ -539,6 +543,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     let people_of = |g: &Game| g.world().provinces.keys().map(|q| g.world().population(*q)).sum::<i64>();
     let (people_start, mut people_100, mut migrants, mut migrants_across) = (people_of(&g), 0i64, 0i64, 0i64);
     let (mut deficit_share, mut deficit_samples, mut deficit_heavy) = (0.0f64, 0u64, 0u64);
+    let (mut pay, mut court) = (0i64, 0i64);
     let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
     let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
     let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
@@ -693,6 +698,8 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             }
         }
         tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
+        pay -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Upkeep).map(|q| q.milli / 1000).sum::<i64>();
+        court -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Court).map(|q| q.milli / 1000).sum::<i64>();
     }
     polity_centuries += n0 as f64 * 1.5;
     let people_end = people_of(&g);
@@ -706,7 +713,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -718,7 +725,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy } = m;
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -755,6 +762,10 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         deficit_share / deficit_samples.max(1) as f64,
         deficit_heavy as f64 / deficit_samples.max(1) as f64
     );
+    // Э9 with the bots — printed, a warning only (owner's answer 3 on §27.5): the band does
+    // not tell war from peace, and `army.campaign_pay_factor` is never fitted to it.
+    let band_e9 = band("budget.observed_military_share");
+    eprintln!("Э9 with bots: the army's share of spending {:.3} (band {band_e9:?}, printed)", pay as f64 / (pay + court).max(1) as f64);
     assert_eq!(declared_unpaid, 0, "a bot declared war with an unpaid army");
     assert!(renewed < 0.10, "the loser's revanche: {declared_after_peace} of {declarations} declarations the tick after a peace of the same pair");
     eprintln!("opportunities {opportunities:?}; elections {elections}, the throne to another than the interim {elections_turned}");
@@ -1289,12 +1300,14 @@ fn windows_of_the_fitted_values() {
     let base = params();
     let seeds: Vec<u64> = (1..=20).collect();
     type Set = fn(&mut Params, f64);
-    let sweeps: [(&str, &[f64], Set); 3] = [
+    let sweeps: [(&str, &[f64], Set); 4] = [
         ("usurpation.per_year → В6", &[0.02, 0.03, 0.04, 0.05, 0.06, 0.08], |p, v| p.usurpation_per_tick = v / 2.0),
         ("revolt.per_year → В7, В9", &[0.0015, 0.002, 0.0025, 0.003, 0.004, 0.005], |p, v| p.revolt_per_tick = v / 2.0),
         // The horizon of every worth (E3 (е1)): chosen, not fitted, and since the weights of
         // the throne and of independence went into the model, the bots' one lever on В6 and В8.
         ("goal.horizon_years → all", &[10.0, 15.0, 20.0, 25.0, 30.0, 40.0], |p, v| p.goal_horizon_ticks = (v * 2.0) as u32),
+        // By memory, not fitted (owner's answer 3 on §27.5): its window printed beside it.
+        ("army.campaign_pay_factor → all", &[1.0, 1.5, 2.0, 3.0, 4.0], |p, v| p.campaign_pay_ppm = (v * 1e6) as i64),
     ];
     for (name, values, set) in sweeps {
         let mut inside = Vec::new();

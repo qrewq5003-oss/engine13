@@ -107,6 +107,9 @@ pub struct Params {
     pub court_share_ppm: i64,
     /// E0 А3: pay per soldier per year, kg (outputs × output per head).
     pub pay_per_soldier_kg_per_year: i64,
+    /// (в) The pay of a soldier on campaign over his pay at home, parts per million (plan
+    /// §27.2): a unit outside its own land or ordered toward land not its own.
+    pub campaign_pay_ppm: i64,
     /// E0 Э6: interest per tick on the debt, parts per million.
     pub loan_interest_ppm_per_tick: i64,
     /// E0 Э7: debt ceiling in thousandths of a year of revenue.
@@ -360,6 +363,7 @@ impl Params {
         let tax = value("tax.default_rate")?;
         let court = value("court.share_of_revenue")?;
         let pay_outputs = value("army.pay_per_soldier_outputs")?;
+        let campaign_pay = value("army.campaign_pay_factor")?;
         let interest = value("loan.interest_per_year")?;
         let ceiling_years = value("loan.ceiling_years_of_revenue")?;
         let attrition_year = value("army.attrition_unsupplied_per_year")?;
@@ -465,6 +469,7 @@ impl Params {
             tax_default_ppm: (tax * 1_000_000.0).round() as i64,
             court_share_ppm: (court * 1_000_000.0).round() as i64,
             pay_per_soldier_kg_per_year: (pay_outputs * output).round() as i64,
+            campaign_pay_ppm: (campaign_pay * 1_000_000.0).round() as i64,
             loan_interest_ppm_per_tick: (interest / 2.0 * 1_000_000.0).round() as i64,
             loan_ceiling_years_milli: (ceiling_years * 1000.0).round() as i64,
             // Two ticks a year: half the yearly share per tick.

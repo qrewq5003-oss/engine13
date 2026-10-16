@@ -109,6 +109,12 @@ pub fn pay_per_tick(soldiers: i64, params: &Params) -> i64 {
     soldiers * params.pay_per_soldier_kg_per_year / 2
 }
 
+/// The pay of `soldiers` on campaign for a tick, kg: the pay times
+/// `army.campaign_pay_factor` (plan §27.2).
+pub fn campaign_pay_per_tick(soldiers: i64, params: &Params) -> i64 {
+    pay_per_tick(soldiers, params) * params.campaign_pay_ppm / 1_000_000
+}
+
 /// A vassal's tribute on a take of `income`, kg (E0 Д2: `vassal.tribute_share`).
 pub fn tribute_due(income: i64, params: &Params) -> i64 {
     income * params.tribute_share_ppm / 1_000_000
@@ -155,6 +161,25 @@ impl World {
             0
         } else {
             for_army / params.pay_per_soldier_kg_per_year
+        }
+    }
+
+    /// Whether a unit is on campaign (plan §27.2, owner's correction on #297): standing on
+    /// land not its owner's, or ordered toward land not its owner's. A garrison at home is
+    /// not, at war or not.
+    pub fn on_campaign(&self, u: crate::ids::UnitId) -> bool {
+        let unit = &self.units[&u];
+        self.provinces[&unit.position].owner != unit.owner || unit.destination.is_some_and(|d| self.provinces[&d].owner != unit.owner)
+    }
+
+    /// A unit's pay for a tick, kg: the pay of its soldiers, on campaign
+    /// `army.campaign_pay_factor` times as much (plan §27.2).
+    pub fn unit_pay_per_tick(&self, u: crate::ids::UnitId, params: &Params) -> i64 {
+        let soldiers = self.soldiers(u);
+        if self.on_campaign(u) {
+            campaign_pay_per_tick(soldiers, params)
+        } else {
+            pay_per_tick(soldiers, params)
         }
     }
 
@@ -340,8 +365,7 @@ impl World {
             // The polity pays its own men and the ruling house's retinue; a house that does
             // not rule pays its own below (E0 Х2, owner's rule on §21).
             let units = self.units_of(a);
-            let soldiers: i64 = units.iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.soldiers(*u)).sum();
-            let pay_due = pay_per_tick(soldiers, params);
+            let pay_due: i64 = units.iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_per_tick(*u, params)).sum();
             let shortfall = (pay_due - self.treasury(a)).max(0);
             let borrowed = shortfall.min(self.loan_room(a, params));
             if borrowed > 0 {
@@ -373,8 +397,7 @@ impl World {
             // home by А7 (`movement.rs`) — the house's budget is its limit, as the polity's
             // is the polity's. No bank lends to a house.
             for h in self.houses_of(a) {
-                let men: i64 = units.iter().filter(|u| self.house_pays(**u) == Some(h)).map(|u| self.soldiers(*u)).sum();
-                let due = pay_per_tick(men, params);
+                let due: i64 = units.iter().filter(|u| self.house_pays(**u) == Some(h)).map(|u| self.unit_pay_per_tick(*u, params)).sum();
                 let paid = due.min(self.house_treasury(h));
                 if paid > 0 {
                     self.post(Account::HouseTreasury(h), Source::Upkeep, -paid * 1000)?;
