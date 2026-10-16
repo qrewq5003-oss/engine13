@@ -198,6 +198,10 @@ pub struct Actor {
     /// facts of the world; `agents.rs`). Starting aspirations are facts of the scenario,
     /// then the goals live and change by the engine's rules.
     pub goals: Vec<Goal>,
+    /// The men of its levies killed and not yet replaced by the cohort growing up (plan
+    /// §27.1, owner's answer 1 on §27.5): they leave the ceiling of А1 and come back at the
+    /// renewal of the cohort of service (`army.rs`, `population.rs`).
+    pub manpower_deficit: f64,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -705,6 +709,7 @@ impl World {
                     // Set below, once the provinces and their people are in.
                     core_culture: CultureId(0),
                     goals: Vec::new(),
+                    manpower_deficit: 0.0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;

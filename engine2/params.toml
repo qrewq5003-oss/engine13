@@ -438,6 +438,28 @@ band = [0.069, 0.103]
 unit = "children per living person aged 16–45 per year, staying in the house"
 e0 = "В4"
 
+# E0 А1 — the ages of service, the cohort the levy draws from (plan §27.1, owner's answer 4
+# on §27.5: the age of the levy, not the majority of a ruler): the Roman iuniores served
+# «before reaching the age of forty-six» (Polybius 6.19 — открыл (вторичное), through a
+# translation quoted in search; the text itself did not open), and were not taken younger
+# than seventeen (Plutarch, Gaius Gracchus 5 — по памяти). With the Frier table (В2) they give
+# the men of the levy, 0.228 of the people, and the years a man of the cohort stays in it,
+# τ = 13.8 — derived in `params.rs`, no parameter: the dead of a levy leave the ceiling of
+# А1 until the cohort grows up (`army.rs`).
+[manpower.service_from]
+kind = "a"
+value = 17.0
+band = [16.0, 17.0]
+unit = "years of age"
+e0 = "А1"
+
+[manpower.service_until]
+kind = "a"
+value = 46.0
+band = [45.0, 46.0]
+unit = "years of age"
+e0 = "А1"
+
 # E0 В1 — majority: venia aetatis at 20 (men) and 18 (women) under Valentinian's law of
 # 371 (CTh 2.17.1 — по памяти); emperors were proclaimed as children, Gian Galeazzo got no
 # power after 20 either (Lubkin 1994, ch. 1 — по памяти): the threshold of the regency

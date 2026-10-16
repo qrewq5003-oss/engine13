@@ -153,20 +153,41 @@ impl World {
 
     /// Room under the ceiling.
     pub fn recruit_room(&self, a: ActorId, params: &Params) -> i64 {
-        (self.recruit_ceiling(a, params) - self.army_size(a)).max(0)
+        (self.levy_ceiling(a, params) - self.army_size(a)).max(0)
     }
 
-    /// Men a levy can raise this tick: the rate of a tick (А2) within the room.
+    /// The ceiling a levy can draw to (plan §27.1, owner's answer 1 on §27.5): the ceiling of
+    /// А1 less the men of its levies killed and not yet replaced by the cohort growing up
+    /// (`Actor::manpower_deficit`), never below nothing. After a lost army there is nobody to
+    /// levy: the cohort was spent, and comes back over the years a man stays in it
+    /// (`Params::manpower_renewal_years`, from the mortality table).
+    pub fn levy_ceiling(&self, a: ActorId, params: &Params) -> i64 {
+        (self.recruit_ceiling(a, params) as f64 - self.actors[&a].manpower_deficit).max(0.0) as i64
+    }
+
+    /// Men a levy can raise this tick: the rate of a tick (А2) of what can be levied, within
+    /// the room.
     pub fn recruit_per_tick(&self, a: ActorId, params: &Params) -> i64 {
-        (self.recruit_ceiling(a, params) * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.recruit_room(a, params))
+        (self.levy_ceiling(a, params) * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.recruit_room(a, params))
     }
 
-    /// Mercenaries the treasury's advance covers within the room.
+    /// Mercenaries the treasury's advance covers within the ceiling of А1 — the men come from
+    /// outside the world, so the polity's spent cohort does not hold them back.
     pub fn hire_count(&self, a: ActorId, params: &Params) -> i64 {
         if params.mercenary_advance_kg <= 0 {
             return 0;
         }
-        (self.treasury(a) / params.mercenary_advance_kg).min(self.recruit_room(a, params)).max(0)
+        (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
+    }
+
+    /// The men of a levy killed: they leave its polity's ceiling until the cohort grows up.
+    fn levy_dead(&mut self, unit: UnitId, men: i64) {
+        if men > 0 && !self.units[&unit].mercenary {
+            let owner = self.units[&unit].owner;
+            if let Some(actor) = self.actors.get_mut(&owner) {
+                actor.manpower_deficit += men as f64;
+            }
+        }
     }
 
     fn strength(&self, units: &[UnitId]) -> f64 {
@@ -214,7 +235,9 @@ impl World {
                     if milli > 0 {
                         self.post(Account::Soldiers(*u), Source::BattleLoss, -milli)?;
                     }
-                    sum += soldiers - self.soldiers(*u);
+                    let dead = soldiers - self.soldiers(*u);
+                    self.levy_dead(*u, dead);
+                    sum += dead;
                 }
                 lost.insert(side, sum as u64);
             }
@@ -249,6 +272,7 @@ impl World {
                 if soldiers > 0 {
                     self.post(Account::Soldiers(unit), Source::BattleLoss, -soldiers * 1000)?;
                 }
+                self.levy_dead(unit, soldiers);
                 self.units.remove(&unit);
                 self.emit(Event::UnitDestroyed { unit });
             }

@@ -504,3 +504,53 @@ fn a_war_is_deterministic_through_save_and_load() {
     assert_eq!(straight, spliced);
     assert!(straight.iter().any(|r| r.events.iter().any(|e| matches!(e.event, Event::Battle { .. }))), "the run had a battle to save");
 }
+
+/// Exhaustion of men (plan §27.1, owner's answer 1 on §27.5): the men of a levy killed leave
+/// the ceiling of А1 until the cohort of service grows up — a destroyed army leaves the
+/// ceiling near nothing, and five years on about a third of it is back (`e^(−5/τ)` missing,
+/// τ = 13.8 years from the Frier table). Exactly the levy's dead count; mercenaries come from
+/// outside the world, and neither their dead nor the polity's spent cohort hold a hire back.
+#[test]
+fn the_dead_of_a_levy_leave_the_ceiling_until_the_cohort_grows_up_and_mercenaries_do_not() {
+    let p = params();
+    let (mut facts, names) = testworld::five_states();
+    for f in &mut facts.provinces {
+        f.sea_neighbours.clear();
+    }
+    let mut w = World::from_facts(&facts, names, &p, 1).unwrap();
+    let (s0, s2) = (ActorId(0), ActorId(2));
+    let (u0, u2) = (w.units_of(s0)[0], w.units_of(s2)[0]);
+    w.declare_war(s0, s2).unwrap();
+    // The whole levy of s0, deep in s2's land with no way home, beaten and destroyed.
+    let ceiling = w.recruit_ceiling(s0, &p);
+    w.units.get_mut(&u0).unwrap().position = at(2, 2);
+    w.units.get_mut(&u2).unwrap().position = at(2, 2);
+    set_soldiers(&mut w, u0, ceiling);
+    set_soldiers(&mut w, u2, ceiling * 50);
+    w.tick(&p).unwrap();
+    assert!(!w.units.contains_key(&u0), "the levy was destroyed");
+    let left = (-1.0 / (2.0 * p.manpower_renewal_years)).exp();
+    assert!((w.actors[&s0].manpower_deficit - ceiling as f64 * left).abs() < 1.0, "the dead enter the deficit, and a tick of the cohort growing up: {}", w.actors[&s0].manpower_deficit);
+    let share = |w: &World| w.levy_ceiling(s0, &p) as f64 / w.recruit_ceiling(s0, &p) as f64;
+    assert!(share(&w) < 0.05, "a destroyed army: nobody to levy, {:.3} of the ceiling", share(&w));
+    assert_eq!(w.recruit_per_tick(s0, &p), w.levy_ceiling(s0, &p) * p.recruit_rate_ppm_per_tick / 1_000_000, "the levy draws on what is left");
+    for _ in 0..10 {
+        w.tick(&p).unwrap();
+    }
+    let back = share(&w);
+    assert!((0.25..=0.40).contains(&back), "five years on about a third is back: {back:.3}");
+    // Mercenaries: their room is the ceiling of А1 whatever the cohort, and their dead count
+    // for nothing.
+    let deficit = w.actors[&s0].manpower_deficit;
+    let hired = UnitId(w.next_unit);
+    w.next_unit += 1;
+    w.units.insert(hired, engine2::world::Unit { owner: s0, position: at(2, 2), quality: 50.0, destination: None, mercenary: true, house: None });
+    w.ledger.open(w.tick, Account::Soldiers(hired), 0).unwrap();
+    set_soldiers(&mut w, hired, 10);
+    w.tick(&p).unwrap();
+    assert!(!w.units.contains_key(&hired), "the hired men were destroyed too");
+    assert!((w.actors[&s0].manpower_deficit - deficit * left).abs() < 1e-6, "a mercenary's death spends no cohort");
+    let treasury = w.treasury(s0);
+    w.post(Account::Treasury(s0), Source::Test, (p.mercenary_advance_kg * ceiling * 2 - treasury) * 1000).unwrap();
+    assert_eq!(w.hire_count(s0, &p), (w.recruit_ceiling(s0, &p) - w.army_size(s0)).max(0), "a hire fills the ceiling of А1, not the spent cohort");
+}

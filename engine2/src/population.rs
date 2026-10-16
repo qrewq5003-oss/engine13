@@ -192,6 +192,13 @@ impl World {
             self.post(Account::Population(to), Source::MigrationIn, milli)?;
             self.emit(Event::Migration { from, to, people: (milli as u64) / 1000 });
         }
+        // The cohort of service grows up (plan §27.1): the men of the levies killed come back
+        // into the ceiling of А1 at the cohort's renewal, `e^(−1/(2τ))` of what is missing
+        // left after a tick.
+        let left = (-1.0 / (2.0 * params.manpower_renewal_years.max(1e-9))).exp();
+        for actor in self.actors.values_mut() {
+            actor.manpower_deficit *= left;
+        }
         Ok(())
     }
 }
