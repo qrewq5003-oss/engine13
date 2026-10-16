@@ -375,6 +375,11 @@ struct Measures {
     opportunities: BTreeMap<String, u64>,
     elections: u64,
     elections_turned: u64,
+    people_start: i64,
+    people_100: i64,
+    people_end: i64,
+    migrants: i64,
+    migrants_across: i64,
 }
 
 /// The measures of E2/E3 with the bots, read off the worlds' sums.
@@ -389,6 +394,7 @@ struct Rates {
     d3: f64,
     e8: f64,
     b9: f64,
+    p7: f64,
 }
 
 impl Rates {
@@ -405,6 +411,7 @@ impl Rates {
             ("Д3", self.d3, band("diplomacy.observed_bound_share")),
             ("Э8", self.e8, band("tax.observed_share_of_production")),
             ("В9", self.b9, band("revolt.observed_share_of_provinces")),
+            ("П7", self.p7, band("population.observed_growth_per_year")),
         ]
         .into_iter()
         .map(|(n, v, b)| (n, v, b, (b[0]..=b[1]).contains(&v)))
@@ -426,6 +433,9 @@ impl Measures {
             d3: self.bound_century as f64 / self.alive_century as f64,
             e8: self.tax as f64 / self.production as f64,
             b9: self.revolt_ticks as f64 / self.province_ticks as f64,
+            // The growth of all the worlds' people over the first 100 ticks, a year (П7 is
+            // read over 100 ticks, `tests/population.rs`).
+            p7: (self.people_100 as f64 / self.people_start.max(1) as f64).powf(1.0 / 50.0) - 1.0,
         }
     }
 
@@ -489,6 +499,11 @@ impl Measures {
         }
         self.elections += o.elections;
         self.elections_turned += o.elections_turned;
+        self.people_start += o.people_start;
+        self.people_100 += o.people_100;
+        self.people_end += o.people_end;
+        self.migrants += o.migrants;
+        self.migrants_across += o.migrants_across;
     }
 }
 
@@ -515,6 +530,8 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
     let s = worldgen::generate(seed, p);
     let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let people_of = |g: &Game| g.world().provinces.keys().map(|q| g.world().population(*q)).sum::<i64>();
+    let (people_start, mut people_100, mut migrants, mut migrants_across) = (people_of(&g), 0i64, 0i64, 0i64);
     let mut last_tax: BTreeMap<ActorId, (u32, bool)> = BTreeMap::new();
     let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
     let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
@@ -553,6 +570,17 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
         revolt_ticks += w.provinces.values().filter(|pr| pr.revolt.is_some()).count() as u64;
         let started: BTreeMap<ProvinceId, u32> = w.provinces.iter().filter_map(|(q, pr)| pr.revolt.map(|t| (*q, t.0))).collect();
         let r = g.tick(&[]).unwrap();
+        if t == 99 {
+            people_100 = people_of(&g);
+        }
+        for e in &r.events {
+            if let Event::Migration { from, to, people } = e.event {
+                migrants += people as i64;
+                if g.world().provinces[&from].owner != g.world().provinces[&to].owner {
+                    migrants_across += people as i64;
+                }
+            }
+        }
         if t == 199 {
             let w = g.world();
             // The polities living a century on: since the orders of step (б) a polity
@@ -651,6 +679,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
         tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
     }
     polity_centuries += n0 as f64 * 1.5;
+    let people_end = people_of(&g);
     let w = g.world();
     rates.extend(w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(_, x)| x.tax_rate_ppm as f64 / 1e6));
     for (k, v) in g.preempted_reasons() {
@@ -661,7 +690,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_two_years, opportunities, elections, elections_turned }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_two_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -672,8 +701,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let band = |k: &str| p.entries[k].band.unwrap();
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
-    let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9 } = m.rates();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_two_years, opportunities, elections, elections_turned } = m;
+    let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_two_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -751,6 +780,15 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!((b8_band[0]..=b8_band[1]).contains(&b8), "В8 {b8:.2} outside {b8_band:?}");
     let e8_band = band("tax.observed_share_of_production");
     assert!((e8_band[0]..=e8_band[1]).contains(&e8), "Э8 {e8:.3} outside {e8_band:?}");
+    // П7 with the bots (owner's rule after #295: the flight from the tax is checked through
+    // П7 and Э8): the growth of the worlds' people over the first 100 ticks, and the people
+    // who moved — across a border, the flight from the heavier tax.
+    eprintln!(
+        "П7 {p7:.4} a year over 100 ticks; people {people_start} → {people_end} over 300 ticks; migrants {migrants}, of them across a border {migrants_across} ({:.3})",
+        migrants_across as f64 / migrants.max(1) as f64
+    );
+    let p7_band = band("population.observed_growth_per_year");
+    assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     let a11_band = band("army.observed_share_of_population");
     assert!((a11_band[0]..=a11_band[1]).contains(&a11_peace), "А11 at peace {a11_peace:.4} outside {a11_band:?}");
     let b7_band = band("revolt.observed_per_century");
@@ -1305,6 +1343,20 @@ fn a_change_of_the_worlds_numbers_alone_changes_the_bots_choices() {
     );
     assert!(e < shipped, "the collection lost per point of legitimacy moves the tax down");
     assert!(s < shipped, "a costlier shift of the norm per step moves the tax down");
+    // The flight (owner's rule after #295): what a step up drives across the border is read
+    // off the world's migration — four times its rate, four times the people a step drives
+    // away, by the bot's own count, with nothing changed in the bot.
+    let mut w = testworld::world(54);
+    let rate = p.tax_band_ppm.1 - p.tax_step_ppm;
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = rate;
+    let mut mobile = p.clone();
+    mobile.migration_rate_ppm_per_tick *= 4;
+    let mut lenient = p.clone();
+    lenient.migration_min_gap_ppm /= 4;
+    let (f0, f1, f2) = (w.flight_worth(a, rate + p.tax_step_ppm, &p), w.flight_worth(a, rate + p.tax_step_ppm, &mobile), w.flight_worth(a, rate + p.tax_step_ppm, &lenient));
+    eprintln!("the flight of a step to the top of Э4: {f0:+.4} years of income; migration four times as fast {f1:+.4}; the threshold of a move a quarter {f2:+.4}");
+    assert!(f1 != f0 || f2 != f0, "the world's migration moves the worth of the flight");
+    assert!(f2 <= f0, "a lower threshold lets more people go");
     // The choice itself, at the tithe: the step up the shipped world makes worth it, the
     // evasive world does not.
     let w = testworld::world(54);
