@@ -84,7 +84,7 @@ pub fn peace_rule(b_losing: bool, a_losing: bool, declared_by_b: bool, at_thresh
     if declared_by_b {
         return at_threshold || b_exhausted || !b_wants_war;
     }
-    !(a_losing && !at_threshold)
+    !a_losing || at_threshold
 }
 
 /// A relation after a push of `delta`: the push takes its share of the distance left to the
