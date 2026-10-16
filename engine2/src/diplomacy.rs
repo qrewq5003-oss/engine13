@@ -87,6 +87,11 @@ pub fn peace_rule(b_losing: bool, a_losing: bool, declared_by_b: bool, at_thresh
     !a_losing || at_threshold
 }
 
+/// A relation after a tick of its drift to the norm (`relation.rate_per_tick` of the way).
+pub fn relation_step(r: f64, norm: f64, params: &Params) -> f64 {
+    r + params.relation_rate_per_tick * (norm - r)
+}
+
 /// A relation after a push of `delta`: the push takes its share of the distance left to the
 /// bound it moves toward (`push_relation`; the worth of an embassy or a gift reads it).
 pub fn pushed_relation(r: f64, delta: f64) -> f64 {
@@ -189,11 +194,23 @@ impl World {
 
     /// The norm of a pair's relation from the state of the pair (plan §19.2).
     pub fn relation_norm(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        self.relation_norm_with(a, b, self.at_war(a, b), self.allied(a, b), params)
+    }
+
+    /// The norm of a pair's relation were the two at war — the treaty a declaration breaks
+    /// gone (E3 (е2): whether a beaten side can leave its war reads the relation the war
+    /// leaves, not the one before it).
+    pub fn relation_norm_at_war(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        self.relation_norm_with(a, b, true, false, params)
+    }
+
+    /// The norm of a pair's relation with the war and the alliance given.
+    fn relation_norm_with(&self, a: ActorId, b: ActorId, at_war: bool, allied: bool, params: &Params) -> f64 {
         let mut norm = params.relation_base;
-        if self.at_war(a, b) {
+        if at_war {
             norm -= params.relation_norm_war;
         }
-        if self.allied(a, b) {
+        if allied {
             norm += params.relation_norm_alliance;
         }
         if self.married_across(a, b) {
@@ -664,7 +681,7 @@ impl World {
             }
             let norm = self.relation_norm(a, b, params);
             let r = self.relations[&(a, b)];
-            self.relations.insert((a, b), r + params.relation_rate_per_tick * (norm - r));
+            self.relations.insert((a, b), relation_step(r, norm, params));
         }
         Ok(())
     }

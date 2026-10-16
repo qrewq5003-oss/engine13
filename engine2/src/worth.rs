@@ -27,7 +27,7 @@
 
 use crate::army::{battle_losses_ppm, win_chance};
 use crate::collapse::rising_hazard;
-use crate::economy::{collection_share, pay_per_tick, tribute_due};
+use crate::economy::{campaign_pay_per_tick, collection_share, pay_per_tick, tribute_due};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::politics::{drift_toward, natural_death_hazard, saturate, usurpation_hazard, violent_death_hazard};
@@ -315,14 +315,45 @@ impl World {
                 _ => {}
             }
         }
-        let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params)).sum();
+        let back = self.retake_odds(a, b, params);
+        let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params) * (1.0 - back) * (1.0 - self.revolt_share(a, *q, params))).sum();
         if subdue {
-            kg += tribute_due(self.yearly_income(b, params), params) as f64;
+            kg += tribute_due(self.yearly_income(b, params), params) as f64 * (1.0 - back);
         }
         if free {
             kg += tribute_due(self.yearly_income(a, params), params) as f64;
         }
         kg
+    }
+
+    /// The odds that `b` takes back what `a` takes from it (plan §27.3, (б)): by the battle
+    /// formula, each side's army and all it can still levy (`recruit_room` — the dead of its
+    /// levies out of the ceiling until its cohort grows up, plan §27.1).
+    pub fn retake_odds(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        if !self.alive(b) {
+            return 0.0;
+        }
+        let could = |x: ActorId| self.army_strength(x) + World::new_soldiers_strength(self.recruit_room(x, params));
+        let (theirs, mine) = (could(b), could(a));
+        if theirs <= 0.0 {
+            return 0.0;
+        }
+        if mine <= 0.0 {
+            return 1.0;
+        }
+        win_chance(theirs, mine, params)
+    }
+
+    /// The share of the horizon a province taken by `a` would stand in revolt (plan §27.3,
+    /// (б)): its marks of alienation against `a`'s court and core, the chance of a rising at
+    /// `a`'s legitimacy (`collapse::rising_hazard`) each tick, each rising lasting until `a`'s
+    /// men reach it from the capital (`path`, `march_steps_per_tick`).
+    pub fn revolt_share(&self, a: ActorId, q: ProvinceId, params: &Params) -> f64 {
+        let pr = &self.provinces[&q];
+        let marks = u32::from(pr.religion != self.polity_religion(a)) + u32::from(pr.culture != self.actors[&a].core_culture);
+        let steps = self.path(a, self.actors[&a].capital, q).map(|p| p.len()).unwrap_or(0);
+        let lasting = (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1)) as f64;
+        (rising_hazard(marks, self.actors[&a].legitimacy, params) * lasting).min(1.0)
     }
 
     /// The odds of `a` in its war with `b`, by the battle formula: the strength of its side
@@ -357,10 +388,20 @@ impl World {
     }
 
     /// Whether `a`, beaten by `b`, could end the war by a peace `b` accepts — the rule of the
-    /// peace (`diplomacy::peace_rule`) on a war `a` is losing.
+    /// peace (`diplomacy::peace_rule`) on a war `a` is losing, at the relation the war leaves
+    /// by its expected end: drifted (`relation_step`) toward the norm of the pair at war
+    /// (`relation_norm_at_war`) for `war_ticks`. Read at the relation before the war, a
+    /// declarer on friendly terms counted on leaving a lost war for nothing, and the war
+    /// itself took the relation below the threshold the next tick (measured: every one-tick
+    /// war ended by its declarer).
     fn could_leave(&self, a: ActorId, b: ActorId, declaring: bool, params: &Params) -> bool {
         let declared_by_b = !declaring && self.wars.get(&crate::army::pair(a, b)).is_some_and(|w| w.by == Some(b));
-        crate::diplomacy::peace_rule(false, true, declared_by_b, self.relation(a, b) >= params.treaty_accept_at_relation, self.exhausted(b), self.war_goal_against(b, a))
+        let norm = self.relation_norm_at_war(a, b, params);
+        let mut r = self.relation(a, b);
+        for _ in 0..(self.war_ticks(a, b, params).ceil() as u32) {
+            r = crate::diplomacy::relation_step(r, norm, params);
+        }
+        crate::diplomacy::peace_rule(false, true, declared_by_b, r >= params.treaty_accept_at_relation, self.exhausted(b), self.war_goal_against(b, a))
     }
 
     /// What `a`'s war with `b` is worth to `a`, in years of its income (plan §26): won — what
@@ -375,19 +416,34 @@ impl World {
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
         let p = self.war_odds(a, b, extra, params);
         let gain = if unpaid { 0.0 } else { p * self.war_stake(a, b, params) * years };
-        let lose = if self.could_leave(a, b, declaring, params) { 0.0 } else { (1.0 - p) * self.take_of(a, self.war_target(b, a), params) * years };
+        let lost_province = self.war_target(b, a);
+        // What the enemy takes is held by it only as long as `a` does not take it back, nor it
+        // rise (plan §27.3, (б), the same measure as the gain's).
+        let held_by_b = (1.0 - self.retake_odds(b, a, params)) * (1.0 - self.revolt_share(b, lost_province, params));
+        let lose = if self.could_leave(a, b, declaring, params) { 0.0 } else { (1.0 - p) * self.take_of(a, lost_province, params) * held_by_b * years };
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let soldiers = self.army_size(a) as f64;
         let lost = soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
         let head = if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 };
-        (gain - lose - lost * head * years) / income
+        // The campaign (plan §27.2): a war its goals want takes `a`'s army off its land for
+        // the war's length, at the pay of a campaign; a defender stays at home on its pay.
+        let campaign = if self.war_goal_against(a, b) { self.campaign_extra(a, self.army_size(a), self.war_ticks(a, b, params), params) } else { 0.0 };
+        (gain - lose - lost * head * years) / income - campaign
+    }
+
+    /// What `n` soldiers on campaign for `ticks` cost a polity beyond their pay at home, in
+    /// years of its income (`campaign_pay_per_tick` against `pay_per_tick`).
+    pub fn campaign_extra(&self, a: ActorId, n: i64, ticks: f64, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        (campaign_pay_per_tick(n, params) - pay_per_tick(n, params)) as f64 * ticks / income
     }
 
     /// The ticks `a`'s war on `b` is expected to take: the march from `a`'s capital to the
-    /// province it aims at (`path`, `march_steps_per_tick`) and the siege there (`siege_ticks`).
+    /// province it aims at, as the march goes in that war whether or not it is on
+    /// (`path_at_war`, `march_steps_per_tick`), and the siege there (`siege_ticks`).
     pub fn war_ticks(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
         let target = self.war_target(a, b);
-        let steps = self.path(a, self.actors[&a].capital, target).map(|p| p.len()).unwrap_or(0);
+        let steps = self.path_at_war(a, b, self.actors[&a].capital, target).map(|p| p.len()).unwrap_or(0);
         (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
     }
 

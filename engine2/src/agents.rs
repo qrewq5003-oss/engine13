@@ -472,6 +472,15 @@ impl World {
         self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_worth(a, b, false, unpaid, extra, params) - self.war_worth(a, b, false, unpaid, 0.0, params)).sum()
     }
 
+    /// What `n` soldiers kept for `a`'s wars cost it, in years of its income: their pay and the
+    /// heads away from the land for the wars' expected length, and — when a war its goals want
+    /// is on — the pay of the campaign beyond it (plan §27.2).
+    fn war_soldiers_cost(&self, a: ActorId, n: i64, params: &Params) -> f64 {
+        let ticks = self.war_length(a, params);
+        let offensive = self.actors.keys().any(|b| self.at_war(a, *b) && self.alive(*b) && self.war_goal_against(a, *b));
+        self.soldiers_cost(a, n, ticks, params) + if offensive { self.campaign_extra(a, n, ticks, params) } else { 0.0 }
+    }
+
     /// The expected length of `a`'s wars, ticks: the longest of its fronts (`war_ticks`).
     fn war_length(&self, a: ActorId, params: &Params) -> f64 {
         self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_ticks(a, b, params)).fold(0.0, f64::max)
@@ -600,17 +609,17 @@ impl World {
             // threat it answers — (г).
             (VerbId::Recruit, Target::Province(_)) => {
                 let n = self.recruit_per_tick(a, params);
-                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - self.soldiers_cost(a, n, self.war_length(a, params), params)
+                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - self.war_soldiers_cost(a, n, params)
             }
             (VerbId::HireMercenaries, _) => {
                 let n = self.hire_count(a, params);
-                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.soldiers_cost(a, n, self.war_length(a, params), params)
+                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.war_soldiers_cost(a, n, params)
             }
             // A unit sent home at war: the pay saved for the war's length against what the
             // wars lose; at peace the rule of (б) until (г): an unpaid army melts anyway.
             (VerbId::Disband, Target::Unit(u)) => {
                 if at_war {
-                    self.soldiers_cost(a, self.soldiers(u), self.war_length(a, params), params) + self.at_war_gain(a, -self.unit_strength(u), unpaid, params)
+                    self.war_soldiers_cost(a, self.soldiers(u), params) + self.at_war_gain(a, -self.unit_strength(u), unpaid, params)
                 } else if unpaid {
                     0.5
                 } else {
