@@ -263,13 +263,28 @@ impl World {
     }
 
     /// Unsupplied soldiers of a unit melt by А7: thousandths lost = unsupplied × rate per tick.
+    /// **A levy's deserters go home** (owner's rule after #297: they deserted, they did not
+    /// die — and the world lost them, a leak of people): what the unit loses goes, through
+    /// the ledger, to the people of the province it stands in when that is its owner's, else
+    /// the nearest province of its own (the way a beaten unit falls back), else the province
+    /// it stands in. Mercenaries leave the world, as when disbanded.
     fn melt(&mut self, id: UnitId, unsupplied: i64, params: &Params) -> Result<(), WorldError> {
         if unsupplied <= 0 {
             return Ok(());
         }
         let milli = -(unsupplied * params.army_attrition_unsupplied_ppm_per_tick / 1000);
         if milli != 0 {
-            self.post(Account::Soldiers(id), Source::Desertion, milli)?;
+            let account = Account::Soldiers(id);
+            let held = |w: &World| w.ledger.stock(account).unwrap_or(0) * 1000 + w.ledger.carry(account).unwrap_or(0);
+            let before = held(self);
+            self.post(account, Source::Desertion, milli)?;
+            let gone = before - held(self);
+            let unit = &self.units[&id];
+            if !unit.mercenary && gone > 0 {
+                let (owner, at) = (unit.owner, unit.position);
+                let home = if self.provinces[&at].owner == owner { at } else { self.nearest_own(owner, at).unwrap_or(at) };
+                self.post(Account::Population(home), Source::Desertion, gone)?;
+            }
             self.emit(Event::Attrition { unit: id, unsupplied: unsupplied as u64 });
         }
         Ok(())

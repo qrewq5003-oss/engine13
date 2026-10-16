@@ -81,6 +81,9 @@ pub enum Source {
     /// A new house rises from the people: `−` one person on a province's population; the
     /// founder is a record of the house, not a stock (owner's rule on #285).
     Rise,
+    /// Unsupplied soldiers melting (E0 А7): `−` on the unit's soldiers and, for a levy, `+`
+    /// on the people of a province of its own, the same figure — deserters go home;
+    /// mercenaries leave the world (`−` soldiers only).
     Desertion,
     BattleLoss,
     /// A vassal's tribute (E0 Д2): `−` on its treasury and `+` on the lord's, the same figure.

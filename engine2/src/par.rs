@@ -4,16 +4,21 @@
 //! deterministic by itself (its own seed, its own draws, no shared state; `HashMap` is
 //! forbidden in the engine by a guard), so the results are byte for byte those of a run
 //! one after another — tested (`tests/par.rs`). `ENGINE2_SEQUENTIAL=1` plays them one after
-//! another, for a debugger.
+//! another, for a debugger; `ENGINE2_THREADS=n` caps the threads (owner's rule after #297:
+//! the chain ran out of memory when the build, the link, the tests and sixteen worlds ran at
+//! once).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// The number of threads a parallel run uses: the machine's, or one with
-/// `ENGINE2_SEQUENTIAL` set.
+/// The number of threads a parallel run uses: one with `ENGINE2_SEQUENTIAL` set, else
+/// `ENGINE2_THREADS` when it names a number of at least one, else the machine's.
 pub fn threads() -> usize {
     if std::env::var_os("ENGINE2_SEQUENTIAL").is_some() {
         return 1;
+    }
+    if let Some(n) = std::env::var("ENGINE2_THREADS").ok().and_then(|v| v.trim().parse::<usize>().ok()).filter(|n| *n >= 1) {
+        return n;
     }
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }

@@ -314,3 +314,33 @@ fn a_shortfall_is_shared_pro_rata_among_the_polity_s_units() {
     let ratio_diff = (lost_big * small - lost_small * big).abs();
     assert!(ratio_diff <= big + small, "{lost_big}:{big} vs {lost_small}:{small}");
 }
+
+/// Deserters go home (owner's rule after #297): an unpaid levy melts by А7 and what it loses
+/// arrives, through the ledger, in the people of a province of its own — the sum of people
+/// and levies is the same before and after, to the thousandth; mercenaries leave the world,
+/// as when disbanded.
+#[test]
+fn an_unpaid_levy_deserts_home_and_no_one_leaves_the_world_but_mercenaries() {
+    let p = params();
+    let mut w = testworld::world(8);
+    let a = ActorId(0);
+    let levy = w.units_of(a)[0];
+    let home = w.units[&levy].position;
+    let hired = UnitId(w.next_unit);
+    w.next_unit += 1;
+    w.units.insert(hired, engine2::world::Unit { owner: a, position: home, quality: 50.0, destination: None, mercenary: true, house: None });
+    w.ledger.open(w.tick, engine2::Account::Soldiers(hired), 0).unwrap();
+    let limit = w.sustainable_soldiers(a, &p);
+    w.post(engine2::Account::Soldiers(levy), Source::Recruit, (limit * 2 - w.soldiers(levy)) * 1000).unwrap();
+    w.post(engine2::Account::Soldiers(hired), Source::Hire, limit * 1000).unwrap();
+    let t = w.treasury(a);
+    w.post(engine2::Account::Treasury(a), Source::Verb, -t * 1000).unwrap();
+    let r = w.tick(&p).unwrap();
+    let deserted = |account: &dyn Fn(&engine2::Account) -> bool| r.postings.iter().filter(|q| q.source == Source::Desertion && account(&q.account)).map(|q| q.milli).sum::<i64>();
+    let from_levy = deserted(&|x| *x == engine2::Account::Soldiers(levy));
+    let from_hired = deserted(&|x| *x == engine2::Account::Soldiers(hired));
+    let to_people = deserted(&|x| matches!(x, engine2::Account::Population(_)));
+    assert!(from_levy < 0 && from_hired < 0, "both units were short of pay and melted: {from_levy}, {from_hired}");
+    assert_eq!(to_people, -from_levy, "every deserter of the levy is back among the people, to the thousandth");
+    assert!(r.postings.iter().filter(|q| q.source == Source::Desertion && matches!(q.account, engine2::Account::Population(_))).all(|q| q.account == engine2::Account::Population(home)), "at home: the levy stands in its own province");
+}
