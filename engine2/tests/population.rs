@@ -166,3 +166,49 @@ fn famine_strikes_a_province_above_its_capacity_until_it_fits() {
     assert!(famines > 0);
     assert!(g.world().population(prov) <= cap, "famine must bring the province back under its capacity");
 }
+
+/// People flee the heavier tax (owner's rule after #295; Lewis 1993 on the anachoresis of Roman
+/// Egypt): the fill a migrant compares is the people over the land the assessed rate leaves
+/// them, `capacity × (1 − rate)/(1 − tithe)` — at the tithe the plain fill, so a world of
+/// tithes migrates as before; across a border the heavier tax raises the gap toward the
+/// lighter, and a province in revolt, paying nothing, looks roomier.
+#[test]
+fn people_flee_the_heavier_tax_across_a_border_and_at_the_tithe_nothing_changes() {
+    let p = params();
+    let mut w = engine2::testworld::world(5);
+    let a = engine2::ActorId(0);
+    let (from, to) = w.actors[&a]
+        .provinces
+        .iter()
+        .find_map(|q| w.provinces[q].neighbours.iter().find(|n| w.provinces[n].owner != a).map(|n| (*q, *n)))
+        .expect("a province of polity 0 on a border");
+    let b = w.provinces[&to].owner;
+    // The same plain fill on both sides: 70 % of the capacity.
+    for q in [from, to] {
+        let want = w.provinces[&q].capacity as i64 * 7 / 10;
+        let have = w.population(q);
+        w.post(engine2::Account::Population(q), Source::Growth, (want - have) * 1000).unwrap();
+    }
+    let plain = |w: &engine2::World, q| w.population(q) * 1_000_000 / w.provinces[&q].capacity as i64;
+    let at_tithe = w.migration_fills(&p);
+    assert_eq!(at_tithe[&from], plain(&w, from), "at the tithe the fill is the plain fill");
+    assert_eq!(at_tithe[&from] - at_tithe[&to], plain(&w, from) - plain(&w, to));
+    // The top of Э4 against the bottom: the gap opens toward the lighter tax, by the land the
+    // two rates leave, and passes the threshold of a move.
+    w.actors.get_mut(&a).unwrap().tax_rate_ppm = p.tax_band_ppm.1;
+    w.actors.get_mut(&b).unwrap().tax_rate_ppm = p.tax_band_ppm.0;
+    let fills = w.migration_fills(&p);
+    let gap = fills[&from] - fills[&to];
+    let tithe = 1.0 - p.tax_default_ppm as f64 / 1e6;
+    let expected = 0.7 * tithe * (1.0 / (1.0 - p.tax_band_ppm.1 as f64 / 1e6) - 1.0 / (1.0 - p.tax_band_ppm.0 as f64 / 1e6));
+    assert!((gap as f64 / 1e6 - expected).abs() < 0.002, "the gap {gap} against the land the rates leave {expected:.4}");
+    assert!(gap > p.migration_min_gap_ppm, "a heavy tax against a light one is worth a move");
+    let (_, _, wanted) = w.migration_wanted(from, &fills, &p).expect("the people of the heavier tax move");
+    assert!(wanted > 0);
+    // The other way round they would not.
+    assert!(fills[&to] - fills[&from] < p.migration_min_gap_ppm);
+    // A province in revolt pays nothing and looks roomier than its plain fill.
+    w.provinces.get_mut(&to).unwrap().revolt = Some(w.tick);
+    assert_eq!(w.tax_burden_ppm(to), 0);
+    assert!(w.migration_fills(&p)[&to] < plain(&w, to));
+}

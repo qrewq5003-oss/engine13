@@ -706,7 +706,9 @@ impl World {
     /// legitimacy** (E3 (е1), owner's answer 2 on §24.7: no weight — what the world turns it
     /// into): the shifted norm and the step's blow or gain invite usurpations and murders,
     /// each at what it would cost the polity (`World::course_risk`), and the blow costs the
-    /// take while the rating comes back to its norm (`World::course_worth`).
+    /// take while the rating comes back to its norm (`World::course_worth`). **The people**
+    /// (owner's rule after #295): the heavier tax drives them across the border, the lighter
+    /// draws them, by the world's migration (`World::flight_worth`).
     pub fn tax_utility(&self, a: ActorId, verb: VerbId, params: &Params) -> f64 {
         self.tax_utility_at(a, verb, &self.risk_prices(a, params), params)
     }
@@ -730,7 +732,8 @@ impl World {
         let from = self.course(a, params);
         let lasting = self.course_after_tax_step(a, up, false, params);
         let after = self.course_after_tax_step(a, up, true, params);
-        take + self.course_risk(a, &from, &lasting, prices, params) + self.course_worth(a, &lasting, &after, prices, params)
+        let flight = self.flight_worth(a, actor.tax_rate_ppm + if up { params.tax_step_ppm } else { -params.tax_step_ppm }, params);
+        take + flight + self.course_risk(a, &from, &lasting, prices, params) + self.course_worth(a, &lasting, &after, prices, params)
     }
 
     /// The options a ruler has: every available call of the enabled verbs over their

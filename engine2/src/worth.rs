@@ -8,7 +8,9 @@
 //! (`politics::usurpation_hazard`, `violent_death_hazard`, `collapse::rising_hazard`), the
 //! drift of legitimacy to its
 //! norm (`politics::drift_toward`) and its saturation (`politics::saturate`), the push of a
-//! relation (`diplomacy::pushed_relation`), the mortality table (`politics::natural_death_hazard`).
+//! relation (`diplomacy::pushed_relation`), the mortality table (`politics::natural_death_hazard`),
+//! the migration by the fill the tax leaves (`migration_fills`, `migration_wanted`,
+//! `migrants_to_close`).
 //! A change of the world's
 //! numbers changes the bots' worth by itself, with no change to the bots (tested by
 //! injection, `tests/agents.rs`).
@@ -233,6 +235,53 @@ impl World {
         let from = self.course(a, params);
         let to = Course { legitimacy: saturate(from.legitimacy, -points), ..from };
         self.course_worth(a, &from, &to, prices, params)
+    }
+
+    /// What the flight a tax rate drives or draws is worth to a polity, in years of its income
+    /// (owner's rule after #295: people flee the heavier tax): the people the world's
+    /// migration would move across its border a tick (`migration_wanted`) at `rate_ppm`
+    /// against the rate as it stands — each flow until the gap it follows closes to the
+    /// threshold (`migrants_to_close`) — absent or present for the rest of the horizon, at
+    /// what a head pays the polity at that rate.
+    pub fn flight_worth(&self, a: ActorId, rate_ppm: i64, params: &Params) -> f64 {
+        let people: i64 = self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum();
+        let now_rate = self.actors[&a].tax_rate_ppm;
+        if people <= 0 || now_rate <= 0 {
+            return 0.0;
+        }
+        let now = self.migration_fills(params);
+        let mut after = now.clone();
+        let mut involved: std::collections::BTreeSet<ProvinceId> = std::collections::BTreeSet::new();
+        for p in &self.actors[&a].provinces {
+            if !self.in_revolt(*p) {
+                after.insert(*p, self.migration_fill_ppm(*p, rate_ppm, params));
+            }
+            involved.insert(*p);
+            involved.extend(self.provinces[p].neighbours.iter().copied().filter(|n| self.provinces[n].owner != a));
+        }
+        let ticks = f64::from(params.goal_horizon_ticks);
+        let burden = |q: ProvinceId, changed: bool| if changed && self.provinces[&q].owner == a && !self.in_revolt(q) { rate_ppm } else { self.tax_burden_ppm(q) };
+        // People-ticks the polity gains (> 0) or loses over the horizon under `fills`.
+        let held = |fills: &std::collections::BTreeMap<ProvinceId, i64>, changed: bool| -> f64 {
+            let mut total = 0.0;
+            for q in &involved {
+                let Some((to, gap, milli)) = self.migration_wanted(*q, fills, params) else { continue };
+                let (out, into) = (self.provinces[q].owner == a, self.provinces[&to].owner == a);
+                if out == into || milli <= 0 {
+                    continue;
+                }
+                let per_tick = milli as f64 / 1000.0;
+                let movable = self.migrants_to_close(*q, to, gap, (burden(*q, changed), burden(to, changed)), params);
+                let until = movable / per_tick;
+                let person_ticks = if until >= ticks { per_tick * ticks * ticks / 2.0 } else { movable * (ticks - until / 2.0) };
+                total += if into { person_ticks } else { -person_ticks };
+            }
+            total
+        };
+        let delta = held(&after, true) - held(&now, false);
+        // A head pays the polity its share of the take: the yearly income over the people, at
+        // the new rate; in years of income that is the people-ticks over twice the people.
+        delta * rate_ppm as f64 / now_rate as f64 / (2.0 * people as f64)
     }
 
     // ---- the houses ----

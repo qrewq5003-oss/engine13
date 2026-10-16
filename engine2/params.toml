@@ -90,7 +90,9 @@ unit = "share of the province per outbreak (urban share × urban outbreak)"
 e0 = "П4"
 
 # E0 П5 — migration, kind (в): people move toward an emptier land neighbour; the sum of
-# people never changes (ledger). Checked through П7.
+# people never changes (ledger). The fill compared is the people over the land the assessed
+# tax leaves them, capacity × (1 − rate)/(1 − tithe) — derived, no weight (owner's rule
+# after #295: people fled the heavier tax; Lewis 1993 — открыл). Checked through П7.
 [migration.rate_per_tick]
 kind = "c"
 value = 0.02

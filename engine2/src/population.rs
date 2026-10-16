@@ -19,6 +19,14 @@
 //! - **Migration** (E0 П5, kind (в) checked through П7): people move from a fuller
 //!   province to an emptier land neighbour at `migration.rate × P × (fill gap)` a tick,
 //!   posted out and in with the same thousandths — the sum of people never changes.
+//!   **The fill a migrant compares is the land the tax leaves him** (owner's rule after
+//!   #295: people fled heavy taxes — Lewis 1993 on the anachoresis of Roman Egypt): people
+//!   over the land the rate their owner assesses leaves them ([`World::migration_fill_ppm`]).
+//!   Derived, no weight: capacity is the density observed at the Malthusian ceiling (E0 П1)
+//!   under the ordinary burden of its age, the tithe, where what people keep feeds them; a
+//!   rate `t` leaves food for `(1 − t)/(1 − tithe)` of them. Inside one polity the
+//!   rate is one and nothing changes; across a border people drift from the heavier tax to
+//!   the lighter, and a province in revolt, paying nothing, draws them.
 //!
 //! Order inside the phase is canonical (ascending province id). The remainder carry means
 //! a posting's whole part is the ceiling for losses and the floor for gains.
@@ -33,6 +41,75 @@ use crate::rng::{Draw, DrawPoint};
 use crate::world::{Disease, World, WorldError};
 
 impl World {
+    /// The share of their harvest a province's people are assessed, parts per million: the
+    /// tax rate of its owner — nothing in a province in revolt (it pays no tax) or of a
+    /// fallen polity.
+    pub fn tax_burden_ppm(&self, p: ProvinceId) -> i64 {
+        let owner = self.provinces[&p].owner;
+        if !self.alive(owner) || self.in_revolt(p) {
+            return 0;
+        }
+        self.actors[&owner].tax_rate_ppm
+    }
+
+    /// The fill a migrant compares, parts per million: the people over the land the burden
+    /// leaves them (owner's rule after #295; derived, no weight). The capacity is the density
+    /// observed at the Malthusian ceiling (E0 П1) under the ordinary burden of its age, the
+    /// tithe: a rate `t` leaves food for `(1 − t)/(1 − tithe)` of it. At the tithe the fill is
+    /// the plain fill — a world where every polity taxes the tithe migrates as before. A
+    /// province of no capacity counts as full.
+    pub fn migration_fill_ppm(&self, p: ProvinceId, burden_ppm: i64, params: &Params) -> i64 {
+        let cap = self.provinces[&p].capacity as i64;
+        if cap == 0 {
+            return 1_000_000;
+        }
+        let people = self.ledger.stock(Account::Population(p)).unwrap_or(0);
+        people * 1_000_000 / cap * (1_000_000 - params.tax_default_ppm) / (1_000_000 - burden_ppm).max(1)
+    }
+
+    /// Every province's migration fill under the burdens as they stand.
+    pub fn migration_fills(&self, params: &Params) -> BTreeMap<ProvinceId, i64> {
+        self.provinces.keys().map(|p| (*p, self.migration_fill_ppm(*p, self.tax_burden_ppm(*p), params))).collect()
+    }
+
+    /// Where the people of `p` would go a tick under `fills` (E0 П5): the land neighbour with
+    /// the largest gap above `migration.min_gap` (ties: the lower id), the gap, and the
+    /// migrants wanted in thousandths — `P × rate × gap` — before the room at the other end
+    /// caps them.
+    pub fn migration_wanted(&self, p: ProvinceId, fills: &BTreeMap<ProvinceId, i64>, params: &Params) -> Option<(ProvinceId, i64, i64)> {
+        let fill = fills[&p];
+        let (to, gap) = self.provinces[&p]
+            .neighbours
+            .iter()
+            .map(|n| (*n, fill - fills[n]))
+            .filter(|(_, gap)| *gap > params.migration_min_gap_ppm)
+            .max_by_key(|(n, gap)| (*gap, std::cmp::Reverse(*n)))?;
+        let people = self.ledger.stock(Account::Population(p)).unwrap_or(0);
+        // migrants·1000 = P × rate × gap, rate in ppm per tick, gap in ppm.
+        Some((to, gap, people * params.migration_rate_ppm_per_tick / 1000 * gap / 1_000_000))
+    }
+
+    /// How many migrants from `from` to `to` would close a fill gap of `gap_ppm` down to the
+    /// threshold of a move (`migration.min_gap`), the burdens of the two provinces given: each
+    /// migrant lowers the one fill and raises the other by a head over the land the burden
+    /// leaves (`migration_fill_ppm`). The world's own limit of a flight, read by the bots'
+    /// worth (E3).
+    pub fn migrants_to_close(&self, from: ProvinceId, to: ProvinceId, gap_ppm: i64, burdens: (i64, i64), params: &Params) -> f64 {
+        let per_head = |q: ProvinceId, burden: i64| {
+            let cap = self.provinces[&q].capacity as f64;
+            if cap <= 0.0 {
+                0.0
+            } else {
+                1e6 / cap * (1e6 - params.tax_default_ppm as f64) / (1e6 - burden as f64).max(1.0)
+            }
+        };
+        let closing = per_head(from, burdens.0) + per_head(to, burdens.1);
+        if closing <= 0.0 {
+            return 0.0;
+        }
+        (gap_ppm - params.migration_min_gap_ppm).max(0) as f64 / closing
+    }
+
     /// The population phase of a tick.
     pub(crate) fn phase_population(&mut self, params: &Params) -> Result<(), WorldError> {
         let ids: Vec<ProvinceId> = self.provinces.keys().copied().collect();
@@ -87,33 +164,15 @@ impl World {
             }
         }
 
-        // Migration: from each province to its emptiest land neighbour when the fill gap is
-        // worth the move; out and in with the same thousandths.
-        let fills: BTreeMap<ProvinceId, i64> = ids
-            .iter()
-            .map(|p| {
-                let cap = self.provinces[p].capacity as i64;
-                let people = self.ledger.stock(Account::Population(*p)).unwrap_or(0);
-                (*p, if cap == 0 { 1_000_000 } else { people * 1_000_000 / cap })
-            })
-            .collect();
+        // Migration: from each province to its emptiest land neighbour, by the fill the tax
+        // leaves, when the gap is worth the move; out and in with the same thousandths.
+        let fills = self.migration_fills(params);
         let mut moves: Vec<(ProvinceId, ProvinceId, i64)> = Vec::new();
         for p in &ids {
-            let fill = fills[p];
-            let Some((to, gap)) = self.provinces[p]
-                .neighbours
-                .iter()
-                .map(|n| (*n, fill - fills[n]))
-                .filter(|(_, gap)| *gap > params.migration_min_gap_ppm)
-                .max_by_key(|(n, gap)| (*gap, std::cmp::Reverse(*n)))
-            else {
-                continue;
-            };
-            let people = self.ledger.stock(Account::Population(*p)).unwrap_or(0);
-            // migrants·1000 = P × rate × gap, rate in ppm per tick, gap in ppm.
-            let milli = people * params.migration_rate_ppm_per_tick / 1000 * gap / 1_000_000;
-            if milli > 0 {
-                moves.push((*p, to, milli));
+            if let Some((to, _, milli)) = self.migration_wanted(*p, &fills, params) {
+                if milli > 0 {
+                    moves.push((*p, to, milli));
+                }
             }
         }
         // Several provinces may send to the same emptiest neighbour in one tick: each
