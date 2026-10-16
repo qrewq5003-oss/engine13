@@ -71,6 +71,16 @@ pub fn win_chance(a: f64, b: f64, params: &Params) -> f64 {
     a.powf(k) / (a.powf(k) + b.powf(k))
 }
 
+/// The share of its soldiers a side loses in a battle, parts per million (E0 А6): the
+/// winner's or the loser's.
+pub fn battle_losses_ppm(won: bool, params: &Params) -> i64 {
+    if won {
+        params.battle_losses_winner_ppm
+    } else {
+        params.battle_losses_loser_ppm
+    }
+}
+
 impl World {
     /// A polity is alive while it holds land and its ruler lives: a polity whose last house
     /// died out has fallen with its land (`politics.rs`), one conquered has none.
@@ -170,7 +180,28 @@ impl World {
     }
 
     fn strength(&self, units: &[UnitId]) -> f64 {
-        units.iter().map(|u| self.soldiers(*u) as f64 * (0.5 + self.units[u].quality / 100.0)).sum()
+        units.iter().map(|u| self.unit_strength(*u)).sum()
+    }
+
+    /// A unit's strength in battle: soldiers × (0.5 + quality/100).
+    pub fn unit_strength(&self, u: UnitId) -> f64 {
+        self.soldiers(u) as f64 * (0.5 + self.units[&u].quality / 100.0)
+    }
+
+    /// The strength of a polity's whole army, by the battle's measure.
+    pub fn army_strength(&self, a: ActorId) -> f64 {
+        self.strength(&self.units_of(a))
+    }
+
+    /// The ticks an unopposed enemy needs to take a province: a capital holds
+    /// `siege.capital_ticks`, any other falls within the tick (E0 А9).
+    pub fn siege_ticks(&self, p: ProvinceId, params: &Params) -> u32 {
+        let owner = self.provinces[&p].owner;
+        if self.actors[&owner].capital == p {
+            params.siege_capital_ticks
+        } else {
+            1
+        }
     }
 
     /// Units standing in `p`, grouped by owner in canonical order.
@@ -206,7 +237,7 @@ impl World {
             let attacker_won = u < p_att;
             let (winner, loser) = if attacker_won { (attacker, defender) } else { (defender, attacker) };
             let mut lost = BTreeMap::new();
-            for (side, share) in [(winner, params.battle_losses_winner_ppm), (loser, params.battle_losses_loser_ppm)] {
+            for (side, share) in [(winner, battle_losses_ppm(true, params)), (loser, battle_losses_ppm(false, params))] {
                 let mut sum = 0i64;
                 for u in &present[&side] {
                     let soldiers = self.soldiers(*u);
@@ -269,12 +300,13 @@ impl World {
                 self.provinces.get_mut(&p).unwrap().siege = None;
                 continue;
             };
-            if self.actors[&owner].capital == p {
+            let need = self.siege_ticks(p, params);
+            if need > 1 {
                 let ticks = match self.provinces[&p].siege {
                     Some(s) if s.by == by => s.ticks + 1,
                     _ => 1,
                 };
-                if ticks < params.siege_capital_ticks {
+                if ticks < need {
                     self.provinces.get_mut(&p).unwrap().siege = Some(crate::world::Siege { by, ticks });
                     continue;
                 }
