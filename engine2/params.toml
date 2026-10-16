@@ -1212,15 +1212,8 @@ origin = "выбран: лёгкий вес (владелец, #293)"
 
 # ---- orders and suppression (E3 (б), plan §23, §23c) ----
 
-# (в) A bot's units advance on the enemy when they are at least this share of the enemy's
-# whole army, else they go home to hold the capital. Checked through А12 (wars that never
-# move and wars that end at once both leave it).
-[agent.advance_ratio]
-kind = "c"
-value = 1.0
-unit = "own units' soldiers per enemy soldier"
-checked_by = "А12"
-origin = "выбран: перевес для похода — к выводу из формулы боя в (е)"
+# (A bot's units advance when going on with the war is worth something by the battle
+# formula — `World::war_worth`, E3 (е2); `agent.advance_ratio` left for the model.)
 
 # E0 В9 (row added at E3, orders; owner's answers on #289 and §23) — observed: the share of
 # province-ticks in revolt. By memory, source to open: revolts were frequent and mostly short
