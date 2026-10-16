@@ -25,9 +25,9 @@
 //! the rising crushed — is the throne and the seats lost, with no price on a life (owner's
 //! answer 3). Houses have no goals yet, so a house's «survive» does not enter (E4).
 
-use crate::army::win_chance;
+use crate::army::{battle_losses_ppm, win_chance};
 use crate::collapse::rising_hazard;
-use crate::economy::collection_share;
+use crate::economy::{collection_share, pay_per_tick, tribute_due};
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::politics::{drift_toward, natural_death_hazard, saturate, usurpation_hazard, violent_death_hazard};
@@ -282,6 +282,122 @@ impl World {
         // A head pays the polity its share of the take: the yearly income over the people, at
         // the new rate; in years of income that is the people-ticks over twice the people.
         delta * rate_ppm as f64 / now_rate as f64 / (2.0 * people as f64)
+    }
+
+    // ---- war (E3 (е2), plan §26) ----
+
+    /// The take a province would give `a` a year: its production at `a`'s rate and share.
+    pub(crate) fn take_of(&self, a: ActorId, q: ProvinceId, params: &Params) -> f64 {
+        self.province_production_per_tick(q, params) as f64 * 2.0 * self.actors[&a].tax_rate_ppm as f64 / 1e6 * self.collection_share_ppm(a, params) as f64 / 1e6
+    }
+
+    /// What the live goals of `a` want of `b`, kg a year: the provinces of `b` they name, each
+    /// once, at `a`'s take; the tribute `b` would pay as a vassal; the tribute `a` pays `b` as
+    /// its lord.
+    pub fn war_stake(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        use crate::agents::{GoalKind as K, GoalTarget as T};
+        let mut wanted: std::collections::BTreeSet<ProvinceId> = std::collections::BTreeSet::new();
+        let (mut subdue, mut free) = (false, false);
+        let of_b = |q: &ProvinceId| self.provinces[q].owner == b;
+        for g in &self.actors[&a].goals {
+            if self.goal_progress(a, g) >= 1.0 - 1e-9 {
+                continue;
+            }
+            match (g.kind, g.target) {
+                (K::Take | K::Hold, T::Province(q)) if of_b(&q) => {
+                    wanted.insert(q);
+                }
+                (K::Take, T::Route(q, r)) => wanted.extend([q, r].into_iter().filter(of_b)),
+                (K::Take | K::Unite | K::Hold, T::Region(r)) => wanted.extend(self.regions[r.index()].iter().copied().filter(of_b)),
+                (K::Take, T::Polity(x)) if x == b => wanted.extend(self.actors[&b].provinces.iter().copied()),
+                (K::Subdue, T::Polity(x)) if x == b => subdue = true,
+                (K::Free, _) if self.lord_of(a) == Some(b) => free = true,
+                _ => {}
+            }
+        }
+        let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params)).sum();
+        if subdue {
+            kg += tribute_due(self.yearly_income(b, params), params) as f64;
+        }
+        if free {
+            kg += tribute_due(self.yearly_income(a, params), params) as f64;
+        }
+        kg
+    }
+
+    /// The odds of `a` in its war with `b`, by the battle formula: the strength of its side
+    /// (and `extra`) against the other's, each polity counted once. Against `a`: `b`, every
+    /// enemy `a` already fights — one army for every front — and, for a war not yet open,
+    /// those its declaration brings in by §19 (`war_entrants`). With `a`: the vassals the
+    /// declaration brings in, and its allies, lord and vassals already at war with `b`.
+    pub fn war_odds(&self, a: ActorId, b: ActorId, extra: f64, params: &Params) -> f64 {
+        use std::collections::BTreeSet;
+        let mut theirs: BTreeSet<ActorId> = self.actors.keys().copied().filter(|c| self.alive(*c) && self.at_war(a, *c)).collect();
+        theirs.insert(b);
+        let mut mine: BTreeSet<ActorId> = BTreeSet::from([a]);
+        if !self.at_war(a, b) {
+            let (with_b, with_a) = self.war_entrants(a, b);
+            theirs.extend(with_b);
+            mine.extend(with_a);
+        }
+        let mut friends: Vec<ActorId> = self.allies_of(a);
+        friends.extend(self.lord_of(a));
+        friends.extend(self.vassals_of(a));
+        mine.extend(friends.into_iter().filter(|x| self.alive(*x) && self.at_war(*x, b)));
+        mine.retain(|x| !theirs.contains(x));
+        let mine = (mine.iter().map(|x| self.army_strength(*x)).sum::<f64>() + extra).max(0.0);
+        let theirs: f64 = theirs.iter().map(|x| self.army_strength(*x)).sum();
+        if theirs <= 0.0 {
+            return if mine > 0.0 { 1.0 } else { 0.5 };
+        }
+        if mine <= 0.0 {
+            return 0.0;
+        }
+        win_chance(mine, theirs, params)
+    }
+
+    /// Whether `a`, beaten by `b`, could end the war by a peace `b` accepts — the rule of the
+    /// peace (`diplomacy::peace_rule`) on a war `a` is losing.
+    fn could_leave(&self, a: ActorId, b: ActorId, declaring: bool, params: &Params) -> bool {
+        let declared_by_b = !declaring && self.wars.get(&crate::army::pair(a, b)).is_some_and(|w| w.by == Some(b));
+        crate::diplomacy::peace_rule(false, true, declared_by_b, self.relation(a, b) >= params.treaty_accept_at_relation, self.exhausted(b), self.war_goal_against(b, a))
+    }
+
+    /// What `a`'s war with `b` is worth to `a`, in years of its income (plan §26): won — what
+    /// its goals want of `b` (`war_stake`) for the horizon; lost — the province `b` marches on
+    /// (`war_target`) for the horizon, unless the peace lets `a` out; the soldiers the battle
+    /// costs (А6), heads gone from the tax base for the horizon. `declaring`: no war of record
+    /// yet. `unpaid`: an unpaid army is exhausted and the peace comes at the first offer — the
+    /// goals are not reached. `extra`: strength added to `a`'s (a levy, a hire; a unit sent
+    /// away, negative).
+    pub fn war_worth(&self, a: ActorId, b: ActorId, declaring: bool, unpaid: bool, extra: f64, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let years = f64::from(params.goal_horizon_ticks) / 2.0;
+        let p = self.war_odds(a, b, extra, params);
+        let gain = if unpaid { 0.0 } else { p * self.war_stake(a, b, params) * years };
+        let lose = if self.could_leave(a, b, declaring, params) { 0.0 } else { (1.0 - p) * self.take_of(a, self.war_target(b, a), params) * years };
+        let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
+        let soldiers = self.army_size(a) as f64;
+        let lost = soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
+        let head = if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 };
+        (gain - lose - lost * head * years) / income
+    }
+
+    /// The ticks `a`'s war on `b` is expected to take: the march from `a`'s capital to the
+    /// province it aims at (`path`, `march_steps_per_tick`) and the siege there (`siege_ticks`).
+    pub fn war_ticks(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        let target = self.war_target(a, b);
+        let steps = self.path(a, self.actors[&a].capital, target).map(|p| p.len()).unwrap_or(0);
+        (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
+    }
+
+    /// What `n` soldiers kept under arms for `ticks` cost a polity, in years of its income:
+    /// their pay (`pay_per_tick`) and the take of the heads they are away from the land.
+    pub fn soldiers_cost(&self, a: ActorId, n: i64, ticks: f64, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
+        let head = if people > 0 { income / people as f64 } else { 0.0 };
+        (pay_per_tick(n, params) as f64 * ticks + n as f64 * head * ticks / 2.0) / income
     }
 
     // ---- the houses ----

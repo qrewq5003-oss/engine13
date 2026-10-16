@@ -245,9 +245,6 @@ pub struct Params {
     /// (е1): prices are wheat over it, with no weight).
     pub agent_temperature: f64,
     pub goal_horizon_ticks: u32,
-    /// (в) A bot's units advance on the enemy when they are at least this share of the
-    /// enemy's whole army, else they hold the capital (E3 (б)).
-    pub agent_advance_ratio: f64,
     /// (в) The goals a polity keeps at a time; a freed slot is filled by revanche, by the
     /// wish of a vassal to be free, else by the weighted lot (E3 (б)).
     pub goal_open_per_polity: usize,
@@ -411,7 +408,6 @@ impl Params {
         let other_retinue = value("house.other_retinue_share")?;
         let temperature = value("agent.temperature")?;
         let horizon = value("goal.horizon_years")?;
-        let advance = value("agent.advance_ratio")?;
         let open_goals = value("goal.open_per_polity")?;
         let pay_memory = value("agent.pay_memory_ticks")?;
         let policy_cost = value("policy.cost_legitimacy")?;
@@ -509,7 +505,6 @@ impl Params {
             other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,
             agent_temperature: temperature,
             goal_horizon_ticks: (horizon * 2.0).round() as u32,
-            agent_advance_ratio: advance,
             goal_open_per_polity: open_goals.round() as usize,
             agent_pay_memory_ticks: (pay_memory.round() as usize).max(1),
             policy_cost_legitimacy: policy_cost,
