@@ -56,7 +56,8 @@
 //!
 //! **Legitimacy as a price (6b, plan §18.3).** The tax verbs: `raise_tax` moves the rate up
 //! by `tax.step` inside the band of Э4 and costs `legitimacy.cost_raise_tax`; `lower_tax`
-//! moves it down and gives `legitimacy.gain_lower_tax` back. The offer carries the price
+//! moves it down and gives back `legitimacy.lower_tax_gives_back` of what a raise would take
+//! at the level the ruler stands (`World::tax_step_cost`). The offer carries the price
 //! (`VerbOffer::cost_legitimacy`); at the edge of the band the verb is closed with its
 //! reason. **A lasting decision shifts the norm** (brief §2; review of #286): the norm falls
 //! by `legitimacy.norm_per_tax_step` for every step of the rate above the tithe and rises
@@ -114,6 +115,29 @@ pub fn saturate(value: f64, points: f64) -> f64 {
     } else {
         value * (points / 100.0).exp()
     }
+}
+
+/// The chance a tick that a ruler at `legitimacy` meets a chance of usurpation (E0 В6):
+/// `usurpation.per_year / 2 × (100 − L)/50` — the formula the phase draws by and the bots'
+/// worth reads (E3 (е1)).
+pub fn usurpation_hazard(legitimacy: f64, params: &Params) -> f64 {
+    params.usurpation_per_tick * (100.0 - legitimacy) / 50.0
+}
+
+/// The chance a tick that a person of `age` dies a natural death: the mortality table at the
+/// elite's factor (E0 В1, В2).
+pub fn natural_death_hazard(age: i32, params: &Params) -> f64 {
+    params.mortality_per_year(age) * params.mortality_elite_factor / 2.0
+}
+
+/// The chance a tick that a ruler at `legitimacy` is murdered (E0 В3).
+pub fn violent_death_hazard(legitimacy: f64, params: &Params) -> f64 {
+    params.violent_death_per_tick * (100.0 - legitimacy) / 50.0
+}
+
+/// Legitimacy after a tick's drift toward its norm (`legitimacy.rate_per_tick`).
+pub fn drift_toward(legitimacy: f64, norm: f64, params: &Params) -> f64 {
+    legitimacy + (norm - legitimacy) * params.legitimacy_rate_per_tick
 }
 
 pub fn standing_of_rule(rule: Succession) -> Standing {
@@ -217,7 +241,7 @@ impl World {
 
     /// The shifts of the norm by the ruler's lasting decisions, in points: the tax away from
     /// the tithe (down above it, up below it) and the closed credit.
-    fn norm_shifts(&self, a: ActorId, params: &Params) -> (f64, f64) {
+    pub(crate) fn norm_shifts(&self, a: ActorId, params: &Params) -> (f64, f64) {
         let actor = &self.actors[&a];
         let steps_above_tithe = (actor.tax_rate_ppm - params.tax_default_ppm) as f64 / params.tax_step_ppm as f64;
         let in_default = if self.credit_closed(a) { params.legitimacy_norm_penalty_in_default } else { 0.0 };
@@ -403,6 +427,17 @@ impl World {
         self.provinces.get_mut(&province).unwrap().governor = to;
         self.emit(Event::GovernorChanged { province, from, to });
         Ok(())
+    }
+
+    /// Who would take the throne of `a` were its ruler to die now: the designated heir, else
+    /// the next by the rule inside the ruling house (`None` when the house has nobody left —
+    /// the throne would pass to another house; E3 (е1): the worth of a murder reads it).
+    pub fn next_ruler(&self, a: ActorId, params: &Params) -> Option<PersonId> {
+        let actor = &self.actors[&a];
+        actor.heir.filter(|h| self.person_alive(*h)).or_else(|| {
+            let ruler = actor.ruler;
+            self.heir_by_rule(ruler, actor.succession, params).filter(|p| *p != ruler)
+        })
     }
 
     /// The next ruler by the rule, inside the ruling house (`None` when the house has no
@@ -600,6 +635,23 @@ impl World {
         }
     }
 
+    /// The points of legitimacy a step of the tax costs (> 0, raising) or gives (< 0,
+    /// lowering), before `pay_legitimacy` saturates them: a raise costs
+    /// `legitimacy.cost_raise_tax`; a lowering gives back `legitimacy.lower_tax_gives_back`
+    /// of what a raise would take at the level the ruler stands — so a step and the step back
+    /// lose legitimacy in either order and at every level (the rule of #286: no conversion at
+    /// a profit). With a fixed gain the round trip **gained** below L ≈ 34, where a
+    /// saturating blow of 10 takes less than a saturating gain of 5 gives (owner's rule on
+    /// #293 made the prices saturate); the bots of E3 (е1), reading the world's prices, found
+    /// it — 12 % of their changes of the tax undone the next tick, 2 % with the gain removed.
+    pub fn tax_step_cost(&self, a: ActorId, up: bool, params: &Params) -> f64 {
+        if up {
+            return params.legitimacy_cost_raise_tax;
+        }
+        let l = self.actors[&a].legitimacy;
+        -params.legitimacy_lower_tax_gives_back * (l - saturate(l, -params.legitimacy_cost_raise_tax))
+    }
+
     /// What `enforce_order` costs now: the share of a year's revenue, kg.
     pub fn order_cost(&self, a: ActorId, params: &Params) -> i64 {
         self.yearly_income(a, params) * params.order_cost_share_ppm / 1_000_000
@@ -623,11 +675,9 @@ impl World {
                 }
                 self.tax_room(a, call.verb, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
                 let from_ppm = self.actors[&a].tax_rate_ppm;
-                let (to_ppm, cost) = if call.verb == VerbId::RaiseTax {
-                    (from_ppm + params.tax_step_ppm, params.legitimacy_cost_raise_tax)
-                } else {
-                    (from_ppm - params.tax_step_ppm, -params.legitimacy_gain_lower_tax)
-                };
+                let up = call.verb == VerbId::RaiseTax;
+                let to_ppm = if up { from_ppm + params.tax_step_ppm } else { from_ppm - params.tax_step_ppm };
+                let cost = self.tax_step_cost(a, up, params);
                 self.actors.get_mut(&a).unwrap().tax_rate_ppm = to_ppm;
                 self.pay_legitimacy(a, cost);
                 self.emit(Event::TaxRateChanged { actor: a, from_ppm, to_ppm });
@@ -659,8 +709,7 @@ impl World {
         // 1. Deaths, every living person in id order.
         let living: Vec<PersonId> = self.persons.iter().filter(|(_, p)| p.died.is_none()).map(|(id, _)| *id).collect();
         for p in &living {
-            let age = year - self.persons[p].born;
-            let per_tick = params.mortality_per_year(age) * params.mortality_elite_factor / 2.0;
+            let per_tick = natural_death_hazard(year - self.persons[p].born, params);
             if self.draw_once(DrawPoint::Mortality, p.0) < per_tick {
                 self.die(*p, Cause::Natural, params)?;
             }
@@ -671,8 +720,7 @@ impl World {
             if !self.alive(*a) {
                 continue;
             }
-            let legitimacy = self.actors[a].legitimacy;
-            let per_tick = params.violent_death_per_tick * (100.0 - legitimacy) / 50.0;
+            let per_tick = violent_death_hazard(self.actors[a].legitimacy, params);
             if self.draw_once(DrawPoint::Violence, a.0) < per_tick {
                 let ruler = self.actors[a].ruler;
                 self.die(ruler, Cause::Murder, params)?;
@@ -683,8 +731,7 @@ impl World {
             if !self.alive(*a) {
                 continue;
             }
-            let legitimacy = self.actors[a].legitimacy;
-            let per_tick = params.usurpation_per_tick * (100.0 - legitimacy) / 50.0;
+            let per_tick = usurpation_hazard(self.actors[a].legitimacy, params);
             if self.draw_once(DrawPoint::Usurpation, a.0) < per_tick {
                 // The lot makes the chance, the candidate's house decides in the next turn
                 // (owner's rule on #290, E3 (в)).
@@ -747,7 +794,7 @@ impl World {
             }
             let norm = self.legitimacy_norm(*a, params);
             let actor = self.actors.get_mut(a).unwrap();
-            actor.legitimacy += (norm - actor.legitimacy) * params.legitimacy_rate_per_tick;
+            actor.legitimacy = drift_toward(actor.legitimacy, norm, params);
         }
         Ok(())
     }

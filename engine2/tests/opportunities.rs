@@ -138,7 +138,10 @@ fn a_chance_taken_is_made_at_the_next_turns_start_and_a_declined_one_is_nothing(
     let (usurp, secede) = first(&mut g);
     let decline = |o: &Opportunity| Answer { who: o0(), opportunity: o.id, reply: engine2::Reply::Decline };
     let r = g.play(&Turn { answers: vec![decline(&usurp), decline(&secede)], ..Turn::default() }).unwrap();
-    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorBorn { .. } | Event::Succession { how: Standing::Usurper, .. })));
+    // Nothing of the declined two (the other houses' bots answer their own chances by their
+    // worth, E3 (е1)).
+    let Chance::Usurpation { candidate, .. } = usurp.what else { unreachable!() };
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorBorn { house, .. } if house == h) || matches!(e.event, Event::Succession { to, how: Standing::Usurper, .. } if to == candidate)));
     assert_eq!(r.events.iter().filter(|e| matches!(&e.event, Event::OpportunityDeclined { by, .. } if *by == o0())).count(), 2);
 }
 
@@ -190,32 +193,68 @@ fn a_ruler_answers_for_its_ruling_house_but_never_for_a_usurpation_of_its_own_th
     assert!(!w.answers_for(ActorRef::Ruler(ActorId(1)), &secession), "another polity's ruler");
 }
 
+/// E3 (е1), owner's answers on §24.7: the house values the throne and a polity of its own in
+/// its own wheat over the horizon — the seats they bring against the seats it gives up — with
+/// no weight and no price on a life.
 #[test]
-fn the_bots_usurp_a_weak_ruler_not_a_legitimate_one_and_secede_only_with_a_chance_against_the_parent() {
+fn the_throne_and_independence_are_worth_to_a_house_the_seats_they_bring_against_the_seats_it_gives_up() {
     let p = params();
     let s = scenario();
     let c = s.compile(&p).unwrap();
     let mut w = World::from_facts(&c.facts, c.names, &p, 7).unwrap();
     let (s0, o0a, h) = (ActorId(0), person(&s, "o0a"), house(&s, "o0"));
-    w.actors.get_mut(&s0).unwrap().legitimacy = 10.0;
-    assert!(w.usurpation_utility(s0, o0a, &p) > 0.0, "a weak ruler is worth deposing: {:.2}", w.usurpation_utility(s0, o0a, &p));
+    // The throne: its seat while held, at the usurper's legitimacy, the hold lost at the
+    // next chance — against the candidate's governorships, given up at the accession.
+    let seats: Vec<ProvinceId> = w.provinces.iter().filter(|(_, pr)| pr.governor == Some(o0a)).map(|(q, _)| *q).collect();
+    assert!(!seats.is_empty(), "the candidate governs");
+    let with_seats = w.throne_worth(s0, o0a, &p);
+    for q in &seats {
+        w.provinces.get_mut(q).unwrap().governor = None;
+    }
+    let without = w.throne_worth(s0, o0a, &p);
+    assert!(without > 0.0 && without > with_seats, "a candidate with no seat to give up takes the throne: {without:.2} against {with_seats:.2} with its seats");
+    for q in &seats {
+        w.provinces.get_mut(q).unwrap().governor = Some(o0a);
+    }
+    // Every province but the capital under the candidate: the seats outweigh the throne's
+    // share at the usurper's collection and hold, and the house declines.
+    let capital = w.actors[&s0].capital;
+    let saved: Vec<(ProvinceId, Option<PersonId>)> = w.actors[&s0].provinces.iter().map(|q| (*q, w.provinces[q].governor)).collect();
+    for (q, _) in &saved {
+        if *q != capital {
+            w.provinces.get_mut(q).unwrap().governor = Some(o0a);
+        }
+    }
+    let u = w.throne_worth(s0, o0a, &p);
+    assert!(u < 0.0, "a candidate governing the whole polity keeps its seats: {u:.2}");
+    for (q, g) in saved {
+        w.provinces.get_mut(&q).unwrap().governor = g;
+    }
+    // No price on a life and no weight: the ruler's legitimacy above the usurper's norm does
+    // not make the throne cheaper — the usurper starts at its own norm either way (and a
+    // legitimate ruler meets the chance more rarely, В6); it enters through the collection
+    // alone: a weak ruler's governorships pay less, and the throne is worth more against them.
     w.actors.get_mut(&s0).unwrap().legitimacy = 70.0;
-    assert!(w.usurpation_utility(s0, o0a, &p) < 0.0, "a legitimate one is not: {:.2}", w.usurpation_utility(s0, o0a, &p));
-    // The secession: the ruler's weakness, at `agent.weight_independence`, against the odds
-    // of being crushed. With the shipped weight (1.5, owner's rule on #293) the parent's
-    // army decides against any ruler above a third of legitimacy; below it a house leaves
-    // even a strong one.
+    let strong = w.throne_worth(s0, o0a, &p);
+    w.actors.get_mut(&s0).unwrap().legitimacy = 40.0;
+    let weak = w.throne_worth(s0, o0a, &p);
+    eprintln!("the throne for o0a: {with_seats:.2} with its seats, {without:.2} without; {strong:.2} under a ruler at 70, {weak:.2} at 40");
+    assert!(weak > strong, "a weak ruler's seats pay less: {weak:.2} against {strong:.2}");
+    // A polity of its own: the new throne's seat and the governorships the house keeps there,
+    // times the chance to hold out against the parent's army, against its seats now.
     w.actors.get_mut(&s0).unwrap().legitimacy = 60.0;
-    let u = w.secession_utility(h, s0, at(0, 1), &p);
-    assert!(u > 0.0, "a militia of two provinces against the parent's 600: {u:.2}");
+    let u = w.independence_worth(h, s0, at(0, 1), &p);
+    // The weakness of the ruler it leaves enters through the collection: a parent collecting
+    // less pays the house's seats less, and its own polity is worth more against them.
+    w.actors.get_mut(&s0).unwrap().legitimacy = 10.0;
+    let weak = w.independence_worth(h, s0, at(0, 1), &p);
+    eprintln!("independence against the shipped army: {u:.2} at legitimacy 60, {weak:.2} at 10");
+    assert!(weak > u, "a weaker parent is worth leaving sooner: {weak:.2} against {u:.2}");
+    w.actors.get_mut(&s0).unwrap().legitimacy = 60.0;
     let unit = w.units_of(s0)[0];
     w.post(Account::Soldiers(unit), Source::Recruit, 100_000 * 1000).unwrap();
-    let u = w.secession_utility(h, s0, at(0, 1), &p);
-    assert!(u < 0.0, "against an army a hundred times its own: {u:.2}");
-    w.actors.get_mut(&s0).unwrap().legitimacy = 40.0;
-    assert!(w.secession_utility(h, s0, at(0, 1), &p) < 0.0, "at 40 the army still decides");
-    w.actors.get_mut(&s0).unwrap().legitimacy = 20.0;
-    assert!(w.secession_utility(h, s0, at(0, 1), &p) > 0.0, "a ruler with a fifth of legitimacy is left even with a hopeless rising");
+    let crushed = w.independence_worth(h, s0, at(0, 1), &p);
+    assert!(crushed < 0.0 && crushed < u, "against an army a hundred times its own the house stays: {crushed:.2}");
 }
 
 // ---------- elections (owner's answer 5 on §23) ----------
@@ -436,5 +475,5 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
     assert!(marriage(&g.play(&answer(id, engine2::Reply::Take)).unwrap()), "taken: the two marry");
     // The bot of a house takes a match with its own polity's ruling house.
     let g = offer(None);
-    assert!(g.world().marriage_utility(o0, h0, g.params()) > 0.0);
+    assert!(g.world().marriage_worth(o0, h0, g.params()) > 0.0);
 }

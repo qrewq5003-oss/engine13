@@ -72,6 +72,13 @@ use crate::world::{Treaty, TreatyKind, World, WorldError};
 
 pub(crate) use crate::army::pair;
 
+/// A relation after a push of `delta`: the push takes its share of the distance left to the
+/// bound it moves toward (`push_relation`; the worth of an embassy or a gift reads it).
+pub fn pushed_relation(r: f64, delta: f64) -> f64 {
+    let moved = if delta >= 0.0 { delta * (100.0 - r) / 100.0 } else { delta * r / 100.0 };
+    (r + moved).clamp(0.0, 100.0)
+}
+
 /// The verbs this system prices and applies.
 pub fn is_diplomatic(verb: VerbId) -> bool {
     matches!(verb, VerbId::DeclareWar | VerbId::MakePeace | VerbId::ProposeAlliance | VerbId::ProposeMarriage | VerbId::SendEmbassy | VerbId::Bribe)
@@ -200,9 +207,14 @@ impl World {
         if a == b {
             return;
         }
-        let r = self.relation(a, b);
-        let moved = if delta >= 0.0 { delta * (100.0 - r) / 100.0 } else { delta * r / 100.0 };
-        self.relations.insert(pair(a, b), (r + moved).clamp(0.0, 100.0));
+        let r = pushed_relation(self.relation(a, b), delta);
+        self.relations.insert(pair(a, b), r);
+    }
+
+    /// How far a gift moves the giver in the receiver's relation: by its worth to the
+    /// receiver, the gift over the receiver's revenue (E0 Д2).
+    pub fn gift_push(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        params.bribe_gain_per_share * (self.gift_size(a, params) as f64 / self.yearly_income(b, params).max(1) as f64)
     }
 
     /// Bind a pair by a treaty running `treaty.term_years` from now; a new treaty of the
@@ -574,8 +586,8 @@ impl World {
                 }
                 self.post(Account::Treasury(a), Source::Gift, -gift * 1000).map_err(ledger)?;
                 self.post(Account::Treasury(b), Source::Gift, gift * 1000).map_err(ledger)?;
-                let worth = gift as f64 / self.yearly_income(b, params).max(1) as f64;
-                self.push_relation(a, b, params.bribe_gain_per_share * worth);
+                let push = self.gift_push(a, b, params);
+                self.push_relation(a, b, push);
                 self.emit(Event::Gift { from: a, to: b, kg: gift as u64 });
                 Ok(())
             }

@@ -63,6 +63,14 @@ pub(crate) fn pair(a: ActorId, b: ActorId) -> (ActorId, ActorId) {
     }
 }
 
+/// The chance that strength `a` beats strength `b` in a battle, `a^k / (a^k + b^k)` with
+/// k = `battle.strength_exponent` (E0 А13): the one formula the battles draw by and the
+/// bots' worth reads (E3 (е1): the bot calls the world's formulas, never copies them).
+pub fn win_chance(a: f64, b: f64, params: &Params) -> f64 {
+    let k = params.battle_strength_exponent;
+    a.powf(k) / (a.powf(k) + b.powf(k))
+}
+
 impl World {
     /// A polity is alive while it holds land and its ruler lives: a polity whose last house
     /// died out has fallen with its land (`politics.rs`), one conquered has none.
@@ -132,6 +140,12 @@ impl World {
 
     /// The levy ceiling (E0 А1): a share of the polity's people — those at home and those
     /// already under arms, so that raising a levy does not lower the ceiling it counts against.
+    /// The militia a province levies at the ceiling of А1: what a polity born of a rising
+    /// raises in it (`collapse.rs`), and what the worth of a secession counts on.
+    pub fn province_levy(&self, q: ProvinceId, params: &Params) -> i64 {
+        self.population(q) * params.recruit_ceiling_ppm / 1_000_000
+    }
+
     pub fn recruit_ceiling(&self, a: ActorId, params: &Params) -> i64 {
         let people: i64 = self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum::<i64>() + self.army_size(a);
         people * params.recruit_ceiling_ppm / 1_000_000
@@ -187,8 +201,7 @@ impl World {
             if s_att <= 0.0 && s_def <= 0.0 {
                 continue;
             }
-            let k = params.battle_strength_exponent;
-            let p_att = s_att.powf(k) / (s_att.powf(k) + s_def.powf(k));
+            let p_att = win_chance(s_att, s_def, params);
             let u = (self.draw(DrawPoint::Battle, p.0) >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
             let attacker_won = u < p_att;
             let (winner, loser) = if attacker_won { (attacker, defender) } else { (defender, attacker) };

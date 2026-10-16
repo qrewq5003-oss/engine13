@@ -65,7 +65,7 @@
 //! can keep at the limit of its budget, which must fall inside А11 (owner's rule).
 
 use crate::event::Event;
-use crate::ids::ActorId;
+use crate::ids::{ActorId, ProvinceId};
 use crate::ledger::{Account, Source};
 use crate::params::Params;
 use crate::verbs::{ActorRef, VerbCall, VerbId};
@@ -104,10 +104,31 @@ pub enum VerbError {
     Fallen(ActorId),
 }
 
+/// The share collected, parts per million, under a norm of lawful rule at a legitimacy as
+/// the collection reads it: everything at the norm and above, less by
+/// `tax.evasion_per_legitimacy_point` for every point below — the one formula of the
+/// collection, for a polity that stands and for one the worth of a secession imagines.
+pub fn collection_share(lawful: f64, legitimacy_for_collection: f64, params: &Params) -> i64 {
+    let gap = (lawful - legitimacy_for_collection).max(0.0);
+    (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
+}
+
 impl World {
     /// Production of a polity per tick (half a year), kg of wheat-equivalent.
     pub fn production_per_tick(&self, a: ActorId, params: &Params) -> i64 {
         self.taxable_people(a) * params.output_per_head_kg / 2
+    }
+
+    /// One province's production a tick, kg (E0 Э2): its people at the output per head.
+    pub fn province_production_per_tick(&self, p: ProvinceId, params: &Params) -> i64 {
+        self.population(p) * params.output_per_head_kg / 2
+    }
+
+    /// A governorship's seat, kg a tick: its share of the province's tax at the rate and
+    /// the share collected (E0 Х1) — the formula the economy pays by and the worth reads.
+    pub fn governor_seat_income(&self, p: ProvinceId, rate: i64, share: i64, params: &Params) -> i64 {
+        let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000 * share / 1_000_000;
+        province_tax * params.seat_income_share_ppm / 1_000_000
     }
 
     /// The people a polity taxes: those of its provinces not in revolt (E2 step 9: a
@@ -190,8 +211,43 @@ impl World {
     /// before the saturation, at every equilibrium.
     pub fn collection_share_ppm(&self, a: ActorId, params: &Params) -> i64 {
         let legitimacy = self.actors[&a].legitimacy - (self.legitimacy_norm(a, params) - self.unclamped_legitimacy_norm(a, params));
-        let gap = (self.lawful_norm(a, params) - legitimacy).max(0.0);
-        (1_000_000 - (gap * params.tax_evasion_ppm_per_legitimacy_point as f64).round() as i64).max(0)
+        self.collection_share_for(a, legitimacy, params)
+    }
+
+    /// The share collected at a legitimacy as the collection reads it (the rating less the
+    /// distance between the saturated norm and the pressure): the one formula the economy
+    /// and the bots' worth call (E3 (е1)).
+    pub fn collection_share_for(&self, a: ActorId, legitimacy_for_collection: f64, params: &Params) -> i64 {
+        collection_share(self.lawful_norm(a, params), legitimacy_for_collection, params)
+    }
+
+    /// The seats of a polity's houses, kg a tick (E0 Х1): the throne's share of the take, a
+    /// governorship's share of its province's tax (provinces in revolt pay none) — given the
+    /// take, the rate and the share collected; the one formula the economy pays by and the
+    /// bots' worth reads (E3 (е1)).
+    pub fn seat_incomes(&self, a: ActorId, income: i64, rate: i64, share: i64, params: &Params) -> Vec<(crate::ids::HouseId, i64)> {
+        let ruling_house = self.persons[&self.actors[&a].ruler].house;
+        let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
+        for p in &self.actors[&a].provinces {
+            if self.in_revolt(*p) {
+                continue;
+            }
+            if let Some(g) = self.provinces[p].governor {
+                seats.push((self.persons[&g].house, self.governor_seat_income(*p, rate, share, params)));
+            }
+        }
+        seats
+    }
+
+    /// A house's income from its seats, kg a year, at its polity's take as it stands.
+    pub fn house_income_per_year(&self, h: crate::ids::HouseId, params: &Params) -> i64 {
+        let a = self.houses[&h].polity;
+        if !self.alive(a) {
+            return 0;
+        }
+        let (rate, share) = (self.actors[&a].tax_rate_ppm, self.collection_share_ppm(a, params));
+        let income = self.production_per_tick(a, params) * rate / 1_000_000 * share / 1_000_000;
+        2 * self.seat_incomes(a, income, rate, share, params).into_iter().filter(|(x, _)| *x == h).map(|(_, kg)| kg).sum::<i64>()
     }
 
     /// Borrow `amount` from the bank: the same figure on both accounts.
@@ -243,17 +299,7 @@ impl World {
             }
             // The houses' seats: the throne's share of the tax, a governorship's share of
             // its province's tax.
-            let ruling_house = self.persons[&self.actors[&a].ruler].house;
-            let mut seats: Vec<(crate::ids::HouseId, i64)> = vec![(ruling_house, income * params.seat_income_share_ppm / 1_000_000)];
-            for p in self.actors[&a].provinces.clone() {
-                if self.in_revolt(p) {
-                    continue;
-                }
-                if let Some(g) = self.provinces[&p].governor {
-                    let province_tax = self.population(p) * params.output_per_head_kg / 2 * rate / 1_000_000 * share / 1_000_000;
-                    seats.push((self.persons[&g].house, province_tax * params.seat_income_share_ppm / 1_000_000));
-                }
-            }
+            let seats = self.seat_incomes(a, income, rate, share, params);
             for (house, kg) in seats {
                 let kg = kg.min(self.treasury(a));
                 if kg > 0 {
