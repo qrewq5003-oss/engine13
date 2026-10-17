@@ -202,6 +202,12 @@ pub struct Actor {
     /// §27.1, owner's answer 1 on §27.5): they leave the ceiling of А1 and come back at the
     /// renewal of the cohort of service (`army.rs`, `population.rs`).
     pub manpower_deficit: f64,
+    /// The men of its units killed in the battles anyone saw (the `Battle` and
+    /// `UnitDestroyed` events), levies and mercenaries alike, decaying as the deficit does
+    /// (plan §28.7, owner's answer 3): the count a player keeps of another's losses — the
+    /// bots' estimate of its room to levy (`levy_room_seen`). The polity's own
+    /// `manpower_deficit` stays its own.
+    pub losses_seen: f64,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -711,6 +717,7 @@ impl World {
                     core_culture: CultureId(0),
                     goals: Vec::new(),
                     manpower_deficit: 0.0,
+                    losses_seen: 0.0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;

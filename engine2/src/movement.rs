@@ -135,6 +135,11 @@ impl World {
     /// Breadth-first search over `owner`'s passable provinces from `from`; returns the first
     /// province satisfying `goal` and the steps to it.
     fn nearest(&self, owner: ActorId, from: ProvinceId, goal: impl Fn(ProvinceId) -> bool) -> Option<(ProvinceId, Vec<(ProvinceId, Way)>)> {
+        self.nearest_through(from, goal, |n| self.passable(owner, n))
+    }
+
+    /// The breadth-first search of `nearest`, through the provinces `pass` lets in.
+    fn nearest_through(&self, from: ProvinceId, goal: impl Fn(ProvinceId) -> bool, pass: impl Fn(ProvinceId) -> bool) -> Option<(ProvinceId, Vec<(ProvinceId, Way)>)> {
         let mut prev: BTreeMap<ProvinceId, (ProvinceId, Way)> = BTreeMap::new();
         let mut seen: BTreeSet<ProvinceId> = BTreeSet::new();
         let mut queue = VecDeque::new();
@@ -144,7 +149,7 @@ impl World {
             let pr = &self.provinces[&c];
             let steps = pr.neighbours.iter().map(|n| (*n, Way::Land)).chain(pr.sea_neighbours.iter().map(|n| (*n, Way::Sea)));
             for (n, way) in steps {
-                if seen.contains(&n) || !self.passable(owner, n) {
+                if seen.contains(&n) || !pass(n) {
                     continue;
                 }
                 seen.insert(n);
@@ -164,6 +169,45 @@ impl World {
             }
         }
         None
+    }
+
+    /// The path `owner`'s men would march from `from` to `to` in a war with `enemy`, whether
+    /// or not the war is on: through what is passable to them and the enemy's land (E3 (е2):
+    /// the worth of a war measures its march the same before the declaration and after).
+    pub fn path_at_war(&self, owner: ActorId, enemy: ActorId, from: ProvinceId, to: ProvinceId) -> Option<Vec<(ProvinceId, Way)>> {
+        if from == to {
+            return Some(Vec::new());
+        }
+        self.nearest_through(from, |p| p == to, |n| self.passable(owner, n) || self.provinces[&n].owner == enemy).map(|(_, path)| path)
+    }
+
+    /// The nearest province of `enemy` to `from` for `mover`'s men, as the march goes in a
+    /// war with it (`path_at_war`): the province and the steps to it (E3 (е2), plan §28.7:
+    /// where an enemy's units would go is read off where they stand, by the movement rule,
+    /// not off its goals).
+    pub fn nearest_land_of(&self, mover: ActorId, enemy: ActorId, from: ProvinceId) -> Option<(ProvinceId, usize)> {
+        if self.provinces[&from].owner == enemy {
+            return Some((from, 0));
+        }
+        self.nearest_through(from, |p| self.provinces[&p].owner == enemy, |n| self.passable(mover, n) || self.provinces[&n].owner == enemy).map(|(p, path)| (p, path.len()))
+    }
+
+    /// Whether a unit of `owner` standing at `from` would reach `to` this tick, were it
+    /// ordered there, by the movement rule (`phase_movement`): engaged where it stands it
+    /// does not move; else it takes up to `march_steps_per_tick` steps of its path and stops
+    /// at the first contact (E3 (е2), plan §28.2: a province of one's own an enemy unit can
+    /// reach in a tick is threatened — read off the unit's position, not its order).
+    pub fn reaches_in_a_tick(&self, owner: ActorId, from: ProvinceId, to: ProvinceId, params: &Params) -> bool {
+        if from == to {
+            return true;
+        }
+        if self.contact(owner, from) {
+            return false;
+        }
+        match self.path(owner, from, to) {
+            Some(steps) if steps.len() <= self.march_steps_per_tick(params) => steps[..steps.len() - 1].iter().all(|(p, _)| !self.contact(owner, *p)),
+            _ => false,
+        }
     }
 
     /// The nearest province of `owner`'s own from `from`, through passable land, if any.

@@ -71,6 +71,9 @@ pub fn win_chance(a: f64, b: f64, params: &Params) -> f64 {
     a.powf(k) / (a.powf(k) + b.powf(k))
 }
 
+/// The quality of a unit when it is raised or hired (its dynamics are E3 (д)'s).
+pub const NEW_UNIT_QUALITY: f64 = 50.0;
+
 /// The share of its soldiers a side loses in a battle, parts per million (E0 А6): the
 /// winner's or the loser's.
 pub fn battle_losses_ppm(won: bool, params: &Params) -> i64 {
@@ -217,14 +220,27 @@ impl World {
         (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
     }
 
-    /// The men of a levy killed: they leave its polity's ceiling until the cohort grows up.
-    fn levy_dead(&mut self, unit: UnitId, men: i64) {
-        if men > 0 && !self.units[&unit].mercenary {
-            let owner = self.units[&unit].owner;
+    /// The men of a unit killed: all of them into their polity's count of the dead that
+    /// anyone sees (`Actor::losses_seen` — every call here comes with a `Battle` or
+    /// `UnitDestroyed` event), a levy's into its polity's ceiling until the cohort grows up.
+    fn men_dead(&mut self, unit: UnitId, men: i64) {
+        if men > 0 {
+            let (owner, mercenary) = (self.units[&unit].owner, self.units[&unit].mercenary);
             if let Some(actor) = self.actors.get_mut(&owner) {
-                actor.manpower_deficit += men as f64;
+                actor.losses_seen += men as f64;
+                if !mercenary {
+                    actor.manpower_deficit += men as f64;
+                }
             }
         }
+    }
+
+    /// The room to levy as anyone sees it (plan §28.7, owner's answer 3): the ceiling of А1
+    /// by the polity's people, less its dead by the battles seen (`losses_seen` — levies and
+    /// mercenaries alike, a player cannot tell them apart), less the army it has. The
+    /// polity's own count (`recruit_room`) is its own.
+    pub fn levy_room_seen(&self, a: ActorId, params: &Params) -> i64 {
+        ((self.recruit_ceiling(a, params) as f64 - self.actors[&a].losses_seen).max(0.0) as i64 - self.army_size(a)).max(0)
     }
 
     fn strength(&self, units: &[UnitId]) -> f64 {
@@ -234,6 +250,17 @@ impl World {
     /// A unit's strength in battle: soldiers × (0.5 + quality/100).
     pub fn unit_strength(&self, u: UnitId) -> f64 {
         self.soldiers(u) as f64 * (0.5 + self.units[&u].quality / 100.0)
+    }
+
+    /// The strength `n` new soldiers bring, by the battle's measure (a new unit's quality).
+    pub fn new_soldiers_strength(n: i64) -> f64 {
+        n as f64 * (0.5 + NEW_UNIT_QUALITY / 100.0)
+    }
+
+    /// The advance a hire of mercenaries costs now, kg (E0 А4): as many as the treasury
+    /// covers within the ceiling, at `mercenary.advance` each.
+    pub fn hire_advance(&self, a: ActorId, params: &Params) -> i64 {
+        self.hire_count(a, params) * params.mercenary_advance_kg
     }
 
     /// The strength of a polity's whole army, by the battle's measure.
@@ -294,7 +321,7 @@ impl World {
                         self.post(Account::Soldiers(*u), Source::BattleLoss, -milli)?;
                     }
                     let dead = soldiers - self.soldiers(*u);
-                    self.levy_dead(*u, dead);
+                    self.men_dead(*u, dead);
                     sum += dead;
                 }
                 lost.insert(side, sum as u64);
@@ -330,7 +357,7 @@ impl World {
                 if soldiers > 0 {
                     self.post(Account::Soldiers(unit), Source::BattleLoss, -soldiers * 1000)?;
                 }
-                self.levy_dead(unit, soldiers);
+                self.men_dead(unit, soldiers);
                 self.units.remove(&unit);
                 self.emit(Event::UnitDestroyed { unit });
             }
@@ -436,7 +463,7 @@ impl World {
     pub(crate) fn new_unit(&mut self, owner: ActorId, at: ProvinceId, mercenary: bool) -> Result<UnitId, WorldError> {
         let id = UnitId(self.next_unit);
         self.next_unit += 1;
-        self.units.insert(id, Unit { owner, position: at, quality: 50.0, destination: None, mercenary, house: None });
+        self.units.insert(id, Unit { owner, position: at, quality: NEW_UNIT_QUALITY, destination: None, mercenary, house: None });
         self.ledger.open(self.tick, Account::Soldiers(id), 0)?;
         Ok(id)
     }
@@ -480,7 +507,7 @@ impl World {
                 if n <= 0 {
                     return Err(VerbError::NotAvailable(call.verb, if self.recruit_room(a, params) <= 0 { "at the levy ceiling" } else { "cannot pay an advance" }));
                 }
-                let advance = n * params.mercenary_advance_kg;
+                let advance = self.hire_advance(a, params);
                 let capital = self.actors[&a].capital;
                 let unit = self.new_unit(a, capital, true).map_err(ledger)?;
                 self.post(Account::Treasury(a), Source::Hire, -advance * 1000).map_err(ledger)?;
