@@ -549,7 +549,7 @@ impl World {
             (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
             (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
             (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
-            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_worth(g, *from, params) > 0.0,
+            (ActorRef::House(g), Chance::Marriage { from, dowry_kg, .. }) => self.marriage_worth(g, *from, *dowry_kg, params) > 0.0,
             _ => false,
         }
     }

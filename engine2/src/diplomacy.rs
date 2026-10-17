@@ -516,7 +516,7 @@ impl World {
             let h = self.house_of_caller(call.actor)?;
             let Target::House(g) = call.target else { return Err(VerbError::BadTarget(call.verb, "a house to marry into")) };
             let (p, q) = self.marriage_room(h, g, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
-            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q });
+            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q, dowry_kg: self.dowry(h, params) });
             return Ok(());
         }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };

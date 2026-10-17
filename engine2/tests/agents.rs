@@ -1473,3 +1473,69 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
         }
     }
 }
+
+/// The bot sees what a player would see (owner's rule 2026-10-17, plan §28.4, §28.7):
+/// positions, owners, wars, treaties, the view and the events — not another's goals, its
+/// house's treasury, its count of the dead or its orders. Checked by injection: the hidden
+/// state of another changes, and the worth and the choices of polity 0 and of the house
+/// offered a match do not. On the code before the fix the goal of polity 2 moved what an
+/// alliance with it was worth to polity 0, and the proposer's treasury moved the house's
+/// worth of the match (checked when the guard was written). The registry of the hidden:
+/// `Actor.goals`, `Actor.manpower_deficit`, `Actor.paid_share_history_ppm` (the bot's own
+/// memory), `House.treasury` (not one's own), `Unit.destination` (not one's own).
+#[test]
+fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
+    let p = params();
+    let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    let mut w = world_of(&carrier_scenario(), 7);
+    let before = seen(&w);
+    // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
+    w.set_goal(c, GoalKind::AllianceAgainst, GoalTarget::Polity(b)).unwrap();
+    w.set_goal(b, GoalKind::Take, GoalTarget::Province(w.actors[&a].capital)).unwrap();
+    assert_eq!(seen(&w), before, "another's goals are its own");
+    // Another's count of the dead.
+    w.actors.get_mut(&b).unwrap().manpower_deficit = 1.0e6;
+    w.actors.get_mut(&c).unwrap().manpower_deficit = 1.0e6;
+    assert_eq!(seen(&w), before, "another's count of the dead is its own");
+    // Another's orders: every unit of polity 1 ordered onto polity 0's capital.
+    let capital = w.actors[&a].capital;
+    let theirs: Vec<engine2::UnitId> = w.units.iter().filter(|(_, u)| u.owner == b).map(|(u, _)| *u).collect();
+    assert!(!theirs.is_empty(), "polity 1 has units to order");
+    for u in theirs {
+        w.units.get_mut(&u).unwrap().destination = Some(capital);
+    }
+    assert_eq!(seen(&w), before, "another's orders are its own");
+    // Another house's treasury: the match offered, the proposer's treasury then grows a
+    // thousandfold — the house answers the dowry the offer named.
+    let s = all_verbs(testworld::five_states_scenario());
+    let o0 = engine2::HouseId(s.houses.keys().position(|k| k == "o0").unwrap() as u32);
+    let mut g = Game::new(&s, params(), 12).unwrap();
+    g.set_bots(false);
+    let h0 = g.world().ruling_house(a);
+    g.tick(&[VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::ProposeMarriage, target: Target::House(o0) }]).unwrap();
+    let offer = g.world().opportunities.iter().find(|o| matches!(o.what, engine2::Chance::Marriage { .. })).cloned().expect("the match offered");
+    let engine2::Chance::Marriage { dowry_kg, .. } = offer.what else { unreachable!() };
+    let answered = |w: &World| (w.bot_reply(&offer, &p), w.marriage_worth(o0, h0, dowry_kg, &p));
+    let before = answered(g.world());
+    let more = 1000 * g.world().house_treasury(h0).max(1000) * 1000;
+    g.world_mut().post(engine2::Account::HouseTreasury(h0), Source::Test, more).unwrap();
+    assert_eq!(answered(g.world()), before, "another house's treasury is its own: the offer named the dowry");
+}
+
+/// The bot's sources name no hidden state of another that has no use of one's own in them
+/// (plan §28.7): the count of the dead and a house's treasury are reached through the
+/// world's functions on the deciding actor only, never by these names. The difference between
+/// one's own and another's (`goals`, `dowry`, `recruit_room`, `destination`) is the
+/// injection's to hold (`the_bot_reads_nothing_of_another_that_a_player_would_not_see`).
+#[test]
+fn the_bots_code_names_no_hidden_state_of_another() {
+    const SOURCES: [(&str, &str); 2] = [("agents.rs", include_str!("../src/agents.rs")), ("worth.rs", include_str!("../src/worth.rs"))];
+    for (file, src) in SOURCES {
+        let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+        for hidden in ["manpower_deficit", "house_treasury("] {
+            let read: Vec<&&str> = code.iter().filter(|l| l.contains(hidden)).collect();
+            assert!(read.is_empty(), "{file} reads hidden state by name `{hidden}`: {read:?}");
+        }
+    }
+}

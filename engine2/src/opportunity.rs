@@ -34,9 +34,11 @@
 //!
 //! **A marriage offered to a house** (owner's correction on §23): `propose_marriage` no
 //! longer marries by the rule of the state — it offers the match to the other house, which
-//! answers at the next turn; taken, the two marry and the proposer's dowry is paid then, out
-//! of what its treasury holds at the wedding. Two offers for one bride: the first taken in
-//! the order they were made marries, the other is void.
+//! answers at the next turn; the offer **names the dowry** (owner's rule 2026-10-17, plan
+//! §28.7: the offer is the terms, and the answer — the player's or the bot's — is given to
+//! them, not to the proposer's treasury), and taken, the two marry and the dowry named is
+//! paid then, no more than the proposer's treasury holds at the wedding. Two offers for one
+//! bride: the first taken in the order they were made marries, the other is void.
 //!
 //! **Lifetime.** Opened in a tick's phases or by a verb of its turn (`opened` = that tick),
 //! answered at the start of the next tick, before the verbs: the answer meets the world as
@@ -84,8 +86,9 @@ pub enum Chance {
     Union { polity: ActorId, faith: crate::ids::ReligionId },
     /// The court of `polity` may adopt the policy of conversion, met at `from`.
     Policy { polity: ActorId, from: ActorId },
-    /// House `from` offers `a`, its member, to `b` of the house answering.
-    Marriage { from: crate::ids::HouseId, a: PersonId, b: PersonId },
+    /// House `from` offers `a`, its member, to `b` of the house answering, with the dowry
+    /// it names (`dowry_kg`: what the house would give when it offered, `World::dowry`).
+    Marriage { from: crate::ids::HouseId, a: PersonId, b: PersonId, dowry_kg: i64 },
 }
 
 impl Chance {
@@ -329,7 +332,7 @@ impl World {
                 self.emit(Event::Adopted { actor: polity, institution, from });
                 Ok(Ok(()))
             }
-            Chance::Marriage { from, a, b } => {
+            Chance::Marriage { from, a, b, dowry_kg } => {
                 let ActorRef::House(g) = o.to else { return Ok(Err("a match is a house's")) };
                 let free = |w: &World, p: PersonId, h: crate::ids::HouseId| w.person_alive(p) && w.is_adult(p, params) && w.persons[&p].house == h && !w.persons[&p].spouse.is_some_and(|s| w.person_alive(s));
                 if !free(self, a, from) || !free(self, b, g) {
@@ -341,7 +344,8 @@ impl World {
                 if pa != pb && self.at_war(pa, pb) {
                     return Ok(Err("the polities are at war"));
                 }
-                let dowry = self.dowry(from, params);
+                // The offer named the dowry; the wedding pays it, no more than the house holds.
+                let dowry = dowry_kg.min(self.house_treasury(from)).max(0);
                 if dowry > 0 {
                     self.post(crate::ledger::Account::HouseTreasury(from), crate::ledger::Source::Dowry, -dowry * 1000)?;
                     self.post(crate::ledger::Account::HouseTreasury(g), crate::ledger::Source::Dowry, dowry * 1000)?;

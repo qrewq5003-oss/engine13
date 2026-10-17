@@ -644,19 +644,30 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.world_mut().relations.insert((s0, s1), p.treaty_accept_at_relation);
+    // The house has something to offer (the test world's houses start with nothing).
+    g.world_mut().post(engine2::Account::HouseTreasury(h0), engine2::Source::Test, 10_000 * 1000).unwrap();
     // E3 (в): the call offers the match to the other house; it answers at the next turn
     // (here a world with its bots off: by the rule of E2, it takes it).
     let r = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap();
     assert!(r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.to == ActorRef::House(h1))), "the match offered to the house");
     assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "not married before its answer");
-    // The dowry is paid at the wedding, out of what the house holds then (its seat's income
-    // of the tick the offer was made in).
+    // The offer names the dowry (owner's rule 2026-10-17, plan §28.7: the offer is the
+    // terms); the wedding pays what was named, not the share of what the house holds then —
+    // which is more, by its seat's income of the tick the offer was made in.
+    let named = match g.opportunities(ActorRef::House(h1)).as_slice() {
+        [o] => match o.what {
+            engine2::Chance::Marriage { dowry_kg, .. } => dowry_kg,
+            _ => panic!("a match offered"),
+        },
+        other => panic!("one offer to the house, got {other:?}"),
+    };
     let at_wedding = g.world().dowry(h0, &p);
+    assert!(named > 0 && at_wedding > named, "the house holds more at the wedding than the offer named: {at_wedding} > {named}");
     let r = g.tick(&[]).unwrap();
     let (a, b) = r.events.iter().find_map(|e| match e.event {
-        Event::Marriage { a, b, dowry_kg } if dowry_kg == at_wedding as u64 => Some((a, b)),
+        Event::Marriage { a, b, dowry_kg } if dowry_kg == named as u64 => Some((a, b)),
         _ => None,
-    }).expect("a marriage with the dowry the house holds at the wedding");
+    }).expect("a marriage with the dowry the offer named");
     let w = g.world();
     assert_eq!((w.persons[&a].house, w.persons[&b].house), (h0, h1));
     assert_eq!(w.persons[&a].spouse, Some(b));
@@ -678,10 +689,16 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::House(o0), HouseId(3))]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
+    // The offer named `dowry`; the house then loses most of what it holds — the wedding pays
+    // what the house holds, no more than it named.
+    let paid = dowry / 2;
+    let held = g.world().house_treasury(o0);
+    g.world_mut().post(engine2::Account::HouseTreasury(o0), engine2::Source::Test, -(held - paid) * 1000).unwrap();
+    assert!(paid > 0 && g.world().house_treasury(o0) == paid);
     let r = g.tick(&[]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)), "the dowry paid at the wedding");
-    assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -dowry);
-    assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), dowry);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == paid as u64)), "the dowry paid at the wedding: what the house holds, less than it named");
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -paid);
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), paid);
     let _ = h2;
     let offer = g.verbs(ActorRef::House(o0)).into_iter().find(|o| o.verb == VerbId::ProposeMarriage).unwrap();
     assert!(!offer.available && offer.why.as_deref() == Some("no unmarried adult to marry"), "{:?}", offer.why);
