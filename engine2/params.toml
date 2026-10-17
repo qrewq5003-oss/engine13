@@ -337,6 +337,23 @@ band = [0.03, 0.16]
 unit = "share of production"
 e0 = "Э8"
 
+# (в) The pay of a soldier on campaign over his pay at home (plan §27.2, owner's answer 3 on
+# §27.5 and correction on #297): a unit outside its own land, or ordered toward land not its
+# own, is paid `army.campaign_pay_factor` times the pay; garrisons at home — the plain pay,
+# at war or not, so a border war does not double the cost of every garrison and the price
+# falls on the campaign — on whoever starts it. The Italian condotta «in aspetto» — the
+# company kept in readiness in peacetime on reduced pay (Balestracci D., Le armi i cavalli
+# l'oro — открыл (вторичное)); half pay — по памяти (Mallett 1974); Venetian men-at-arms on
+# leave half of the year in peacetime (Mallett & Hale 1984, conclusion — открыл (вторичное),
+# the abstract). Not to be moved until a source opens; Э9 is printed beside it, never fitted:
+# Э9 does not tell war from peace.
+[army.campaign_pay_factor]
+kind = "c"
+value = 2.0
+unit = "pay on campaign per pay at home"
+checked_by = "Э9"
+origin = "выбран: по памяти — кондотта «в аспетто» на полуплате в мирное время (Mallett 1974); не двигать до источника"
+
 # E0 Э9 — observed: the army's share of spending.
 [budget.observed_military_share]
 kind = "b"
@@ -437,6 +454,28 @@ value = 0.069
 band = [0.069, 0.103]
 unit = "children per living person aged 16–45 per year, staying in the house"
 e0 = "В4"
+
+# E0 А1 — the ages of service, the cohort the levy draws from (plan §27.1, owner's answer 4
+# on §27.5: the age of the levy, not the majority of a ruler): the Roman iuniores served
+# «before reaching the age of forty-six» (Polybius 6.19 — открыл (вторичное), through a
+# translation quoted in search; the text itself did not open), and were not taken younger
+# than seventeen (Plutarch, Gaius Gracchus 5 — по памяти). With the Frier table (В2) they give
+# the men of the levy, 0.228 of the people, and the years a man of the cohort stays in it,
+# τ = 13.8 — derived in `params.rs`, no parameter: the dead of a levy leave the ceiling of
+# А1 until the cohort grows up (`army.rs`).
+[manpower.service_from]
+kind = "a"
+value = 17.0
+band = [16.0, 17.0]
+unit = "years of age"
+e0 = "А1"
+
+[manpower.service_until]
+kind = "a"
+value = 46.0
+band = [45.0, 46.0]
+unit = "years of age"
+e0 = "А1"
 
 # E0 В1 — majority: venia aetatis at 20 (men) and 18 (women) under Valentinian's law of
 # 371 (CTh 2.17.1 — по памяти); emperors were proclaimed as children, Gian Galeazzo got no

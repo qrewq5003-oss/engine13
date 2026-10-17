@@ -259,6 +259,8 @@ impl World {
                 core_culture: CultureId(0),
                 // The goals come by the rules at the end of the tick (`agents.rs`).
                 goals: Vec::new(),
+                // A polity born of a rising starts with its cohort whole (plan §27.1).
+                manpower_deficit: 0.0,
             },
         );
         self.ledger.open(self.tick, Account::Treasury(new), 0)?;

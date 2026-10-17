@@ -71,6 +71,16 @@ pub fn win_chance(a: f64, b: f64, params: &Params) -> f64 {
     a.powf(k) / (a.powf(k) + b.powf(k))
 }
 
+/// The share of its soldiers a side loses in a battle, parts per million (E0 А6): the
+/// winner's or the loser's.
+pub fn battle_losses_ppm(won: bool, params: &Params) -> i64 {
+    if won {
+        params.battle_losses_winner_ppm
+    } else {
+        params.battle_losses_loser_ppm
+    }
+}
+
 impl World {
     /// A polity is alive while it holds land and its ruler lives: a polity whose last house
     /// died out has fallen with its land (`politics.rs`), one conquered has none.
@@ -153,24 +163,66 @@ impl World {
 
     /// Room under the ceiling.
     pub fn recruit_room(&self, a: ActorId, params: &Params) -> i64 {
-        (self.recruit_ceiling(a, params) - self.army_size(a)).max(0)
+        (self.levy_ceiling(a, params) - self.army_size(a)).max(0)
     }
 
-    /// Men a levy can raise this tick: the rate of a tick (А2) within the room.
+    /// The ceiling a levy can draw to (plan §27.1, owner's answer 1 on §27.5): the ceiling of
+    /// А1 less the men of its levies killed and not yet replaced by the cohort growing up
+    /// (`Actor::manpower_deficit`), never below nothing. After a lost army there is nobody to
+    /// levy: the cohort was spent, and comes back over the years a man stays in it
+    /// (`Params::manpower_renewal_years`, from the mortality table).
+    pub fn levy_ceiling(&self, a: ActorId, params: &Params) -> i64 {
+        (self.recruit_ceiling(a, params) as f64 - self.actors[&a].manpower_deficit).max(0.0) as i64
+    }
+
+    /// Men a levy can raise this tick: the rate of a tick (А2) of what can be levied, within
+    /// the room.
     pub fn recruit_per_tick(&self, a: ActorId, params: &Params) -> i64 {
-        (self.recruit_ceiling(a, params) * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.recruit_room(a, params))
+        (self.levy_ceiling(a, params) * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.recruit_room(a, params))
     }
 
-    /// Mercenaries the treasury's advance covers within the room.
+    /// Mercenaries the treasury's advance covers within the ceiling of А1 — the men come from
+    /// outside the world, so the polity's spent cohort does not hold them back.
     pub fn hire_count(&self, a: ActorId, params: &Params) -> i64 {
         if params.mercenary_advance_kg <= 0 {
             return 0;
         }
-        (self.treasury(a) / params.mercenary_advance_kg).min(self.recruit_room(a, params)).max(0)
+        (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
+    }
+
+    /// The men of a levy killed: they leave its polity's ceiling until the cohort grows up.
+    fn levy_dead(&mut self, unit: UnitId, men: i64) {
+        if men > 0 && !self.units[&unit].mercenary {
+            let owner = self.units[&unit].owner;
+            if let Some(actor) = self.actors.get_mut(&owner) {
+                actor.manpower_deficit += men as f64;
+            }
+        }
     }
 
     fn strength(&self, units: &[UnitId]) -> f64 {
-        units.iter().map(|u| self.soldiers(*u) as f64 * (0.5 + self.units[u].quality / 100.0)).sum()
+        units.iter().map(|u| self.unit_strength(*u)).sum()
+    }
+
+    /// A unit's strength in battle: soldiers × (0.5 + quality/100).
+    pub fn unit_strength(&self, u: UnitId) -> f64 {
+        self.soldiers(u) as f64 * (0.5 + self.units[&u].quality / 100.0)
+    }
+
+    /// The strength of a polity's whole army, by the battle's measure.
+    pub fn army_strength(&self, a: ActorId) -> f64 {
+        self.strength(&self.units_of(a))
+    }
+
+    /// The ticks an unopposed enemy needs to take a province: a capital holds
+    /// `siege.capital_ticks`, any other falls within the tick (E0 А9).
+    pub fn siege_ticks(&self, p: ProvinceId, params: &Params) -> u32 {
+        let owner = self.provinces[&p].owner;
+        if self.actors[&owner].capital == p {
+            params.siege_capital_ticks
+        } else {
+            1
+        }
     }
 
     /// Units standing in `p`, grouped by owner in canonical order.
@@ -206,7 +258,7 @@ impl World {
             let attacker_won = u < p_att;
             let (winner, loser) = if attacker_won { (attacker, defender) } else { (defender, attacker) };
             let mut lost = BTreeMap::new();
-            for (side, share) in [(winner, params.battle_losses_winner_ppm), (loser, params.battle_losses_loser_ppm)] {
+            for (side, share) in [(winner, battle_losses_ppm(true, params)), (loser, battle_losses_ppm(false, params))] {
                 let mut sum = 0i64;
                 for u in &present[&side] {
                     let soldiers = self.soldiers(*u);
@@ -214,7 +266,9 @@ impl World {
                     if milli > 0 {
                         self.post(Account::Soldiers(*u), Source::BattleLoss, -milli)?;
                     }
-                    sum += soldiers - self.soldiers(*u);
+                    let dead = soldiers - self.soldiers(*u);
+                    self.levy_dead(*u, dead);
+                    sum += dead;
                 }
                 lost.insert(side, sum as u64);
             }
@@ -249,6 +303,7 @@ impl World {
                 if soldiers > 0 {
                     self.post(Account::Soldiers(unit), Source::BattleLoss, -soldiers * 1000)?;
                 }
+                self.levy_dead(unit, soldiers);
                 self.units.remove(&unit);
                 self.emit(Event::UnitDestroyed { unit });
             }
@@ -269,12 +324,13 @@ impl World {
                 self.provinces.get_mut(&p).unwrap().siege = None;
                 continue;
             };
-            if self.actors[&owner].capital == p {
+            let need = self.siege_ticks(p, params);
+            if need > 1 {
                 let ticks = match self.provinces[&p].siege {
                     Some(s) if s.by == by => s.ticks + 1,
                     _ => 1,
                 };
-                if ticks < params.siege_capital_ticks {
+                if ticks < need {
                     self.provinces.get_mut(&p).unwrap().siege = Some(crate::world::Siege { by, ticks });
                     continue;
                 }

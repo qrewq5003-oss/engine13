@@ -107,6 +107,9 @@ pub struct Params {
     pub court_share_ppm: i64,
     /// E0 А3: pay per soldier per year, kg (outputs × output per head).
     pub pay_per_soldier_kg_per_year: i64,
+    /// (в) The pay of a soldier on campaign over his pay at home, parts per million (plan
+    /// §27.2): a unit outside its own land or ordered toward land not its own.
+    pub campaign_pay_ppm: i64,
     /// E0 Э6: interest per tick on the debt, parts per million.
     pub loan_interest_ppm_per_tick: i64,
     /// E0 Э7: debt ceiling in thousandths of a year of revenue.
@@ -142,6 +145,12 @@ pub struct Params {
     pub births_per_adult_per_tick: f64,
     /// E0 В1: the age of majority, years.
     pub majority_age: i32,
+    /// E0 А1: the ages of service — the cohort the levy draws from (plan §27.1).
+    pub service_ages: (i32, i32),
+    /// Derived (no parameter): the years a man of the cohort of service stays in it on
+    /// average, by the mortality table (E0 В2) — the time constant at which the dead of a
+    /// levy come back into the ceiling of А1 as the cohort grows up (plan §27.1).
+    pub manpower_renewal_years: f64,
     /// E0 В3: the base chance of a ruler's violent death per tick (at legitimacy 50).
     pub violent_death_per_tick: f64,
     /// (в) The legitimacy norms by standing (E0 §1.7).
@@ -275,6 +284,27 @@ impl Params {
     }
 }
 
+/// The years a man of the cohort of service stays in it on average (plan §27.1): over a
+/// stationary population with the mortality table, a member of ages `service.0..=service.1`
+/// weighted by the survivors at his age, the survivors' years from his age to the last year
+/// of service. With the Frier table and 17–46: 13.8 years.
+pub fn cohort_renewal_years(mortality_by_age: &[(i32, f64)], service: (i32, i32)) -> f64 {
+    let q = |age: i32| mortality_by_age.iter().rev().find(|(from, _)| age >= *from).map(|(_, q)| *q).unwrap_or(mortality_by_age[0].1);
+    let mut alive = vec![1.0f64];
+    for age in 0..=service.1.max(0) {
+        let last = *alive.last().unwrap();
+        alive.push(last * (1.0 - q(age)));
+    }
+    let l = |age: i32| alive[age.max(0) as usize];
+    let (mut years, mut weight) = (0.0, 0.0);
+    for a in service.0..=service.1 {
+        let ahead: f64 = (a..=service.1).map(l).sum::<f64>() / l(a);
+        years += l(a) * ahead;
+        weight += l(a);
+    }
+    if weight > 0.0 { years / weight } else { 0.0 }
+}
+
 /// The file shipped with the crate.
 pub const PARAMS_TOML: &str = include_str!("../params.toml");
 
@@ -333,6 +363,7 @@ impl Params {
         let tax = value("tax.default_rate")?;
         let court = value("court.share_of_revenue")?;
         let pay_outputs = value("army.pay_per_soldier_outputs")?;
+        let campaign_pay = value("army.campaign_pay_factor")?;
         let interest = value("loan.interest_per_year")?;
         let ceiling_years = value("loan.ceiling_years_of_revenue")?;
         let attrition_year = value("army.attrition_unsupplied_per_year")?;
@@ -359,6 +390,8 @@ impl Params {
         let elite = value("mortality.elite_factor")?;
         let births = value("births.per_adult_per_year")?;
         let majority = value("majority.age")?;
+        let service = (value("manpower.service_from")?.round() as i32, value("manpower.service_until")?.round() as i32);
+        let renewal = cohort_renewal_years(&mortality_by_age, service);
         let violent = value("violent_death.per_year")?;
         let norm_hereditary = value("legitimacy.norm_hereditary")?;
         let norm_elected = value("legitimacy.norm_elected")?;
@@ -436,6 +469,7 @@ impl Params {
             tax_default_ppm: (tax * 1_000_000.0).round() as i64,
             court_share_ppm: (court * 1_000_000.0).round() as i64,
             pay_per_soldier_kg_per_year: (pay_outputs * output).round() as i64,
+            campaign_pay_ppm: (campaign_pay * 1_000_000.0).round() as i64,
             loan_interest_ppm_per_tick: (interest / 2.0 * 1_000_000.0).round() as i64,
             loan_ceiling_years_milli: (ceiling_years * 1000.0).round() as i64,
             // Two ticks a year: half the yearly share per tick.
@@ -454,6 +488,8 @@ impl Params {
             mortality_elite_factor: elite,
             births_per_adult_per_tick: births / 2.0,
             majority_age: majority.round() as i32,
+            service_ages: service,
+            manpower_renewal_years: renewal,
             violent_death_per_tick: violent / 2.0,
             legitimacy_norm_hereditary: norm_hereditary,
             legitimacy_norm_elected: norm_elected,
@@ -582,7 +618,8 @@ mod tests {
         }
         let of_bots = model.iter().filter(|(n, _)| n.starts_with("agent.") || n.starts_with("aspiration.") || n.starts_with("goal.")).count();
         let by_memory: Vec<&str> = model.iter().filter(|(_, e)| e.origin.as_deref().is_some_and(|o| o.starts_with(FITTED_BY_MEMORY))).map(|(n, _)| n.as_str()).collect();
-        eprintln!("registry of (в): {} parameters, of the bots {of_bots}; by origin {by_origin:?}; fitted to a band by memory: {by_memory:?}", model.len());
+        eprintln!("registry of (в): {} parameters, of the bots {of_bots}; by origin {by_origin:?}; fitted to a band by memory: {by_memory:?}; derived, no parameter: τ of the cohort of service {:.1} years ({}–{}, В2)", model.len(), p.manpower_renewal_years, p.service_ages.0, p.service_ages.1);
+        assert!((p.manpower_renewal_years - 13.8).abs() < 0.05, "τ from the Frier table and 17–46: {}", p.manpower_renewal_years);
         assert_eq!(by_memory, ["institution.adoption_per_year", "revolt.per_year", "usurpation.per_year"], "a (в) value fitted to a band by memory joined or left the registry: the owner decides");
     }
 

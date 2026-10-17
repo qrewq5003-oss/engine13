@@ -72,6 +72,21 @@ use crate::world::{Treaty, TreatyKind, World, WorldError};
 
 pub(crate) use crate::army::pair;
 
+/// The rule of the peace (§19, owner's rule on #291) on the state of a war: would `b` accept
+/// a peace from `a`? A losing `b` always; a `b` that declared — at the threshold of the
+/// relation, exhausted, or with its war goal gone; an attacked `b` — unless it is winning and
+/// the relation is below the threshold. One function for `peace_room` and for the bots'
+/// worth of a war (E3 (е2)): whether a beaten side can end its war.
+pub fn peace_rule(b_losing: bool, a_losing: bool, declared_by_b: bool, at_threshold: bool, b_exhausted: bool, b_wants_war: bool) -> bool {
+    if b_losing {
+        return true;
+    }
+    if declared_by_b {
+        return at_threshold || b_exhausted || !b_wants_war;
+    }
+    !a_losing || at_threshold
+}
+
 /// A relation after a push of `delta`: the push takes its share of the distance left to the
 /// bound it moves toward (`push_relation`; the worth of an embassy or a gift reads it).
 pub fn pushed_relation(r: f64, delta: f64) -> f64 {
@@ -313,21 +328,21 @@ impl World {
             return Err("not at war");
         }
         let loser = self.losing_side(a, b);
-        if loser == Some(b) {
+        let declared_by_b = self.wars[&pair(a, b)].by == Some(b);
+        let at_threshold = self.relation(a, b) >= params.treaty_accept_at_relation;
+        if peace_rule(loser == Some(b), loser == Some(a), declared_by_b, at_threshold, self.exhausted(b), self.war_goal_against(b, a)) {
             return Ok(());
         }
-        let at_threshold = self.relation(a, b) >= params.treaty_accept_at_relation;
-        if self.wars[&pair(a, b)].by == Some(b) {
-            let exhausted = self.actors[&b].paid_share_ppm < 1_000_000;
-            if at_threshold || exhausted || !self.war_goal_against(b, a) {
-                return Ok(());
-            }
+        if declared_by_b {
             return Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid");
         }
-        if loser == Some(a) && !at_threshold {
-            return Err("the winner wants more: the relation is below the threshold");
-        }
-        Ok(())
+        Err("the winner wants more: the relation is below the threshold")
+    }
+
+    /// Whether a polity's army is short of its pay this tick — exhausted, by the rule of the
+    /// peace.
+    pub fn exhausted(&self, a: ActorId) -> bool {
+        self.actors[&a].paid_share_ppm < 1_000_000
     }
 
     /// Would `b` accept an alliance from `a`?
