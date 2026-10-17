@@ -1106,8 +1106,16 @@ fn an_order_is_a_channel_of_the_contract_a_ruler_commands_its_units_and_the_ruli
     let _ = p;
 }
 
+/// At peace the bot puts a revolt down with the nearest unit and keeps the rest at home. At
+/// war the three duties are weighed in wheat (E3 (е2), plan §26, §28.2): with a goal against
+/// the enemy and equal armies the war is worth going on with — the unit marches on the wanted
+/// province and the revolt waits; outnumbered five to one the war is worth less than nothing
+/// and the unit holds the capital; without a goal there is nothing to win and it stays home;
+/// attacked, with an enemy unit a tick's march from its land, it goes to the threatened
+/// province whose defence is worth most; and with a goal worth more than that defence it
+/// campaigns on the enemy's capital instead.
 #[test]
-fn a_bot_puts_a_revolt_down_at_peace_lets_it_wait_at_war_advances_when_strong_enough_and_holds_its_capital_when_not() {
+fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_and_the_suppression_in_wheat() {
     let p = params();
     let mut w = world_of(&testworld::five_states_scenario(), 62);
     let (s0, s1) = (ActorId(0), ActorId(1));
@@ -1128,20 +1136,41 @@ fn a_bot_puts_a_revolt_down_at_peace_lets_it_wait_at_war_advances_when_strong_en
     assert!(r.events.iter().any(|e| matches!(e.event, Event::RevoltEnded { province, .. } if province == at(0, 2))), "put down");
     // Back home at peace.
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(0, 0) }]);
-    // At war a revolt waits; the units advance on the enemy when strong enough, else hold.
+    // At war with a goal and equal armies: the war is worth going on with, the unit marches
+    // on the wanted province, the revolt waits (its take for the war's length is worth less
+    // than what the front loses without the only unit).
     let mut w = world_of(&testworld::five_states_scenario(), 63);
     w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
     w.declare_war(s0, s1).unwrap();
     w.rise_now(at(0, 2), &p).unwrap();
-    let orders = w.bot_orders(s0, &p);
-    assert_eq!(orders, vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "equal armies: advance on the wanted province, the revolt waits");
+    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) > 0.0, "the war is worth going on with");
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "equal armies and a goal: the campaign; the revolt waits");
+    // Outnumbered five to one the war is worth less than nothing: hold the capital.
     let u1 = w.units_of(s1)[0];
     w.post(engine2::Account::Soldiers(u1), Source::Test, (3000 - w.soldiers(u1)) * 1000).unwrap();
+    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) < 0.0);
     assert!(w.bot_orders(s0, &p).is_empty(), "outnumbered: hold the capital, where the unit stands");
-    // Without a wanted province the target is the enemy's capital.
+    // Without a goal there is nothing to win: home.
     let mut w = world_of(&testworld::five_states_scenario(), 64);
     w.declare_war(s0, s1).unwrap();
-    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }]);
+    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) < 0.0, "nothing to win, something to lose");
+    assert!(w.bot_orders(s0, &p).is_empty(), "no goal: the unit stays home");
+    // Attacked, with the enemy's unit a tick's march from its land: the defence of the
+    // threatened province worth most (the enemy's position is read, not its order).
+    let mut w = world_of(&testworld::five_states_scenario(), 65);
+    w.declare_war(s1, s0).unwrap();
+    let u1 = w.units_of(s1)[0];
+    w.units.get_mut(&u1).unwrap().position = at(1, 2);
+    let (mine, theirs) = (w.unit_strength(u0), w.unit_strength(u1));
+    let threatened: Vec<ProvinceId> = w.actors[&s0].provinces.iter().copied().filter(|q| w.reaches_in_a_tick(s1, at(1, 2), *q, &p)).collect();
+    assert!(threatened.contains(&at(0, 2)) && threatened.len() > 1, "{threatened:?}");
+    let best = threatened.iter().copied().max_by(|x, y| w.defence_worth(s0, *x, s1, mine, theirs, &p).total_cmp(&w.defence_worth(s0, *y, s1, mine, theirs, &p))).unwrap();
+    assert!(w.defence_worth(s0, best, s1, mine, theirs, &p) > 0.0 && best != at(0, 0), "a province other than the capital is worth defending most: {best:?}");
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: best }], "attacked: the unit defends the threatened province worth most");
+    // With a goal worth more than the defence it campaigns on the enemy's capital instead.
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) > 0.0);
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }], "the campaign worth more than the defence: on the enemy's capital");
 }
 
 /// The rule of the peace (plan §28.1, §28.8): the forced side accepts any peace; a side with
@@ -1510,7 +1539,7 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
 fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let p = params();
     let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, true, false, 0.0, &p), w.war_worth(a, c, true, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.

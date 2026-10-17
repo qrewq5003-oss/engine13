@@ -261,6 +261,7 @@ impl World {
                 goals: Vec::new(),
                 // A polity born of a rising starts with its cohort whole (plan §27.1).
                 manpower_deficit: 0.0,
+                losses_seen: 0.0,
             },
         );
         self.ledger.open(self.tick, Account::Treasury(new), 0)?;

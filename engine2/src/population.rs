@@ -198,6 +198,7 @@ impl World {
         let left = (-1.0 / (2.0 * params.manpower_renewal_years.max(1e-9))).exp();
         for actor in self.actors.values_mut() {
             actor.manpower_deficit *= left;
+            actor.losses_seen *= left;
         }
         Ok(())
     }

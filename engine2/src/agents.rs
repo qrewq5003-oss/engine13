@@ -114,7 +114,6 @@ pub struct GoalFact {
 /// marriages — every pair of houses scanned every person of the world).
 #[derive(Debug, Clone)]
 pub struct Context {
-    enemy: Option<ActorId>,
     at_war: bool,
     income: f64,
     unpaid: bool,
@@ -378,50 +377,27 @@ impl World {
 
     // ---- utility ----
 
-    /// The strongest enemy of `a` at war with it, by soldiers, and whether it outnumbers `a`.
-    fn outmatched(&self, a: ActorId) -> Option<ActorId> {
-        let mine = self.army_size(a);
-        self.actors
-            .keys()
-            .copied()
-            .filter(|b| self.at_war(a, *b) && self.alive(*b))
-            .filter(|b| self.army_size(*b) > mine)
-            .max_by_key(|b| self.army_size(*b))
-    }
-
-    /// The progress a war on `b` would move over `a`'s goals.
-    fn war_wanted(&self, a: ActorId, b: ActorId) -> f64 {
-        let mut want = 0.0f64;
-        for g in &self.actors[&a].goals {
-            let p = self.goal_progress(a, g);
-            if p >= 1.0 - 1e-9 {
-                continue;
-            }
-            want += match (g.kind, g.target) {
-                (GoalKind::Take | GoalKind::Hold, GoalTarget::Province(q)) if self.provinces[&q].owner == b => 1.0,
-                (GoalKind::Take, GoalTarget::Route(q, r)) if self.provinces[&q].owner == b || self.provinces[&r].owner == b => 0.5,
-                (GoalKind::Take | GoalKind::Unite | GoalKind::Hold, GoalTarget::Region(r)) => {
-                    let ps = &self.regions[r.index()];
-                    ps.iter().filter(|q| self.provinces[q].owner == b).count() as f64 / ps.len().max(1) as f64
-                }
-                (GoalKind::Take | GoalKind::Subdue, GoalTarget::Polity(x)) if x == b => 1.0,
-                (GoalKind::Free, _) if self.lord_of(a) == Some(b) => 1.0,
-                _ => 0.0,
-            };
-        }
-        want
-    }
-
     /// Whether `a` has a live goal a war on `b` would serve: the war goal the declarer's
-    /// acceptance of a peace reads (`diplomacy::peace_room`, owner's rule on #291).
+    /// acceptance of a peace reads (`diplomacy::peace_room`, owner's rule on #291). What the
+    /// goals are worth is the worth's (`World::war_stake`, E3 (е2)).
     pub fn war_goal_against(&self, a: ActorId, b: ActorId) -> bool {
-        self.war_wanted(a, b) > 0.0
+        self.actors[&a].goals.iter().any(|g| {
+            self.goal_progress(a, g) < 1.0 - 1e-9
+                && match (g.kind, g.target) {
+                    (GoalKind::Take | GoalKind::Hold, GoalTarget::Province(q)) => self.provinces[&q].owner == b,
+                    (GoalKind::Take, GoalTarget::Route(q, r)) => self.provinces[&q].owner == b || self.provinces[&r].owner == b,
+                    (GoalKind::Take | GoalKind::Unite | GoalKind::Hold, GoalTarget::Region(r)) => self.regions[r.index()].iter().any(|q| self.provinces[q].owner == b),
+                    (GoalKind::Take | GoalKind::Subdue, GoalTarget::Polity(x)) => x == b,
+                    (GoalKind::Free, _) => self.lord_of(a) == Some(b),
+                    _ => false,
+                }
+        })
     }
 
     /// The province a war on `b` aims at for `a`: the province of `b` a goal of `a` wants
     /// (the lowest id among them), else `b`'s capital — the march takes what lies on the
     /// way and stops at contact.
-    fn war_target(&self, a: ActorId, b: ActorId) -> ProvinceId {
+    pub(crate) fn war_target(&self, a: ActorId, b: ActorId) -> ProvinceId {
         let wanted = self.actors[&a].goals.iter().filter_map(|g| match (g.kind, g.target) {
             (GoalKind::Take | GoalKind::Hold, GoalTarget::Province(q)) if self.provinces[&q].owner == b => Some(q),
             _ => None,
@@ -429,16 +405,22 @@ impl World {
         wanted.min().unwrap_or(self.actors[&b].capital)
     }
 
-    /// The orders a bot gives its units (E3 (б), plan §23.2 p. 4; the same channel as the
-    /// player's): no draws, by the state alone. **At peace, revolts first** — for every
-    /// province in revolt the nearest unit by path goes there and stands (owner's rule on
-    /// #289: the suppression is an ordinary decision of the bot); at war a revolt waits (a
-    /// stub, owner on #292: to be chosen by utility, the front against the suppression);
-    /// **at war** — the enemy whose land a
-    /// goal wants most (ties: the lower id), its wanted province or its capital, when the
-    /// units are at least `agent.advance_ratio` of the enemy's whole army, else home to the
-    /// capital to defend it; **at peace** — home. The ruler commands its own units and the
-    /// ruling house's retinue; the other houses' men wait for their houses (step (в)).
+    /// The orders a bot gives its units (E3 (б), plan §23.2 p. 4; (е2), plan §26 and §28.2;
+    /// the same channel as the player's): no draws, by the state alone, **three duties in
+    /// one currency** — years of the polity's income. **The campaign:** against the enemy
+    /// whose land the goals want most (`war_stake`; ties: the lower id), to its wanted
+    /// province or its capital (`war_target`), when going on with the war is worth something
+    /// by the battle formula (`war_worth`); a unit's worth there is what the wars lose
+    /// without it. **The defence** of a threatened province — one an enemy unit can reach
+    /// this tick by the movement rule from where it stands (`reaches_in_a_tick`; the player
+    /// sees where the enemy's units stand, not where they go): its take for the horizon at
+    /// the chance the defenders beat what can reach it (`defence_worth`). **The suppression**
+    /// of a revolt: at peace the nearest unit goes and stands (owner's rule on #289); at war
+    /// the province's take for the wars' expected length. At war the units are peeled off
+    /// the campaign one at a time, the smallest first, to the duty that gains most over what
+    /// the front loses, while any gains; the rest campaign, or hold the capital when the war
+    /// is not worth going on with. The ruler commands its own units and the ruling house's
+    /// retinue; the other houses' men wait for their houses (step (в)).
     pub fn bot_orders(&self, a: ActorId, params: &Params) -> Vec<Order> {
         let who = ActorRef::Ruler(a);
         if !self.alive(a) {
@@ -453,41 +435,123 @@ impl World {
                 out.push(Order { actor: who, unit: u, to });
             }
         };
-        // STUB (owner on #292): at war the army goes to the war and a revolt waits for the
-        // peace — a rule of behaviour written by hand, like the tax anchored to the tithe
-        // that #291 removed, not a utility. To be replaced by the choice «the front or the
-        // suppression» by utility: the worth of the war goal against the loss to the revolt.
-        // Measured: with the revolts put down at once, mid-war, they lasted a year and
-        // recurred, and no base rate of the rising kept both В7 and В9 in their bands.
-        let at_war = self.actors.keys().any(|b| self.at_war(a, *b) && self.alive(*b));
-        let revolts: Vec<ProvinceId> = if at_war { Vec::new() } else { self.actors[&a].provinces.iter().copied().filter(|p| self.in_revolt(*p)).collect() };
-        for p in revolts {
-            if let Some(on_duty) = units.iter().copied().find(|u| self.units[u].position == p || self.units[u].destination == Some(p)) {
-                units.retain(|u| *u != on_duty);
-                continue;
-            }
-            let nearest = units.iter().copied().filter_map(|u| self.path(a, self.units[&u].position, p).map(|path| (path.len(), u))).min();
-            if let Some((_, u)) = nearest {
-                give(u, p, &mut out);
-                units.retain(|x| *x != u);
-            }
-        }
         let enemies: Vec<ActorId> = self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).collect();
-        let to = match enemies.iter().copied().max_by_key(|b| ((self.war_wanted(a, *b) * 1e6) as i64, std::cmp::Reverse(*b))) {
-            Some(enemy) => {
-                let mine: i64 = units.iter().map(|u| self.soldiers(*u)).sum();
-                if mine > 0 && mine as f64 >= params.agent_advance_ratio * self.army_size(enemy) as f64 {
-                    self.war_target(a, enemy)
-                } else {
-                    capital
+        // A revolt with a unit there or on its way keeps it.
+        let mut revolts: Vec<ProvinceId> = self.actors[&a].provinces.iter().copied().filter(|p| self.in_revolt(*p)).collect();
+        revolts.sort();
+        revolts.retain(|p| match units.iter().copied().find(|u| self.units[u].position == *p || self.units[u].destination == Some(*p)) {
+            Some(on_duty) => {
+                units.retain(|u| *u != on_duty);
+                false
+            }
+            None => true,
+        });
+        if enemies.is_empty() {
+            // At peace: the nearest unit by path to each revolt; the rest home.
+            for p in revolts {
+                let nearest = units.iter().copied().filter_map(|u| self.path(a, self.units[&u].position, p).map(|path| (path.len(), u))).min();
+                if let Some((_, u)) = nearest {
+                    give(u, p, &mut out);
+                    units.retain(|x| *x != u);
                 }
             }
-            None => capital,
-        };
-        for u in units {
+            for u in units {
+                give(u, capital, &mut out);
+            }
+            return out;
+        }
+        let unpaid = self.paid_share_seen_ppm(a) < 1_000_000;
+        let income = self.yearly_income(a, params).max(1) as f64;
+        // The campaign: against the enemy the goals want most, when going on with the war is
+        // worth something by the battle formula.
+        let enemy = enemies.iter().copied().max_by_key(|b| ((self.war_stake(a, *b, params) * 1e3) as i64, std::cmp::Reverse(*b))).unwrap();
+        let campaign = self.war_worth(a, enemy, false, unpaid, 0.0, params) > 0.0;
+        // The threats: for every own province, the strength of the enemy units that can reach
+        // it this tick, and the strongest enemy among them (whose hold the loss is valued at).
+        let mut threats: Vec<(ProvinceId, f64, ActorId)> = Vec::new();
+        let mut own: Vec<ProvinceId> = self.actors[&a].provinces.clone();
+        own.sort();
+        for p in own {
+            let mut by: std::collections::BTreeMap<ActorId, f64> = std::collections::BTreeMap::new();
+            for (u, unit) in &self.units {
+                if enemies.contains(&unit.owner) && self.reaches_in_a_tick(unit.owner, unit.position, p, params) {
+                    *by.entry(unit.owner).or_insert(0.0) += self.unit_strength(*u);
+                }
+            }
+            if let Some(strongest) = by.iter().max_by(|x, y| x.1.total_cmp(y.1).then_with(|| y.0.cmp(x.0))).map(|(b, _)| *b) {
+                threats.push((p, by.values().sum(), strongest));
+            }
+        }
+        // The units, the smallest first, each with what the wars lose without it at the front.
+        units.sort_by_key(|u| (self.soldiers(*u), *u));
+        let mut pool: Vec<(crate::ids::UnitId, f64)> = units
+            .into_iter()
+            .map(|u| {
+                let loss = if campaign { enemies.iter().map(|b| self.war_worth(a, *b, false, unpaid, 0.0, params) - self.war_worth(a, *b, false, unpaid, -self.unit_strength(u), params)).sum() } else { 0.0 };
+                (u, loss)
+            })
+            .collect();
+        let war_years = enemies.iter().map(|b| self.war_ticks(a, *b, params)).fold(0.0f64, f64::max) / 2.0;
+        // Peel off the campaign to the duty that gains most over what the front loses.
+        let mut defenders = vec![0.0f64; threats.len()];
+        let mut manned = vec![false; revolts.len()];
+        let mut duties: Vec<(crate::ids::UnitId, ProvinceId)> = Vec::new();
+        loop {
+            let mut best: Option<(f64, usize, usize)> = None;
+            for (i, (u, loss)) in pool.iter().enumerate() {
+                let s = self.unit_strength(*u);
+                let mut offer = |gain: f64, j: usize| {
+                    if gain > 0.0 && best.map(|b| b.0).unwrap_or(0.0) < gain {
+                        best = Some((gain, i, j));
+                    }
+                };
+                for (j, (p, threat, by)) in threats.iter().enumerate() {
+                    offer(self.defence_worth(a, *p, *by, defenders[j] + s, *threat, params) - self.defence_worth(a, *p, *by, defenders[j], *threat, params) - *loss, j);
+                }
+                for (k, r) in revolts.iter().enumerate() {
+                    if !manned[k] {
+                        offer(self.take_of(a, *r, params) * war_years / income - *loss, threats.len() + k);
+                    }
+                }
+            }
+            let Some((_, i, j)) = best else { break };
+            let (u, _) = pool.remove(i);
+            if j < threats.len() {
+                defenders[j] += self.unit_strength(u);
+                duties.push((u, threats[j].0));
+            } else {
+                manned[j - threats.len()] = true;
+                duties.push((u, revolts[j - threats.len()]));
+            }
+        }
+        for (u, p) in duties {
+            give(u, p, &mut out);
+        }
+        let to = if campaign { self.war_target(a, enemy) } else { capital };
+        for (u, _) in pool {
             give(u, to, &mut out);
         }
         out
+    }
+
+    /// What `extra` strength adds to (or, negative, takes from) every war of `a`, in years of
+    /// its income: the worth of each war with it against without it.
+    fn at_war_gain(&self, a: ActorId, extra: f64, unpaid: bool, params: &Params) -> f64 {
+        self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_worth(a, b, false, unpaid, extra, params) - self.war_worth(a, b, false, unpaid, 0.0, params)).sum()
+    }
+
+    /// What `n` soldiers kept for `a`'s wars cost it, in years of its income: their pay and the
+    /// heads away from the land for the wars' expected length, and — when a war its goals want
+    /// is on — the pay of the campaign beyond it (plan §27.2).
+    fn war_soldiers_cost(&self, a: ActorId, n: i64, params: &Params) -> f64 {
+        let ticks = self.war_length(a, params);
+        let offensive = self.actors.keys().any(|b| self.at_war(a, *b) && self.alive(*b) && self.war_goal_against(a, *b));
+        self.soldiers_cost(a, n, ticks, params) + if offensive { self.campaign_extra(a, n, ticks, params) } else { 0.0 }
+    }
+
+    /// The expected length of `a`'s wars, ticks: the longest of its fronts (`war_ticks`).
+    fn war_length(&self, a: ActorId, params: &Params) -> f64 {
+        self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_ticks(a, b, params)).fold(0.0, f64::max)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
@@ -506,13 +570,6 @@ impl World {
         } else {
             h.iter().sum::<i64>() / h.len() as i64
         }
-    }
-
-    /// Whether `b`'s army is too strong for `a` to march against: the bot's units advance
-    /// only at `agent.advance_ratio` of the enemy's whole army (`bot_orders`), and the war
-    /// and the peace weigh the enemy's strength by the same measure.
-    fn outweighed(&self, a: ActorId, b: ActorId, params: &Params) -> bool {
-        (self.army_size(a) as f64) < params.agent_advance_ratio * self.army_size(b) as f64
     }
 
     /// The bots' answers to the open opportunities (E3 (в)): every opportunity the player
@@ -587,7 +644,6 @@ impl World {
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         Context {
-            enemy: self.outmatched(a),
             at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
@@ -603,76 +659,40 @@ impl World {
 
     /// The utility of a call in a context read once.
     fn utility_in(&self, a: ActorId, call: &VerbCall, params: &Params, ctx: &Context) -> f64 {
-        let (enemy, at_war, income, unpaid) = (ctx.enemy, ctx.at_war, ctx.income, ctx.unpaid);
+        let (at_war, income, unpaid) = (ctx.at_war, ctx.income, ctx.unpaid);
         // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price.
         let price_kg = |kg: i64| kg as f64 / income;
         match (call.verb, call.target) {
-            (VerbId::DeclareWar, Target::Actor(b)) => {
-                // What the war is worth: the goals it serves — nothing for a ruler whose army
-                // is unpaid, since an unpaid army is an exhausted one by the rule of the
-                // peace (`diplomacy::peace_room`) and the war ends at the first peace the
-                // other side offers (measured: four fifths of the declarations came the tick
-                // after a peace of the same pair, most of them by a declarer already short of
-                // its pay — a war a tick long, a peace treaty broken every other tick).
-                let mut u = if unpaid { 0.0 } else { self.war_wanted(a, b) };
-                // A war the bot would not march in is not worth declaring: its units advance
-                // only at `agent.advance_ratio` of the enemy's army (`bot_orders`), and a
-                // declarer that stays home loses provinces, accepts the peace as the loser
-                // and declares again the next tick (measured: 128 of 170 renewals).
-                if self.outweighed(a, b, params) {
-                    u -= 1.0;
-                }
-                if at_war {
-                    u -= 0.5;
-                }
-                u + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
-            }
-            (VerbId::MakePeace, Target::Actor(b)) => {
-                // The peace is the war the other way round: worth what going on would lose —
-                // the goals the war serves, less the strength of the enemy, weighed as the
-                // declaration weighed them (an army the bot would not march against); a
-                // losing war is worth ending, and with nothing to win the peace is wanted.
-                // (Measured: «stronger» was every larger army here and half again as large at
-                // the declaration, and a bot ended the next tick the war it had just declared.)
-                let losing = self.forced_to_peace(a, b, params) == Some(a);
-                let wanted = self.war_wanted(a, b);
-                let strength = if self.outweighed(a, b, params) { 1.0 } else { 0.0 };
-                let mut u = strength - wanted;
-                if losing {
-                    u += 1.0;
-                }
-                if wanted <= 0.0 {
-                    u += 0.3;
-                }
-                u
-            }
+            // The war in wheat (E3 (е2), plan §26): what it wins by its goals and loses by the
+            // province the enemy would reach first, at the odds of the battle formula against
+            // every front, less the soldiers the battle costs and the price of the declaration.
+            // An unpaid army wins nothing: by the rule of the peace it is exhausted and the war
+            // ends at the first offer (measured on #293: four fifths of the declarations came
+            // the tick after a peace of the same pair, by declarers short of their pay).
+            (VerbId::DeclareWar, Target::Actor(b)) => self.war_worth(a, b, true, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params),
+            // The peace is the war the other way round: worth what going on would lose.
+            (VerbId::MakePeace, Target::Actor(b)) => -self.war_worth(a, b, false, unpaid, 0.0, params),
+            // A levy or a hire at war: what the strength adds to the wars, less its pay (and the
+            // advance) for the war's expected length; at peace a standing army's worth is the
+            // threat it answers — (г).
             (VerbId::Recruit, Target::Province(_)) => {
-                let room = self.recruit_room(a, params) as f64 / self.recruit_ceiling(a, params).max(1) as f64;
-                let mut u = 0.0;
-                if at_war {
-                    u += 0.5 * room;
-                }
-                if enemy.is_some() {
-                    u += 0.5;
-                }
-                if unpaid {
-                    u -= 1.0;
-                }
-                u
+                let n = self.recruit_per_tick(a, params);
+                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - self.war_soldiers_cost(a, n, params)
             }
-            (VerbId::Disband, Target::Unit(_)) => {
-                if !at_war && unpaid {
+            (VerbId::HireMercenaries, _) => {
+                let n = self.hire_count(a, params);
+                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.war_soldiers_cost(a, n, params)
+            }
+            // A unit sent home at war: the pay saved for the war's length against what the
+            // wars lose; at peace the rule of (б) until (г): an unpaid army melts anyway.
+            (VerbId::Disband, Target::Unit(u)) => {
+                if at_war {
+                    self.war_soldiers_cost(a, self.soldiers(u), params) + self.at_war_gain(a, -self.unit_strength(u), unpaid, params)
+                } else if unpaid {
                     0.5
                 } else {
                     -1.0
                 }
-            }
-            (VerbId::HireMercenaries, _) => {
-                let mut u = 0.0;
-                if enemy.is_some() {
-                    u += 0.5;
-                }
-                u - price_kg(self.hire_count(a, params) * params.mercenary_advance_kg)
             }
             (VerbId::TakeLoan, _) => {
                 if unpaid && at_war {
