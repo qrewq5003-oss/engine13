@@ -26,6 +26,10 @@ pub struct ActorView {
     /// Debt in the scenario's display currency, for showing only.
     pub debt_display: f64,
     pub legitimacy: f64,
+    /// The tax rate, parts per million of production (owner's rule 2026-10-17, plan §28.7):
+    /// an open fact — the people flee the heavier tax (`population.rs`), so they know it,
+    /// and the bot's `flight_worth` reads the neighbours' rates by the same right.
+    pub tax_rate_ppm: i64,
     /// The ruler's name, and the regent's while the ruler is a minor.
     pub ruler: String,
     pub regent: Option<String>,
@@ -81,6 +85,7 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
                 debt_kg,
                 debt_display: debt_kg as f64 / currency.kg_per_unit,
                 legitimacy: a.legitimacy,
+                tax_rate_ppm: a.tax_rate_ppm,
                 ruler: w.names.persons[a.ruler.index()].1.clone(),
                 regent: a.regent.map(|r| w.names.persons[r.index()].1.clone()),
                 relations: w.actors.keys().filter(|b| *b != id).map(|b| (w.names.actors[b.index()].0.clone(), w.relation(*id, *b))).collect(),

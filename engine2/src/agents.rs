@@ -549,7 +549,7 @@ impl World {
             (_, Chance::Usurpation { polity, candidate, .. }) => self.house_would_usurp(*polity, *candidate, params),
             (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
             (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
-            (ActorRef::House(g), Chance::Marriage { from, .. }) => self.marriage_worth(g, *from, params) > 0.0,
+            (ActorRef::House(g), Chance::Marriage { from, dowry_kg, .. }) => self.marriage_worth(g, *from, *dowry_kg, params) > 0.0,
             _ => false,
         }
     }
@@ -634,7 +634,7 @@ impl World {
                 // losing war is worth ending, and with nothing to win the peace is wanted.
                 // (Measured: «stronger» was every larger army here and half again as large at
                 // the declaration, and a bot ended the next tick the war it had just declared.)
-                let losing = self.losing_side(a, b) == Some(a);
+                let losing = self.forced_to_peace(a, b, params) == Some(a);
                 let wanted = self.war_wanted(a, b);
                 let strength = if self.outweighed(a, b, params) { 1.0 } else { 0.0 };
                 let mut u = strength - wanted;

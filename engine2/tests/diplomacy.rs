@@ -497,8 +497,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     assert_eq!(w.treaty(s0, s1).unwrap().until, Tick(w.tick.0 + p.treaty_term_ticks));
     assert!((w.war_price(s0, s1, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor * p.treaty_fresh_breach_factor).abs() < 1e-9, "war again before the term is a breach — a fresh one");
     assert_eq!(w.peace_room(s0, s1, &p), Err("not at war"));
-    // The winner takes a province: the loser's proposal is refused at the norm of war, the
-    // winner's accepted; the loser accepts at the threshold.
+    // The winner takes a province: the loser's proposal is refused at the norm of war; the
+    // winner's is refused too while the loser, with its ally, has the better odds (plan
+    // §28.8 — a cause to go on); at the threshold both go through.
     let mut w = testworld::world(13);
     w.ally_now(s1, s3, &p).unwrap();
     // The declarer refuses a status quo or the loser's peace only while it has a war goal
@@ -511,14 +512,18 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     assert_eq!(w.losing_side(s0, s1), Some(s1));
     assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
     let err = w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap_err();
-    assert!(err.to_string().contains("the declarer wants its war"), "{err}");
+    assert!(err.to_string().contains("the other side wants its war"), "{err}");
     assert!(w.at_war(s0, s1));
     w.relations.insert((s0, s1), p.treaty_accept_at_relation);
     assert!(w.peace_room(s1, s0, &p).is_ok(), "at the threshold the winner accepts");
     w.relations.insert((s0, s1), 20.0);
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "s1 lost a province, but with its ally its side is the stronger");
+    let err = w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap_err();
+    assert!(err.to_string().contains("the other side wants its war"), "the stronger loser of a province refuses the declarer's peace: {err}");
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation);
     let before = w.tick;
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
-    assert!(!w.at_war(s0, s1), "the loser accepts the winner's peace always");
+    assert!(!w.at_war(s0, s1), "at the threshold it accepts the declarer's peace");
     assert!(!w.at_war(s0, s3), "the ally's war was an obligation of this one and closed with it");
     assert_eq!(w.treaty(s0, s1).map(|t| t.kind), Some(TreatyKind::Peace));
     assert_eq!(w.lord_of(s1), None, "one province of five lost: no submission");
@@ -531,6 +536,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
         take(&mut w, s0, at(1, y), &p);
     }
     assert_eq!(w.actors[&s1].provinces.len(), 2);
+    // Forced: three provinces lost and the weaker side (plan §28.1).
+    w.post(engine2::Account::Soldiers(w.units_of(s0)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     let r = {
         w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
         w.tick(&p).unwrap()
@@ -544,14 +552,21 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s1, at(0, 4), &p);
     assert_eq!(w.losing_side(s0, s1), Some(s0));
+    // The lord, beaten and the weaker, is forced to the vassal's peace.
+    w.post(engine2::Account::Soldiers(w.units_of(s1)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert_eq!(w.lord_of(s1), None, "released");
     assert!(!w.at_war(s0, s1));
-    // A rebel that lost stays a vassal.
+    // A rebel that lost stays a vassal: it lost a province and, once its side is the weaker,
+    // it is forced to the lord's peace (plan §28.1; at even strength it fights on).
     let mut w = testworld::world(16);
     w.make_vassal(s1, s0).unwrap();
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s0, at(1, 4), &p);
+    let lords = w.units_of(s0)[0];
+    w.post(engine2::Account::Soldiers(lords), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
     assert_eq!(w.lord_of(s1), Some(s0), "the rebel lost: still a vassal");
     let _ = s2;
@@ -644,19 +659,30 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.world_mut().relations.insert((s0, s1), p.treaty_accept_at_relation);
+    // The house has something to offer (the test world's houses start with nothing).
+    g.world_mut().post(engine2::Account::HouseTreasury(h0), engine2::Source::Test, 10_000 * 1000).unwrap();
     // E3 (в): the call offers the match to the other house; it answers at the next turn
     // (here a world with its bots off: by the rule of E2, it takes it).
     let r = g.tick(&[marry(ActorRef::Ruler(s0), h1)]).unwrap();
     assert!(r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.to == ActorRef::House(h1))), "the match offered to the house");
     assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "not married before its answer");
-    // The dowry is paid at the wedding, out of what the house holds then (its seat's income
-    // of the tick the offer was made in).
+    // The offer names the dowry (owner's rule 2026-10-17, plan §28.7: the offer is the
+    // terms); the wedding pays what was named, not the share of what the house holds then —
+    // which is more, by its seat's income of the tick the offer was made in.
+    let named = match g.opportunities(ActorRef::House(h1)).as_slice() {
+        [o] => match o.what {
+            engine2::Chance::Marriage { dowry_kg, .. } => dowry_kg,
+            _ => panic!("a match offered"),
+        },
+        other => panic!("one offer to the house, got {other:?}"),
+    };
     let at_wedding = g.world().dowry(h0, &p);
+    assert!(named > 0 && at_wedding > named, "the house holds more at the wedding than the offer named: {at_wedding} > {named}");
     let r = g.tick(&[]).unwrap();
     let (a, b) = r.events.iter().find_map(|e| match e.event {
-        Event::Marriage { a, b, dowry_kg } if dowry_kg == at_wedding as u64 => Some((a, b)),
+        Event::Marriage { a, b, dowry_kg } if dowry_kg == named as u64 => Some((a, b)),
         _ => None,
-    }).expect("a marriage with the dowry the house holds at the wedding");
+    }).expect("a marriage with the dowry the offer named");
     let w = g.world();
     assert_eq!((w.persons[&a].house, w.persons[&b].house), (h0, h1));
     assert_eq!(w.persons[&a].spouse, Some(b));
@@ -678,10 +704,16 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     let err = g.tick(&[marry(ActorRef::House(o0), HouseId(3))]).unwrap_err();
     assert!(err.to_string().contains("below the threshold"), "{err}");
     g.tick(&[marry(ActorRef::House(o0), h0)]).unwrap();
+    // The offer named `dowry`; the house then loses most of what it holds — the wedding pays
+    // what the house holds, no more than it named.
+    let paid = dowry / 2;
+    let held = g.world().house_treasury(o0);
+    g.world_mut().post(engine2::Account::HouseTreasury(o0), engine2::Source::Test, -(held - paid) * 1000).unwrap();
+    assert!(paid > 0 && g.world().house_treasury(o0) == paid);
     let r = g.tick(&[]).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == dowry as u64)), "the dowry paid at the wedding");
-    assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -dowry);
-    assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), dowry);
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Marriage { dowry_kg, .. } if dowry_kg == paid as u64)), "the dowry paid at the wedding: what the house holds, less than it named");
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(o0), engine2::Source::Dowry), -paid);
+    assert_eq!(on(&r, engine2::Account::HouseTreasury(h0), engine2::Source::Dowry), paid);
     let _ = h2;
     let offer = g.verbs(ActorRef::House(o0)).into_iter().find(|o| o.verb == VerbId::ProposeMarriage).unwrap();
     assert!(!offer.available && offer.why.as_deref() == Some("no unmarried adult to marry"), "{:?}", offer.why);

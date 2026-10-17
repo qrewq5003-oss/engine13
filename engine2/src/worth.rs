@@ -24,6 +24,17 @@
 //! seats they bring the house against the seats it gives up, and losing them — the execution,
 //! the rising crushed — is the throne and the seats lost, with no price on a life (owner's
 //! answer 3). Houses have no goals yet, so a house's «survive» does not enter (E4).
+//!
+//! **The bot sees what a player would see** (owner's rule 2026-10-17, plan §28.4, §28.7):
+//! positions, owners, wars and who declared them, treaties, and what the view and the
+//! tick's events show — relations, legitimacy, treasuries, population, the tax rate, the
+//! dowry an offer names, the pay shortfalls and the battles. **Not** another's goals, its
+//! house's treasury, its count of the dead (`manpower_deficit`) or its orders — the registry
+//! of the hidden. A model of another from visible facts (what the throne is worth to a
+//! candidate's house, `throne_worth`) is allowed: a player reasons so too; calling another's
+//! decision on its hidden state is not. Guarded by injection and by the sources
+//! (`tests/agents.rs`: `the_bot_reads_nothing_of_another_that_a_player_would_not_see`,
+//! `the_bots_code_names_no_hidden_state_of_another`).
 
 use crate::army::win_chance;
 use crate::collapse::rising_hazard;
@@ -350,15 +361,22 @@ impl World {
 
     // ---- bonds ----
 
-    /// The threat an alliance of `a` would answer, a fact of the state: the polity its goal
-    /// of «alliance against» names, else the strongest enemy at war with it that outnumbers
-    /// it (the threat of a neighbour not at war is valued in (г)).
-    fn threat(&self, a: ActorId) -> Option<ActorId> {
+    /// The threat an alliance of `a` would answer, as `a` knows it: the polity its own goal
+    /// of «alliance against» names, else the threat anyone sees (`seen_threat`).
+    fn own_threat(&self, a: ActorId) -> Option<ActorId> {
         let goal = self.actors[&a].goals.iter().find_map(|g| match (g.kind, g.target) {
             (crate::agents::GoalKind::AllianceAgainst, crate::agents::GoalTarget::Polity(x)) if self.alive(x) && x != a => Some(x),
             _ => None,
         });
-        goal.or_else(|| self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b) && self.army_size(*b) > self.army_size(a)).max_by_key(|b| (self.army_size(*b), std::cmp::Reverse(*b))))
+        goal.or_else(|| self.seen_threat(a))
+    }
+
+    /// The threat to `x` that anyone sees — a fact of the state, not of `x`'s goals (owner's
+    /// rule 2026-10-17: the bot sees what a player would, and `x`'s goals are its own): the
+    /// strongest enemy at war with `x` that outnumbers it (the threat of a neighbour not at
+    /// war is valued in (г)).
+    fn seen_threat(&self, x: ActorId) -> Option<ActorId> {
+        self.actors.keys().copied().filter(|b| self.at_war(x, *b) && self.alive(*b) && self.army_size(*b) > self.army_size(x)).max_by_key(|b| (self.army_size(*b), std::cmp::Reverse(*b)))
     }
 
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at
@@ -384,14 +402,14 @@ impl World {
         }
         let army = |x: ActorId| self.army_size(x) as f64;
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
-        let gain = match self.threat(a).filter(|t| *t != b) {
+        let gain = match self.own_threat(a).filter(|t| *t != b) {
             Some(t) if army(t) > 0.0 => {
                 let alone = if army(a) > 0.0 { win_chance(army(a), army(t), params) } else { 0.0 };
                 (win_chance(army(a) + army(b), army(t), params) - alone) * self.stake(a, t, params)
             }
             _ => 0.0,
         };
-        let cost = match self.threat(b).filter(|t| *t != a && !self.at_war(a, *t)) {
+        let cost = match self.seen_threat(b).filter(|t| *t != a && !self.at_war(a, *t)) {
             Some(t) if army(t) > 0.0 => win_chance(army(t), army(a) + army(b), params) * self.stake(a, t, params),
             _ => 0.0,
         };
@@ -428,10 +446,11 @@ impl World {
     }
 
     /// What a match offered by house `from` is worth to house `g`, in years of `g`'s income:
-    /// the dowry it receives and the bond.
-    pub fn marriage_worth(&self, g: HouseId, from: HouseId, params: &Params) -> f64 {
+    /// the dowry the offer names (`dowry_kg` — the offer, not the proposer's treasury, which
+    /// `g` does not see) and the bond.
+    pub fn marriage_worth(&self, g: HouseId, from: HouseId, dowry_kg: i64, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
-        self.dowry(from, params) as f64 / self.house_income(g, params) + self.bond(g, mine, theirs, params)
+        dowry_kg as f64 / self.house_income(g, params) + self.bond(g, mine, theirs, params)
     }
 
     /// What offering a match to house `g` is worth to house `h`, in years of `h`'s income:

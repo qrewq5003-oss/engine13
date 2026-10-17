@@ -72,19 +72,24 @@ use crate::world::{Treaty, TreatyKind, World, WorldError};
 
 pub(crate) use crate::army::pair;
 
-/// The rule of the peace (§19, owner's rule on #291) on the state of a war: would `b` accept
-/// a peace from `a`? A losing `b` always; a `b` that declared — at the threshold of the
-/// relation, exhausted, or with its war goal gone; an attacked `b` — unless it is winning and
-/// the relation is below the threshold. One function for `peace_room` and for the bots'
-/// worth of a war (E3 (е2)): whether a beaten side can end its war.
-pub fn peace_rule(b_losing: bool, a_losing: bool, declared_by_b: bool, at_threshold: bool, b_exhausted: bool, b_wants_war: bool) -> bool {
-    if b_losing {
+/// The rule of the peace (§19; plan §28.1 and §28.8, owner's decision 2026-10-17) on the
+/// state of a war: would `b` accept a peace from `a`? A `b` **forced** to peace always
+/// (`World::forced_to_peace`: it lost more provinces in the war and its side is the weaker by
+/// the battle formula); a `b` with a **cause** to go on — a live war goal against `a`, or
+/// provinces lost with the better odds — only at the threshold of the relation or exhausted;
+/// a `b` with nothing to fight for always. Who declared the war does not enter: the rule of
+/// #291 bound the attacked to accept the declarer's peace, and an attacked side that had lost
+/// provinces with the stronger army took the peace and declared again the next tick (68 of
+/// 97 renewals the tick after a peace, plan §28.8). One function for `peace_room` and for
+/// the bots' worth of a war (E3 (е2)): whether a beaten side can end its war.
+pub fn peace_rule(b_forced: bool, b_has_cause: bool, at_threshold: bool, b_exhausted: bool) -> bool {
+    if b_forced {
         return true;
     }
-    if declared_by_b {
-        return at_threshold || b_exhausted || !b_wants_war;
+    if b_has_cause {
+        return at_threshold || b_exhausted;
     }
-    !a_losing || at_threshold
+    true
 }
 
 /// A relation after a push of `delta`: the push takes its share of the distance left to the
@@ -269,7 +274,9 @@ impl World {
     // ---- the verbs ----
 
     /// The losing side of a war: the one that has lost more provinces in it (owner's rule
-    /// on §19: by the outcome, since both sides may lose something); none when even.
+    /// on §19: by the outcome, since both sides may lose something); none when even. The
+    /// terms of the peace read it (who cedes, who submits); who must accept a peace is
+    /// `forced_to_peace`.
     pub fn losing_side(&self, a: ActorId, b: ActorId) -> Option<ActorId> {
         let (lo, hi) = pair(a, b);
         let war = self.wars.get(&(lo, hi))?;
@@ -278,6 +285,34 @@ impl World {
             std::cmp::Ordering::Less => Some(lo),
             std::cmp::Ordering::Equal => None,
         }
+    }
+
+    /// The side forced to accept any peace in the war of `a` and `b` (plan §28.1, owner's
+    /// rule after the stop of (е2) on #298): the one that has lost more provinces in it
+    /// (`losing_side`) **and** whose side is the weaker by the battle formula — the strength
+    /// of its side against the other's, each with those in the war by its obligations
+    /// (`war_sides`, `army_strength`), `win_chance` below a half; at even strength nobody is
+    /// forced. A loser of provinces with the stronger side is not forced: it would take back
+    /// what it lost (measured on #298: polity 9 with 13 441 men against 6 lost undefended
+    /// provinces, accepted the peace as the loser and took them back the next tick — the
+    /// revanche that stopped (е2)).
+    pub fn forced_to_peace(&self, a: ActorId, b: ActorId, params: &Params) -> Option<ActorId> {
+        let loser = self.losing_side(a, b)?;
+        let (side_a, side_b) = self.war_sides(a, b);
+        let strength = |side: &[ActorId]| side.iter().map(|x| self.army_strength(*x)).sum::<f64>();
+        let (mine, theirs) = if loser == a { (strength(&side_a), strength(&side_b)) } else { (strength(&side_b), strength(&side_a)) };
+        let odds = if theirs <= 0.0 {
+            if mine > 0.0 {
+                1.0
+            } else {
+                0.5
+            }
+        } else if mine <= 0.0 {
+            0.0
+        } else {
+            crate::army::win_chance(mine, theirs, params)
+        };
+        (odds < 0.5).then_some(loser)
     }
 
     /// Could `a` declare war on `b`?
@@ -327,16 +362,19 @@ impl World {
         if a == b || !self.at_war(a, b) {
             return Err("not at war");
         }
-        let loser = self.losing_side(a, b);
-        let declared_by_b = self.wars[&pair(a, b)].by == Some(b);
+        let forced = self.forced_to_peace(a, b, params);
         let at_threshold = self.relation(a, b) >= params.treaty_accept_at_relation;
-        if peace_rule(loser == Some(b), loser == Some(a), declared_by_b, at_threshold, self.exhausted(b), self.war_goal_against(b, a)) {
+        if peace_rule(forced == Some(b), self.war_cause(b, a, params), at_threshold, self.exhausted(b)) {
             return Ok(());
         }
-        if declared_by_b {
-            return Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid");
-        }
-        Err("the winner wants more: the relation is below the threshold")
+        Err("the other side wants its war: the relation below the threshold, its cause alive (a war goal, or provinces lost with the better odds), its army paid")
+    }
+
+    /// Whether `b` has a cause to go on with its war against `a` (plan §28.8): a live war goal
+    /// against `a` (`war_goal_against`), or provinces lost in the war with the better odds —
+    /// the loser of provinces that is not forced (`forced_to_peace`) would take them back.
+    pub fn war_cause(&self, b: ActorId, a: ActorId, params: &Params) -> bool {
+        self.war_goal_against(b, a) || (self.losing_side(a, b) == Some(b) && self.forced_to_peace(a, b, params) != Some(b))
     }
 
     /// Whether a polity's army is short of its pay this tick — exhausted, by the rule of the
@@ -516,7 +554,7 @@ impl World {
             let h = self.house_of_caller(call.actor)?;
             let Target::House(g) = call.target else { return Err(VerbError::BadTarget(call.verb, "a house to marry into")) };
             let (p, q) = self.marriage_room(h, g, params).map_err(|why| VerbError::NotAvailable(call.verb, why))?;
-            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q });
+            self.open_opportunity(ActorRef::House(g), crate::opportunity::Chance::Marriage { from: h, a: p, b: q, dowry_kg: self.dowry(h, params) });
             return Ok(());
         }
         let ActorRef::Ruler(a) = call.actor else { return Err(VerbError::NotARuler(call.actor)) };

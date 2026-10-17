@@ -457,6 +457,9 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
         let mut g = Game::new(&s, params(), 12).unwrap();
         g.set_bots(false);
         g.set_player(player);
+        // The house has something to offer (the test world's houses start with nothing): the
+        // offer names the dowry (plan §28.7), and a house with nothing names none.
+        g.world_mut().post(Account::HouseTreasury(h0), Source::Test, 10_000 * 1000).unwrap();
         let call = engine2::VerbCall { actor: ActorRef::Ruler(ActorId(0)), verb: engine2::VerbId::ProposeMarriage, target: engine2::Target::House(o0) };
         let r = g.tick(&[call]).unwrap();
         assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "nobody married before the answer");
@@ -473,7 +476,9 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
     let mut g = offer(Some(ActorRef::House(o0)));
     let id = g.opportunities(ActorRef::House(o0))[0].id;
     assert!(marriage(&g.play(&answer(id, engine2::Reply::Take)).unwrap()), "taken: the two marry");
-    // The bot of a house takes a match with its own polity's ruling house.
+    // The bot of a house takes a match with its own polity's ruling house, at the dowry the
+    // offer names.
     let g = offer(None);
-    assert!(g.world().marriage_worth(o0, h0, g.params()) > 0.0);
+    let Chance::Marriage { dowry_kg, .. } = g.opportunities(ActorRef::House(o0))[0].what else { panic!("a match offered") };
+    assert!(g.world().marriage_worth(o0, h0, dowry_kg, g.params()) > 0.0);
 }

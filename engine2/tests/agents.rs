@@ -1144,8 +1144,12 @@ fn a_bot_puts_a_revolt_down_at_peace_lets_it_wait_at_war_advances_when_strong_en
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }]);
 }
 
+/// The rule of the peace (plan §28.1, §28.8): the forced side accepts any peace; a side with
+/// a cause — a live war goal, or provinces lost with the better odds — refuses below the
+/// threshold of the relation unless exhausted; a side with nothing to fight for accepts. Who
+/// declared the war does not enter.
 #[test]
-fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_war_goal_or_exhausted() {
+fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_threshold_or_exhausted_the_forced_always() {
     let p = params();
     let (s0, s1) = (ActorId(0), ActorId(1));
     let fresh = |seed: u64| {
@@ -1157,10 +1161,10 @@ fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_w
     let w = fresh(71);
     assert_eq!(w.wars[&(s0, s1)].by, Some(s0), "the declarer of record");
     assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
-    // The declarer proposes a status quo: the attacked accepts always.
+    // The declarer proposes a status quo: the attacked, with nothing to fight for, accepts.
     assert!(w.peace_room(s0, s1, &p).is_ok());
     // The attacked proposes: the declarer refuses — its goal alive, its army paid.
-    assert_eq!(w.peace_room(s1, s0, &p), Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid"));
+    assert_eq!(w.peace_room(s1, s0, &p), Err("the other side wants its war: the relation below the threshold, its cause alive (a war goal, or provinces lost with the better odds), its army paid"));
     // … accepts at the threshold,
     let mut x = fresh(72);
     x.relations.insert((s0, s1), p.treaty_accept_at_relation);
@@ -1173,17 +1177,36 @@ fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_w
     let mut x = fresh(74);
     x.actors.get_mut(&s0).unwrap().paid_share_ppm = 800_000;
     assert!(x.peace_room(s1, s0, &p).is_ok(), "the pay short");
-    // … and always when it is losing (lost more than it took).
+    // … and always when it is forced to peace (plan §28.1): lost more provinces than it took
+    // and its side the weaker by the battle formula (at even strength it is not forced).
     let mut x = fresh(75);
     x.wars.get_mut(&(s0, s1)).unwrap().taken = (0, 1);
     assert_eq!(x.losing_side(s0, s1), Some(s0));
-    assert!(x.peace_room(s1, s0, &p).is_ok(), "the losing declarer accepts always");
-    // A war of the starting facts has no declarer: a status quo is accepted both ways.
+    assert!(x.peace_room(s1, s0, &p).is_err(), "a loser of provinces at even strength is not forced");
+    let theirs = x.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).unwrap();
+    x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0));
+    assert!(x.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts always");
+    // A war of the starting facts has no declarer, and the rule does not ask (plan §28.8):
+    // the side with a live goal refuses a status quo below the threshold, the side with
+    // nothing to fight for accepts it.
     let mut x = world_of(&testworld::five_states_scenario(), 76);
     x.declare_war(s0, s1).unwrap();
     x.wars.get_mut(&(s0, s1)).unwrap().by = None;
     x.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
-    assert!(x.peace_room(s0, s1, &p).is_ok() && x.peace_room(s1, s0, &p).is_ok());
+    assert!(x.peace_room(s0, s1, &p).is_ok() && x.peace_room(s1, s0, &p).is_err());
+    // The mirror of the forced case (plan §28.8, the stop of (е2)): the attacked lost a
+    // province but has the stronger army — a cause to go on — and refuses the declarer's
+    // peace below the threshold; at the threshold it accepts.
+    let mut x = fresh(78);
+    x.wars.get_mut(&(s0, s1)).unwrap().taken = (1, 0);
+    let theirs = x.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).unwrap();
+    x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!((x.losing_side(s0, s1), x.forced_to_peace(s0, s1, &p)), (Some(s1), None));
+    assert!(x.war_cause(s1, s0, &p) && !x.war_goal_against(s1, s0), "a cause without a goal: the land lost with the better odds");
+    assert!(x.peace_room(s0, s1, &p).is_err(), "the stronger loser of a province refuses the declarer's peace");
+    x.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(x.peace_room(s0, s1, &p).is_ok(), "at the threshold it accepts");
     // The war of secession is the parent's: the parent is its declarer and wants the new
     // polity's land; the new polity accepts a status quo always.
     let s = carrier_scenario();
@@ -1472,4 +1495,120 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
             assert!(copied.is_empty(), "{file} copies a formula of the world through `params.{f}`: {copied:?}");
         }
     }
+}
+
+/// The bot sees what a player would see (owner's rule 2026-10-17, plan §28.4, §28.7):
+/// positions, owners, wars, treaties, the view and the events — not another's goals, its
+/// house's treasury, its count of the dead or its orders. Checked by injection: the hidden
+/// state of another changes, and the worth and the choices of polity 0 and of the house
+/// offered a match do not. On the code before the fix the goal of polity 2 moved what an
+/// alliance with it was worth to polity 0, and the proposer's treasury moved the house's
+/// worth of the match (checked when the guard was written). The registry of the hidden:
+/// `Actor.goals`, `Actor.manpower_deficit`, `Actor.paid_share_history_ppm` (the bot's own
+/// memory), `House.treasury` (not one's own), `Unit.destination` (not one's own).
+#[test]
+fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
+    let p = params();
+    let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    let mut w = world_of(&carrier_scenario(), 7);
+    let before = seen(&w);
+    // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
+    w.set_goal(c, GoalKind::AllianceAgainst, GoalTarget::Polity(b)).unwrap();
+    w.set_goal(b, GoalKind::Take, GoalTarget::Province(w.actors[&a].capital)).unwrap();
+    assert_eq!(seen(&w), before, "another's goals are its own");
+    // Another's count of the dead.
+    w.actors.get_mut(&b).unwrap().manpower_deficit = 1.0e6;
+    w.actors.get_mut(&c).unwrap().manpower_deficit = 1.0e6;
+    assert_eq!(seen(&w), before, "another's count of the dead is its own");
+    // Another's orders: every unit of polity 1 ordered onto polity 0's capital.
+    let capital = w.actors[&a].capital;
+    let theirs: Vec<engine2::UnitId> = w.units.iter().filter(|(_, u)| u.owner == b).map(|(u, _)| *u).collect();
+    assert!(!theirs.is_empty(), "polity 1 has units to order");
+    for u in theirs {
+        w.units.get_mut(&u).unwrap().destination = Some(capital);
+    }
+    assert_eq!(seen(&w), before, "another's orders are its own");
+    // Another house's treasury: the match offered, the proposer's treasury then grows a
+    // thousandfold — the house answers the dowry the offer named.
+    let s = all_verbs(testworld::five_states_scenario());
+    let o0 = engine2::HouseId(s.houses.keys().position(|k| k == "o0").unwrap() as u32);
+    let mut g = Game::new(&s, params(), 12).unwrap();
+    g.set_bots(false);
+    let h0 = g.world().ruling_house(a);
+    g.tick(&[VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::ProposeMarriage, target: Target::House(o0) }]).unwrap();
+    let offer = g.world().opportunities.iter().find(|o| matches!(o.what, engine2::Chance::Marriage { .. })).cloned().expect("the match offered");
+    let engine2::Chance::Marriage { dowry_kg, .. } = offer.what else { unreachable!() };
+    let answered = |w: &World| (w.bot_reply(&offer, &p), w.marriage_worth(o0, h0, dowry_kg, &p));
+    let before = answered(g.world());
+    let more = 1000 * g.world().house_treasury(h0).max(1000) * 1000;
+    g.world_mut().post(engine2::Account::HouseTreasury(h0), Source::Test, more).unwrap();
+    assert_eq!(answered(g.world()), before, "another house's treasury is its own: the offer named the dowry");
+}
+
+/// The bot's sources name no hidden state of another that has no use of one's own in them
+/// (plan §28.7): the count of the dead and a house's treasury are reached through the
+/// world's functions on the deciding actor only, never by these names. The difference between
+/// one's own and another's (`goals`, `dowry`, `recruit_room`, `destination`) is the
+/// injection's to hold (`the_bot_reads_nothing_of_another_that_a_player_would_not_see`).
+#[test]
+fn the_bots_code_names_no_hidden_state_of_another() {
+    const SOURCES: [(&str, &str); 2] = [("agents.rs", include_str!("../src/agents.rs")), ("worth.rs", include_str!("../src/worth.rs"))];
+    for (file, src) in SOURCES {
+        let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+        for hidden in ["manpower_deficit", "house_treasury("] {
+            let read: Vec<&&str> = code.iter().filter(|l| l.contains(hidden)).collect();
+            assert!(read.is_empty(), "{file} reads hidden state by name `{hidden}`: {read:?}");
+        }
+    }
+}
+
+/// The rule of the peace by the battle formula (plan §28.1, owner's rule after the stop of
+/// (е2) on #298): the side forced to accept any peace is the one that lost more provinces in
+/// the war **and** whose side is the weaker by the battle formula, counted with those in the
+/// war by its obligations (`war_sides`). Polity 9's case: the loser of undefended provinces
+/// with the stronger army is not forced — it refuses the weaker side's peace and would take
+/// back what it lost; the same loser with the smaller army is forced; a loser stronger than
+/// its enemy alone but weaker than the enemy with its ally in the war is forced; at even
+/// strength nobody is.
+#[test]
+fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_the_battle_formula() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let unit_of = |w: &World, a: ActorId| w.units.iter().find(|(_, u)| u.owner == a).map(|(u, _)| *u).expect("a unit");
+    // s0 declares on s1 and loses a province in the war.
+    let fresh = |seed: u64, allied: bool| {
+        let mut w = world_of(&testworld::five_states_scenario(), seed);
+        if allied {
+            w.ally_now(s1, s2, &p).unwrap();
+        }
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+        w.declare_war(s0, s1).unwrap();
+        w.wars.get_mut(&(s0, s1)).unwrap().taken = (0, 1);
+        assert_eq!(w.losing_side(s0, s1), Some(s0), "s0 lost more provinces");
+        w
+    };
+    // Even armies (the test world's 600 each): nobody is forced; the declarer refuses.
+    let w = fresh(81, false);
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "even strength: nobody is forced");
+    assert!(w.peace_room(s1, s0, &p).is_err(), "the declarer, not forced, wants its war");
+    // The loser of provinces with the stronger army (polity 9's case): not forced.
+    let mut w = fresh(82, false);
+    w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "the stronger loser of provinces would take them back");
+    assert!(w.peace_room(s1, s0, &p).is_err(), "it refuses the weaker side's peace");
+    assert!(w.peace_room(s0, s1, &p).is_ok(), "the attacked accepts a status quo from it");
+    // The same loser with the smaller army: forced, accepts any peace.
+    let mut w = fresh(83, false);
+    w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
+    assert_eq!(w.forced_to_peace(s1, s0, &p), Some(s0), "the same either way round");
+    assert!(w.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts");
+    // Stronger than the enemy alone, weaker than the enemy with its ally in the war: forced.
+    let mut w = fresh(84, true);
+    assert!(w.at_war(s0, s2) && w.wars[&(s0, s2)].of == Some((s0, s1)), "the ally entered by the obligation");
+    assert_eq!(w.war_sides(s0, s1), (vec![s0], vec![s1, s2]));
+    w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 300 * 1000).unwrap();
+    assert!(w.army_strength(s0) > w.army_strength(s1) && w.army_strength(s0) < w.army_strength(s1) + w.army_strength(s2));
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone");
 }
