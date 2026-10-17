@@ -72,21 +72,24 @@ use crate::world::{Treaty, TreatyKind, World, WorldError};
 
 pub(crate) use crate::army::pair;
 
-/// The rule of the peace (§19, owner's rule on #291; plan §28.1) on the state of a war: would
-/// `b` accept a peace from `a`? A `b` forced to peace always (`World::forced_to_peace`: it
-/// lost more provinces in the war and its side is the weaker by the battle formula); a `b`
-/// that declared — at the threshold of the relation, exhausted, or with its war goal gone; an
-/// attacked `b` — unless `a` is the forced side and the relation is below the threshold. One
-/// function for `peace_room` and for the bots' worth of a war (E3 (е2)): whether a beaten
-/// side can end its war.
-pub fn peace_rule(b_forced: bool, a_forced: bool, declared_by_b: bool, at_threshold: bool, b_exhausted: bool, b_wants_war: bool) -> bool {
+/// The rule of the peace (§19; plan §28.1 and §28.8, owner's decision 2026-10-17) on the
+/// state of a war: would `b` accept a peace from `a`? A `b` **forced** to peace always
+/// (`World::forced_to_peace`: it lost more provinces in the war and its side is the weaker by
+/// the battle formula); a `b` with a **cause** to go on — a live war goal against `a`, or
+/// provinces lost with the better odds — only at the threshold of the relation or exhausted;
+/// a `b` with nothing to fight for always. Who declared the war does not enter: the rule of
+/// #291 bound the attacked to accept the declarer's peace, and an attacked side that had lost
+/// provinces with the stronger army took the peace and declared again the next tick (68 of
+/// 97 renewals the tick after a peace, plan §28.8). One function for `peace_room` and for
+/// the bots' worth of a war (E3 (е2)): whether a beaten side can end its war.
+pub fn peace_rule(b_forced: bool, b_has_cause: bool, at_threshold: bool, b_exhausted: bool) -> bool {
     if b_forced {
         return true;
     }
-    if declared_by_b {
-        return at_threshold || b_exhausted || !b_wants_war;
+    if b_has_cause {
+        return at_threshold || b_exhausted;
     }
-    !a_forced || at_threshold
+    true
 }
 
 /// A relation after a push of `delta`: the push takes its share of the distance left to the
@@ -360,15 +363,18 @@ impl World {
             return Err("not at war");
         }
         let forced = self.forced_to_peace(a, b, params);
-        let declared_by_b = self.wars[&pair(a, b)].by == Some(b);
         let at_threshold = self.relation(a, b) >= params.treaty_accept_at_relation;
-        if peace_rule(forced == Some(b), forced == Some(a), declared_by_b, at_threshold, self.exhausted(b), self.war_goal_against(b, a)) {
+        if peace_rule(forced == Some(b), self.war_cause(b, a, params), at_threshold, self.exhausted(b)) {
             return Ok(());
         }
-        if declared_by_b {
-            return Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid");
-        }
-        Err("the winner wants more: the relation is below the threshold")
+        Err("the other side wants its war: the relation below the threshold, its cause alive (a war goal, or provinces lost with the better odds), its army paid")
+    }
+
+    /// Whether `b` has a cause to go on with its war against `a` (plan §28.8): a live war goal
+    /// against `a` (`war_goal_against`), or provinces lost in the war with the better odds —
+    /// the loser of provinces that is not forced (`forced_to_peace`) would take them back.
+    pub fn war_cause(&self, b: ActorId, a: ActorId, params: &Params) -> bool {
+        self.war_goal_against(b, a) || (self.losing_side(a, b) == Some(b) && self.forced_to_peace(a, b, params) != Some(b))
     }
 
     /// Whether a polity's army is short of its pay this tick — exhausted, by the rule of the

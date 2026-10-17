@@ -274,10 +274,11 @@ pub struct War {
     /// The principal pair this war is an obligation of (an ally's, a lord's, a vassal's
     /// entry); it ends with their peace. None for a war of its own.
     pub of: Option<(ActorId, ActorId)>,
-    /// Who declared it (E3 (б), owner's rule on #291): the attacked accepts a peace always,
-    /// the declarer only at the threshold of the relation, when its war goal is gone, or
-    /// when it is exhausted (`diplomacy::peace_room`). An ally's entry is the attacker's
-    /// side's declaration; a war of the starting facts has none.
+    /// Who declared it (E3 (б)): a fact of the record and the chronicle, and the sign a
+    /// player sees of the other side's cause (plan §28.7). The rule of the peace no longer
+    /// reads it (plan §28.8: who declared does not matter — the forced side accepts, the side
+    /// with a cause refuses below the threshold, `diplomacy::peace_rule`). An ally's entry is
+    /// the attacker's side's declaration; a war of the starting facts has none.
     pub by: Option<ActorId>,
 }
 

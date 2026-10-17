@@ -497,8 +497,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     assert_eq!(w.treaty(s0, s1).unwrap().until, Tick(w.tick.0 + p.treaty_term_ticks));
     assert!((w.war_price(s0, s1, &p) - p.legitimacy_cost_declare_war * p.treaty_breach_factor * p.treaty_fresh_breach_factor).abs() < 1e-9, "war again before the term is a breach — a fresh one");
     assert_eq!(w.peace_room(s0, s1, &p), Err("not at war"));
-    // The winner takes a province: the loser's proposal is refused at the norm of war, the
-    // winner's accepted; the loser accepts at the threshold.
+    // The winner takes a province: the loser's proposal is refused at the norm of war; the
+    // winner's is refused too while the loser, with its ally, has the better odds (plan
+    // §28.8 — a cause to go on); at the threshold both go through.
     let mut w = testworld::world(13);
     w.ally_now(s1, s3, &p).unwrap();
     // The declarer refuses a status quo or the loser's peace only while it has a war goal
@@ -511,14 +512,18 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     assert_eq!(w.losing_side(s0, s1), Some(s1));
     assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
     let err = w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap_err();
-    assert!(err.to_string().contains("the declarer wants its war"), "{err}");
+    assert!(err.to_string().contains("the other side wants its war"), "{err}");
     assert!(w.at_war(s0, s1));
     w.relations.insert((s0, s1), p.treaty_accept_at_relation);
     assert!(w.peace_room(s1, s0, &p).is_ok(), "at the threshold the winner accepts");
     w.relations.insert((s0, s1), 20.0);
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "s1 lost a province, but with its ally its side is the stronger");
+    let err = w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap_err();
+    assert!(err.to_string().contains("the other side wants its war"), "the stronger loser of a province refuses the declarer's peace: {err}");
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation);
     let before = w.tick;
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
-    assert!(!w.at_war(s0, s1), "the attacked accepts the declarer's peace");
+    assert!(!w.at_war(s0, s1), "at the threshold it accepts the declarer's peace");
     assert!(!w.at_war(s0, s3), "the ally's war was an obligation of this one and closed with it");
     assert_eq!(w.treaty(s0, s1).map(|t| t.kind), Some(TreatyKind::Peace));
     assert_eq!(w.lord_of(s1), None, "one province of five lost: no submission");
@@ -531,6 +536,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
         take(&mut w, s0, at(1, y), &p);
     }
     assert_eq!(w.actors[&s1].provinces.len(), 2);
+    // Forced: three provinces lost and the weaker side (plan §28.1).
+    w.post(engine2::Account::Soldiers(w.units_of(s0)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     let r = {
         w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
         w.tick(&p).unwrap()
@@ -544,6 +552,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s1, at(0, 4), &p);
     assert_eq!(w.losing_side(s0, s1), Some(s0));
+    // The lord, beaten and the weaker, is forced to the vassal's peace.
+    w.post(engine2::Account::Soldiers(w.units_of(s1)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert_eq!(w.lord_of(s1), None, "released");
     assert!(!w.at_war(s0, s1));

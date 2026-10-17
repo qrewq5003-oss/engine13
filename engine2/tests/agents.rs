@@ -1144,8 +1144,12 @@ fn a_bot_puts_a_revolt_down_at_peace_lets_it_wait_at_war_advances_when_strong_en
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }]);
 }
 
+/// The rule of the peace (plan §28.1, §28.8): the forced side accepts any peace; a side with
+/// a cause — a live war goal, or provinces lost with the better odds — refuses below the
+/// threshold of the relation unless exhausted; a side with nothing to fight for accepts. Who
+/// declared the war does not enter.
 #[test]
-fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_war_goal_or_exhausted() {
+fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_threshold_or_exhausted_the_forced_always() {
     let p = params();
     let (s0, s1) = (ActorId(0), ActorId(1));
     let fresh = |seed: u64| {
@@ -1157,10 +1161,10 @@ fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_w
     let w = fresh(71);
     assert_eq!(w.wars[&(s0, s1)].by, Some(s0), "the declarer of record");
     assert!(w.relation(s0, s1) < p.treaty_accept_at_relation);
-    // The declarer proposes a status quo: the attacked accepts always.
+    // The declarer proposes a status quo: the attacked, with nothing to fight for, accepts.
     assert!(w.peace_room(s0, s1, &p).is_ok());
     // The attacked proposes: the declarer refuses — its goal alive, its army paid.
-    assert_eq!(w.peace_room(s1, s0, &p), Err("the declarer wants its war: the relation below the threshold, its war goal alive, its army paid"));
+    assert_eq!(w.peace_room(s1, s0, &p), Err("the other side wants its war: the relation below the threshold, its cause alive (a war goal, or provinces lost with the better odds), its army paid"));
     // … accepts at the threshold,
     let mut x = fresh(72);
     x.relations.insert((s0, s1), p.treaty_accept_at_relation);
@@ -1183,12 +1187,26 @@ fn the_attacked_accepts_a_peace_always_the_declarer_at_the_threshold_without_a_w
     x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
     assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0));
     assert!(x.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts always");
-    // A war of the starting facts has no declarer: a status quo is accepted both ways.
+    // A war of the starting facts has no declarer, and the rule does not ask (plan §28.8):
+    // the side with a live goal refuses a status quo below the threshold, the side with
+    // nothing to fight for accepts it.
     let mut x = world_of(&testworld::five_states_scenario(), 76);
     x.declare_war(s0, s1).unwrap();
     x.wars.get_mut(&(s0, s1)).unwrap().by = None;
     x.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
-    assert!(x.peace_room(s0, s1, &p).is_ok() && x.peace_room(s1, s0, &p).is_ok());
+    assert!(x.peace_room(s0, s1, &p).is_ok() && x.peace_room(s1, s0, &p).is_err());
+    // The mirror of the forced case (plan §28.8, the stop of (е2)): the attacked lost a
+    // province but has the stronger army — a cause to go on — and refuses the declarer's
+    // peace below the threshold; at the threshold it accepts.
+    let mut x = fresh(78);
+    x.wars.get_mut(&(s0, s1)).unwrap().taken = (1, 0);
+    let theirs = x.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).unwrap();
+    x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!((x.losing_side(s0, s1), x.forced_to_peace(s0, s1, &p)), (Some(s1), None));
+    assert!(x.war_cause(s1, s0, &p) && !x.war_goal_against(s1, s0), "a cause without a goal: the land lost with the better odds");
+    assert!(x.peace_room(s0, s1, &p).is_err(), "the stronger loser of a province refuses the declarer's peace");
+    x.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(x.peace_room(s0, s1, &p).is_ok(), "at the threshold it accepts");
     // The war of secession is the parent's: the parent is its declarer and wants the new
     // polity's land; the new polity accepts a status quo always.
     let s = carrier_scenario();
