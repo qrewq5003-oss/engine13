@@ -1111,13 +1111,14 @@ fn an_order_is_a_channel_of_the_contract_a_ruler_commands_its_units_and_the_ruli
 }
 
 /// At peace the bot puts a revolt down with the nearest unit and keeps the rest at home. At
-/// war the three duties are weighed in wheat (E3 (е2), plan §26, §28.2): with a goal against
-/// the enemy and equal armies the war is worth going on with — the unit marches on the wanted
-/// province and the revolt waits; outnumbered five to one the war is worth less than nothing
-/// and the unit holds the capital; without a goal there is nothing to win and it stays home;
-/// attacked, with an enemy unit a tick's march from its land, it goes to the threatened
-/// province whose defence is worth most; and with a goal worth more than that defence it
-/// campaigns on the enemy's capital instead.
+/// war the three duties are weighed in wheat (E3 (е2), plan §26, §28.2, §28.9): with a goal
+/// against the enemy and the stronger army the war is worth going on with — the unit marches
+/// on the wanted province and the revolt waits; at equal strength a war for one province
+/// risks as much as it wins and is not (plan §28.9: the land at risk, one battle at a time);
+/// outnumbered five to one it is worth less than nothing and the unit holds the capital;
+/// without a goal there is nothing to win and it stays home; attacked, with an enemy unit a
+/// tick's march from its land, it goes to the threatened province whose defence is worth
+/// most; and with a goal worth more than that defence it campaigns on the enemy's capital.
 #[test]
 fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_and_the_suppression_in_wheat() {
     let p = params();
@@ -1151,11 +1152,13 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     assert!(claims.contains(&Target::Province(at(1, 2))) && claims.contains(&Target::Actor(ActorId(2))), "{claims:?}");
     w.declare_war(s0, s1).unwrap();
     w.rise_now(at(0, 2), &p).unwrap();
-    assert!(w.war_worth(s0, s1, false, 0.0, &p) > 0.0, "the war is worth going on with");
-    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "equal armies and a goal: the campaign; the revolt waits");
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) <= 0.0, "at equal strength a war for one province risks as much as it wins");
+    w.post(engine2::Account::Soldiers(u0), Source::Test, 1200 * 1000).unwrap();
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) > 0.0, "three to one, the war is worth going on with");
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "the stronger army with a goal: the campaign; the revolt waits");
     // Outnumbered five to one the war is worth less than nothing: hold the capital.
     let u1 = w.units_of(s1)[0];
-    w.post(engine2::Account::Soldiers(u1), Source::Test, (3000 - w.soldiers(u1)) * 1000).unwrap();
+    w.post(engine2::Account::Soldiers(u1), Source::Test, (9000 - w.soldiers(u1)) * 1000).unwrap();
     assert!(w.war_worth(s0, s1, false, 0.0, &p) < 0.0);
     assert!(w.bot_orders(s0, &p).is_empty(), "outnumbered: hold the capital, where the unit stands");
     // Without a goal there is nothing to win: home.
@@ -1169,6 +1172,7 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     w.declare_war(s1, s0).unwrap();
     let u1 = w.units_of(s1)[0];
     w.units.get_mut(&u1).unwrap().position = at(1, 2);
+    w.post(engine2::Account::Soldiers(u0), Source::Test, 1200 * 1000).unwrap();
     let (mine, theirs) = (w.unit_strength(u0), w.unit_strength(u1));
     let threatened: Vec<ProvinceId> = w.actors[&s0].provinces.iter().copied().filter(|q| w.reaches_in_a_tick(s1, at(1, 2), *q, &p)).collect();
     assert!(threatened.contains(&at(0, 2)) && threatened.len() > 1, "{threatened:?}");

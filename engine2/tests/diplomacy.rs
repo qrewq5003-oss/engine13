@@ -765,5 +765,5 @@ fn a_declaration_states_its_claim_and_the_claimant_has_a_cause_until_it_is_met()
     // The land within the enemy's reach: on the test world a tick's march covers it all.
     let reach = w.land_in_reach(s1, s0, 1, &p);
     assert!(reach.contains_key(&at(0, 0)) && reach.len() == w.actors[&s0].provinces.len(), "{reach:?}");
-    assert!(reach[&at(0, 4)] < reach[&at(0, 0)], "the nearest province falls first: {reach:?}");
+    assert!(reach[&at(0, 0)] < reach[&at(0, 4)], "the province nearest to the enemy's unit falls first: {reach:?}");
 }

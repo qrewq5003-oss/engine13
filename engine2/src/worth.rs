@@ -72,7 +72,13 @@ pub struct WarTerms {
     to_submit: u32,
     soldiers: f64,
     head: f64,
-    campaign: f64,
+    /// Years of income the take the dead would have paid is short per head and per year of
+    /// the shortfall; the ticks of the shortfall by the growth rule, in years.
+    dead_years: f64,
+    /// The pay of the campaign beyond the pay at home, years of income per unit of strength
+    /// sent for the war's length; the strength the ruler would send (the units it commands).
+    campaign_per_strength: f64,
+    campaign_strength: f64,
     income: f64,
     years: f64,
 }
@@ -479,7 +485,9 @@ impl World {
             to_submit,
             soldiers: self.army_size(a) as f64,
             head: if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 },
-            campaign: if self.war_goal_against(a, b) { self.campaign_extra(a, self.army_size(a), ticks, params) } else { 0.0 },
+            dead_years: self.regrowth_shortfall_ticks(a, params) / 2.0,
+            campaign_per_strength: if self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
+            campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
         }
@@ -497,7 +505,10 @@ impl World {
     /// the enemy taking it one battle at a time, the k-th province with the odds of k battles
     /// lost, for the horizon as the enemy holds it, with the legitimacy of ceding it, and the
     /// tribute of a submission once enough is lost (plan §28.9); the soldiers the battle
-    /// costs (А6), heads gone from the tax base for the horizon; the pay of the campaign. The
+    /// costs (А6), heads gone from the tax base while the people grow back by the world's
+    /// growth rule (`regrowth_shortfall_ticks`; their place in the cohort of service is the
+    /// ceiling's, `levy_ceiling`, counted once); the pay of the campaign for the strength sent
+    /// (plan §28.10, owner's rules: each priced as the world charges it). The
     /// odds are the battle formula's over the sides of the war (`war_odds`). `unpaid`: an
     /// unpaid army is exhausted and the peace comes at the first offer — the goals are not
     /// reached. `extra`: strength added to `a`'s (a levy, a hire; a unit sent away, negative).
@@ -518,7 +529,8 @@ impl World {
         }
         lose += q.powi(t.to_submit as i32) * t.tribute * t.years;
         let lost = t.soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
-        (gain - lose - lost * t.head * t.years) / t.income - t.campaign - blow
+        let campaign = t.campaign_per_strength * (t.campaign_strength + extra).max(0.0);
+        (gain - lose - lost * t.head * t.dead_years) / t.income - campaign - blow
     }
 
     /// What `a`'s war with `b` is worth to `a` (`war_terms`, `war_worth_of`), the terms and
@@ -543,11 +555,13 @@ impl World {
         win_chance(defenders, threat, params) * self.take_of(a, p, params) * held * years / income
     }
 
-    /// What `n` soldiers on campaign for `ticks` cost a polity beyond their pay at home, in
-    /// years of its income (`campaign_pay_per_tick` against `pay_per_tick`).
-    pub fn campaign_extra(&self, a: ActorId, n: i64, ticks: f64, params: &Params) -> f64 {
+    /// What a unit of strength on campaign for `ticks` costs a polity beyond its pay at home,
+    /// in years of its income (`campaign_pay_per_tick` against `pay_per_tick`, as the world
+    /// charges the units off their land for the march and the siege, plan §28.10).
+    pub fn campaign_extra_per_strength(&self, a: ActorId, ticks: f64, params: &Params) -> f64 {
         let income = self.yearly_income(a, params).max(1) as f64;
-        (campaign_pay_per_tick(n, params) - pay_per_tick(n, params)) as f64 * ticks / income
+        let n = 1000;
+        (campaign_pay_per_tick(n, params) - pay_per_tick(n, params)) as f64 * ticks / income / World::new_soldiers_strength(n)
     }
 
     /// The ticks `a`'s war on `b` is expected to take: the march from `a`'s capital to the

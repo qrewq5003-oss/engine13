@@ -111,6 +111,25 @@ impl World {
     }
 
     /// The population phase of a tick.
+    /// The people-ticks a polity is short of over the goal's horizon for every head it loses,
+    /// by the growth rule of `phase_population` (plan §28.10, owner's rule: the dead cost what
+    /// the world does with them — the take they would have paid while the people grow back):
+    /// the logistic growth closes a gap δ below the capacity at the rate r·(2P/K − 1) a tick
+    /// near P — the faster the fuller the land — and widens it below half the capacity;
+    /// integrated over `goal.horizon` ticks, at the polity's people over its capacity.
+    pub fn regrowth_shortfall_ticks(&self, a: crate::ids::ActorId, params: &Params) -> f64 {
+        let (people, capacity) = self.actors[&a].provinces.iter().fold((0i64, 0i64), |(p, k), q| (p + self.population(*q), k + self.provinces[q].capacity as i64));
+        let r = params.population_growth_ppm_per_tick as f64 / 1e6;
+        let fill = if capacity > 0 { people as f64 / capacity as f64 } else { 1.0 };
+        let lambda = r * (2.0 * fill - 1.0);
+        let horizon = f64::from(params.goal_horizon_ticks);
+        if lambda.abs() < 1e-9 {
+            horizon
+        } else {
+            (1.0 - (-lambda * horizon).exp()) / lambda
+        }
+    }
+
     pub(crate) fn phase_population(&mut self, params: &Params) -> Result<(), WorldError> {
         let ids: Vec<ProvinceId> = self.provinces.keys().copied().collect();
         let plague = self.diseases.contains(&Disease::Plague);

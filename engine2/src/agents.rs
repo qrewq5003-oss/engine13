@@ -571,13 +571,12 @@ impl World {
     }
 
     /// What `n` soldiers kept for `a`'s wars (their terms `wars`) cost it, in years of its
-    /// income: their pay and the heads away from the land for the wars' expected length — the
-    /// longest of its fronts — and, when a war its goals want is on, the pay of the campaign
-    /// beyond it (plan §27.2).
+    /// income: their pay at home and the heads away from the land for the wars' expected
+    /// length — the longest of its fronts. The pay of the campaign beyond it is the war's
+    /// (`war_worth_of`, with the strength sent — plan §28.10), counted once.
     fn war_soldiers_cost(&self, a: ActorId, wars: &[crate::worth::WarTerms], n: i64, params: &Params) -> f64 {
         let ticks = wars.iter().map(|t| t.ticks).fold(0.0, f64::max);
-        let offensive = wars.iter().any(|t| self.war_goal_against(a, t.b));
-        self.soldiers_cost(a, n, ticks, params) + if offensive { self.campaign_extra(a, n, ticks, params) } else { 0.0 }
+        self.soldiers_cost(a, n, ticks, params)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
