@@ -116,20 +116,47 @@ impl World {
         }
         self.war_between(attacker, victim, None, attacker);
         let principal = Some(pair(attacker, victim));
+        let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
+        for x in with_victim {
+            self.war_between(x, attacker, principal, attacker);
+        }
+        for x in with_attacker {
+            self.war_between(x, victim, principal, x);
+        }
+        Ok(())
+    }
+
+    /// Who enters a war of `attacker` on `victim` by its obligations (§19): the victim's
+    /// allies, lord and vassals against the attacker, the attacker's vassals against the
+    /// victim — living, and not bound by a peace in force with the other side. The one rule
+    /// the war opens by and the sides of a war not yet open are read by (`war_sides`).
+    pub fn war_entrants(&self, attacker: ActorId, victim: ActorId) -> (Vec<ActorId>, Vec<ActorId>) {
         let mut with_victim: Vec<ActorId> = self.allies_of(victim);
         with_victim.extend(self.lord_of(victim));
         with_victim.extend(self.vassals_of(victim));
-        for x in with_victim {
-            if x != attacker && self.alive(x) && !self.peace_in_force(x, attacker) {
-                self.war_between(x, attacker, principal, attacker);
-            }
+        let with_victim = with_victim.into_iter().filter(|x| *x != attacker && self.alive(*x) && !self.peace_in_force(*x, attacker)).collect();
+        let with_attacker = self.vassals_of(attacker).into_iter().filter(|x| *x != victim && self.alive(*x) && !self.peace_in_force(*x, victim)).collect();
+        (with_victim, with_attacker)
+    }
+
+    /// The two sides of the war of `a` and `b` (plan §28.1, owner's answer 1): `a` with
+    /// those at war with `b` by this war's obligations (`War::of` names the principal pair)
+    /// and `b` with those at war with `a` by them; for a war not yet open, the sides a
+    /// declaration by `a` would make (`war_entrants`). The one function the rule of the peace
+    /// (`forced_to_peace`) and the bots' odds of a war read, so that the two do not part.
+    pub fn war_sides(&self, a: ActorId, b: ActorId) -> (Vec<ActorId>, Vec<ActorId>) {
+        let principal = pair(a, b);
+        if self.wars.contains_key(&principal) {
+            let with = |x: ActorId, against: ActorId| -> Vec<ActorId> {
+                let mut side = vec![x];
+                side.extend(self.actors.keys().copied().filter(|c| *c != x && *c != against && self.alive(*c) && self.wars.get(&pair(*c, against)).is_some_and(|w| w.of == Some(principal))));
+                side
+            };
+            (with(a, b), with(b, a))
+        } else {
+            let (with_b, with_a) = self.war_entrants(a, b);
+            (std::iter::once(a).chain(with_a).collect(), std::iter::once(b).chain(with_b).collect())
         }
-        for x in self.vassals_of(attacker) {
-            if x != victim && self.alive(x) && !self.peace_in_force(x, victim) {
-                self.war_between(x, victim, principal, x);
-            }
-        }
-        Ok(())
     }
 
     /// Record a war between a pair if there is none, with its event; `of` names the

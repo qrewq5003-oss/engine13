@@ -518,7 +518,7 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.relations.insert((s0, s1), 20.0);
     let before = w.tick;
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
-    assert!(!w.at_war(s0, s1), "the loser accepts the winner's peace always");
+    assert!(!w.at_war(s0, s1), "the attacked accepts the declarer's peace");
     assert!(!w.at_war(s0, s3), "the ally's war was an obligation of this one and closed with it");
     assert_eq!(w.treaty(s0, s1).map(|t| t.kind), Some(TreatyKind::Peace));
     assert_eq!(w.lord_of(s1), None, "one province of five lost: no submission");
@@ -547,11 +547,15 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert_eq!(w.lord_of(s1), None, "released");
     assert!(!w.at_war(s0, s1));
-    // A rebel that lost stays a vassal.
+    // A rebel that lost stays a vassal: it lost a province and, once its side is the weaker,
+    // it is forced to the lord's peace (plan §28.1; at even strength it fights on).
     let mut w = testworld::world(16);
     w.make_vassal(s1, s0).unwrap();
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s0, at(1, 4), &p);
+    let lords = w.units_of(s0)[0];
+    w.post(engine2::Account::Soldiers(lords), engine2::Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
     assert_eq!(w.lord_of(s1), Some(s0), "the rebel lost: still a vassal");
     let _ = s2;

@@ -634,7 +634,7 @@ impl World {
                 // losing war is worth ending, and with nothing to win the peace is wanted.
                 // (Measured: «stronger» was every larger army here and half again as large at
                 // the declaration, and a bot ended the next tick the war it had just declared.)
-                let losing = self.losing_side(a, b) == Some(a);
+                let losing = self.forced_to_peace(a, b, params) == Some(a);
                 let wanted = self.war_wanted(a, b);
                 let strength = if self.outweighed(a, b, params) { 1.0 } else { 0.0 };
                 let mut u = strength - wanted;
