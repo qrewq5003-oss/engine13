@@ -95,11 +95,17 @@ impl World {
         a != b && self.wars.contains_key(&pair(a, b))
     }
 
-    /// Open a war without a price. For the tests only: the verb `declare_war` pays in
-    /// legitimacy (`diplomacy.rs`) and then comes here.
+    /// Open a war without a price, claiming the polity's submission. For the tests only:
+    /// the verb `declare_war` pays in legitimacy (`diplomacy.rs`) and then comes here.
     #[cfg(feature = "testing")]
     pub fn declare_war(&mut self, a: ActorId, b: ActorId) -> Result<(), WorldError> {
-        self.open_war(a, b)
+        self.open_war(a, b, Some(crate::world::WarAim::Polity(b)))
+    }
+
+    /// Open a war on the owner of `q` without a price, claiming `q`. For the tests only.
+    #[cfg(feature = "testing")]
+    pub fn declare_war_for(&mut self, a: ActorId, q: ProvinceId) -> Result<(), WorldError> {
+        self.open_war(a, self.provinces[&q].owner, Some(crate::world::WarAim::Province(q)))
     }
 
     /// The war itself, with its obligations (E2 step 7, plan §19.2 p. 3–4, owner's rule):
@@ -108,7 +114,7 @@ impl World {
     /// declaration**: it costs nothing, breaks no treaty, and pulls nobody further in, so one
     /// war does not light the world in a chain. An entrant whose peace with the other side
     /// is in force stays out: the treaty holds.
-    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId) -> Result<(), WorldError> {
+    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId, aim: Option<crate::world::WarAim>) -> Result<(), WorldError> {
         if attacker == victim {
             return Err(WorldError::WarWithSelf(attacker));
         }
@@ -117,14 +123,14 @@ impl World {
                 return Err(WorldError::UnknownActor(x));
             }
         }
-        self.war_between(attacker, victim, None, attacker);
+        self.war_between(attacker, victim, None, attacker, aim);
         let principal = Some(pair(attacker, victim));
         let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
         for x in with_victim {
-            self.war_between(x, attacker, principal, attacker);
+            self.war_between(x, attacker, principal, attacker, None);
         }
         for x in with_attacker {
-            self.war_between(x, victim, principal, x);
+            self.war_between(x, victim, principal, x, None);
         }
         Ok(())
     }
@@ -163,12 +169,13 @@ impl World {
     }
 
     /// Record a war between a pair if there is none, with its event; `of` names the
-    /// principal pair when the war is an obligation of theirs.
-    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>, by: ActorId) {
+    /// principal pair when the war is an obligation of theirs; `aim` is the claim the
+    /// declaration stated (none for an entrant).
+    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>, by: ActorId, aim: Option<crate::world::WarAim>) {
         let (a, b) = pair(a, b);
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
-            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by) });
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by), aim });
             self.emit(Event::War { a, b });
         }
     }

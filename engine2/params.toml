@@ -140,6 +140,14 @@ band = [0.005, 0.03]
 unit = "soldiers per inhabitant"
 e0 = "А11"
 
+# E0 А11 — under arms in war, as a share of population: 2–3 % (Jones; Mallett–Hale; the
+# source's band, owner's rule 2026-10-17 — the bots' acceptance of E3 (е2), plan §28.9).
+[army.observed_share_at_war]
+kind = "b"
+band = [0.02, 0.03]
+unit = "soldiers per inhabitant"
+e0 = "А11"
+
 # E0 А12 — share of years a polity spends at war (Ammianus; Mallett).
 [war.observed_share_of_years]
 kind = "b"

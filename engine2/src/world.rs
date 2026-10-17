@@ -286,6 +286,22 @@ pub struct War {
     /// with a cause refuses below the threshold, `diplomacy::peace_rule`). An ally's entry is
     /// the attacker's side's declaration; a war of the starting facts has none.
     pub by: Option<ActorId>,
+    /// The claim the declaration stated (plan §28.9, owner's decision 2026-10-17): the
+    /// province named, or the polity's submission — the target of `declare_war`, a public
+    /// act. The declarer has a cause to go on until the claim is met
+    /// (`diplomacy::war_cause`, `claim_met`); met, it accepts a peace or offers one. None for
+    /// an entrant's war of obligation and a war of the starting facts.
+    pub aim: Option<WarAim>,
+}
+
+/// What a declaration of war claims (plan §28.9): the province named, or the submission of
+/// the polity — met when the province is the claimant's, or when the polity would submit at a
+/// peace now (down to half the land it held when the war began, `make_peace_between`), is
+/// the claimant's vassal already, or has fallen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WarAim {
+    Province(ProvinceId),
+    Polity(ActorId),
 }
 
 /// What a treaty binds a pair to (E2 step 7).
@@ -856,7 +872,7 @@ impl World {
             }
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
-            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None });
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

@@ -106,9 +106,11 @@ pub fn order_application(world: &World, orders: &[Order]) -> Vec<Order> {
 
 /// The bond a call makes between a pair — a peace or a war — that the other side of the
 /// pair may make in the same tick too; the second is nothing.
-fn bond_of(call: &VerbCall) -> Option<(VerbId, (ActorId, ActorId))> {
+fn bond_of(world: &World, call: &VerbCall) -> Option<(VerbId, (ActorId, ActorId))> {
     match (call.verb, call.actor, call.target) {
         (VerbId::MakePeace | VerbId::DeclareWar, ActorRef::Ruler(a), Target::Actor(b)) if a != b => Some((call.verb, crate::army::pair(a, b))),
+        // A declaration claiming a province is a war on its owner (plan §28.9).
+        (VerbId::DeclareWar, ActorRef::Ruler(a), Target::Province(q)) => world.provinces.get(&q).map(|pr| pr.owner).filter(|b| *b != a).map(|b| (call.verb, crate::army::pair(a, b))),
         _ => None,
     }
 }
@@ -325,7 +327,7 @@ impl Simulation for Game {
             let mut probe = self.world.clone();
             let mut bonded: std::collections::BTreeSet<(VerbId, (ActorId, ActorId))> = std::collections::BTreeSet::new();
             for call in application_order(&self.world, player) {
-                let bond = bond_of(&call);
+                let bond = bond_of(&self.world, &call);
                 if bond.is_some_and(|k| bonded.contains(&k)) {
                     continue;
                 }
@@ -363,7 +365,7 @@ impl Simulation for Game {
         for call in application_order(&self.world, &calls) {
             // A peace or a war the other side of the pair already made this tick is nothing
             // (owner's rule on #291): both proposed it, it is made once.
-            let bond = bond_of(&call);
+            let bond = bond_of(&self.world, &call);
             if bond.is_some_and(|k| bonded.contains(&k)) {
                 continue;
             }

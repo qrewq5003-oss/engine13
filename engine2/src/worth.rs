@@ -50,19 +50,26 @@ use crate::economy::{campaign_pay_per_tick, collection_share, pay_per_tick, trib
 use crate::ids::{ActorId, HouseId, PersonId, ProvinceId};
 use crate::params::Params;
 use crate::politics::{drift_toward, natural_death_hazard, saturate, usurpation_hazard, violent_death_hazard};
-use crate::world::{Standing, World};
+use crate::world::{Standing, WarAim, World};
 
 /// The terms of `a`'s war with `b` that do not move with the strength `a` puts in (E3 (е2),
 /// plan §28.8 — read once per decision, `World::war_terms`; the worth at any strength is
-/// `World::war_worth_of`): the stake of the goals (kg a year), the take of the province the
-/// enemy would reach first as the enemy holds it, the soldiers and what a head pays, the
-/// pay of the campaign, the war's expected length in ticks.
+/// `World::war_worth_of`): the stake of the goals (kg a year); the land at risk, nearest to
+/// the enemy first, each province's take as the enemy would hold it (kg a year) — the
+/// enemy takes it one battle at a time, so the k-th falls with the odds of k battles lost
+/// (plan §28.9, owner's rule (B)); the legitimacy of ceding a province (years of income);
+/// the tribute a submission would cost (kg a year) and the provinces still to lose before
+/// it; the soldiers and what a head pays; the pay of the campaign; the war's expected length
+/// in ticks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WarTerms {
     pub b: ActorId,
     pub ticks: f64,
     stake: f64,
-    lost_held: f64,
+    at_risk: Vec<f64>,
+    blow: f64,
+    tribute: f64,
+    to_submit: u32,
     soldiers: f64,
     head: f64,
     campaign: f64,
@@ -425,32 +432,51 @@ impl World {
         win_chance(mine, theirs, params)
     }
 
-    /// Where `b`'s men would go in a war on `a`, as `a` can see it (plan §28.7, owner's
-    /// rule: not by `b`'s goals, which are its own): the province of `a` nearest to `b`'s
-    /// units by the movement rule from where they stand (`nearest_land_of`; the fewest
-    /// steps, then the lower id), else `a`'s capital. One reading for the province a war
-    /// puts at risk and for the threat the defence answers.
-    pub fn expected_target(&self, b: ActorId, a: ActorId) -> ProvinceId {
-        self.units_of(b).iter().filter_map(|u| self.nearest_land_of(b, a, self.units[u].position)).map(|(p, steps)| (steps, p)).min().map(|(_, p)| p).unwrap_or(self.actors[&a].capital)
-    }
-
     /// The terms of `a`'s war with `b` that do not move with the strength `a` puts in
-    /// (`WarTerms`), read once per decision: what its goals want of `b` (`war_stake`); the
-    /// take of the province `b`'s units would reach first (`expected_target`), held by `b` as
-    /// long as `a` does not take it back nor it rises (plan §27.3, (б)); the soldiers the
-    /// battle would cost and what a head pays; the pay of the campaign when `a`'s goals want
-    /// the war (plan §27.2); the war's expected length (`war_ticks`).
-    pub fn war_terms(&self, a: ActorId, b: ActorId, params: &Params) -> WarTerms {
-        let lost_province = self.expected_target(b, a);
-        let held_by_b = (1.0 - self.retake_odds(b, a, a, params)) * (1.0 - self.revolt_share(b, lost_province, params));
+    /// (`WarTerms`), read once per decision: what its goals want of `b` (`war_stake`); what
+    /// a lost war costs (plan §28.9, owner's rule (B), all of it visible) — against a claim
+    /// `b` stated, the province it named, or for the polity's submission the land within
+    /// `b`'s reach and the tribute of Д2; with no claim against `a` (a war `a` declares or
+    /// would declare, an entrant's war), the provinces of `a` within the reach of `b`'s units
+    /// by the movement rule over the war's expected length (`land_in_reach`) — each held by
+    /// `b` as long as `a` does not take it back nor it rises (plan §27.3, (б)), and each
+    /// ceded at the legitimacy the peace charges (`blow_per_province`, years of income); the
+    /// soldiers the battle would cost and what a head pays; the pay of the campaign when `a`'s
+    /// goals want the war (plan §27.2); the war's expected length (`war_ticks`).
+    pub fn war_terms(&self, a: ActorId, b: ActorId, blow_per_province: f64, params: &Params) -> WarTerms {
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let income = self.yearly_income(a, params).max(1) as f64;
         let ticks = self.war_ticks(a, b, params);
+        let key = crate::army::pair(a, b);
+        let claim = self.wars.get(&key).filter(|w| w.by == Some(b)).and_then(|w| w.aim);
+        // The land at risk, the nearest to the enemy's units first.
+        let at_risk: Vec<ProvinceId> = match claim {
+            Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
+            _ => {
+                let mut reach: Vec<(usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d, q)).collect();
+                reach.sort();
+                reach.into_iter().map(|(_, q)| q).collect()
+            }
+        };
+        let back = 1.0 - self.retake_odds(b, a, a, params);
+        let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share(b, *q, params))).collect();
+        // A claim on the polity: the tribute of Д2 once `a` is down to half the land it held
+        // when the war began (`make_peace_between`) — the provinces still to lose until then.
+        let (tribute, to_submit) = match claim {
+            Some(WarAim::Polity(_)) => {
+                let held = self.wars.get(&key).map(|w| if a == key.0 { w.held.0 } else { w.held.1 }).unwrap_or(0);
+                (tribute_due(self.yearly_income(a, params), params) as f64, (self.actors[&a].provinces.len() as u32).saturating_sub(held / 2).max(1))
+            }
+            _ => (0.0, 1),
+        };
         WarTerms {
             b,
             ticks,
             stake: self.war_stake(a, b, params),
-            lost_held: self.take_of(a, lost_province, params) * held_by_b,
+            at_risk,
+            blow: blow_per_province,
+            tribute,
+            to_submit,
             soldiers: self.army_size(a) as f64,
             head: if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 },
             campaign: if self.war_goal_against(a, b) { self.campaign_extra(a, self.army_size(a), ticks, params) } else { 0.0 },
@@ -459,9 +485,18 @@ impl World {
         }
     }
 
+    /// The legitimacy a province ceded at a peace would cost `a`, in years of its income
+    /// (`diplomacy::ceded_province_cost` at what the world turns a blow of legitimacy into,
+    /// `blow_worth`): the price of every province at risk in a war (plan §28.9).
+    pub fn ceded_province_blow(&self, a: ActorId, risk: &RiskPrices, params: &Params) -> f64 {
+        -self.blow_worth(a, Self::ceded_province_cost(params), risk, params)
+    }
+
     /// What `a`'s war on the terms `t` is worth to `a` with `extra` strength put in, in years
-    /// of its income (plan §26): won — the stake for the horizon; lost — the province the
-    /// enemy would reach first, for the horizon as the enemy holds it; the soldiers the battle
+    /// of its income (plan §26): won — the stake for the horizon; lost — the land at risk,
+    /// the enemy taking it one battle at a time, the k-th province with the odds of k battles
+    /// lost, for the horizon as the enemy holds it, with the legitimacy of ceding it, and the
+    /// tribute of a submission once enough is lost (plan §28.9); the soldiers the battle
     /// costs (А6), heads gone from the tax base for the horizon; the pay of the campaign. The
     /// odds are the battle formula's over the sides of the war (`war_odds`). `unpaid`: an
     /// unpaid army is exhausted and the peace comes at the first offer — the goals are not
@@ -474,15 +509,23 @@ impl World {
     pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
         let p = self.war_odds(a, t.b, extra, params);
         let gain = if unpaid { 0.0 } else { p * t.stake * t.years };
-        let lose = (1.0 - p) * t.lost_held * t.years;
+        let q = 1.0 - p;
+        let (mut lose, mut blow, mut odds) = (0.0, 0.0, 1.0);
+        for take in &t.at_risk {
+            odds *= q;
+            lose += odds * take * t.years;
+            blow += odds * t.blow;
+        }
+        lose += q.powi(t.to_submit as i32) * t.tribute * t.years;
         let lost = t.soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
-        (gain - lose - lost * t.head * t.years) / t.income - t.campaign
+        (gain - lose - lost * t.head * t.years) / t.income - t.campaign - blow
     }
 
-    /// What `a`'s war with `b` is worth to `a` (`war_terms`, `war_worth_of`), the terms read
-    /// here; a decision that asks several times reads them once.
+    /// What `a`'s war with `b` is worth to `a` (`war_terms`, `war_worth_of`), the terms and
+    /// the prices of the risks read here; a decision that asks several times reads them once.
     pub fn war_worth(&self, a: ActorId, b: ActorId, unpaid: bool, extra: f64, params: &Params) -> f64 {
-        self.war_worth_of(a, &self.war_terms(a, b, params), unpaid, extra, params)
+        let blow = self.ceded_province_blow(a, &self.risk_prices(a, params), params);
+        self.war_worth_of(a, &self.war_terms(a, b, blow, params), unpaid, extra, params)
     }
 
     /// What holding a threatened province `p` against `by` is worth to `a`, in years of its

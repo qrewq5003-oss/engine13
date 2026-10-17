@@ -181,15 +181,45 @@ impl World {
         self.nearest_through(from, |p| p == to, |n| self.passable(owner, n) || self.provinces[&n].owner == enemy).map(|(_, path)| path)
     }
 
-    /// The nearest province of `enemy` to `from` for `mover`'s men, as the march goes in a
-    /// war with it (`path_at_war`): the province and the steps to it (E3 (е2), plan §28.7:
-    /// where an enemy's units would go is read off where they stand, by the movement rule,
-    /// not off its goals).
-    pub fn nearest_land_of(&self, mover: ActorId, enemy: ActorId, from: ProvinceId) -> Option<(ProvinceId, usize)> {
-        if self.provinces[&from].owner == enemy {
-            return Some((from, 0));
+    /// The provinces of `enemy` within the reach of `mover`'s units over `ticks` ticks by the
+    /// movement rule — `march_steps_per_tick` steps a tick through what is passable to them
+    /// and the enemy's land, from where each unit stands — each with the fewest steps to it
+    /// (plan §28.9, owner's rule (B): what an enemy could take in a war, read off its
+    /// positions and the world's path, not off its goals; the nearest falls first).
+    pub fn land_in_reach(&self, mover: ActorId, enemy: ActorId, ticks: usize, params: &Params) -> BTreeMap<ProvinceId, usize> {
+        let depth = self.march_steps_per_tick(params) * ticks.max(1);
+        let mut out: BTreeMap<ProvinceId, usize> = BTreeMap::new();
+        let mut reach = |q: ProvinceId, steps: usize| {
+            let d = out.entry(q).or_insert(steps);
+            *d = (*d).min(steps);
+        };
+        for u in self.units_of(mover) {
+            let from = self.units[&u].position;
+            if self.provinces[&from].owner == enemy {
+                reach(from, 0);
+            }
+            let mut seen: BTreeSet<ProvinceId> = BTreeSet::from([from]);
+            let mut frontier = vec![from];
+            for step in 1..=depth {
+                let mut next = Vec::new();
+                for c in frontier {
+                    let pr = &self.provinces[&c];
+                    for n in pr.neighbours.iter().chain(pr.sea_neighbours.iter()).copied() {
+                        if seen.insert(n) && (self.passable(mover, n) || self.provinces[&n].owner == enemy) {
+                            if self.provinces[&n].owner == enemy {
+                                reach(n, step);
+                            }
+                            next.push(n);
+                        }
+                    }
+                }
+                if next.is_empty() {
+                    break;
+                }
+                frontier = next;
+            }
         }
-        self.nearest_through(from, |p| self.provinces[&p].owner == enemy, |n| self.passable(mover, n) || self.provinces[&n].owner == enemy).map(|(p, path)| (p, path.len()))
+        out
     }
 
     /// Whether a unit of `owner` standing at `from` would reach `to` this tick, were it

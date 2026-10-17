@@ -118,6 +118,8 @@ pub struct Context {
     income: f64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
+    /// The legitimacy a ceded province would cost, years of income (`ceded_province_blow`).
+    blow_per_province: f64,
     /// The terms of every war the polity is in (`World::war_terms`), read once: the verbs of
     /// the army ask the worth of each war at several strengths.
     wars: Vec<crate::worth::WarTerms>,
@@ -466,7 +468,8 @@ impl World {
         let unpaid = self.paid_share_seen_ppm(a) < 1_000_000;
         let income = self.yearly_income(a, params).max(1) as f64;
         // The terms of every war, read once (plan §28.8: the worth is asked per unit).
-        let wars: Vec<crate::worth::WarTerms> = enemies.iter().map(|b| self.war_terms(a, *b, params)).collect();
+        let blow = self.ceded_province_blow(a, &self.risk_prices(a, params), params);
+        let wars: Vec<crate::worth::WarTerms> = enemies.iter().map(|b| self.war_terms(a, *b, blow, params)).collect();
         // The campaign: against the enemy the goals want most, when going on with the war is
         // worth something by the battle formula.
         let (enemy, front) = enemies.iter().zip(&wars).max_by_key(|(b, _)| ((self.war_stake(a, **b, params) * 1e3) as i64, std::cmp::Reverse(**b))).map(|(b, t)| (*b, t)).unwrap();
@@ -537,6 +540,28 @@ impl World {
             give(u, to, &mut out);
         }
         out
+    }
+
+    /// What declaring war on `b` is worth to `a` in a context read once: the war on the terms
+    /// of a war not yet open (`war_terms`) and the price of the declaration.
+    fn declaration_worth(&self, a: ActorId, b: ActorId, unpaid: bool, ctx: &Context, params: &Params) -> f64 {
+        self.war_worth_of(a, &self.war_terms(a, b, ctx.blow_per_province, params), unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
+    }
+
+    /// The claim a bot's declaration on `b` states (plan §28.9): the province of `b` its
+    /// goals want (the lowest id, as `war_target` marches), else the polity's submission —
+    /// unless that is met already (its own vassal: the claim would be no claim), when it
+    /// claims the province the march aims at (`war_target`).
+    fn claim_target(&self, a: ActorId, b: ActorId) -> Target {
+        let wanted = self.actors[&a].goals.iter().filter_map(|g| match (g.kind, g.target) {
+            (GoalKind::Take | GoalKind::Hold, GoalTarget::Province(q)) if self.provinces[&q].owner == b => Some(q),
+            _ => None,
+        });
+        match wanted.min() {
+            Some(q) => Target::Province(q),
+            None if self.claim_met(a, b, crate::world::WarAim::Polity(b)) => Target::Province(self.war_target(a, b)),
+            None => Target::Actor(b),
+        }
     }
 
     /// What `extra` strength adds to (or, negative, takes from) every war of `a` (its terms
@@ -644,12 +669,15 @@ impl World {
 
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
+        let risk = self.risk_prices(a, params);
+        let blow_per_province = self.ceded_province_blow(a, &risk, params);
         Context {
             at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
-            risk: self.risk_prices(a, params),
-            wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, params)).collect(),
+            wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect(),
+            risk,
+            blow_per_province,
         }
     }
 
@@ -671,7 +699,8 @@ impl World {
             // An unpaid army wins nothing: by the rule of the peace it is exhausted and the war
             // ends at the first offer (measured on #293: four fifths of the declarations came
             // the tick after a peace of the same pair, by declarers short of their pay).
-            (VerbId::DeclareWar, Target::Actor(b)) => self.war_worth(a, b, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params),
+            (VerbId::DeclareWar, Target::Actor(b)) => self.declaration_worth(a, b, unpaid, ctx, params),
+            (VerbId::DeclareWar, Target::Province(q)) => self.declaration_worth(a, self.provinces[&q].owner, unpaid, ctx, params),
             // The peace is the war the other way round: worth what going on would lose.
             (VerbId::MakePeace, Target::Actor(b)) => ctx.wars.iter().find(|t| t.b == b).map_or(0.0, |t| -self.war_worth_of(a, t, unpaid, 0.0, params)),
             // A levy or a hire at war: what the strength adds to the wars, less its pay (and the
@@ -771,7 +800,7 @@ impl World {
         let mut calls: Vec<VerbCall> = Vec::new();
         for v in enabled {
             match v {
-                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
+                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: self.claim_target(a, *b) })),
                 VerbId::MakePeace => calls.extend(others.iter().filter(|b| self.peace_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
                 VerbId::ProposeAlliance => {
                     let cost = self.embassy_cost(a, params);
