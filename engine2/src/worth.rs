@@ -52,6 +52,24 @@ use crate::params::Params;
 use crate::politics::{drift_toward, natural_death_hazard, saturate, usurpation_hazard, violent_death_hazard};
 use crate::world::{Standing, World};
 
+/// The terms of `a`'s war with `b` that do not move with the strength `a` puts in (E3 (е2),
+/// plan §28.8 — read once per decision, `World::war_terms`; the worth at any strength is
+/// `World::war_worth_of`): the stake of the goals (kg a year), the take of the province the
+/// enemy would reach first as the enemy holds it, the soldiers and what a head pays, the
+/// pay of the campaign, the war's expected length in ticks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarTerms {
+    pub b: ActorId,
+    pub ticks: f64,
+    stake: f64,
+    lost_held: f64,
+    soldiers: f64,
+    head: f64,
+    campaign: f64,
+    income: f64,
+    years: f64,
+}
+
 /// What the risks legitimacy invites would cost a polity now, wheat — a chance of usurpation
 /// taken, a murder of the ruler, a rising in each province that can rise (its marks and its
 /// loss) — read once per decision (`World::risk_prices`): they depend on the state, not on
@@ -416,50 +434,55 @@ impl World {
         self.units_of(b).iter().filter_map(|u| self.nearest_land_of(b, a, self.units[u].position)).map(|(p, steps)| (steps, p)).min().map(|(_, p)| p).unwrap_or(self.actors[&a].capital)
     }
 
-    /// Whether `a`, beaten by `b`, could end the war by a peace `b` accepts — the rule of the
-    /// peace (`diplomacy::peace_rule`) on a war `a` is forced out of, at the relation the war
-    /// leaves by its expected end: drifted (`relation_step`) toward the norm of the pair at
-    /// war (`relation_norm_at_war`) for `war_ticks`. Read at the relation before the war, a
-    /// declarer on friendly terms counted on leaving a lost war for nothing, and the war
-    /// itself took the relation below the threshold the next tick (measured: every one-tick
-    /// war ended by its declarer). Whether `b` wants its war is read off who declared it
-    /// (`War::by`, a public act — plan §28.7): a declarer wants it, the attacked does not.
-    fn could_leave(&self, a: ActorId, b: ActorId, declaring: bool, params: &Params) -> bool {
-        let declared_by_b = !declaring && self.wars.get(&crate::army::pair(a, b)).is_some_and(|w| w.by == Some(b));
-        let norm = self.relation_norm_at_war(a, b, params);
-        let mut r = self.relation(a, b);
-        for _ in 0..(self.war_ticks(a, b, params).ceil() as u32) {
-            r = crate::diplomacy::relation_step(r, norm, params);
+    /// The terms of `a`'s war with `b` that do not move with the strength `a` puts in
+    /// (`WarTerms`), read once per decision: what its goals want of `b` (`war_stake`); the
+    /// take of the province `b`'s units would reach first (`expected_target`), held by `b` as
+    /// long as `a` does not take it back nor it rises (plan §27.3, (б)); the soldiers the
+    /// battle would cost and what a head pays; the pay of the campaign when `a`'s goals want
+    /// the war (plan §27.2); the war's expected length (`war_ticks`).
+    pub fn war_terms(&self, a: ActorId, b: ActorId, params: &Params) -> WarTerms {
+        let lost_province = self.expected_target(b, a);
+        let held_by_b = (1.0 - self.retake_odds(b, a, a, params)) * (1.0 - self.revolt_share(b, lost_province, params));
+        let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let ticks = self.war_ticks(a, b, params);
+        WarTerms {
+            b,
+            ticks,
+            stake: self.war_stake(a, b, params),
+            lost_held: self.take_of(a, lost_province, params) * held_by_b,
+            soldiers: self.army_size(a) as f64,
+            head: if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 },
+            campaign: if self.war_goal_against(a, b) { self.campaign_extra(a, self.army_size(a), ticks, params) } else { 0.0 },
+            income,
+            years: f64::from(params.goal_horizon_ticks) / 2.0,
         }
-        crate::diplomacy::peace_rule(false, true, declared_by_b, r >= params.treaty_accept_at_relation, self.exhausted(b), declared_by_b)
     }
 
-    /// What `a`'s war with `b` is worth to `a`, in years of its income (plan §26): won — what
-    /// its goals want of `b` (`war_stake`) for the horizon; lost — the province `b`'s units
-    /// would reach first (`expected_target`) for the horizon, held by `b` as long as `a` does
-    /// not take it back nor it rises, unless the peace lets `a` out; the soldiers the battle
-    /// costs (А6), heads gone from the tax base for the horizon; the pay of the campaign when
-    /// `a`'s goals want the war (plan §27.2). `declaring`: no war of record yet. `unpaid`: an
+    /// What `a`'s war on the terms `t` is worth to `a` with `extra` strength put in, in years
+    /// of its income (plan §26): won — the stake for the horizon; lost — the province the
+    /// enemy would reach first, for the horizon as the enemy holds it; the soldiers the battle
+    /// costs (А6), heads gone from the tax base for the horizon; the pay of the campaign. The
+    /// odds are the battle formula's over the sides of the war (`war_odds`). `unpaid`: an
     /// unpaid army is exhausted and the peace comes at the first offer — the goals are not
     /// reached. `extra`: strength added to `a`'s (a levy, a hire; a unit sent away, negative).
-    pub fn war_worth(&self, a: ActorId, b: ActorId, declaring: bool, unpaid: bool, extra: f64, params: &Params) -> f64 {
-        let income = self.yearly_income(a, params).max(1) as f64;
-        let years = f64::from(params.goal_horizon_ticks) / 2.0;
-        let p = self.war_odds(a, b, extra, params);
-        let gain = if unpaid { 0.0 } else { p * self.war_stake(a, b, params) * years };
-        let lost_province = self.expected_target(b, a);
-        // What the enemy takes is held by it only as long as `a` does not take it back, nor it
-        // rise (plan §27.3, (б), the same measure as the gain's).
-        let held_by_b = (1.0 - self.retake_odds(b, a, a, params)) * (1.0 - self.revolt_share(b, lost_province, params));
-        let lose = if self.could_leave(a, b, declaring, params) { 0.0 } else { (1.0 - p) * self.take_of(a, lost_province, params) * held_by_b * years };
-        let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
-        let soldiers = self.army_size(a) as f64;
-        let lost = soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
-        let head = if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 };
-        // The campaign (plan §27.2): a war its goals want takes `a`'s army off its land for
-        // the war's length, at the pay of a campaign; a defender stays at home on its pay.
-        let campaign = if self.war_goal_against(a, b) { self.campaign_extra(a, self.army_size(a), self.war_ticks(a, b, params), params) } else { 0.0 };
-        (gain - lose - lost * head * years) / income - campaign
+    /// Leaving the war is a decision of its own — the peace, worth what going on would lose,
+    /// granted by the rule of the peace — not a discount on the loss (plan §28.8): a bot that
+    /// counted on leaving a lost war for nothing never left it, since the same valuation told
+    /// it to fight on while the enemy took its land (on the test world a war at five to one
+    /// stayed worth fighting).
+    pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
+        let p = self.war_odds(a, t.b, extra, params);
+        let gain = if unpaid { 0.0 } else { p * t.stake * t.years };
+        let lose = (1.0 - p) * t.lost_held * t.years;
+        let lost = t.soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
+        (gain - lose - lost * t.head * t.years) / t.income - t.campaign
+    }
+
+    /// What `a`'s war with `b` is worth to `a` (`war_terms`, `war_worth_of`), the terms read
+    /// here; a decision that asks several times reads them once.
+    pub fn war_worth(&self, a: ActorId, b: ActorId, unpaid: bool, extra: f64, params: &Params) -> f64 {
+        self.war_worth_of(a, &self.war_terms(a, b, params), unpaid, extra, params)
     }
 
     /// What holding a threatened province `p` against `by` is worth to `a`, in years of its

@@ -118,6 +118,9 @@ pub struct Context {
     income: f64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
+    /// The terms of every war the polity is in (`World::war_terms`), read once: the verbs of
+    /// the army ask the worth of each war at several strengths.
+    wars: Vec<crate::worth::WarTerms>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -462,10 +465,12 @@ impl World {
         }
         let unpaid = self.paid_share_seen_ppm(a) < 1_000_000;
         let income = self.yearly_income(a, params).max(1) as f64;
+        // The terms of every war, read once (plan §28.8: the worth is asked per unit).
+        let wars: Vec<crate::worth::WarTerms> = enemies.iter().map(|b| self.war_terms(a, *b, params)).collect();
         // The campaign: against the enemy the goals want most, when going on with the war is
         // worth something by the battle formula.
-        let enemy = enemies.iter().copied().max_by_key(|b| ((self.war_stake(a, *b, params) * 1e3) as i64, std::cmp::Reverse(*b))).unwrap();
-        let campaign = self.war_worth(a, enemy, false, unpaid, 0.0, params) > 0.0;
+        let (enemy, front) = enemies.iter().zip(&wars).max_by_key(|(b, _)| ((self.war_stake(a, **b, params) * 1e3) as i64, std::cmp::Reverse(**b))).map(|(b, t)| (*b, t)).unwrap();
+        let campaign = self.war_worth_of(a, front, unpaid, 0.0, params) > 0.0;
         // The threats: for every own province, the strength of the enemy units that can reach
         // it this tick, and the strongest enemy among them (whose hold the loss is valued at).
         let mut threats: Vec<(ProvinceId, f64, ActorId)> = Vec::new();
@@ -487,11 +492,11 @@ impl World {
         let mut pool: Vec<(crate::ids::UnitId, f64)> = units
             .into_iter()
             .map(|u| {
-                let loss = if campaign { enemies.iter().map(|b| self.war_worth(a, *b, false, unpaid, 0.0, params) - self.war_worth(a, *b, false, unpaid, -self.unit_strength(u), params)).sum() } else { 0.0 };
+                let loss = if campaign { wars.iter().map(|t| self.war_worth_of(a, t, unpaid, 0.0, params) - self.war_worth_of(a, t, unpaid, -self.unit_strength(u), params)).sum() } else { 0.0 };
                 (u, loss)
             })
             .collect();
-        let war_years = enemies.iter().map(|b| self.war_ticks(a, *b, params)).fold(0.0f64, f64::max) / 2.0;
+        let war_years = wars.iter().map(|t| t.ticks).fold(0.0f64, f64::max) / 2.0;
         // Peel off the campaign to the duty that gains most over what the front loses.
         let mut defenders = vec![0.0f64; threats.len()];
         let mut manned = vec![false; revolts.len()];
@@ -534,24 +539,20 @@ impl World {
         out
     }
 
-    /// What `extra` strength adds to (or, negative, takes from) every war of `a`, in years of
-    /// its income: the worth of each war with it against without it.
-    fn at_war_gain(&self, a: ActorId, extra: f64, unpaid: bool, params: &Params) -> f64 {
-        self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_worth(a, b, false, unpaid, extra, params) - self.war_worth(a, b, false, unpaid, 0.0, params)).sum()
+    /// What `extra` strength adds to (or, negative, takes from) every war of `a` (its terms
+    /// `wars`), in years of its income: the worth of each war with it against without it.
+    fn at_war_gain(&self, a: ActorId, wars: &[crate::worth::WarTerms], extra: f64, unpaid: bool, params: &Params) -> f64 {
+        wars.iter().map(|t| self.war_worth_of(a, t, unpaid, extra, params) - self.war_worth_of(a, t, unpaid, 0.0, params)).sum()
     }
 
-    /// What `n` soldiers kept for `a`'s wars cost it, in years of its income: their pay and the
-    /// heads away from the land for the wars' expected length, and — when a war its goals want
-    /// is on — the pay of the campaign beyond it (plan §27.2).
-    fn war_soldiers_cost(&self, a: ActorId, n: i64, params: &Params) -> f64 {
-        let ticks = self.war_length(a, params);
-        let offensive = self.actors.keys().any(|b| self.at_war(a, *b) && self.alive(*b) && self.war_goal_against(a, *b));
+    /// What `n` soldiers kept for `a`'s wars (their terms `wars`) cost it, in years of its
+    /// income: their pay and the heads away from the land for the wars' expected length — the
+    /// longest of its fronts — and, when a war its goals want is on, the pay of the campaign
+    /// beyond it (plan §27.2).
+    fn war_soldiers_cost(&self, a: ActorId, wars: &[crate::worth::WarTerms], n: i64, params: &Params) -> f64 {
+        let ticks = wars.iter().map(|t| t.ticks).fold(0.0, f64::max);
+        let offensive = wars.iter().any(|t| self.war_goal_against(a, t.b));
         self.soldiers_cost(a, n, ticks, params) + if offensive { self.campaign_extra(a, n, ticks, params) } else { 0.0 }
-    }
-
-    /// The expected length of `a`'s wars, ticks: the longest of its fronts (`war_ticks`).
-    fn war_length(&self, a: ActorId, params: &Params) -> f64 {
-        self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_ticks(a, b, params)).fold(0.0, f64::max)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
@@ -648,6 +649,7 @@ impl World {
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             risk: self.risk_prices(a, params),
+            wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, params)).collect(),
         }
     }
 
@@ -669,25 +671,25 @@ impl World {
             // An unpaid army wins nothing: by the rule of the peace it is exhausted and the war
             // ends at the first offer (measured on #293: four fifths of the declarations came
             // the tick after a peace of the same pair, by declarers short of their pay).
-            (VerbId::DeclareWar, Target::Actor(b)) => self.war_worth(a, b, true, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params),
+            (VerbId::DeclareWar, Target::Actor(b)) => self.war_worth(a, b, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params),
             // The peace is the war the other way round: worth what going on would lose.
-            (VerbId::MakePeace, Target::Actor(b)) => -self.war_worth(a, b, false, unpaid, 0.0, params),
+            (VerbId::MakePeace, Target::Actor(b)) => ctx.wars.iter().find(|t| t.b == b).map_or(0.0, |t| -self.war_worth_of(a, t, unpaid, 0.0, params)),
             // A levy or a hire at war: what the strength adds to the wars, less its pay (and the
             // advance) for the war's expected length; at peace a standing army's worth is the
             // threat it answers — (г).
             (VerbId::Recruit, Target::Province(_)) => {
                 let n = self.recruit_per_tick(a, params);
-                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - self.war_soldiers_cost(a, n, params)
+                self.at_war_gain(a, &ctx.wars, World::new_soldiers_strength(n), unpaid, params) - self.war_soldiers_cost(a, &ctx.wars, n, params)
             }
             (VerbId::HireMercenaries, _) => {
                 let n = self.hire_count(a, params);
-                self.at_war_gain(a, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.war_soldiers_cost(a, n, params)
+                self.at_war_gain(a, &ctx.wars, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.war_soldiers_cost(a, &ctx.wars, n, params)
             }
             // A unit sent home at war: the pay saved for the war's length against what the
             // wars lose; at peace the rule of (б) until (г): an unpaid army melts anyway.
             (VerbId::Disband, Target::Unit(u)) => {
                 if at_war {
-                    self.war_soldiers_cost(a, self.soldiers(u), params) + self.at_war_gain(a, -self.unit_strength(u), unpaid, params)
+                    self.war_soldiers_cost(a, &ctx.wars, self.soldiers(u), params) + self.at_war_gain(a, &ctx.wars, -self.unit_strength(u), unpaid, params)
                 } else if unpaid {
                     0.5
                 } else {
