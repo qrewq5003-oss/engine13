@@ -141,3 +141,30 @@ fn every_deserializable_struct_denies_unknown_fields() {
     }
     assert!(hits.is_empty(), "Deserialize struct without deny_unknown_fields:\n{}", hits.join("\n"));
 }
+
+/// Line endings are LF in every source, document and config of the repository (plan §28.8):
+/// on Windows a python `write_text` rewrote whole files to CRLF and three commits' diffs
+/// became the whole file (f630ba9, 9d9567f, bb63f69 — restored by separate commits). The
+/// chain catches it here instead of a reviewer's eye.
+#[test]
+fn no_crlf_in_the_repositorys_sources_documents_and_configs() {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.is_dir() {
+                if !matches!(name, "target" | "node_modules" | ".git" | "dist") {
+                    walk(&path, out);
+                }
+            } else if matches!(path.extension().and_then(|e| e.to_str()), Some("rs" | "md" | "toml")) {
+                out.push(path);
+            }
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut files = Vec::new();
+    walk(&root, &mut files);
+    assert!(files.len() > 50, "the walk found only {} files", files.len());
+    let crlf: Vec<String> = files.iter().filter(|f| std::fs::read(f).unwrap().contains(&13u8)).map(|f| f.strip_prefix(&root).unwrap_or(f).display().to_string()).collect();
+    assert!(crlf.is_empty(), "CRLF line endings in: {crlf:?}");
+}
