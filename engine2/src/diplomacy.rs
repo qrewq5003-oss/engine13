@@ -199,23 +199,11 @@ impl World {
 
     /// The norm of a pair's relation from the state of the pair (plan §19.2).
     pub fn relation_norm(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
-        self.relation_norm_with(a, b, self.at_war(a, b), self.allied(a, b), params)
-    }
-
-    /// The norm of a pair's relation were the two at war — the treaty a declaration breaks
-    /// gone (E3 (е2): whether a beaten side can leave its war reads the relation the war
-    /// leaves, not the one before it).
-    pub fn relation_norm_at_war(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
-        self.relation_norm_with(a, b, true, false, params)
-    }
-
-    /// The norm of a pair's relation with the war and the alliance given.
-    fn relation_norm_with(&self, a: ActorId, b: ActorId, at_war: bool, allied: bool, params: &Params) -> f64 {
         let mut norm = params.relation_base;
-        if at_war {
+        if self.at_war(a, b) {
             norm -= params.relation_norm_war;
         }
-        if allied {
+        if self.allied(a, b) {
             norm += params.relation_norm_alliance;
         }
         if self.married_across(a, b) {

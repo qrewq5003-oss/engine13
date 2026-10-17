@@ -1143,17 +1143,17 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
     w.declare_war(s0, s1).unwrap();
     w.rise_now(at(0, 2), &p).unwrap();
-    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) > 0.0, "the war is worth going on with");
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) > 0.0, "the war is worth going on with");
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "equal armies and a goal: the campaign; the revolt waits");
     // Outnumbered five to one the war is worth less than nothing: hold the capital.
     let u1 = w.units_of(s1)[0];
     w.post(engine2::Account::Soldiers(u1), Source::Test, (3000 - w.soldiers(u1)) * 1000).unwrap();
-    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) < 0.0);
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) < 0.0);
     assert!(w.bot_orders(s0, &p).is_empty(), "outnumbered: hold the capital, where the unit stands");
     // Without a goal there is nothing to win: home.
     let mut w = world_of(&testworld::five_states_scenario(), 64);
     w.declare_war(s0, s1).unwrap();
-    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) < 0.0, "nothing to win, something to lose");
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) < 0.0, "nothing to win, something to lose");
     assert!(w.bot_orders(s0, &p).is_empty(), "no goal: the unit stays home");
     // Attacked, with the enemy's unit a tick's march from its land: the defence of the
     // threatened province worth most (the enemy's position is read, not its order).
@@ -1169,7 +1169,7 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: best }], "attacked: the unit defends the threatened province worth most");
     // With a goal worth more than the defence it campaigns on the enemy's capital instead.
     w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
-    assert!(w.war_worth(s0, s1, false, false, 0.0, &p) > 0.0);
+    assert!(w.war_worth(s0, s1, false, 0.0, &p) > 0.0);
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 0) }], "the campaign worth more than the defence: on the enemy's capital");
 }
 
@@ -1539,7 +1539,7 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
 fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let p = params();
     let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, true, false, 0.0, &p), w.war_worth(a, c, true, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
