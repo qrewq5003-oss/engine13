@@ -421,7 +421,10 @@ impl World {
     /// sees where the enemy's units stand, not where they go): its take for the horizon at
     /// the chance the defenders beat what can reach it (`defence_worth`). **The suppression**
     /// of a revolt: at peace the nearest unit goes and stands (owner's rule on #289); at war
-    /// the province's take for the wars' expected length. At war the units are peeled off
+    /// the province's take for as long as the revolt would otherwise stand — a revolt stands
+    /// until a unit of the owner has stood in it a tick (`RevoltEnded`), so until the peace
+    /// (the wars' expected length, `war_ticks`) and the march from home by the rule at peace,
+    /// less the march of the unit sent now (plan §28.12). At war the units are peeled off
     /// the campaign one at a time, the smallest first, to the duty that gains most over what
     /// the front loses, while any gains; the rest campaign, or hold the capital when the war
     /// is not worth going on with. The ruler commands its own units and the ruling house's
@@ -499,7 +502,12 @@ impl World {
                 (u, loss)
             })
             .collect();
-        let war_years = wars.iter().map(|t| t.ticks).fold(0.0f64, f64::max) / 2.0;
+        // A revolt stands until a unit has stood in it a tick: sent now, the unit's march there;
+        // else until the peace, when the nearest unit goes from home (the rule at peace).
+        let steps_per_tick = self.march_steps_per_tick(params).max(1);
+        let march = |from: ProvinceId, to: ProvinceId| self.path(a, from, to).map(|path| path.len().div_ceil(steps_per_tick).max(1) as f64);
+        let war_ticks = wars.iter().map(|t| t.ticks).fold(0.0f64, f64::max);
+        let stands: Vec<f64> = revolts.iter().map(|r| war_ticks + march(capital, *r).unwrap_or(0.0)).collect();
         // Peel off the campaign to the duty that gains most over what the front loses.
         let mut defenders = vec![0.0f64; threats.len()];
         let mut manned = vec![false; revolts.len()];
@@ -518,7 +526,9 @@ impl World {
                 }
                 for (k, r) in revolts.iter().enumerate() {
                     if !manned[k] {
-                        offer(self.take_of(a, *r, params) * war_years / income - *loss, threats.len() + k);
+                        if let Some(now) = march(self.units[u].position, *r) {
+                            offer(self.take_of(a, *r, params) * (stands[k] - now).max(0.0) / 2.0 / income - *loss, threats.len() + k);
+                        }
                     }
                 }
             }

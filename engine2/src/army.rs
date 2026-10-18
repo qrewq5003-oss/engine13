@@ -250,6 +250,14 @@ impl World {
         ((self.recruit_ceiling(a, params) as f64 - self.actors[&a].losses_seen).max(0.0) as i64 - self.army_size(a)).max(0)
     }
 
+    /// Men a levy can raise this tick as anyone sees it: the rate of a tick (А2) on the
+    /// ceiling less the dead by the battles seen, within the room seen (`levy_room_seen`).
+    /// The polity's own count is `recruit_per_tick`.
+    pub fn levy_per_tick_seen(&self, a: ActorId, params: &Params) -> i64 {
+        let ceiling = (self.recruit_ceiling(a, params) as f64 - self.actors[&a].losses_seen).max(0.0) as i64;
+        (ceiling * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.levy_room_seen(a, params))
+    }
+
     fn strength(&self, units: &[UnitId]) -> f64 {
         units.iter().map(|u| self.unit_strength(*u)).sum()
     }

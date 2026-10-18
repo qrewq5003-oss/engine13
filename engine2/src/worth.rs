@@ -54,10 +54,12 @@ use crate::world::{Standing, WarAim, World};
 
 /// The terms of `a`'s war with `b` that do not move with the strength `a` puts in (E3 (е2),
 /// plan §28.8 — read once per decision, `World::war_terms`; the worth at any strength is
-/// `World::war_worth_of`): the stake of the goals (kg a year); the land at risk, nearest to
-/// the enemy first, each province's take as the enemy would hold it (kg a year) — the
+/// `World::war_worth_of`): the stake of the goals (kg a year); the land at risk, the
+/// quickest to fall first, each province's take as the enemy would hold it (kg a year) — the
 /// enemy takes it one battle at a time, so the k-th falls with the odds of k battles lost
-/// (plan §28.9, owner's rule (B)); the legitimacy of ceding a province (years of income);
+/// (plan §28.9, owner's rule (B)) — as many as the enemy can take within the war's expected
+/// length, each a march and a siege (plan §28.12, `conquests_within`); the legitimacy of
+/// ceding a province (years of income);
 /// the tribute a submission would cost (kg a year) and the provinces still to lose before
 /// it; the soldiers and what a head pays; the pay of the campaign; the war's expected length
 /// in ticks.
@@ -365,7 +367,7 @@ impl World {
                 _ => {}
             }
         }
-        let back = self.retake_odds(a, b, a, params);
+        let back = self.retake_odds(a, b, a, self.war_ticks(a, b, params), params);
         let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params) * (1.0 - back) * (1.0 - self.revolt_share(a, *q, params))).sum();
         if subdue {
             kg += tribute_due(self.yearly_income(b, params), params) as f64 * (1.0 - back);
@@ -377,16 +379,20 @@ impl World {
     }
 
     /// The odds that `b` takes back what `a` takes from it (plan §27.3, (б)), as `by` can
-    /// know them: by the battle formula, each side's army and all it can still levy — `by`'s
-    /// own room exactly (`recruit_room`), another's as anyone sees it (`levy_room_seen`: the
-    /// ceiling by its people less its dead by the battles seen, plan §28.7).
-    pub fn retake_odds(&self, a: ActorId, b: ActorId, by: ActorId, params: &Params) -> f64 {
+    /// know them: by the battle formula, each side's army and what it can levy over the
+    /// war's expected length `ticks` — the rate of a tick (А2) times the ticks, within the
+    /// room (plan §28.12, owner's decision 2: not the whole ceiling, which А2 reaches only
+    /// over many ticks) — `by`'s own count exactly (`recruit_per_tick`, `recruit_room`),
+    /// another's as anyone sees it (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by
+    /// its people less its dead by the battles seen, plan §28.7).
+    pub fn retake_odds(&self, a: ActorId, b: ActorId, by: ActorId, ticks: f64, params: &Params) -> f64 {
         if !self.alive(b) {
             return 0.0;
         }
         let could = |x: ActorId| {
-            let room = if x == by { self.recruit_room(x, params) } else { self.levy_room_seen(x, params) };
-            self.army_strength(x) + World::new_soldiers_strength(room)
+            let (per_tick, room) = if x == by { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
+            let raised = ((per_tick as f64 * ticks).floor() as i64).min(room).max(0);
+            self.army_strength(x) + World::new_soldiers_strength(raised)
         };
         let (theirs, mine) = (could(b), could(a));
         if theirs <= 0.0 {
@@ -444,9 +450,11 @@ impl World {
     /// `b` stated, the province it named, or for the polity's submission the land within
     /// `b`'s reach and the tribute of Д2; with no claim against `a` (a war `a` declares or
     /// would declare, an entrant's war), the provinces of `a` within the reach of `b`'s units
-    /// by the movement rule over the war's expected length (`land_in_reach`) — each held by
-    /// `b` as long as `a` does not take it back nor it rises (plan §27.3, (б)), and each
-    /// ceded at the legitimacy the peace charges (`blow_per_province`, years of income); the
+    /// by the movement rule over the war's expected length (`land_in_reach`), as many as `b`
+    /// can take in that length, a march and a siege each (`conquests_within`, plan §28.12) —
+    /// each held by `b` as long as `a` does not take it back nor it rises (plan §27.3, (б)),
+    /// and each ceded at the legitimacy the peace charges (`blow_per_province`, years of
+    /// income); the
     /// soldiers the battle would cost and what a head pays; the pay of the campaign when `a`'s
     /// goals want the war (plan §27.2); the war's expected length (`war_ticks`).
     pub fn war_terms(&self, a: ActorId, b: ActorId, blow_per_province: f64, params: &Params) -> WarTerms {
@@ -455,16 +463,22 @@ impl World {
         let ticks = self.war_ticks(a, b, params);
         let key = crate::army::pair(a, b);
         let claim = self.wars.get(&key).filter(|w| w.by == Some(b)).and_then(|w| w.aim);
-        // The land at risk, the nearest to the enemy's units first.
+        // The land at risk: a claimed province; else what the enemy's units reach in the war's length.
         let at_risk: Vec<ProvinceId> = match claim {
             Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
             _ => {
-                let mut reach: Vec<(usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d, q)).collect();
+                // The quickest to fall first: the march to each (a tick at least, as `war_ticks`
+                // counts a march) and its siege — a capital a step away stands its siege while
+                // the land behind it falls within the tick (the test world's case).
+                let per_tick = self.march_steps_per_tick(params).max(1);
+                let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
                 reach.sort();
-                reach.into_iter().map(|(_, q)| q).collect()
+                let reach: Vec<(usize, ProvinceId)> = reach.into_iter().map(|(_, d, q)| (d, q)).collect();
+                let n = self.conquests_within(ticks, &reach, params);
+                reach.into_iter().take(n).map(|(_, q)| q).collect()
             }
         };
-        let back = 1.0 - self.retake_odds(b, a, a, params);
+        let back = 1.0 - self.retake_odds(b, a, a, ticks, params);
         let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share(b, *q, params))).collect();
         // A claim on the polity: the tribute of Д2 once `a` is down to half the land it held
         // when the war began (`make_peace_between`) — the provinces still to lose until then.
@@ -493,6 +507,26 @@ impl World {
         }
     }
 
+    /// How many of the provinces `reach` (the steps to each from the enemy's units, in the
+    /// order they fall) the enemy can take within `ticks`, taking them one after another as the
+    /// world does (plan §28.12, owner's decision 1): each costs the march to it from the one
+    /// before by the movement rule (`march_steps_per_tick`, a tick at least — as `war_ticks`
+    /// counts a march) and its siege (`siege_ticks`: a province falls within the tick, a
+    /// capital after `siege.capital_ticks`). The k-th conquest needs k marches and k sieges:
+    /// the chain of (1−p)^k is cut where the war's expected length runs out.
+    pub fn conquests_within(&self, ticks: f64, reach: &[(usize, ProvinceId)], params: &Params) -> usize {
+        let per_tick = self.march_steps_per_tick(params).max(1);
+        let (mut spent, mut from) = (0.0, 0usize);
+        for (k, (steps, q)) in reach.iter().enumerate() {
+            spent += steps.saturating_sub(from).div_ceil(per_tick).max(1) as f64 + f64::from(self.siege_ticks(*q, params));
+            if spent > ticks {
+                return k;
+            }
+            from = *steps;
+        }
+        reach.len()
+    }
+
     /// The legitimacy a province ceded at a peace would cost `a`, in years of its income
     /// (`diplomacy::ceded_province_cost` at what the world turns a blow of legitimacy into,
     /// `blow_worth`): the price of every province at risk in a war (plan §28.9).
@@ -503,7 +537,8 @@ impl World {
     /// What `a`'s war on the terms `t` is worth to `a` with `extra` strength put in, in years
     /// of its income (plan §26): won — the stake for the horizon; lost — the land at risk,
     /// the enemy taking it one battle at a time, the k-th province with the odds of k battles
-    /// lost, for the horizon as the enemy holds it, with the legitimacy of ceding it, and the
+    /// lost (as many as it can take in the war's length, `war_terms`), for the horizon as the
+    /// enemy holds it, with the legitimacy of ceding it, and the
     /// tribute of a submission once enough is lost (plan §28.9); the soldiers the battle
     /// costs (А6), heads gone from the tax base while the people grow back by the world's
     /// growth rule (`regrowth_shortfall_ticks`; their place in the cohort of service is the
@@ -551,7 +586,7 @@ impl World {
         }
         let income = self.yearly_income(a, params).max(1) as f64;
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
-        let held = (1.0 - self.retake_odds(by, a, a, params)) * (1.0 - self.revolt_share(by, p, params));
+        let held = (1.0 - self.retake_odds(by, a, a, self.war_ticks(a, by, params), params)) * (1.0 - self.revolt_share(by, p, params));
         win_chance(defenders, threat, params) * self.take_of(a, p, params) * held * years / income
     }
 

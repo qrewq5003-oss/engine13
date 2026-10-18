@@ -669,16 +669,24 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
                         falls_by_conquest += 1;
                     }
                 }
-                Event::Verb { actor: engine2::ActorRef::Ruler(a), verb: VerbId::DeclareWar, target: engine2::Target::Actor(b) } => {
+                // A declaration claims a polity or one of its provinces (plan §28.9): the war
+                // is on the province's owner — read before a conquest of the same tick moves it.
+                Event::Verb { actor: engine2::ActorRef::Ruler(a), verb: VerbId::DeclareWar, target } => {
                     *verbs.entry(VerbId::DeclareWar).or_insert(0) += 1;
+                    let b = match target {
+                        engine2::Target::Actor(b) => Some(*b),
+                        engine2::Target::Province(q) => Some(g.world().provinces[q].owner).filter(|b| b != a).or_else(|| r.events.iter().find_map(|e| match e.event { Event::ProvinceChangedHands { province, from, .. } if province == *q => Some(from), _ => None })),
+                        _ => None,
+                    };
+                    let Some(b) = b else { continue };
                     declarations += 1;
                     if unpaid_seen.get(a).copied().unwrap_or(false) {
                         declared_unpaid += 1;
                     }
-                    if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t0 + 1 == t) {
+                    if last_peace.get(&((*a).min(b), (*a).max(b))).is_some_and(|t0| t0 + 1 == t) {
                         declared_after_peace += 1;
                     }
-                    if last_peace.get(&((*a).min(*b), (*a).max(*b))).is_some_and(|t0| t <= t0 + 10) {
+                    if last_peace.get(&((*a).min(b), (*a).max(b))).is_some_and(|t0| t <= t0 + 10) {
                         declared_within_five_years += 1;
                     }
                 }
@@ -1266,7 +1274,13 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
 
 /// The player's strategies of the paired run: the bot in the player's seat, a player who
 /// does nothing, a conqueror who goes to war on its weakest neighbour and marches on its
-/// capital — through the contract, with only what is on offer.
+/// capital — through the contract, with only what is on offer. The conqueror levies within
+/// its budget: while the pay of its whole army on campaign fits the tick's income (the
+/// world's pay functions). A probe that levied every tick could not pay the double pay of
+/// the campaign, was exhausted by the rule of the peace, accepted the enemy's peace and
+/// declared again — 121 wars of a tick on the test world's seed 3, its outcome the idle
+/// player's (plan §28.12): a foolish probe, not a degeneration of the engine. The change is
+/// to the probe player, not to the measures.
 fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
     let p = params();
     let me = ActorId(0);
@@ -1290,7 +1304,8 @@ fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sen
             });
             if g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
                 let capital = w.actors[&me].capital;
-                if !w.in_revolt(capital) && w.population(capital) > 0 {
+                let within_budget = engine2::economy::campaign_pay_per_tick(w.army_size(me) + w.recruit_per_tick(me, &p), &p) <= w.yearly_income(me, &p) / 2;
+                if within_budget && !w.in_revolt(capital) && w.population(capital) > 0 {
                     calls.push(VerbCall { actor: ActorRef::Ruler(me), verb: VerbId::Recruit, target: Target::Province(capital) });
                 }
             }
@@ -1309,7 +1324,6 @@ fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sen
             g.tick_turn(&[], &orders).or_else(|_| g.tick(&[])).unwrap();
         }
     });
-    let _ = p;
     summary
 }
 
