@@ -490,6 +490,9 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     // a new war before it is a breach.
     let mut w = testworld::world(12);
     w.declare_war(s0, s1).unwrap();
+    // A war of the facts states no claim (plan §28.9); the test's declaration would claim
+    // the polity's submission.
+    w.wars.get_mut(&(s0, s1)).unwrap().aim = None;
     assert!(w.losing_side(s0, s1).is_none());
     assert!(w.peace_room(s0, s1, &p).is_ok() && w.peace_room(s1, s0, &p).is_ok());
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
@@ -719,4 +722,94 @@ fn a_marriage_binds_two_houses_for_a_dowry_out_of_the_house_treasury_and_is_open
     assert!(!offer.available && offer.why.as_deref() == Some("no unmarried adult to marry"), "{:?}", offer.why);
     let err = g.tick(&[marry(ActorRef::House(o0), h1)]).unwrap_err();
     assert!(err.to_string().contains("no unmarried adult"), "{err}");
+}
+
+/// A declaration states its claim (plan §28.9, owner's decision 2026-10-17): the verb's
+/// target — a province, or a polity whose submission it claims — goes into the war's record,
+/// a public act. The claimant has a cause to go on until the claim is met: it refuses the
+/// other side's peace below the threshold while the province is not its own, and accepts
+/// once it is. The bots read the same function. What a lost war costs is read off the claim
+/// and the reach: against a claim on one province less is at risk than against a claim on
+/// the polity, and the land within the enemy's reach is what the enemy's units can march to.
+#[test]
+fn a_declaration_states_its_claim_and_the_claimant_has_a_cause_until_it_is_met() {
+    use engine2::{VerbId, WarAim};
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let q = at(1, 4);
+    let mut w = testworld::world(21);
+    w.apply_verb(&engine2::VerbCall { actor: engine2::ActorRef::Ruler(s0), verb: VerbId::DeclareWar, target: engine2::Target::Province(q) }, &p).unwrap();
+    assert!(w.at_war(s0, s1), "a claim on a province is a war on its owner");
+    assert_eq!((w.wars[&(s0, s1)].by, w.wars[&(s0, s1)].aim), (Some(s0), Some(WarAim::Province(q))));
+    assert!(w.war_cause(s0, s1, &p) && !w.war_cause(s1, s0, &p), "the claimant has a cause, the attacked none");
+    assert!(w.peace_room(s1, s0, &p).is_err(), "the claimant refuses a status quo below the threshold");
+    assert!(w.peace_room(s0, s1, &p).is_ok(), "the attacked accepts one");
+    // The claim met: the province taken — no cause left, the loser's peace is accepted.
+    take(&mut w, s0, q, &p);
+    assert!(w.claim_met(s0, s1, WarAim::Province(q)) && !w.war_cause(s0, s1, &p));
+    assert!(w.peace_room(s1, s0, &p).is_ok(), "the claim met, the claimant accepts the loser's peace");
+    // What a lost war costs the attacked reads the claim: one province against the polity.
+    let mut one = testworld::world(22);
+    one.declare_war_for(s1, at(0, 4)).unwrap();
+    let mut all = testworld::world(22);
+    all.declare_war(s1, s0).unwrap();
+    assert!(one.war_worth(s0, s1, false, 0.0, &p) > all.war_worth(s0, s1, false, 0.0, &p), "less at risk against a claim on one province than on the polity's submission");
+    // A claim met before the war is no claim: a lord cannot claim the submission of its own
+    // vassal — it names a province or stays at peace.
+    let mut v = testworld::world(23);
+    v.make_vassal(s1, s0).unwrap();
+    let err = v.apply_verb(&engine2::VerbCall { actor: engine2::ActorRef::Ruler(s0), verb: VerbId::DeclareWar, target: engine2::Target::Actor(s1) }, &p).unwrap_err();
+    assert!(err.to_string().contains("the claim is met already"), "{err}");
+    v.apply_verb(&engine2::VerbCall { actor: engine2::ActorRef::Ruler(s0), verb: VerbId::DeclareWar, target: engine2::Target::Province(at(1, 2)) }, &p).unwrap();
+    assert!(v.at_war(s0, s1) && v.war_cause(s0, s1, &p), "a province claimed on a vassal: a war with a cause");
+    // The land within the enemy's reach: on the test world a tick's march covers it all.
+    let reach = w.land_in_reach(s1, s0, 1, &p);
+    assert!(reach.contains_key(&at(0, 0)) && reach.len() == w.actors[&s0].provinces.len(), "{reach:?}");
+    assert!(reach[&at(0, 0)] < reach[&at(0, 4)], "the province nearest to the enemy's unit falls first: {reach:?}");
+}
+
+/// (A′) (plan §28.12, owner's decision 2026-10-20): the attacked states its own claim by
+/// `declare_war` on the enemy it already fights — the same verb at the same price, opening
+/// no war — and has a cause to go on until it is met, as the declarer has: it refuses the
+/// declarer's peace below the threshold. Once only, and only by the side declared on.
+#[test]
+fn the_attacked_states_its_claim_by_a_declaration_on_its_enemy_and_has_a_cause() {
+    use engine2::{ActorRef, Target, VerbCall, VerbId, WarAim};
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let declare = |a: ActorId, target: Target| VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::DeclareWar, target };
+    let mut w = testworld::world(24);
+    w.apply_verb(&declare(s0, Target::Province(at(1, 4))), &p).unwrap();
+    assert!(w.peace_room(s0, s1, &p).is_ok(), "without a claim the attacked accepts the declarer's peace");
+    assert!(w.claim_room(s0, s1).is_err(), "the declarer has its claim: no second one");
+    let legitimacy = w.actors[&s1].legitimacy;
+    let q = at(0, 4);
+    w.apply_verb(&declare(s1, Target::Province(q)), &p).unwrap();
+    let war = &w.wars[&(s0, s1)];
+    assert_eq!((war.by, war.aim, war.counter_aim), (Some(s0), Some(WarAim::Province(at(1, 4))), Some(WarAim::Province(q))), "the claim goes into the war's record; the war is the same");
+    assert_eq!(w.claim_of(s1, s0), Some(WarAim::Province(q)));
+    assert!(w.actors[&s1].legitimacy < legitimacy, "a declaration's price");
+    assert!(w.war_cause(s1, s0, &p) && w.peace_room(s0, s1, &p).is_err(), "the attacked with a claim refuses the declarer's peace below the threshold");
+    let err = w.apply_verb(&declare(s1, Target::Actor(s0)), &p).unwrap_err();
+    assert!(err.to_string().contains("stated already"), "{err}");
+    // The claim met: the province taken — the cause is gone, the declarer's peace accepted.
+    take(&mut w, s1, q, &p);
+    assert!(!w.war_cause(s1, s0, &p) && w.peace_room(s0, s1, &p).is_ok());
+}
+
+/// The bots' worth of a war reads the threshold of the relation (plan §28.12, owner's
+/// decision 2026-10-20): at it the rule of the peace grants either side's peace at the first
+/// offer, so the war wins nothing — as with an unpaid army.
+#[test]
+fn at_the_threshold_of_the_relation_a_war_wins_nothing() {
+    use engine2::{GoalKind, GoalTarget};
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = testworld::world(25);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 4))).unwrap();
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation - 1.0);
+    let below = w.war_worth(s0, s1, false, 0.0, &p);
+    assert!(below > w.war_worth(s0, s1, true, 0.0, &p), "below the threshold the goal is worth something");
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert_eq!(w.war_worth(s0, s1, false, 0.0, &p), w.war_worth(s0, s1, true, 0.0, &p), "at the threshold as unpaid");
 }

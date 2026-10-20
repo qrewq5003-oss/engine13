@@ -202,6 +202,12 @@ pub struct Actor {
     /// §27.1, owner's answer 1 on §27.5): they leave the ceiling of А1 and come back at the
     /// renewal of the cohort of service (`army.rs`, `population.rs`).
     pub manpower_deficit: f64,
+    /// The men of its units killed in the battles anyone saw (the `Battle` and
+    /// `UnitDestroyed` events), levies and mercenaries alike, decaying as the deficit does
+    /// (plan §28.7, owner's answer 3): the count a player keeps of another's losses — the
+    /// bots' estimate of its room to levy (`levy_room_seen`). The polity's own
+    /// `manpower_deficit` stays its own.
+    pub losses_seen: f64,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -280,6 +286,27 @@ pub struct War {
     /// with a cause refuses below the threshold, `diplomacy::peace_rule`). An ally's entry is
     /// the attacker's side's declaration; a war of the starting facts has none.
     pub by: Option<ActorId>,
+    /// The claim the declaration stated (plan §28.9, owner's decision 2026-10-17): the
+    /// province named, or the polity's submission — the target of `declare_war`, a public
+    /// act. The declarer has a cause to go on until the claim is met
+    /// (`diplomacy::war_cause`, `claim_met`); met, it accepts a peace or offers one. None for
+    /// an entrant's war of obligation and a war of the starting facts.
+    pub aim: Option<WarAim>,
+    /// The claim of the other side (plan §28.12, owner's decision (A′) 2026-10-20): a side at
+    /// war that did not declare it states its own by `declare_war` on the enemy it already
+    /// fights — the same public act at the same price — and has a cause to go on until it is
+    /// met, as the declarer has. None until stated.
+    pub counter_aim: Option<WarAim>,
+}
+
+/// What a declaration of war claims (plan §28.9): the province named, or the submission of
+/// the polity — met when the province is the claimant's, or when the polity would submit at a
+/// peace now (down to half the land it held when the war began, `make_peace_between`), is
+/// the claimant's vassal already, or has fallen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WarAim {
+    Province(ProvinceId),
+    Polity(ActorId),
 }
 
 /// What a treaty binds a pair to (E2 step 7).
@@ -711,6 +738,7 @@ impl World {
                     core_culture: CultureId(0),
                     goals: Vec::new(),
                     manpower_deficit: 0.0,
+                    losses_seen: 0.0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -849,7 +877,7 @@ impl World {
             }
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
-            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None });
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None, counter_aim: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

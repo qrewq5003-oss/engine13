@@ -71,6 +71,9 @@ pub fn win_chance(a: f64, b: f64, params: &Params) -> f64 {
     a.powf(k) / (a.powf(k) + b.powf(k))
 }
 
+/// The quality of a unit when it is raised or hired (its dynamics are E3 (д)'s).
+pub const NEW_UNIT_QUALITY: f64 = 50.0;
+
 /// The share of its soldiers a side loses in a battle, parts per million (E0 А6): the
 /// winner's or the loser's.
 pub fn battle_losses_ppm(won: bool, params: &Params) -> i64 {
@@ -92,11 +95,17 @@ impl World {
         a != b && self.wars.contains_key(&pair(a, b))
     }
 
-    /// Open a war without a price. For the tests only: the verb `declare_war` pays in
-    /// legitimacy (`diplomacy.rs`) and then comes here.
+    /// Open a war without a price, claiming the polity's submission. For the tests only:
+    /// the verb `declare_war` pays in legitimacy (`diplomacy.rs`) and then comes here.
     #[cfg(feature = "testing")]
     pub fn declare_war(&mut self, a: ActorId, b: ActorId) -> Result<(), WorldError> {
-        self.open_war(a, b)
+        self.open_war(a, b, Some(crate::world::WarAim::Polity(b)))
+    }
+
+    /// Open a war on the owner of `q` without a price, claiming `q`. For the tests only.
+    #[cfg(feature = "testing")]
+    pub fn declare_war_for(&mut self, a: ActorId, q: ProvinceId) -> Result<(), WorldError> {
+        self.open_war(a, self.provinces[&q].owner, Some(crate::world::WarAim::Province(q)))
     }
 
     /// The war itself, with its obligations (E2 step 7, plan §19.2 p. 3–4, owner's rule):
@@ -105,7 +114,7 @@ impl World {
     /// declaration**: it costs nothing, breaks no treaty, and pulls nobody further in, so one
     /// war does not light the world in a chain. An entrant whose peace with the other side
     /// is in force stays out: the treaty holds.
-    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId) -> Result<(), WorldError> {
+    pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId, aim: Option<crate::world::WarAim>) -> Result<(), WorldError> {
         if attacker == victim {
             return Err(WorldError::WarWithSelf(attacker));
         }
@@ -114,14 +123,14 @@ impl World {
                 return Err(WorldError::UnknownActor(x));
             }
         }
-        self.war_between(attacker, victim, None, attacker);
+        self.war_between(attacker, victim, None, attacker, aim);
         let principal = Some(pair(attacker, victim));
         let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
         for x in with_victim {
-            self.war_between(x, attacker, principal, attacker);
+            self.war_between(x, attacker, principal, attacker, None);
         }
         for x in with_attacker {
-            self.war_between(x, victim, principal, x);
+            self.war_between(x, victim, principal, x, None);
         }
         Ok(())
     }
@@ -160,12 +169,13 @@ impl World {
     }
 
     /// Record a war between a pair if there is none, with its event; `of` names the
-    /// principal pair when the war is an obligation of theirs.
-    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>, by: ActorId) {
+    /// principal pair when the war is an obligation of theirs; `aim` is the claim the
+    /// declaration stated (none for an entrant).
+    fn war_between(&mut self, a: ActorId, b: ActorId, of: Option<(ActorId, ActorId)>, by: ActorId, aim: Option<crate::world::WarAim>) {
         let (a, b) = pair(a, b);
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
-            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by) });
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by), aim, counter_aim: None });
             self.emit(Event::War { a, b });
         }
     }
@@ -217,14 +227,35 @@ impl World {
         (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
     }
 
-    /// The men of a levy killed: they leave its polity's ceiling until the cohort grows up.
-    fn levy_dead(&mut self, unit: UnitId, men: i64) {
-        if men > 0 && !self.units[&unit].mercenary {
-            let owner = self.units[&unit].owner;
+    /// The men of a unit killed: all of them into their polity's count of the dead that
+    /// anyone sees (`Actor::losses_seen` — every call here comes with a `Battle` or
+    /// `UnitDestroyed` event), a levy's into its polity's ceiling until the cohort grows up.
+    fn men_dead(&mut self, unit: UnitId, men: i64) {
+        if men > 0 {
+            let (owner, mercenary) = (self.units[&unit].owner, self.units[&unit].mercenary);
             if let Some(actor) = self.actors.get_mut(&owner) {
-                actor.manpower_deficit += men as f64;
+                actor.losses_seen += men as f64;
+                if !mercenary {
+                    actor.manpower_deficit += men as f64;
+                }
             }
         }
+    }
+
+    /// The room to levy as anyone sees it (plan §28.7, owner's answer 3): the ceiling of А1
+    /// by the polity's people, less its dead by the battles seen (`losses_seen` — levies and
+    /// mercenaries alike, a player cannot tell them apart), less the army it has. The
+    /// polity's own count (`recruit_room`) is its own.
+    pub fn levy_room_seen(&self, a: ActorId, params: &Params) -> i64 {
+        ((self.recruit_ceiling(a, params) as f64 - self.actors[&a].losses_seen).max(0.0) as i64 - self.army_size(a)).max(0)
+    }
+
+    /// Men a levy can raise this tick as anyone sees it: the rate of a tick (А2) on the
+    /// ceiling less the dead by the battles seen, within the room seen (`levy_room_seen`).
+    /// The polity's own count is `recruit_per_tick`.
+    pub fn levy_per_tick_seen(&self, a: ActorId, params: &Params) -> i64 {
+        let ceiling = (self.recruit_ceiling(a, params) as f64 - self.actors[&a].losses_seen).max(0.0) as i64;
+        (ceiling * params.recruit_rate_ppm_per_tick / 1_000_000).min(self.levy_room_seen(a, params))
     }
 
     fn strength(&self, units: &[UnitId]) -> f64 {
@@ -234,6 +265,17 @@ impl World {
     /// A unit's strength in battle: soldiers × (0.5 + quality/100).
     pub fn unit_strength(&self, u: UnitId) -> f64 {
         self.soldiers(u) as f64 * (0.5 + self.units[&u].quality / 100.0)
+    }
+
+    /// The strength `n` new soldiers bring, by the battle's measure (a new unit's quality).
+    pub fn new_soldiers_strength(n: i64) -> f64 {
+        n as f64 * (0.5 + NEW_UNIT_QUALITY / 100.0)
+    }
+
+    /// The advance a hire of mercenaries costs now, kg (E0 А4): as many as the treasury
+    /// covers within the ceiling, at `mercenary.advance` each.
+    pub fn hire_advance(&self, a: ActorId, params: &Params) -> i64 {
+        self.hire_count(a, params) * params.mercenary_advance_kg
     }
 
     /// The strength of a polity's whole army, by the battle's measure.
@@ -294,7 +336,7 @@ impl World {
                         self.post(Account::Soldiers(*u), Source::BattleLoss, -milli)?;
                     }
                     let dead = soldiers - self.soldiers(*u);
-                    self.levy_dead(*u, dead);
+                    self.men_dead(*u, dead);
                     sum += dead;
                 }
                 lost.insert(side, sum as u64);
@@ -330,7 +372,7 @@ impl World {
                 if soldiers > 0 {
                     self.post(Account::Soldiers(unit), Source::BattleLoss, -soldiers * 1000)?;
                 }
-                self.levy_dead(unit, soldiers);
+                self.men_dead(unit, soldiers);
                 self.units.remove(&unit);
                 self.emit(Event::UnitDestroyed { unit });
             }
@@ -436,7 +478,7 @@ impl World {
     pub(crate) fn new_unit(&mut self, owner: ActorId, at: ProvinceId, mercenary: bool) -> Result<UnitId, WorldError> {
         let id = UnitId(self.next_unit);
         self.next_unit += 1;
-        self.units.insert(id, Unit { owner, position: at, quality: 50.0, destination: None, mercenary, house: None });
+        self.units.insert(id, Unit { owner, position: at, quality: NEW_UNIT_QUALITY, destination: None, mercenary, house: None });
         self.ledger.open(self.tick, Account::Soldiers(id), 0)?;
         Ok(id)
     }
@@ -480,7 +522,7 @@ impl World {
                 if n <= 0 {
                     return Err(VerbError::NotAvailable(call.verb, if self.recruit_room(a, params) <= 0 { "at the levy ceiling" } else { "cannot pay an advance" }));
                 }
-                let advance = n * params.mercenary_advance_kg;
+                let advance = self.hire_advance(a, params);
                 let capital = self.actors[&a].capital;
                 let unit = self.new_unit(a, capital, true).map_err(ledger)?;
                 self.post(Account::Treasury(a), Source::Hire, -advance * 1000).map_err(ledger)?;
