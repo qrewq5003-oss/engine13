@@ -5,6 +5,14 @@
 members = ["engine2", "sentinel"]
 exclude = ["src-tauri"]
 
+# The engine2 tests run many worlds (20 x 300 ticks in the measures of E2, more under
+# `--ignored`): unoptimized they take ~545 s of a ~773 s CI chain, optimized the same run is
+# a fraction of that. Only the crate is optimized, its tests and the rest of the workspace
+# stay at the dev defaults, so the build grows little (chain timed before and after in the PR
+# that added this).
+[profile.dev.package.engine2]
+opt-level = 2
+
 [package]
 name = "engine13"
 version = "0.1.0"
