@@ -123,6 +123,10 @@ pub struct Context {
     /// The terms of every war the polity is in (`World::war_terms`), read once: the verbs of
     /// the army ask the worth of each war at several strengths.
     wars: Vec<crate::worth::WarTerms>,
+    /// The threats at peace (`World::threats`, E3 (г), plan §29): the chance each neighbour
+    /// declares over the horizon and the terms of that war, read once; empty at war, where
+    /// the wars are the measure of the army.
+    threats: Vec<(f64, crate::worth::WarTerms)>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -589,6 +593,28 @@ impl World {
         self.soldiers_cost(a, n, ticks, params)
     }
 
+    /// What `extra` strength is worth to `a` in its state: at war, to its wars
+    /// (`at_war_gain`); at peace (E3 (г), plan §29.3), against the threat it stands under —
+    /// what each neighbour's war would lose it, by the same terms as a war's, at the chance
+    /// that neighbour declares one over the horizon (`World::threats`).
+    fn strength_gain(&self, a: ActorId, ctx: &Context, extra: f64, params: &Params) -> f64 {
+        if ctx.at_war {
+            self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
+        } else {
+            ctx.threats.iter().map(|(chance, t)| chance * (self.war_worth_of(a, t, ctx.unpaid, extra, params) - self.war_worth_of(a, t, ctx.unpaid, 0.0, params))).sum()
+        }
+    }
+
+    /// What `n` soldiers kept cost `a` in its state: at war, for the wars' expected length
+    /// (`war_soldiers_cost`); at peace, for the horizon the threat is read over.
+    fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
+        if ctx.at_war {
+            self.war_soldiers_cost(a, &ctx.wars, n, params)
+        } else {
+            self.soldiers_cost(a, n, f64::from(params.goal_horizon_ticks), params)
+        }
+    }
+
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
     pub fn bot_orders_all(&self, player: Option<ActorRef>, params: &Params) -> Vec<Order> {
         self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).flat_map(|a| self.bot_orders(a, params)).collect()
@@ -680,11 +706,13 @@ impl World {
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         let risk = self.risk_prices(a, params);
         let blow_per_province = self.ceded_province_blow(a, &risk, params);
+        let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
         Context {
-            at_war: self.actors.keys().any(|b| self.at_war(a, *b)),
+            at_war,
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect(),
+            threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },
             risk,
             blow_per_province,
         }
@@ -712,28 +740,21 @@ impl World {
             (VerbId::DeclareWar, Target::Province(q)) => self.declaration_worth(a, self.provinces[&q].owner, unpaid, ctx, params),
             // The peace is the war the other way round: worth what going on would lose.
             (VerbId::MakePeace, Target::Actor(b)) => ctx.wars.iter().find(|t| t.b == b).map_or(0.0, |t| -self.war_worth_of(a, t, unpaid, 0.0, params)),
-            // A levy or a hire at war: what the strength adds to the wars, less its pay (and the
-            // advance) for the war's expected length; at peace a standing army's worth is the
-            // threat it answers — (г).
+            // A levy or a hire: what the strength adds to the wars, or at peace takes off the
+            // threat (E3 (г), plan §29.3 — the loss each neighbour's war would bring, at the
+            // chance it declares one), less its pay (and the advance) for the war's expected
+            // length, or at peace for the horizon the threat is read over.
             (VerbId::Recruit, Target::Province(_)) => {
                 let n = self.recruit_per_tick(a, params);
-                self.at_war_gain(a, &ctx.wars, World::new_soldiers_strength(n), unpaid, params) - self.war_soldiers_cost(a, &ctx.wars, n, params)
+                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - self.kept_soldiers_cost(a, ctx, n, params)
             }
             (VerbId::HireMercenaries, _) => {
                 let n = self.hire_count(a, params);
-                self.at_war_gain(a, &ctx.wars, World::new_soldiers_strength(n), unpaid, params) - price_kg(self.hire_advance(a, params)) - self.war_soldiers_cost(a, &ctx.wars, n, params)
+                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - price_kg(self.hire_advance(a, params)) - self.kept_soldiers_cost(a, ctx, n, params)
             }
-            // A unit sent home at war: the pay saved for the war's length against what the
-            // wars lose; at peace the rule of (б) until (г): an unpaid army melts anyway.
-            (VerbId::Disband, Target::Unit(u)) => {
-                if at_war {
-                    self.war_soldiers_cost(a, &ctx.wars, self.soldiers(u), params) + self.at_war_gain(a, &ctx.wars, -self.unit_strength(u), unpaid, params)
-                } else if unpaid {
-                    0.5
-                } else {
-                    -1.0
-                }
-            }
+            // A unit sent home: the pay saved against what the wars, or the threat, lose by it.
+            (VerbId::Disband, Target::Unit(u)) => self.kept_soldiers_cost(a, ctx, self.soldiers(u), params) + self.strength_gain(a, ctx, -self.unit_strength(u), params),
+            // At peace the loan waits for the rule of the default (plan §29.3, owner's answer 3).
             (VerbId::TakeLoan, _) => {
                 if unpaid && at_war {
                     0.5

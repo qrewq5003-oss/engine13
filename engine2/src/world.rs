@@ -208,6 +208,14 @@ pub struct Actor {
     /// bots' estimate of its room to levy (`levy_room_seen`). The polity's own
     /// `manpower_deficit` stays its own.
     pub losses_seen: f64,
+    /// The tick the polity entered the chronicle — the world's start, or its birth of a
+    /// rising: the span of its record anyone can read (E3 (г), plan §29.2).
+    pub since: Tick,
+    /// The wars it declared itself — the `War` events with it as the declarer, not an
+    /// entrant's by its bonds nor a war of the starting facts — a public fact of the
+    /// chronicle: with `since`, the frequency of its wars that a bot reads as its intent
+    /// (`worth::war_rate`; plan §29.2, owner's answer 1 on §29.6). Its goals stay its own.
+    pub wars_declared: u32,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -739,6 +747,8 @@ impl World {
                     goals: Vec::new(),
                     manpower_deficit: 0.0,
                     losses_seen: 0.0,
+                    since: tick,
+                    wars_declared: 0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;

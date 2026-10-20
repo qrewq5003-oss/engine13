@@ -176,6 +176,13 @@ impl World {
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
             self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by), aim, counter_aim: None });
+            // A war of its own goes into the declarer's public record (`Actor::wars_declared`,
+            // plan §29.2); an entrant's war of obligation is not its declaration.
+            if of.is_none() {
+                if let Some(declarer) = self.actors.get_mut(&by) {
+                    declarer.wars_declared += 1;
+                }
+            }
             self.emit(Event::War { a, b });
         }
     }

@@ -707,6 +707,44 @@ impl World {
         self.actors.keys().copied().filter(|b| self.at_war(x, *b) && self.alive(*b) && self.army_size(*b) > self.army_size(x)).max_by_key(|b| (self.army_size(*b), std::cmp::Reverse(*b)))
     }
 
+    // ---- the threat at peace (E3 (г), plan §29) ----
+
+    /// How often `t` declares a war, per tick, as anyone reads it off the chronicle (plan
+    /// §29.2; owner's answer 1 on §29.6): its own declarations (`Actor::wars_declared`) over
+    /// the ticks of its record (`Actor::since`), mixed with the world's rate over the goal's
+    /// horizon `H` — `(declared_t + r_world × H) / (seen_t + H)`. A polity with a record shorter
+    /// than the horizon is read by the world's rate, one with a longer record by its own; no
+    /// threshold and no parameter. The world's rate: the declarations of every living polity
+    /// over the ticks of every living polity's record.
+    pub fn war_rate(&self, t: ActorId, params: &Params) -> f64 {
+        let h = f64::from(params.goal_horizon_ticks);
+        let seen = |x: ActorId| f64::from(self.tick.0.saturating_sub(self.actors[&x].since.0));
+        let (declared, ticks) = self.actors.keys().filter(|x| self.alive(**x)).fold((0.0, 0.0), |(d, s), x| (d + f64::from(self.actors[x].wars_declared), s + seen(*x)));
+        let world = if ticks > 0.0 { declared / ticks } else { 0.0 };
+        (f64::from(self.actors[&t].wars_declared) + world * h) / (seen(t) + h)
+    }
+
+    /// The chance over the horizon that `t` declares a war on `a` (plan §29.2): `t`'s rate of
+    /// war falls on one of the polities whose land touches its own, each as likely as another
+    /// — the record says how often `t` fights, not whom. Nothing for an `a` that `t` does not
+    /// touch.
+    pub fn war_chance_from(&self, t: ActorId, a: ActorId, params: &Params) -> f64 {
+        if !self.borders(t, a) {
+            return 0.0;
+        }
+        let k = self.actors.keys().filter(|x| self.alive(**x) && self.borders(t, **x)).count().max(1);
+        1.0 - (1.0 - (self.war_rate(t, params) / k as f64).min(1.0)).powf(f64::from(params.goal_horizon_ticks))
+    }
+
+    /// The threats to `a` at peace (plan §29.2–29.3): for every living polity whose land
+    /// touches its own and that it does not fight, the chance it declares over the horizon
+    /// (`war_chance_from`) and the terms of that war for `a` (`war_terms`: the land within its
+    /// reach, the chain of its conquests, the discounts and the blow — the table of §28.10, the
+    /// same as a war's). Read once per decision (`agents::Context`).
+    pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(f64, WarTerms)> {
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (self.war_chance_from(t, a, params), self.war_terms(a, t, blow_per_province, params))).collect()
+    }
+
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at
     /// stake.
     fn stake(&self, a: ActorId, t: ActorId, params: &Params) -> f64 {
