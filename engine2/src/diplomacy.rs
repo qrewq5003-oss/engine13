@@ -300,22 +300,13 @@ impl World {
     /// forced. A loser of provinces with the stronger side is not forced: it would take back
     /// what it lost (measured on #298: polity 9 with 13 441 men against 6 lost undefended
     /// provinces, accepted the peace as the loser and took them back the next tick — the
-    /// revanche that stopped (е2)). **And beaten** (plan §28.12, owner's decision 2026-10-20:
-    /// «вынужден» = действительно разбит): the capital it had when the war began is taken, or
-    /// the other side besieges its capital now (`War::capitals`, `Siege::by`). A loser of a
-    /// border province at odds of 0,3–0,45 was forced, took the peace and declared again the
-    /// next tick (26 of 78 renewals, plan §28.12) — it was weaker, not beaten.
+    /// revanche that stopped (е2)). Not stricter than that (plan §28.12, owner's decision
+    /// 2026-10-20): «beaten» read as the capital taken or besieged added nothing to the
+    /// revanche (25 → 24 of 331) and gave wars without end — 17 polities of 149 always at war,
+    /// the weaker never making peace until the enemy reached its capital.
     pub fn forced_to_peace(&self, a: ActorId, b: ActorId, params: &Params) -> Option<ActorId> {
         let loser = self.losing_side(a, b)?;
         let (side_a, side_b) = self.war_sides(a, b);
-        let key = pair(a, b);
-        let first = self.wars[&key].capitals;
-        let at_war_start = if loser == key.0 { first.0 } else { first.1 };
-        let enemies = if loser == a { &side_b } else { &side_a };
-        let besieged = self.provinces[&self.actors[&loser].capital].siege.as_ref().is_some_and(|s| enemies.contains(&s.by));
-        if self.provinces[&at_war_start].owner == loser && !besieged {
-            return None;
-        }
         let strength = |side: &[ActorId]| side.iter().map(|x| self.army_strength(*x)).sum::<f64>();
         let (mine, theirs) = if loser == a { (strength(&side_a), strength(&side_b)) } else { (strength(&side_b), strength(&side_a)) };
         let odds = if theirs <= 0.0 {

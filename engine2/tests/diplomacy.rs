@@ -539,11 +539,8 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
         take(&mut w, s0, at(1, y), &p);
     }
     assert_eq!(w.actors[&s1].provinces.len(), 2);
-    // Forced: three provinces lost, the weaker side (plan §28.1) and beaten — its capital
-    // besieged (plan §28.12).
+    // Forced: three provinces lost and the weaker side (plan §28.1).
     w.post(engine2::Account::Soldiers(w.units_of(s0)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
-    let cap = w.actors[&s1].capital;
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s0, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     let r = {
         w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
@@ -558,10 +555,8 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s1, at(0, 4), &p);
     assert_eq!(w.losing_side(s0, s1), Some(s0));
-    // The lord, beaten — its capital besieged — and the weaker, is forced to the vassal's peace.
+    // The lord, beaten and the weaker, is forced to the vassal's peace.
     w.post(engine2::Account::Soldiers(w.units_of(s1)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
-    let cap = w.actors[&s0].capital;
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert_eq!(w.lord_of(s1), None, "released");
@@ -574,8 +569,6 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     take(&mut w, s0, at(1, 4), &p);
     let lords = w.units_of(s0)[0];
     w.post(engine2::Account::Soldiers(lords), engine2::Source::Test, 1200 * 1000).unwrap();
-    let cap = w.actors[&s1].capital;
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s0, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
     assert_eq!(w.lord_of(s1), Some(s0), "the rebel lost: still a vassal");

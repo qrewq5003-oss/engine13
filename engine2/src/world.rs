@@ -277,10 +277,6 @@ pub struct War {
     /// Provinces each side held when the war began (the lower id first): a loser down to
     /// half of them submits at the peace.
     pub held: (u32, u32),
-    /// The capitals the sides had when the war began (the lower id first): a side whose
-    /// capital the enemy took, or whose capital it besieges, is beaten (plan §28.12,
-    /// `diplomacy::forced_to_peace`).
-    pub capitals: (ProvinceId, ProvinceId),
     /// The principal pair this war is an obligation of (an ally's, a lord's, a vassal's
     /// entry); it ends with their peace. None for a war of its own.
     pub of: Option<(ActorId, ActorId)>,
@@ -881,8 +877,7 @@ impl World {
             }
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
-            let capitals = (world.actors[&lo].capital, world.actors[&hi].capital);
-            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, capitals, of: None, by: None, aim: None, counter_aim: None });
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None, counter_aim: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

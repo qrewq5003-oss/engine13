@@ -175,8 +175,7 @@ impl World {
         let (a, b) = pair(a, b);
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
-            let capitals = (self.actors[&a].capital, self.actors[&b].capital);
-            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, capitals, of, by: Some(by), aim, counter_aim: None });
+            self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by), aim, counter_aim: None });
             self.emit(Event::War { a, b });
         }
     }

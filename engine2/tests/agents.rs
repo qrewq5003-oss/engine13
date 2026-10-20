@@ -865,13 +865,16 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     let a11_band = band("army.observed_share_of_population");
     assert!((a11_band[0]..=a11_band[1]).contains(&a11_peace), "А11 at peace {a11_peace:.4} outside {a11_band:?}");
-    // In war 2–3 % of the people under arms (E0 А11, Jones, Mallett–Hale — the source's band;
-    // owner's rule 2026-10-17, plan §28.9).
-    let a11_war_band = band("army.observed_share_at_war");
-    assert!((a11_war_band[0]..=a11_war_band[1]).contains(&a11_war), "А11 at war {a11_war:.4} outside {a11_war_band:?}");
     let b7_band = band("revolt.observed_per_century");
     assert!((b7_band[0]..=b7_band[1]).contains(&b7), "В7 {b7:.2} outside {b7_band:?}");
-    eprintln!("А11 at war {a11_war:.4} (E0: 2–3 % in war) — printed: the levy of agents at war is the bots' own choice");
+    // In war 2–3 % of the people under arms (E0 А11, Jones, Mallett–Hale — the source's band;
+    // owner's rule 2026-10-17, plan §28.9). Printed, not asserted (owner's decision 2026-10-20,
+    // plan §28.12): a known deviation until (д) — the world's war is decided in three ticks
+    // (the median) and costs one province, so a second levy has nothing to pay for; the army at
+    // war is one tick's levy, А2 × А1 ≈ 0,75 % of the people. The limit of the model of war,
+    // not an approximation of the bot — not to be tuned.
+    let a11_war_band = band("army.observed_share_at_war");
+    eprintln!("А11 at war {a11_war:.4} (E0: {a11_war_band:?} in war) — printed: a known deviation until (д), plan §28.12");
 }
 
 #[test]
@@ -1249,10 +1252,7 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
     assert!(x.peace_room(s1, s0, &p).is_err(), "a loser of provinces at even strength is not forced");
     let theirs = x.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).unwrap();
     x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
-    assert_eq!(x.forced_to_peace(s0, s1, &p), None, "weaker but not beaten: its capital stands (plan §28.12)");
-    let cap = x.actors[&s0].capital;
-    x.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
-    assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0), "its capital besieged: beaten");
+    assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0));
     assert!(x.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts always");
     // A war of the starting facts states no claim (plan §28.9): a goal is not a cause, and a
     // status quo is accepted both ways.
@@ -1671,15 +1671,11 @@ fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_t
     assert_eq!(w.forced_to_peace(s0, s1, &p), None, "the stronger loser of provinces would take them back");
     assert!(w.peace_room(s1, s0, &p).is_err(), "it refuses the weaker side's peace");
     assert!(w.peace_room(s0, s1, &p).is_ok(), "the attacked accepts a status quo from it");
-    // The same loser with the smaller army: weaker, but not beaten while its capital stands
-    // (plan §28.12); its capital besieged, or taken since the war began — forced.
+    // The same loser with the smaller army: forced, accepts any peace. Not stricter than
+    // that (plan §28.12, owner's decision 2026-10-20): «beaten» read as the capital taken or
+    // besieged gave wars without end — 17 polities of 149 always at war.
     let mut w = fresh(83, false);
     w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
-    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "weaker, its capital its own and free");
-    let cap = w.actors[&s0].capital;
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s2, ticks: 1 });
-    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "a siege by another than the enemy's side beats nobody in this war");
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     assert_eq!(w.forced_to_peace(s1, s0, &p), Some(s0), "the same either way round");
     assert!(w.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts");
@@ -1689,15 +1685,5 @@ fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_t
     assert_eq!(w.war_sides(s0, s1), (vec![s0], vec![s1, s2]));
     w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 300 * 1000).unwrap();
     assert!(w.army_strength(s0) > w.army_strength(s1) && w.army_strength(s0) < w.army_strength(s1) + w.army_strength(s2));
-    let cap = w.actors[&s0].capital;
-    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s2, ticks: 1 });
-    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone — and the ally's siege is the side's");
-    // The capital it had at the war's start taken: beaten, wherever the court went.
-    let mut w = fresh(85, false);
-    w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
-    let first = w.actors[&s0].capital;
-    let other = w.actors[&s0].provinces.iter().copied().find(|q| *q != first).unwrap();
-    w.provinces.get_mut(&first).unwrap().owner = s1;
-    w.actors.get_mut(&s0).unwrap().capital = other;
-    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the capital of the war's start in the enemy's hands");
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone");
 }
