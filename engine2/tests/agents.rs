@@ -875,6 +875,11 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     // not an approximation of the bot — not to be tuned.
     let a11_war_band = band("army.observed_share_at_war");
     eprintln!("А11 at war {a11_war:.4} (E0: {a11_war_band:?} in war) — printed: a known deviation until (д), plan §28.12");
+    // A floor against a regression of the known deviation, not a band (owner's rule
+    // 2026-10-20): the measure stood at 0,0080 on #305 (0,0078–0,0095 over the stops of (3),
+    // plan §28.9–28.13); a bot that stops levying at war would fall below it. Removed with (д),
+    // when the band of the source comes back as the assertion.
+    assert!(a11_war >= 0.007, "А11 at war {a11_war:.4} below the regression floor 0,007 (plan §28.13)");
 }
 
 #[test]
