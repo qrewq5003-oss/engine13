@@ -613,6 +613,11 @@ fn the_end_of_a_secession_is_the_state_of_the_war_suppression_submission_or_free
     let r = w.tick(&p).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, from, to, how: Transfer::Conquest } if province == p15 && from == s0 && to == new)), "an undefended province of the parent falls within the tick");
     assert_eq!(w.losing_side(s0, new), Some(s0));
+    // A province lost does not beat the parent (plan §28.12): it refuses the peace while its
+    // capital stands; besieged by the new polity, it is beaten and accepts.
+    assert!(w.peace_room(new, s0, &p).is_err(), "the parent, not beaten, wants its land back");
+    let cap = w.actors[&s0].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: new, ticks: 1 });
     w.apply_verb(&call(new, VerbId::MakePeace, s0), &p).unwrap();
     assert!(!w.at_war(new, s0));
     assert_eq!(w.lord_of(new), None, "free");

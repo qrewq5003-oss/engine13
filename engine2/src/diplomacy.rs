@@ -300,10 +300,22 @@ impl World {
     /// forced. A loser of provinces with the stronger side is not forced: it would take back
     /// what it lost (measured on #298: polity 9 with 13 441 men against 6 lost undefended
     /// provinces, accepted the peace as the loser and took them back the next tick — the
-    /// revanche that stopped (е2)).
+    /// revanche that stopped (е2)). **And beaten** (plan §28.12, owner's decision 2026-10-20:
+    /// «вынужден» = действительно разбит): the capital it had when the war began is taken, or
+    /// the other side besieges its capital now (`War::capitals`, `Siege::by`). A loser of a
+    /// border province at odds of 0,3–0,45 was forced, took the peace and declared again the
+    /// next tick (26 of 78 renewals, plan §28.12) — it was weaker, not beaten.
     pub fn forced_to_peace(&self, a: ActorId, b: ActorId, params: &Params) -> Option<ActorId> {
         let loser = self.losing_side(a, b)?;
         let (side_a, side_b) = self.war_sides(a, b);
+        let key = pair(a, b);
+        let first = self.wars[&key].capitals;
+        let at_war_start = if loser == key.0 { first.0 } else { first.1 };
+        let enemies = if loser == a { &side_b } else { &side_a };
+        let besieged = self.provinces[&self.actors[&loser].capital].siege.as_ref().is_some_and(|s| enemies.contains(&s.by));
+        if self.provinces[&at_war_start].owner == loser && !besieged {
+            return None;
+        }
         let strength = |side: &[ActorId]| side.iter().map(|x| self.army_strength(*x)).sum::<f64>();
         let (mine, theirs) = if loser == a { (strength(&side_a), strength(&side_b)) } else { (strength(&side_b), strength(&side_a)) };
         let odds = if theirs <= 0.0 {
@@ -380,8 +392,35 @@ impl World {
     /// war with the better odds — the loser that is not forced (`forced_to_peace`) would take
     /// them back. Read off the record alone, so the bots read this very function.
     pub fn war_cause(&self, b: ActorId, a: ActorId, params: &Params) -> bool {
-        let claim = self.wars.get(&pair(a, b)).filter(|w| w.by == Some(b)).and_then(|w| w.aim);
-        claim.is_some_and(|aim| !self.claim_met(b, a, aim)) || (self.losing_side(a, b) == Some(b) && self.forced_to_peace(a, b, params) != Some(b))
+        self.claim_of(b, a).is_some_and(|aim| !self.claim_met(b, a, aim)) || (self.losing_side(a, b) == Some(b) && self.forced_to_peace(a, b, params) != Some(b))
+    }
+
+    /// The claim `claimant` stated in its war with `other`: the declarer's, or the other
+    /// side's own (`War::counter_aim`, (A′)); none for a side that stated none.
+    pub fn claim_of(&self, claimant: ActorId, other: ActorId) -> Option<WarAim> {
+        let w = self.wars.get(&pair(claimant, other))?;
+        if w.by == Some(claimant) {
+            w.aim
+        } else if w.by == Some(other) {
+            w.counter_aim
+        } else {
+            None
+        }
+    }
+
+    /// Could `a` state its claim in the war `b` declared on it (plan §28.12, (A′))? Once:
+    /// a side with a claim of its own has its cause, as the declarer has.
+    pub fn claim_room(&self, a: ActorId, b: ActorId) -> Result<(), &'static str> {
+        match self.wars.get(&pair(a, b)) {
+            Some(w) if a != b && w.by == Some(b) && self.alive(b) => {
+                if w.counter_aim.is_some() {
+                    Err("the claim is stated already")
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err("no war declared on us to claim in"),
+        }
     }
 
     /// Whether the claim `aim` of `claimant` in its war with `other` is met (plan §28.9): the
@@ -531,7 +570,7 @@ impl World {
             (_, ActorRef::House(_)) => closed("a house does not rule the polity"),
             (VerbId::DeclareWar, ActorRef::Ruler(a)) => {
                 let cost = params.legitimacy_cost_declare_war.round() as i64;
-                if others(a).iter().any(|b| self.war_room(a, *b).is_ok()) {
+                if others(a).iter().any(|b| self.war_room(a, *b).is_ok() || self.claim_room(a, *b).is_ok()) {
                     return offer(true, 0, cost, None, None);
                 }
                 let why = if self.lord_of(a).is_some() { "a vassal fights only its lord" } else { "nobody to fight" };
@@ -612,6 +651,16 @@ impl World {
         }
         let not_available = |why: &'static str| VerbError::NotAvailable(call.verb, why);
         match call.verb {
+            // (A′): a declaration on the enemy that declared on us states our claim in its war.
+            VerbId::DeclareWar if self.at_war(a, b) => {
+                self.claim_room(a, b).map_err(not_available)?;
+                if aim.is_some_and(|aim| self.claim_met(a, b, aim)) {
+                    return Err(not_available("the claim is met already: claim a province"));
+                }
+                self.pay_legitimacy(a, self.war_price(a, b, params));
+                self.wars.get_mut(&pair(a, b)).expect("at war").counter_aim = aim;
+                Ok(())
+            }
             VerbId::DeclareWar => {
                 self.war_room(a, b).map_err(not_available)?;
                 // A claim met before the war is no claim (plan §28.9): a lord claiming the

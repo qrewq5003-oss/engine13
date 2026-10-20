@@ -539,8 +539,11 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
         take(&mut w, s0, at(1, y), &p);
     }
     assert_eq!(w.actors[&s1].provinces.len(), 2);
-    // Forced: three provinces lost and the weaker side (plan §28.1).
+    // Forced: three provinces lost, the weaker side (plan §28.1) and beaten — its capital
+    // besieged (plan §28.12).
     w.post(engine2::Account::Soldiers(w.units_of(s0)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    let cap = w.actors[&s1].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s0, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     let r = {
         w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
@@ -555,8 +558,10 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     w.declare_war(s1, s0).unwrap();
     take(&mut w, s1, at(0, 4), &p);
     assert_eq!(w.losing_side(s0, s1), Some(s0));
-    // The lord, beaten and the weaker, is forced to the vassal's peace.
+    // The lord, beaten — its capital besieged — and the weaker, is forced to the vassal's peace.
     w.post(engine2::Account::Soldiers(w.units_of(s1)[0]), engine2::Source::Test, 1200 * 1000).unwrap();
+    let cap = w.actors[&s0].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     w.apply_verb(&call(s1, VerbId::MakePeace, s0), &p).unwrap();
     assert_eq!(w.lord_of(s1), None, "released");
@@ -569,6 +574,8 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
     take(&mut w, s0, at(1, 4), &p);
     let lords = w.units_of(s0)[0];
     w.post(engine2::Account::Soldiers(lords), engine2::Source::Test, 1200 * 1000).unwrap();
+    let cap = w.actors[&s1].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s0, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s1));
     w.apply_verb(&call(s0, VerbId::MakePeace, s1), &p).unwrap();
     assert_eq!(w.lord_of(s1), Some(s0), "the rebel lost: still a vassal");
@@ -766,4 +773,50 @@ fn a_declaration_states_its_claim_and_the_claimant_has_a_cause_until_it_is_met()
     let reach = w.land_in_reach(s1, s0, 1, &p);
     assert!(reach.contains_key(&at(0, 0)) && reach.len() == w.actors[&s0].provinces.len(), "{reach:?}");
     assert!(reach[&at(0, 0)] < reach[&at(0, 4)], "the province nearest to the enemy's unit falls first: {reach:?}");
+}
+
+/// (A′) (plan §28.12, owner's decision 2026-10-20): the attacked states its own claim by
+/// `declare_war` on the enemy it already fights — the same verb at the same price, opening
+/// no war — and has a cause to go on until it is met, as the declarer has: it refuses the
+/// declarer's peace below the threshold. Once only, and only by the side declared on.
+#[test]
+fn the_attacked_states_its_claim_by_a_declaration_on_its_enemy_and_has_a_cause() {
+    use engine2::{ActorRef, Target, VerbCall, VerbId, WarAim};
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let declare = |a: ActorId, target: Target| VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::DeclareWar, target };
+    let mut w = testworld::world(24);
+    w.apply_verb(&declare(s0, Target::Province(at(1, 4))), &p).unwrap();
+    assert!(w.peace_room(s0, s1, &p).is_ok(), "without a claim the attacked accepts the declarer's peace");
+    assert!(w.claim_room(s0, s1).is_err(), "the declarer has its claim: no second one");
+    let legitimacy = w.actors[&s1].legitimacy;
+    let q = at(0, 4);
+    w.apply_verb(&declare(s1, Target::Province(q)), &p).unwrap();
+    let war = &w.wars[&(s0, s1)];
+    assert_eq!((war.by, war.aim, war.counter_aim), (Some(s0), Some(WarAim::Province(at(1, 4))), Some(WarAim::Province(q))), "the claim goes into the war's record; the war is the same");
+    assert_eq!(w.claim_of(s1, s0), Some(WarAim::Province(q)));
+    assert!(w.actors[&s1].legitimacy < legitimacy, "a declaration's price");
+    assert!(w.war_cause(s1, s0, &p) && w.peace_room(s0, s1, &p).is_err(), "the attacked with a claim refuses the declarer's peace below the threshold");
+    let err = w.apply_verb(&declare(s1, Target::Actor(s0)), &p).unwrap_err();
+    assert!(err.to_string().contains("stated already"), "{err}");
+    // The claim met: the province taken — the cause is gone, the declarer's peace accepted.
+    take(&mut w, s1, q, &p);
+    assert!(!w.war_cause(s1, s0, &p) && w.peace_room(s0, s1, &p).is_ok());
+}
+
+/// The bots' worth of a war reads the threshold of the relation (plan §28.12, owner's
+/// decision 2026-10-20): at it the rule of the peace grants either side's peace at the first
+/// offer, so the war wins nothing — as with an unpaid army.
+#[test]
+fn at_the_threshold_of_the_relation_a_war_wins_nothing() {
+    use engine2::{GoalKind, GoalTarget};
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = testworld::world(25);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 4))).unwrap();
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation - 1.0);
+    let below = w.war_worth(s0, s1, false, 0.0, &p);
+    assert!(below > w.war_worth(s0, s1, true, 0.0, &p), "below the threshold the goal is worth something");
+    w.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert_eq!(w.war_worth(s0, s1, false, 0.0, &p), w.war_worth(s0, s1, true, 0.0, &p), "at the threshold as unpaid");
 }

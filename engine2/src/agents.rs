@@ -809,7 +809,8 @@ impl World {
         let mut calls: Vec<VerbCall> = Vec::new();
         for v in enabled {
             match v {
-                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: self.claim_target(a, *b) })),
+                // A war to declare, or (A′) a claim to state in the war declared on `a`.
+                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok() || self.claim_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: self.claim_target(a, *b) })),
                 VerbId::MakePeace => calls.extend(others.iter().filter(|b| self.peace_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
                 VerbId::ProposeAlliance => {
                     let cost = self.embassy_cost(a, params);

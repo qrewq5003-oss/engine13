@@ -41,8 +41,10 @@ fn all_verbs(mut s: ScenarioData) -> ScenarioData {
 /// The refusals a call may meet at application: an earlier call of the same tick closed it
 /// — the bride two houses asked for, a war closed by a peace of its principal pair (plan
 /// §23b: first all decide, then all is applied in one order). A peace or a war both sides
-/// made in one tick is not among them: the second is nothing (owner's rule on #291).
-const CONFLICTS: [&str; 9] = ["at war", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord", "a vassal makes no alliance", "at the levy ceiling", "not the polity's own province", "at the debt ceiling"];
+/// made in one tick is not among them: the second is nothing (owner's rule on #291). A peace
+/// refused because the other side stated its claim earlier in the tick (A′, plan §28.12)
+/// is one: the claim gave it a cause after the peace was decided.
+const CONFLICTS: [&str; 10] = ["at war", "its army paid", "no unmarried adult to marry", "the other house has no unmarried adult", "the relation is below the threshold", "a vassal fights only its lord", "a vassal makes no alliance", "at the levy ceiling", "not the polity's own province", "at the debt ceiling"];
 
 /// A conflict of the tick: a call closed by an earlier call of the same tick — or, since
 /// E3 (в), by an opportunity taken at the turn's start: everyone decides on the state as
@@ -368,6 +370,8 @@ struct Measures {
     tax_changes: u64,
     tax_undone: u64,
     declarations: u64,
+    /// (A′): claims stated by the attacked in a war declared on it — no new war.
+    claims: u64,
     declared_after_peace: u64,
     declared_unpaid: u64,
     war_lengths: Vec<u32>,
@@ -497,6 +501,7 @@ impl Measures {
         self.tax_changes += o.tax_changes;
         self.tax_undone += o.tax_undone;
         self.declarations += o.declarations;
+        self.claims += o.claims;
         self.declared_after_peace += o.declared_after_peace;
         self.declared_unpaid += o.declared_unpaid;
         self.war_lengths.extend(o.war_lengths);
@@ -538,6 +543,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
+    let mut claims = 0u64;
     let mut declared_within_five_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
     let (mut elections, mut elections_turned) = (0u64, 0u64);
@@ -679,6 +685,11 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
                         _ => None,
                     };
                     let Some(b) = b else { continue };
+                    // A claim in a war already fought (A′) opens no war: no `War` of the pair this tick.
+                    if !r.events.iter().any(|e| matches!(e.event, Event::War { a: x, b: y } if (x, y) == ((*a).min(b), (*a).max(b)))) {
+                        claims += 1;
+                        continue;
+                    }
                     declarations += 1;
                     if unpaid_seen.get(a).copied().unwrap_or(false) {
                         declared_unpaid += 1;
@@ -742,7 +753,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -754,7 +765,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought } = m;
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -780,7 +791,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let renewed = declared_after_peace as f64 / declarations.max(1) as f64;
     war_lengths.sort();
     eprintln!(
-        "war declarations {declarations}, by an unpaid army {declared_unpaid}, the tick after a peace of the same pair {declared_after_peace} ({renewed:.3}), within five years of it {declared_within_five_years} ({:.3}); wars ended {}, length median {} ticks, of one tick {}",
+        "war declarations {declarations}, claims in a war declared on the claimant {claims}, by an unpaid army {declared_unpaid}, the tick after a peace of the same pair {declared_after_peace} ({renewed:.3}), within five years of it {declared_within_five_years} ({:.3}); wars ended {}, length median {} ticks, of one tick {}",
         declared_within_five_years as f64 / declarations.max(1) as f64,
         war_lengths.len(),
         war_lengths.get(war_lengths.len() / 2).copied().unwrap_or(0),
@@ -1238,7 +1249,10 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
     assert!(x.peace_room(s1, s0, &p).is_err(), "a loser of provinces at even strength is not forced");
     let theirs = x.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).unwrap();
     x.post(engine2::Account::Soldiers(theirs), Source::Test, 1200 * 1000).unwrap();
-    assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0));
+    assert_eq!(x.forced_to_peace(s0, s1, &p), None, "weaker but not beaten: its capital stands (plan §28.12)");
+    let cap = x.actors[&s0].capital;
+    x.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
+    assert_eq!(x.forced_to_peace(s0, s1, &p), Some(s0), "its capital besieged: beaten");
     assert!(x.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts always");
     // A war of the starting facts states no claim (plan §28.9): a goal is not a cause, and a
     // status quo is accepted both ways.
@@ -1657,9 +1671,15 @@ fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_t
     assert_eq!(w.forced_to_peace(s0, s1, &p), None, "the stronger loser of provinces would take them back");
     assert!(w.peace_room(s1, s0, &p).is_err(), "it refuses the weaker side's peace");
     assert!(w.peace_room(s0, s1, &p).is_ok(), "the attacked accepts a status quo from it");
-    // The same loser with the smaller army: forced, accepts any peace.
+    // The same loser with the smaller army: weaker, but not beaten while its capital stands
+    // (plan §28.12); its capital besieged, or taken since the war began — forced.
     let mut w = fresh(83, false);
     w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "weaker, its capital its own and free");
+    let cap = w.actors[&s0].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s2, ticks: 1 });
+    assert_eq!(w.forced_to_peace(s0, s1, &p), None, "a siege by another than the enemy's side beats nobody in this war");
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s1, ticks: 1 });
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0));
     assert_eq!(w.forced_to_peace(s1, s0, &p), Some(s0), "the same either way round");
     assert!(w.peace_room(s1, s0, &p).is_ok(), "the forced declarer accepts");
@@ -1669,5 +1689,15 @@ fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_t
     assert_eq!(w.war_sides(s0, s1), (vec![s0], vec![s1, s2]));
     w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 300 * 1000).unwrap();
     assert!(w.army_strength(s0) > w.army_strength(s1) && w.army_strength(s0) < w.army_strength(s1) + w.army_strength(s2));
-    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone");
+    let cap = w.actors[&s0].capital;
+    w.provinces.get_mut(&cap).unwrap().siege = Some(engine2::Siege { by: s2, ticks: 1 });
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone — and the ally's siege is the side's");
+    // The capital it had at the war's start taken: beaten, wherever the court went.
+    let mut w = fresh(85, false);
+    w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+    let first = w.actors[&s0].capital;
+    let other = w.actors[&s0].provinces.iter().copied().find(|q| *q != first).unwrap();
+    w.provinces.get_mut(&first).unwrap().owner = s1;
+    w.actors.get_mut(&s0).unwrap().capital = other;
+    assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the capital of the war's start in the enemy's hands");
 }

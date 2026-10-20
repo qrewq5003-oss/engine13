@@ -277,6 +277,10 @@ pub struct War {
     /// Provinces each side held when the war began (the lower id first): a loser down to
     /// half of them submits at the peace.
     pub held: (u32, u32),
+    /// The capitals the sides had when the war began (the lower id first): a side whose
+    /// capital the enemy took, or whose capital it besieges, is beaten (plan §28.12,
+    /// `diplomacy::forced_to_peace`).
+    pub capitals: (ProvinceId, ProvinceId),
     /// The principal pair this war is an obligation of (an ally's, a lord's, a vassal's
     /// entry); it ends with their peace. None for a war of its own.
     pub of: Option<(ActorId, ActorId)>,
@@ -292,6 +296,11 @@ pub struct War {
     /// (`diplomacy::war_cause`, `claim_met`); met, it accepts a peace or offers one. None for
     /// an entrant's war of obligation and a war of the starting facts.
     pub aim: Option<WarAim>,
+    /// The claim of the other side (plan §28.12, owner's decision (A′) 2026-10-20): a side at
+    /// war that did not declare it states its own by `declare_war` on the enemy it already
+    /// fights — the same public act at the same price — and has a cause to go on until it is
+    /// met, as the declarer has. None until stated.
+    pub counter_aim: Option<WarAim>,
 }
 
 /// What a declaration of war claims (plan §28.9): the province named, or the submission of
@@ -872,7 +881,8 @@ impl World {
             }
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
-            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None });
+            let capitals = (world.actors[&lo].capital, world.actors[&hi].capital);
+            world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, capitals, of: None, by: None, aim: None, counter_aim: None });
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

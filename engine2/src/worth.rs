@@ -83,6 +83,10 @@ pub struct WarTerms {
     campaign_strength: f64,
     income: f64,
     years: f64,
+    /// The relation of the pair at the threshold of the treaties: the rule of the peace
+    /// (`diplomacy::peace_rule`) grants either side's peace at the first offer, so the war
+    /// wins nothing — as with an unpaid army (plan §28.12, owner's decision 2026-10-20).
+    at_threshold: bool,
 }
 
 /// What the risks legitimacy invites would cost a polity now, wheat — a chance of usurpation
@@ -462,7 +466,7 @@ impl World {
         let income = self.yearly_income(a, params).max(1) as f64;
         let ticks = self.war_ticks(a, b, params);
         let key = crate::army::pair(a, b);
-        let claim = self.wars.get(&key).filter(|w| w.by == Some(b)).and_then(|w| w.aim);
+        let claim = self.claim_of(b, a);
         // The land at risk: a claimed province; else what the enemy's units reach in the war's length.
         let at_risk: Vec<ProvinceId> = match claim {
             Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
@@ -504,6 +508,7 @@ impl World {
             campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
+            at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
         }
     }
 
@@ -546,7 +551,8 @@ impl World {
     /// (plan §28.10, owner's rules: each priced as the world charges it). The
     /// odds are the battle formula's over the sides of the war (`war_odds`). `unpaid`: an
     /// unpaid army is exhausted and the peace comes at the first offer — the goals are not
-    /// reached. `extra`: strength added to `a`'s (a levy, a hire; a unit sent away, negative).
+    /// reached; so at the threshold of the relation (`WarTerms::at_threshold`). `extra`:
+    /// strength added to `a`'s (a levy, a hire; a unit sent away, negative).
     /// Leaving the war is a decision of its own — the peace, worth what going on would lose,
     /// granted by the rule of the peace — not a discount on the loss (plan §28.8): a bot that
     /// counted on leaving a lost war for nothing never left it, since the same valuation told
@@ -554,7 +560,7 @@ impl World {
     /// stayed worth fighting).
     pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
         let p = self.war_odds(a, t.b, extra, params);
-        let gain = if unpaid { 0.0 } else { p * t.stake * t.years };
+        let gain = if unpaid || t.at_threshold { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
         let (mut lose, mut blow, mut odds) = (0.0, 0.0, 1.0);
         for take in &t.at_risk {
