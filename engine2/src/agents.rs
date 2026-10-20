@@ -126,7 +126,7 @@ pub struct Context {
     /// The threats at peace (`World::threats`, E3 (г), plan §29): the chance each neighbour
     /// declares over the horizon and the terms of that war, read once; empty at war, where
     /// the wars are the measure of the army.
-    threats: Vec<(f64, crate::worth::WarTerms)>,
+    threats: Vec<(ActorId, crate::worth::WarTerms)>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -596,12 +596,16 @@ impl World {
     /// What `extra` strength is worth to `a` in its state: at war, to its wars
     /// (`at_war_gain`); at peace (E3 (г), plan §29.3), against the threat it stands under —
     /// what each neighbour's war would lose it, by the same terms as a war's, at the chance
-    /// that neighbour declares one over the horizon (`World::threats`).
+    /// that neighbour declares one over the horizon (`World::threats`). The strength moves
+    /// both: the loss once attacked and, by the battle formula on the neighbour's choice of
+    /// whom to attack, the chance of the attack (`war_chance_from`; owner's decision 1 on
+    /// §29.8 — the deterrence).
     fn strength_gain(&self, a: ActorId, ctx: &Context, extra: f64, params: &Params) -> f64 {
         if ctx.at_war {
             self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
         } else {
-            ctx.threats.iter().map(|(chance, t)| chance * (self.war_worth_of(a, t, ctx.unpaid, extra, params) - self.war_worth_of(a, t, ctx.unpaid, 0.0, params))).sum()
+            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| self.war_chance_from(t, a, extra, params) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
+            ctx.threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum()
         }
     }
 
@@ -744,8 +748,12 @@ impl World {
             // threat (E3 (г), plan §29.3 — the loss each neighbour's war would bring, at the
             // chance it declares one), less its pay (and the advance) for the war's expected
             // length, or at peace for the horizon the threat is read over.
-            (VerbId::Recruit, Target::Province(_)) => {
-                let n = self.recruit_per_tick(a, params);
+            (VerbId::Recruit, Target::Province(_) | Target::Levy(..)) => {
+                let tick = self.recruit_per_tick(a, params);
+                let n = match call.target {
+                    Target::Levy(_, men) => i64::from(men).min(tick),
+                    _ => tick,
+                };
                 self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - self.kept_soldiers_cost(a, ctx, n, params)
             }
             (VerbId::HireMercenaries, _) => {
@@ -865,12 +873,27 @@ impl World {
                         );
                     }
                 }
+                // The sizes to levy (E3 (г), owner's decision 4 on §29.8): the tick's levy and
+                // its halves down to a thirty-second, from the most peopled province not in
+                // revolt — the bot picks the size whose last man still pays (`utility_in`).
                 VerbId::Recruit => {
-                    if self.recruit_per_tick(a, params) > 0 {
-                        calls.extend(self.actors[&a].provinces.iter().filter(|p| !self.in_revolt(**p) && self.population(**p) > 0).map(|p| VerbCall { actor: who, verb: *v, target: Target::Province(*p) }));
+                    let n = self.recruit_per_tick(a, params);
+                    let from = self.actors[&a].provinces.iter().copied().filter(|p| !self.in_revolt(*p) && self.population(*p) > 0).max_by_key(|p| (self.population(*p), std::cmp::Reverse(*p)));
+                    if let Some(p) = from.filter(|_| n > 0) {
+                        calls.extend((0..6).map(|k| n >> k).filter(|men| *men > 0).map(|men| VerbCall { actor: who, verb: *v, target: Target::Levy(p, men as u32) }));
                     }
                 }
-                VerbId::Disband => calls.extend(self.units_of(a).into_iter().filter(|u| self.units[u].house.is_none()).map(|u| VerbCall { actor: who, verb: *v, target: Target::Unit(u) })),
+                // A unit to disband — at peace not below the army the polity started with while
+                // its record is shorter than the horizon (E3 (г), owner's decision 3 on §29.8:
+                // an empty chronicle says nothing, not «no wars»; the starting army is a fact of
+                // the scenario and stands until the world has been seen).
+                VerbId::Disband => {
+                    let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
+                    let record_short = self.tick.0.saturating_sub(self.actors[&a].since.0) < params.goal_horizon_ticks;
+                    let floor = if !at_war && record_short { self.actors[&a].army_at_start } else { 0 };
+                    let army = self.army_size(a);
+                    calls.extend(self.units_of(a).into_iter().filter(|u| self.units[u].house.is_none() && army - self.soldiers(*u) >= floor).map(|u| VerbCall { actor: who, verb: *v, target: Target::Unit(u) }));
+                }
                 VerbId::HireMercenaries => {
                     if self.hire_count(a, params) > 0 {
                         calls.push(VerbCall { actor: who, verb: *v, target: Target::None });

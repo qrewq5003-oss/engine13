@@ -69,6 +69,11 @@ pub struct WarTerms {
     pub ticks: f64,
     stake: f64,
     at_risk: Vec<f64>,
+    /// The chain of the enemy's conquests covers all the polity's land: at its end the polity
+    /// falls and loses its whole income to the horizon, not the provinces' takes with their
+    /// discounts (owner's decision 2 on §29.8 — in the polity's currency; the throne is the
+    /// house's and stays out).
+    fall: bool,
     blow: f64,
     tribute: f64,
     to_submit: u32,
@@ -87,6 +92,14 @@ pub struct WarTerms {
     /// (`diplomacy::peace_rule`) grants either side's peace at the first offer, so the war
     /// wins nothing — as with an unpaid army (plan §28.12, owner's decision 2026-10-20).
     at_threshold: bool,
+}
+
+impl WarTerms {
+    /// Whether the terms end in the polity's fall: the enemy's chain of conquests covers all
+    /// its land.
+    pub fn fall(&self) -> bool {
+        self.fall
+    }
 }
 
 /// What the risks legitimacy invites would cost a polity now, wheat — a chance of usurpation
@@ -482,6 +495,8 @@ impl World {
                 reach.into_iter().take(n).map(|(_, q)| q).collect()
             }
         };
+        // All its land within the chain: the fall of the polity (owner's decision 2 on §29.8).
+        let fall = !at_risk.is_empty() && at_risk.len() == self.actors[&a].provinces.len();
         let back = 1.0 - self.retake_odds(b, a, a, ticks, params);
         let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share(b, *q, params))).collect();
         // A claim on the polity: the tribute of Д2 once `a` is down to half the land it held
@@ -498,6 +513,7 @@ impl World {
             ticks,
             stake: self.war_stake(a, b, params),
             at_risk,
+            fall,
             blow: blow_per_province,
             tribute,
             to_submit,
@@ -562,10 +578,15 @@ impl World {
         let p = self.war_odds(a, t.b, extra, params);
         let gain = if unpaid || t.at_threshold { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
-        let (mut lose, mut blow, mut odds) = (0.0, 0.0, 1.0);
-        for take in &t.at_risk {
+        let (mut lose, mut blow, mut odds, mut taken) = (0.0, 0.0, 1.0, 0.0);
+        let last = t.at_risk.len().saturating_sub(1);
+        for (k, take) in t.at_risk.iter().enumerate() {
             odds *= q;
-            lose += odds * take * t.years;
+            // The last province of a chain over all the land is the fall: everything the
+            // polity still had — its whole income to the horizon less the land already counted.
+            let loss = if t.fall && k == last { (t.income * t.years - taken).max(take * t.years) } else { take * t.years };
+            lose += odds * loss;
+            taken += take * t.years;
             blow += odds * t.blow;
         }
         lose += q.powi(t.to_submit as i32) * t.tribute * t.years;
@@ -725,24 +746,33 @@ impl World {
     }
 
     /// The chance over the horizon that `t` declares a war on `a` (plan §29.2): `t`'s rate of
-    /// war falls on one of the polities whose land touches its own, each as likely as another
-    /// — the record says how often `t` fights, not whom. Nothing for an `a` that `t` does not
-    /// touch.
-    pub fn war_chance_from(&self, t: ActorId, a: ActorId, params: &Params) -> f64 {
+    /// war (`war_rate` — the record says how often `t` fights) falls on the polities whose land
+    /// touches its own by the battle formula — on whom it would beat (owner's decision 1 on
+    /// §29.8: a bot declares where the war is worth it, and the worth grows with the odds; a
+    /// model of the neighbour by what is seen, its army and one's own — allowed by §28.6).
+    /// `a`'s share: `t`'s odds against `a` (with `extra` strength added to `a`'s) over `t`'s odds
+    /// against each of its neighbours — so an army at peace lowers the chance of the attack,
+    /// not only the loss. Nothing for an `a` that `t` does not touch.
+    pub fn war_chance_from(&self, t: ActorId, a: ActorId, extra: f64, params: &Params) -> f64 {
         if !self.borders(t, a) {
             return 0.0;
         }
-        let k = self.actors.keys().filter(|x| self.alive(**x) && self.borders(t, **x)).count().max(1);
-        1.0 - (1.0 - (self.war_rate(t, params) / k as f64).min(1.0)).powf(f64::from(params.goal_horizon_ticks))
+        let against = |x: ActorId| if x == a { 1.0 - self.war_odds(a, t, extra, params) } else { self.war_odds(t, x, 0.0, params) };
+        let total: f64 = self.actors.keys().filter(|x| self.alive(**x) && self.borders(t, **x)).map(|x| against(*x)).sum();
+        if total <= 0.0 {
+            return 0.0;
+        }
+        let share = against(a) / total;
+        1.0 - (1.0 - (self.war_rate(t, params) * share).min(1.0)).powf(f64::from(params.goal_horizon_ticks))
     }
 
-    /// The threats to `a` at peace (plan §29.2–29.3): for every living polity whose land
-    /// touches its own and that it does not fight, the chance it declares over the horizon
-    /// (`war_chance_from`) and the terms of that war for `a` (`war_terms`: the land within its
-    /// reach, the chain of its conquests, the discounts and the blow — the table of §28.10, the
-    /// same as a war's). Read once per decision (`agents::Context`).
-    pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(f64, WarTerms)> {
-        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (self.war_chance_from(t, a, params), self.war_terms(a, t, blow_per_province, params))).collect()
+    /// The threats to `a` at peace (plan §29.2–29.3): every living polity whose land touches
+    /// its own and that it does not fight, with the terms of its war for `a` (`war_terms`: the
+    /// land within its reach, the chain of its conquests, the discounts and the blow — the
+    /// table of §28.10, the same as a war's). Read once per decision (`agents::Context`); the
+    /// chance of each (`war_chance_from`) is read with the strength a decision adds.
+    pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(ActorId, WarTerms)> {
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms(a, t, blow_per_province, params))).collect()
     }
 
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at

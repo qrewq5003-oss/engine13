@@ -496,14 +496,20 @@ impl World {
         let ledger = |_: WorldError| VerbError::NotAvailable(call.verb, "ledger");
         match call.verb {
             VerbId::Recruit => {
-                let Target::Province(p) = call.target else { return Err(VerbError::BadTarget(call.verb, "a province to levy from")) };
+                // The whole tick's levy from a province, or so many men of it (`Target::Levy`).
+                let (p, men) = match call.target {
+                    Target::Province(p) => (p, None),
+                    Target::Levy(p, men) if men > 0 => (p, Some(i64::from(men))),
+                    Target::Levy(..) => return Err(VerbError::BadTarget(call.verb, "no men to levy")),
+                    _ => return Err(VerbError::BadTarget(call.verb, "a province to levy from")),
+                };
                 if self.provinces.get(&p).map(|x| x.owner) != Some(a) {
                     return Err(VerbError::BadTarget(call.verb, "not the polity's own province"));
                 }
                 if self.in_revolt(p) {
                     return Err(VerbError::NotAvailable(call.verb, "the province is in revolt"));
                 }
-                let n = self.recruit_per_tick(a, params).min(self.population(p));
+                let n = self.recruit_per_tick(a, params).min(self.population(p)).min(men.unwrap_or(i64::MAX));
                 if n <= 0 {
                     return Err(VerbError::NotAvailable(call.verb, "at the levy ceiling"));
                 }

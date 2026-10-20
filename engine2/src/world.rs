@@ -216,6 +216,12 @@ pub struct Actor {
     /// chronicle: with `since`, the frequency of its wars that a bot reads as its intent
     /// (`worth::war_rate`; plan §29.2, owner's answer 1 on §29.6). Its goals stay its own.
     pub wars_declared: u32,
+    /// The soldiers the polity had when it entered the chronicle — its starting facts, or the
+    /// militia of its rising: while its record is shorter than the horizon a bot does not
+    /// disband below it (E3 (г), owner's decision 3 on §29.8: an empty chronicle says nothing,
+    /// not «no wars»; the starting army is a fact of the scenario and stands until the world has
+    /// been seen).
+    pub army_at_start: i64,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -749,6 +755,8 @@ impl World {
                     losses_seen: 0.0,
                     since: tick,
                     wars_declared: 0,
+                    // Set below, once the units are in.
+                    army_at_start: 0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -888,6 +896,10 @@ impl World {
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
             world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None, counter_aim: None });
+        }
+        for id in world.actors.keys().copied().collect::<Vec<_>>() {
+            let soldiers = world.army_size(id);
+            world.actors.get_mut(&id).expect("known").army_at_start = soldiers;
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;
