@@ -594,28 +594,34 @@ impl World {
     }
 
     /// What `extra` strength is worth to `a` in its state: at war, to its wars
-    /// (`at_war_gain`); at peace (E3 (г), plan §29.3), against the threat it stands under —
-    /// what each neighbour's war would lose it, by the same terms as a war's, at the chance
-    /// that neighbour declares one over the horizon (`World::threats`). The strength moves
-    /// both: the loss once attacked and, by the battle formula on the neighbour's choice of
-    /// whom to attack, the chance of the attack (`war_chance_from`; owner's decision 1 on
-    /// §29.8 — the deterrence).
+    /// (`at_war_gain`); at peace (E3 (г), plan §29.3 and owner's decisions on §29.9), **a
+    /// tick of it** — the army at peace is a decision retaken every tick, and it stands while
+    /// a tick of it pays its tick of pay (`kept_soldiers_cost`): the wars its neighbours bring
+    /// a tick (`wars_a_tick_from` — the expected number, by the neighbour's record and the
+    /// battle formula on whom; the strength moves both the loss once attacked and, by the
+    /// formula, the chance of the attack — the deterrence) times what each would lose `a` by
+    /// the same terms as a war's (`World::threats`), plus the take its units bring back by
+    /// putting risings down (`suppression_a_tick` — any unit does; so the first unit's worth,
+    /// nothing for the next).
     fn strength_gain(&self, a: ActorId, ctx: &Context, extra: f64, params: &Params) -> f64 {
         if ctx.at_war {
             self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
         } else {
-            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| self.war_chance_from(t, a, extra, params) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
-            ctx.threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum()
+            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| self.wars_a_tick_from(t, a, extra, params) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
+            let wars: f64 = ctx.threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum();
+            let units = |strength: f64| f64::from(u8::from(strength > 0.0));
+            let now = self.army_strength(a);
+            wars + (units(now + extra) - units(now)) * self.suppression_a_tick(a, params)
         }
     }
 
     /// What `n` soldiers kept cost `a` in its state: at war, for the wars' expected length
-    /// (`war_soldiers_cost`); at peace, for the horizon the threat is read over.
+    /// (`war_soldiers_cost`); at peace, a tick — the decision is retaken every tick.
     fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
         if ctx.at_war {
             self.war_soldiers_cost(a, &ctx.wars, n, params)
         } else {
-            self.soldiers_cost(a, n, f64::from(params.goal_horizon_ticks), params)
+            self.soldiers_cost(a, n, 1.0, params)
         }
     }
 

@@ -356,7 +356,7 @@ impl World {
     // ---- war (E3 (е2), plan §26, §28) ----
 
     /// The take a province would give `a` a year: its production at `a`'s rate and share.
-    pub(crate) fn take_of(&self, a: ActorId, q: ProvinceId, params: &Params) -> f64 {
+    pub fn take_of(&self, a: ActorId, q: ProvinceId, params: &Params) -> f64 {
         self.province_production_per_tick(q, params) as f64 * 2.0 * self.actors[&a].tax_rate_ppm as f64 / 1e6 * self.collection_share_ppm(a, params) as f64 / 1e6
     }
 
@@ -730,30 +730,33 @@ impl World {
 
     // ---- the threat at peace (E3 (г), plan §29) ----
 
-    /// How often `t` declares a war, per tick, as anyone reads it off the chronicle (plan
-    /// §29.2; owner's answer 1 on §29.6): its own declarations (`Actor::wars_declared`) over
-    /// the ticks of its record (`Actor::since`), mixed with the world's rate over the goal's
-    /// horizon `H` — `(declared_t + r_world × H) / (seen_t + H)`. A polity with a record shorter
-    /// than the horizon is read by the world's rate, one with a longer record by its own; no
-    /// threshold and no parameter. The world's rate: the declarations of every living polity
-    /// over the ticks of every living polity's record.
+    /// How often `t` is at a new war, per tick, as anyone reads it off the chronicle (plan
+    /// §29.2; owner's answer 1 on §29.6, decision 2 on §29.9): the wars it has been in
+    /// (`Actor::wars_entered` — declared, suffered or entered by a bond) over the ticks of its
+    /// record (`Actor::since`), mixed with the world's rate over the goal's horizon `H` —
+    /// `(wars_t + r_world × H) / (seen_t + H)`. A polity with a record shorter than the horizon
+    /// is read by the world's rate, one with a longer record by its own; no threshold and no
+    /// parameter. The world's rate: the wars of every living polity over the ticks of every
+    /// living polity's record.
     pub fn war_rate(&self, t: ActorId, params: &Params) -> f64 {
         let h = f64::from(params.goal_horizon_ticks);
         let seen = |x: ActorId| f64::from(self.tick.0.saturating_sub(self.actors[&x].since.0));
-        let (declared, ticks) = self.actors.keys().filter(|x| self.alive(**x)).fold((0.0, 0.0), |(d, s), x| (d + f64::from(self.actors[x].wars_declared), s + seen(*x)));
-        let world = if ticks > 0.0 { declared / ticks } else { 0.0 };
-        (f64::from(self.actors[&t].wars_declared) + world * h) / (seen(t) + h)
+        let (wars, ticks) = self.actors.keys().filter(|x| self.alive(**x)).fold((0.0, 0.0), |(d, s), x| (d + f64::from(self.actors[x].wars_entered), s + seen(*x)));
+        let world = if ticks > 0.0 { wars / ticks } else { 0.0 };
+        (f64::from(self.actors[&t].wars_entered) + world * h) / (seen(t) + h)
     }
 
-    /// The chance over the horizon that `t` declares a war on `a` (plan §29.2): `t`'s rate of
-    /// war (`war_rate` — the record says how often `t` fights) falls on the polities whose land
-    /// touches its own by the battle formula — on whom it would beat (owner's decision 1 on
-    /// §29.8: a bot declares where the war is worth it, and the worth grows with the odds; a
-    /// model of the neighbour by what is seen, its army and one's own — allowed by §28.6).
-    /// `a`'s share: `t`'s odds against `a` (with `extra` strength added to `a`'s) over `t`'s odds
-    /// against each of its neighbours — so an army at peace lowers the chance of the attack,
-    /// not only the loss. Nothing for an `a` that `t` does not touch.
-    pub fn war_chance_from(&self, t: ActorId, a: ActorId, extra: f64, params: &Params) -> f64 {
+    /// The wars `t` brings on `a` a tick — the expected number, not the chance of one (owner's
+    /// decision 3 on §29.9: several wars fit in a horizon, and the expected loss is their
+    /// expected number times the loss of one): `t`'s rate of war (`war_rate` — the record says
+    /// how often `t` fights) falls on the polities whose land touches its own by the battle
+    /// formula — on whom it would beat (owner's decision 1 on §29.8: a bot declares where the
+    /// war is worth it, and the worth grows with the odds; a model of the neighbour by what is
+    /// seen, its army and one's own — allowed by §28.6). `a`'s share: `t`'s odds against `a`
+    /// (with `extra` strength added to `a`'s) over `t`'s odds against each of its neighbours —
+    /// so an army at peace lowers the chance of the attack, not only the loss. Nothing for an
+    /// `a` that `t` does not touch.
+    pub fn wars_a_tick_from(&self, t: ActorId, a: ActorId, extra: f64, params: &Params) -> f64 {
         if !self.borders(t, a) {
             return 0.0;
         }
@@ -762,15 +765,28 @@ impl World {
         if total <= 0.0 {
             return 0.0;
         }
-        let share = against(a) / total;
-        1.0 - (1.0 - (self.war_rate(t, params) * share).min(1.0)).powf(f64::from(params.goal_horizon_ticks))
+        self.war_rate(t, params) * against(a) / total
+    }
+
+    /// The take a tick that units of `a` bring back by putting risings down (E3 (г), owner's
+    /// decision 1 on §29.9 — the second duty of an army at peace), in years of `a`'s income:
+    /// a revolt ends when a unit of the owner has stood in the province a tick, any unit
+    /// (`collapse.rs`), and a levy takes a tick — so a unit in being saves a tick of every
+    /// revolt's withheld take: of the provinces in revolt now, and of those expected to rise
+    /// (`revolt_chance_per_tick`, the hazard of the marks and the legitimacy). Nothing where
+    /// there is no unit to send; the same for one unit and for ten.
+    pub fn suppression_a_tick(&self, a: ActorId, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let a_tick = |q: ProvinceId| self.take_of(a, q, params) / 2.0;
+        let withheld: f64 = self.actors[&a].provinces.iter().map(|q| if self.in_revolt(*q) { a_tick(*q) } else { self.revolt_chance_per_tick(*q, params) * a_tick(*q) }).sum();
+        withheld / income
     }
 
     /// The threats to `a` at peace (plan §29.2–29.3): every living polity whose land touches
     /// its own and that it does not fight, with the terms of its war for `a` (`war_terms`: the
     /// land within its reach, the chain of its conquests, the discounts and the blow — the
     /// table of §28.10, the same as a war's). Read once per decision (`agents::Context`); the
-    /// chance of each (`war_chance_from`) is read with the strength a decision adds.
+    /// wars each brings a tick (`wars_a_tick_from`) are read with the strength a decision adds.
     pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(ActorId, WarTerms)> {
         self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms(a, t, blow_per_province, params))).collect()
     }

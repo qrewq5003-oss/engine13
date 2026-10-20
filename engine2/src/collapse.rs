@@ -263,7 +263,7 @@ impl World {
                 manpower_deficit: 0.0,
                 losses_seen: 0.0,
                 since: self.tick,
-                wars_declared: 0,
+                wars_entered: 0,
                 army_at_start: 0,
             },
         );

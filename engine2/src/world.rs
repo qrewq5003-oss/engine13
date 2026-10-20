@@ -211,11 +211,14 @@ pub struct Actor {
     /// The tick the polity entered the chronicle — the world's start, or its birth of a
     /// rising: the span of its record anyone can read (E3 (г), plan §29.2).
     pub since: Tick,
-    /// The wars it declared itself — the `War` events with it as the declarer, not an
-    /// entrant's by its bonds nor a war of the starting facts — a public fact of the
-    /// chronicle: with `since`, the frequency of its wars that a bot reads as its intent
-    /// (`worth::war_rate`; plan §29.2, owner's answer 1 on §29.6). Its goals stay its own.
-    pub wars_declared: u32,
+    /// The wars it has been in, one for each — its own declarations, the wars declared on it,
+    /// the wars it entered by its bonds (a pair its war brings in is not a new war for it); not
+    /// a war of the starting facts — a public fact of the chronicle: with `since`, the frequency of its
+    /// wars that a bot reads (`worth::war_rate`; plan §29.2, owner's answer 1 on §29.6; by
+    /// wars and not by declarations — owner's decision 2 on §29.9: a polity gets into war by
+    /// its bonds too, and the record of declarations saw one war in fifteen). Whom its war
+    /// falls on is the battle formula's, not the record's. Its goals stay its own.
+    pub wars_entered: u32,
     /// The soldiers the polity had when it entered the chronicle — its starting facts, or the
     /// militia of its rising: while its record is shorter than the horizon a bot does not
     /// disband below it (E3 (г), owner's decision 3 on §29.8: an empty chronicle says nothing,
@@ -754,7 +757,7 @@ impl World {
                     manpower_deficit: 0.0,
                     losses_seen: 0.0,
                     since: tick,
-                    wars_declared: 0,
+                    wars_entered: 0,
                     // Set below, once the units are in.
                     army_at_start: 0,
                 },
