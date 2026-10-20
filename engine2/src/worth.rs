@@ -74,6 +74,14 @@ pub struct WarTerms {
     /// discounts (owner's decision 2 on §29.8 — in the polity's currency; the throne is the
     /// house's and stays out).
     fall: bool,
+    /// The ticks until the enemy's first conquest in the polity's land — the quickest of
+    /// the provinces in its reach, a march and a siege (infinite with none in reach). With
+    /// it the rule of the peace is read for the war not yet open (owner's decision 1 on
+    /// §29.10): the side the weaker by the battle formula is forced the moment it has lost a
+    /// province on balance (`World::forced_to_peace`), so when that comes no later than its
+    /// own march and siege to the stake, the rule closes the war before the stake is reached
+    /// — the war wins nothing (`World::war_worth_of`).
+    first_blow: f64,
     blow: f64,
     tribute: f64,
     to_submit: u32,
@@ -99,6 +107,12 @@ impl WarTerms {
     /// its land.
     pub fn fall(&self) -> bool {
         self.fall
+    }
+
+    /// The ticks until the enemy's first conquest in the polity's land (infinite with none
+    /// in its reach).
+    pub fn first_blow(&self) -> f64 {
+        self.first_blow
     }
 }
 
@@ -480,16 +494,19 @@ impl World {
         let ticks = self.war_ticks(a, b, params);
         let key = crate::army::pair(a, b);
         let claim = self.claim_of(b, a);
+        // What the enemy's units reach in the war's length, the quickest to fall first: the
+        // march to each (a tick at least, as `war_ticks` counts a march) and its siege — a
+        // capital a step away stands its siege while the land behind it falls within the
+        // tick (the test world's case).
+        let per_tick = self.march_steps_per_tick(params).max(1);
+        let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
+        reach.sort();
+        // The enemy's first conquest: the ticks to the quickest of them.
+        let first_blow = reach.first().map_or(f64::INFINITY, |(t, _, _)| *t as f64);
         // The land at risk: a claimed province; else what the enemy's units reach in the war's length.
         let at_risk: Vec<ProvinceId> = match claim {
             Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
             _ => {
-                // The quickest to fall first: the march to each (a tick at least, as `war_ticks`
-                // counts a march) and its siege — a capital a step away stands its siege while
-                // the land behind it falls within the tick (the test world's case).
-                let per_tick = self.march_steps_per_tick(params).max(1);
-                let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
-                reach.sort();
                 let reach: Vec<(usize, ProvinceId)> = reach.into_iter().map(|(_, d, q)| (d, q)).collect();
                 let n = self.conquests_within(ticks, &reach, params);
                 reach.into_iter().take(n).map(|(_, q)| q).collect()
@@ -514,6 +531,7 @@ impl World {
             stake: self.war_stake(a, b, params),
             at_risk,
             fall,
+            first_blow,
             blow: blow_per_province,
             tribute,
             to_submit,
@@ -567,8 +585,18 @@ impl World {
     /// (plan §28.10, owner's rules: each priced as the world charges it). The
     /// odds are the battle formula's over the sides of the war (`war_odds`). `unpaid`: an
     /// unpaid army is exhausted and the peace comes at the first offer — the goals are not
-    /// reached; so at the threshold of the relation (`WarTerms::at_threshold`). `extra`:
-    /// strength added to `a`'s (a levy, a hire; a unit sent away, negative).
+    /// reached; so at the threshold of the relation (`WarTerms::at_threshold`); and so when
+    /// **the rule of the peace closes the war before the stake is reached** (owner's
+    /// decision 1 on §29.10, read off `forced_to_peace` itself): the side the weaker by the
+    /// battle formula (odds under a half, the odds the rule reads) is forced the moment it has
+    /// lost a province on balance, and the enemy's first conquest in its land
+    /// (`WarTerms::first_blow`) comes no later than its own march and siege to the stake — it
+    /// is forced before it takes anything, and the stronger side, with nothing to gain by
+    /// going on, offers the peace it must accept. A loser forced at odds under a half that
+    /// declared again the tick after the peace, with the same odds and the enemy's units a step
+    /// from its land, was forced again at the first loss (59 of 496 declarations on the third
+    /// stop of (г1), plan §29.10): the derivation makes its revanche worth its loss alone.
+    /// `extra`: strength added to `a`'s (a levy, a hire; a unit sent away, negative).
     /// Leaving the war is a decision of its own — the peace, worth what going on would lose,
     /// granted by the rule of the peace — not a discount on the loss (plan §28.8): a bot that
     /// counted on leaving a lost war for nothing never left it, since the same valuation told
@@ -576,7 +604,8 @@ impl World {
     /// stayed worth fighting).
     pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
         let p = self.war_odds(a, t.b, extra, params);
-        let gain = if unpaid || t.at_threshold { 0.0 } else { p * t.stake * t.years };
+        let closed = p < 0.5 && t.first_blow <= t.ticks;
+        let gain = if unpaid || t.at_threshold || closed { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
         let (mut lose, mut blow, mut odds, mut taken) = (0.0, 0.0, 1.0, 0.0);
         let last = t.at_risk.len().saturating_sub(1);
