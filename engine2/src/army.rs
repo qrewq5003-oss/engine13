@@ -176,6 +176,17 @@ impl World {
         if !self.wars.contains_key(&(a, b)) {
             let held = (self.actors[&a].provinces.len() as u32, self.actors[&b].provinces.len() as u32);
             self.wars.insert((a, b), crate::world::War { since: self.tick, taken: (0, 0), held, of, by: Some(by), aim, counter_aim: None });
+            // The war goes into the public record of those it is new to (`Actor::wars_entered`,
+            // plan §29.2; owner's decision 2 on §29.9): a war is a war, declared, suffered or
+            // entered by a bond — but a pair the principals' war brings in is one war for them
+            // (their record has it already), a new one for the entrant alone.
+            for x in [a, b] {
+                if of.is_none_or(|principal| principal.0 != x && principal.1 != x) {
+                    if let Some(actor) = self.actors.get_mut(&x) {
+                        actor.wars_entered += 1;
+                    }
+                }
+            }
             self.emit(Event::War { a, b });
         }
     }
@@ -489,14 +500,20 @@ impl World {
         let ledger = |_: WorldError| VerbError::NotAvailable(call.verb, "ledger");
         match call.verb {
             VerbId::Recruit => {
-                let Target::Province(p) = call.target else { return Err(VerbError::BadTarget(call.verb, "a province to levy from")) };
+                // The whole tick's levy from a province, or so many men of it (`Target::Levy`).
+                let (p, men) = match call.target {
+                    Target::Province(p) => (p, None),
+                    Target::Levy(p, men) if men > 0 => (p, Some(i64::from(men))),
+                    Target::Levy(..) => return Err(VerbError::BadTarget(call.verb, "no men to levy")),
+                    _ => return Err(VerbError::BadTarget(call.verb, "a province to levy from")),
+                };
                 if self.provinces.get(&p).map(|x| x.owner) != Some(a) {
                     return Err(VerbError::BadTarget(call.verb, "not the polity's own province"));
                 }
                 if self.in_revolt(p) {
                     return Err(VerbError::NotAvailable(call.verb, "the province is in revolt"));
                 }
-                let n = self.recruit_per_tick(a, params).min(self.population(p));
+                let n = self.recruit_per_tick(a, params).min(self.population(p)).min(men.unwrap_or(i64::MAX));
                 if n <= 0 {
                     return Err(VerbError::NotAvailable(call.verb, "at the levy ceiling"));
                 }

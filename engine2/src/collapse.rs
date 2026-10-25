@@ -262,6 +262,9 @@ impl World {
                 // A polity born of a rising starts with its cohort whole (plan §27.1).
                 manpower_deficit: 0.0,
                 losses_seen: 0.0,
+                since: self.tick,
+                wars_entered: 0,
+                army_at_start: 0,
             },
         );
         self.ledger.open(self.tick, Account::Treasury(new), 0)?;
@@ -320,6 +323,8 @@ impl World {
             unit.destination = None;
         }
         self.levy_militia(new, params)?;
+        let soldiers = self.army_size(new);
+        self.actors.get_mut(&new).expect("new polity").army_at_start = soldiers;
         // Edges: every pair at its norm — with the war with the parent, and the parent's
         // allies, lord and vassals in it by §19, counted in the norm.
         let others: Vec<ActorId> = self.actors.keys().copied().filter(|b| *b != new).collect();

@@ -254,7 +254,10 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     assert_eq!(g.player(), None);
     // Without goals nobody acts but on its tax: on the first tick, before any goal is drawn,
     // nothing is better than doing nothing — except the step of the tax toward the world's
-    // equilibrium, a decision of the take, not of a goal (E3 (е1)).
+    // equilibrium, a decision of the take, not of a goal (E3 (е1)). The army stands: the
+    // chronicle is empty, so no threat is read and no levy pays, and the starting army is not
+    // disbanded while the record is shorter than the horizon (E3 (г), owner's decision 3 on
+    // §29.8 — an empty chronicle says nothing, not «no wars»).
     let quiet = all_verbs(testworld::five_states_scenario());
     let mut q = Game::new(&quiet, params(), 43).unwrap();
     let r = q.tick(&[]).unwrap();
@@ -349,6 +352,9 @@ struct Measures {
     people_at_war: i64,
     army_at_peace: i64,
     people_at_peace: i64,
+    /// А11 at peace by windows of fifty ticks (army, people): the swing «more armies → fewer
+    /// wars → fewer armies» would show here, not in the mean (owner's answer 1 on §29.6).
+    a11_peace_windows: Vec<(i64, i64)>,
     bound_century: usize,
     alive_century: usize,
     tax: i64,
@@ -473,6 +479,13 @@ impl Measures {
         self.army_at_war += o.army_at_war;
         self.people_at_war += o.people_at_war;
         self.army_at_peace += o.army_at_peace;
+        for (i, (army, people)) in o.a11_peace_windows.into_iter().enumerate() {
+            if self.a11_peace_windows.len() <= i {
+                self.a11_peace_windows.resize(i + 1, (0, 0));
+            }
+            self.a11_peace_windows[i].0 += army;
+            self.a11_peace_windows[i].1 += people;
+        }
         self.people_at_peace += o.people_at_peace;
         self.bound_century += o.bound_century;
         self.alive_century += o.alive_century;
@@ -533,6 +546,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     let (mut polities_start, mut polities_century) = (0usize, 0usize);
     let (mut war_ticks, mut polity_ticks, mut at_peace_ticks) = (0u64, 0u64, 0u64);
     let (mut army_at_war, mut people_at_war, mut army_at_peace, mut people_at_peace) = (0i64, 0i64, 0i64, 0i64);
+    let mut a11_peace_windows: Vec<(i64, i64)> = vec![(0, 0); 6];
     let (mut bound_century, mut alive_century) = (0usize, 0usize);
     let (mut tax, mut production) = (0i64, 0i64);
     let (mut falls, mut falls_by_conquest, mut reached, mut dropped, mut verbs) = (0u64, 0u64, 0u64, 0u64, BTreeMap::<VerbId, u64>::new());
@@ -585,6 +599,8 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
                 at_peace_ticks += 1;
                 army_at_peace += army;
                 people_at_peace += people;
+                a11_peace_windows[(t / 50) as usize].0 += army;
+                a11_peace_windows[(t / 50) as usize].1 += people;
             }
             if w.actors[a].provinces.len() >= 5 {
                 large_ticks += 1;
@@ -753,7 +769,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -765,7 +781,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought } = m;
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -777,6 +793,9 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         rates.iter().filter(|r| (0.0999..=0.1001).contains(*r)).count(),
         rates.iter().filter(|r| **r > 0.1001).count()
     );
+    // А11 at peace over time (E3 (г), owner's answer 1 on §29.6): the swing «more armies →
+    // fewer wars → a lower rate of war read → fewer armies» would show as a wave here.
+    eprintln!("А11 at peace by windows of 50 ticks: {:?}", a11_peace_windows.iter().map(|(a, n)| format!("{:.4}", *a as f64 / (*n).max(1) as f64)).collect::<Vec<_>>());
     // The tax does not swing (owner's rule on #292): a step undone the next tick costs the
     // ruler half a step's price in legitimacy for nothing — the bots that read the pay of
     // one tick raised and lowered by turns, 28 % of their changes, and usurped themselves.
@@ -826,14 +845,18 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert_eq!(falls, falls_by_conquest, "a polity falls only by conquest: every fall in the tick its last province was taken");
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");
-    // With the orders of step (б) a war has its means: А12, Д3 and В9 are checks, not
-    // print (owner's rule on #291).
+    // With the orders of step (б) a war has its means: А12 is a check, not print (owner's
+    // rule on #291).
     let a12_band = band("war.observed_share_of_years");
     assert!((a12_band[0]..=a12_band[1]).contains(&a12), "А12 {a12:.3} outside {a12_band:?}");
     assert!(always * 10 < per_polity_war_share.len(), "«always at war»: {always} of {} polities over nine tenths of their ticks", per_polity_war_share.len());
     assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
+    // Д3's band is by memory (rule 1 of §24.1: a band without a source is a warning, not a
+    // check — owner's decisions 2026-10-20 on §28.12 and 2 on §29.10). Printed: a known
+    // deviation until (г2), the worth of an alliance read by the table of §28.10 — it follows
+    // А12 (more wars, more bonds; §28.12, §29.9), 0,87 with the army at peace of (г1).
     let d3_band = band("diplomacy.observed_bound_share");
-    assert!((d3_band[0]..=d3_band[1]).contains(&d3), "Д3 {d3:.2} outside {d3_band:?}");
+    eprintln!("Д3 at a century {d3:.2} (band by memory {d3_band:?}) — printed: a known deviation until (г2), plan §29.11");
     revolt_lengths.sort();
     let repeated = revolts_per_province.values().filter(|n| **n > 1).count();
     eprintln!(
@@ -843,8 +866,11 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         revolt_lengths.last().copied().unwrap_or(0),
         revolts_per_province.len()
     );
+    // В9's band is by memory too (rule 1; owner's decision 3 on §29.10): printed until a
+    // source is found. With the army at peace of (г1) a rising is put down in two ticks (the
+    // median; up to 192 before), and the share fell under the remembered band.
     let b9_band = band("revolt.observed_share_of_provinces");
-    assert!((b9_band[0]..=b9_band[1]).contains(&b9), "В9 {b9:.4} outside {b9_band:?}");
+    eprintln!("В9 share of province-ticks in revolt {b9:.4} (band by memory {b9_band:?}) — printed: a source to be found, plan §29.11");
     assert!(revolts_ended * 2 > revolts_started, "the bots put down most revolts: {revolts_ended} of {revolts_started}");
     let b5_band = band("reign.observed_years");
     assert!((b5_band[0]..=b5_band[1]).contains(&b5), "В5 {b5:.1} outside {b5_band:?}");
@@ -863,8 +889,18 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     );
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
+    // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
+    // from 0,5 %), so under it is a deviation, not a warning (owner's decision 4 on §29.10).
+    // Printed, not asserted: a known deviation until (д), with the same cause as А11 at war —
+    // the world's wars are short and cheap, so the army at peace pays for itself only by the
+    // wars a tick times the loss of one's first tick. Not to be tuned (rule 1 of §24.1).
     let a11_band = band("army.observed_share_of_population");
-    assert!((a11_band[0]..=a11_band[1]).contains(&a11_peace), "А11 at peace {a11_peace:.4} outside {a11_band:?}");
+    eprintln!("А11 at peace {a11_peace:.4} (E0: {a11_band:?}) — printed: a known deviation until (д), plan §29.11");
+    // A floor against a regression of the known deviation, not a band (owner's decision 4 on
+    // §29.10): the measure stood at 0,0042 on the third stop of (г1), its plateau after the
+    // starting armies about 0,0025–0,0035 a window of fifty ticks; a bot that disbands at peace
+    // would fall below it. Removed with (д), when the band of the source comes back.
+    assert!(a11_peace >= 0.0025, "А11 at peace {a11_peace:.4} below the regression floor 0,0025 (plan §29.11)");
     let b7_band = band("revolt.observed_per_century");
     assert!((b7_band[0]..=b7_band[1]).contains(&b7), "В7 {b7:.2} outside {b7_band:?}");
     // In war 2–3 % of the people under arms (E0 А11, Jones, Mallett–Hale — the source's band;
@@ -1691,4 +1727,256 @@ fn a_loser_of_provinces_is_forced_to_peace_only_when_its_side_is_the_weaker_by_t
     w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 300 * 1000).unwrap();
     assert!(w.army_strength(s0) > w.army_strength(s1) && w.army_strength(s0) < w.army_strength(s1) + w.army_strength(s2));
     assert_eq!(w.forced_to_peace(s0, s1, &p), Some(s0), "the side is weighed, not the polity alone");
+}
+
+/// The chronicle of war (E3 (г), plan §29.2; owner's decision 2 on §29.9): a war goes into the
+/// public record of everyone in it — the declarer, the attacked, the entrant by its bonds —
+/// and the wars of the starting facts are nobody's. The rate a bot reads off it (`war_rate`,
+/// owner's answer 1 on §29.6) mixes the polity's own record with the world's over the horizon:
+/// with no record yet — the own count over the horizon alone; with a record — `(own + world ×
+/// H) / (seen + H)`, so a polity that was never at war is read by the world's rate. The wars it
+/// brings a tick on a neighbour (`wars_a_tick_from`) are nothing where the rate is, or where
+/// their land does not touch.
+#[test]
+fn a_war_goes_into_the_public_record_of_everyone_in_it_and_the_rate_of_war_mixes_it_with_the_worlds() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut w = world_of(&testworld::five_states_scenario(), 31);
+    let h = f64::from(p.goal_horizon_ticks);
+    assert!(w.actors.values().all(|a| a.wars_entered == 0), "the starting facts are nobody's war");
+    assert_eq!(w.war_rate(s0, &p), 0.0, "no record and no wars: nothing");
+    assert!(w.actors.keys().all(|t| w.wars_a_tick_from(*t, s0, 0.0, &p) == 0.0));
+    w.ally_now(s1, s2, &p).unwrap();
+    w.declare_war(s0, s1).unwrap();
+    assert!(w.at_war(s0, s2), "the ally enters");
+    let declared = |w: &World| (w.actors[&s0].wars_entered, w.actors[&s1].wars_entered, w.actors[&s2].wars_entered);
+    assert_eq!(declared(&w), (1, 1, 1), "one war each: the declarer's, the attacked's, the entrant's");
+    assert_eq!(w.actors[&ActorId(3)].wars_entered, 0, "a polity outside the war has none");
+    assert!((w.war_rate(s0, &p) - 1.0 / h).abs() < 1e-12, "no ticks seen yet: the own count over the horizon, {}", w.war_rate(s0, &p));
+    let n = 10u32;
+    for _ in 0..n {
+        w.tick(&p).unwrap();
+    }
+    let living = w.actors.keys().filter(|x| w.alive(**x)).count() as f64;
+    let world = w.actors.values().filter(|x| x.wars_entered > 0).map(|x| f64::from(x.wars_entered)).sum::<f64>() / (living * f64::from(n));
+    let expect = |own: u32| (f64::from(own) + world * h) / (f64::from(n) + h);
+    assert!((w.war_rate(s0, &p) - expect(declared(&w).0)).abs() < 1e-12, "{} vs {}", w.war_rate(s0, &p), expect(declared(&w).0));
+    let s3 = ActorId(3);
+    assert!((w.war_rate(s3, &p) - expect(0)).abs() < 1e-12 && w.war_rate(s3, &p) > 0.0, "a polity that was never at war is read by the world's rate");
+    assert!(w.war_rate(s0, &p) > w.war_rate(s3, &p), "its own record counts");
+    for t in w.actors.keys() {
+        let c = w.wars_a_tick_from(*t, s0, 0.0, &p);
+        assert!(c >= 0.0 && c <= w.war_rate(*t, &p) + 1e-12, "a share of the rate: {c}");
+        assert!(c == 0.0 || (w.war_rate(*t, &p) > 0.0 && w.borders(*t, s0)), "wars only where there is a rate and a border");
+        assert!(w.borders(*t, s0) || c == 0.0, "nothing from a polity that does not touch");
+    }
+}
+
+/// A standing army at peace is worth the threat it answers (E3 (г), plan §29.3): with no
+/// record of war anywhere the levy is worth nothing but its pay for the horizon; with a
+/// neighbour's record it is worth what it takes off the loss that neighbour's war would bring,
+/// at the chance it declares — the more the record, the more the levy and the less the
+/// disbanding. The numbers 0.5 and −1 of (б) are gone from the code.
+#[test]
+fn at_peace_a_levy_is_worth_the_threat_it_answers_and_nothing_but_its_pay_without_one() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&testworld::five_states_scenario(), 33);
+    assert!(w.borders(s0, s1) && !w.at_war(s0, s1));
+    let levy = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(w.actors[&s0].capital) };
+    let unit = w.units.iter().find(|(_, u)| u.owner == s0).map(|(u, _)| *u).expect("a unit of polity 0");
+    let disband = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(unit) };
+    let pay = w.soldiers_cost(s0, w.recruit_per_tick(s0, &p), 1.0, &p);
+    assert!(w.army_size(s0) > 0, "with units in being the levy adds nothing to the suppression");
+    assert!(pay > 0.0 && (w.utility(s0, &levy, &p) + pay).abs() < 1e-9, "no threat: the levy costs a tick of its pay (the decision is retaken every tick) and answers nothing");
+    let (levy_without, disband_without) = (w.utility(s0, &levy, &p), w.utility(s0, &disband, &p));
+    w.actors.get_mut(&s1).unwrap().wars_entered = 3;
+    let (levy_some, disband_some) = (w.utility(s0, &levy, &p), w.utility(s0, &disband, &p));
+    assert!(levy_some > levy_without && disband_some < disband_without, "a neighbour with a record of war: the levy worth more, the disbanding less ({levy_without} → {levy_some}; {disband_without} → {disband_some})");
+    w.actors.get_mut(&s1).unwrap().wars_entered = 9;
+    assert!(w.utility(s0, &levy, &p) > levy_some && w.utility(s0, &disband, &p) < disband_some, "the more the record, the more the chance read");
+}
+
+/// The world lets any number of men be levied up to the tick's levy (`Target::Levy`; E3 (г),
+/// owner's decision 4 on §29.8): so many men from a province, capped by the tick's levy and the
+/// province's people, none is no call; `Target::Province` alone stays the whole tick's levy. The
+/// bot's options are the tick's levy and its halves down to a thirty-second, from its most
+/// peopled province — it picks the size whose last man still pays.
+#[test]
+fn a_levy_of_any_size_up_to_the_ticks_levy_and_the_bots_sizes_are_the_halves_of_it() {
+    let p = params();
+    let s0 = ActorId(0);
+    let mut w = world_of(&testworld::five_states_scenario(), 35);
+    let levy = |q: ProvinceId, men: u32| VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Levy(q, men) };
+    let tick = w.recruit_per_tick(s0, &p);
+    assert!(tick > 100);
+    let before = w.army_size(s0);
+    w.apply_verb(&levy(at(0, 1), 100), &p).unwrap();
+    assert_eq!(w.army_size(s0), before + 100, "a hundred men levied");
+    w.apply_verb(&levy(at(0, 2), u32::MAX), &p).unwrap();
+    assert_eq!(w.army_size(s0), before + 100 + w.recruit_per_tick(s0, &p).max(tick).min(w.population(at(0, 2)) + tick), "capped by the tick's levy");
+    assert!(w.apply_verb(&levy(at(0, 3), 0), &p).is_err(), "no men is no call");
+    // The bot's sizes: the tick's levy halved down to a thirty-second, one province.
+    let w = world_of(&testworld::five_states_scenario(), 35);
+    let tick = w.recruit_per_tick(s0, &p);
+    let mut sizes: Vec<(ProvinceId, u32)> = w.options(s0, &[VerbId::Recruit], &p).iter().filter_map(|o| o.call).filter_map(|c| match c.target { Target::Levy(q, men) => Some((q, men)), _ => None }).collect();
+    sizes.sort();
+    let q = sizes[0].0;
+    assert!(sizes.iter().all(|(x, _)| *x == q), "one province, the most peopled: {sizes:?}");
+    let mut expect: Vec<u32> = (0..6).map(|k| (tick >> k) as u32).filter(|m| *m > 0).collect();
+    expect.sort();
+    let mut got: Vec<u32> = sizes.iter().map(|(_, m)| *m).collect();
+    got.sort();
+    assert_eq!(got, expect, "{sizes:?}");
+}
+
+/// The deterrence (E3 (г), owner's decision 1 on §29.8): the share of a neighbour's wars that
+/// falls on a polity follows the battle formula — the stronger the polity's army, the fewer of
+/// the neighbour's wars are its; the wars a tick over the neighbour's borders sum to its rate
+/// (owner's decision 3 on §29.9: the expected number, not the chance of one).
+#[test]
+fn an_army_at_peace_lowers_the_neighbours_wars_on_it_by_the_battle_formula() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&testworld::five_states_scenario(), 37);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 5;
+    let rate = w.war_rate(s1, &p);
+    assert!(rate > 0.0);
+    let wars = |w: &World, extra: f64| w.wars_a_tick_from(s1, s0, extra, &p);
+    assert!(wars(&w, 0.0) > 0.0);
+    let more = engine2::World::new_soldiers_strength(w.recruit_per_tick(s0, &p));
+    assert!(wars(&w, more) < wars(&w, 0.0), "a levy lowers the wars on it: {} -> {}", wars(&w, 0.0), wars(&w, more));
+    assert!(wars(&w, -w.army_strength(s0)) > wars(&w, 0.0), "an army sent home raises them");
+    // The shares over the neighbour's borders sum to one: the wars a tick add up to the rate.
+    let neighbours: Vec<ActorId> = w.actors.keys().copied().filter(|x| w.borders(s1, *x)).collect();
+    let total: f64 = neighbours.iter().map(|x| w.wars_a_tick_from(s1, *x, 0.0, &p)).sum();
+    assert!((total - rate).abs() < 1e-12, "{total} vs {rate}");
+}
+
+/// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
+/// chain of conquests covers all the polity's land, the loss is its whole income to the
+/// horizon, not the provinces' takes with their discounts; a polity with land beyond the chain
+/// loses provinces.
+#[test]
+fn a_chain_of_conquests_over_all_the_land_is_the_fall_worth_the_whole_income_to_the_horizon() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut w = world_of(&testworld::five_states_scenario(), 39);
+    let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+    assert!(!w.war_terms(s0, s1, blow, &p).fall(), "five provinces: more than a war's chain");
+    // Polity 0 down to its capital: everything the enemy reaches is all of it.
+    for y in 1..5 {
+        let q = at(0, y);
+        w.provinces.get_mut(&q).unwrap().owner = s2;
+        w.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        w.actors.get_mut(&s2).unwrap().provinces.push(q);
+    }
+    let t = w.war_terms(s0, s1, blow, &p);
+    assert!(t.fall(), "one province within the enemy's reach: the fall");
+    let q = 1.0 - w.war_odds(s0, s1, 0.0, &p);
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    let worth = w.war_worth_of(s0, &t, false, 0.0, &p);
+    assert!(worth <= -q * years * 0.999, "the whole income to the horizon at the odds of the fall: {worth} vs {}", -q * years);
+}
+
+/// The rule of the peace read for a war not yet open (E3 (г), owner's decision 1 on §29.10 —
+/// derived from `forced_to_peace`, not a case of its own): the side the weaker by the battle
+/// formula is forced the moment it has lost a province on balance, so when the enemy's first
+/// conquest in its land (`WarTerms::first_blow`) comes no later than its own march and siege
+/// to the stake, the rule closes the war before the stake is reached and the war wins nothing
+/// — its worth does not move with the stake, as at the threshold of the relation. The same
+/// polity with the stronger army counts its stake, and so does the weaker one whose enemy's
+/// units reach none of its land first. The loser of a forced peace that declared again the tick
+/// after it, with the same odds and the enemy's units a step from its land (59 of 496 on the
+/// third stop of (г1)), is read as forced again: its revanche is worth its loss alone.
+#[test]
+fn a_war_the_rule_of_the_peace_would_close_before_the_stake_is_reached_wins_nothing() {
+    let p = params();
+    let (s0, s1, s3) = (ActorId(0), ActorId(1), ActorId(3));
+    let unit_of = |w: &World, a: ActorId| w.units.iter().find(|(_, u)| u.owner == a).map(|(u, _)| *u).expect("a unit");
+    // The worth of the war with the stake and with the stake struck out (`unpaid`: an
+    // exhausted army wins nothing, every other term the same).
+    let worth = |w: &World, b: ActorId| {
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        let t = w.war_terms(s0, b, blow, &p);
+        let (with, without) = (w.war_worth_of(s0, &t, false, 0.0, &p), w.war_worth_of(s0, &t, true, 0.0, &p));
+        (t, with, without)
+    };
+    // The weaker side against the neighbour whose units stand a step from its land: the
+    // stake counts for nothing.
+    let mut w = world_of(&testworld::five_states_scenario(), 91);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 1))).unwrap();
+    w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+    assert!(w.war_odds(s0, s1, 0.0, &p) < 0.5, "the weaker side");
+    let (t, with, without) = worth(&w, s1);
+    assert!(t.first_blow() <= t.ticks, "the enemy's first conquest {} comes no later than the march and siege to the stake {}", t.first_blow(), t.ticks);
+    assert!((with - without).abs() < 1e-12, "the rule closes the war first: the stake counts for nothing, {with} against {without} with none");
+    assert!(with < 0.0, "a war that wins nothing is worth its loss alone: {with}");
+    // The same polity the stronger: the other side is the one the rule forces, the stake counts.
+    w.post(engine2::Account::Soldiers(unit_of(&w, s0)), Source::Test, 2400 * 1000).unwrap();
+    assert!(w.war_odds(s0, s1, 0.0, &p) > 0.5, "the stronger side");
+    let (_, with, without) = worth(&w, s1);
+    assert!(with > without, "the stronger side counts its stake: {with} against {without} with none");
+    // The weaker side whose enemy's units reach none of its land before it reaches the stake
+    // (two polities between them and no bay across): the rule cannot close the war against
+    // it first, the stake counts.
+    let mut w = world_of(&testworld::five_states_scenario(), 92);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(3, 1))).unwrap();
+    w.post(engine2::Account::Soldiers(unit_of(&w, s3)), Source::Test, 1200 * 1000).unwrap();
+    assert!(w.war_odds(s0, s3, 0.0, &p) < 0.5);
+    let (t, with, without) = worth(&w, s3);
+    assert!(t.first_blow() > t.ticks, "the enemy's first conquest {} comes after the march and siege to the stake {}", t.first_blow(), t.ticks);
+    assert!(with > without, "the weaker side the rule cannot close first counts its stake: {with} against {without} with none");
+}
+
+/// The cold start (E3 (г), owner's decision 3 on §29.8): while a polity's record is shorter than
+/// the horizon a bot does not disband below the army it started with — an empty chronicle says
+/// nothing, not «no wars»; a levy above it may go, and once the record is as long as the
+/// horizon the starting army is a decision like any other.
+#[test]
+fn while_the_record_is_shorter_than_the_horizon_a_bot_keeps_the_army_it_started_with() {
+    let p = params();
+    let s0 = ActorId(0);
+    let mut w = world_of(&testworld::five_states_scenario(), 41);
+    assert!(w.actors[&s0].army_at_start > 0 && w.actors[&s0].army_at_start == w.army_size(s0));
+    let disbands = |w: &World| w.options(s0, &[VerbId::Disband], &p).iter().filter(|o| o.call.is_some()).count();
+    assert_eq!(disbands(&w), 0, "the starting army stands");
+    w.apply_verb(&VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Levy(at(0, 1), 50) }, &p).unwrap();
+    assert_eq!(disbands(&w), 1, "the levy above it may go");
+    w.tick.0 = w.actors[&s0].since.0 + p.goal_horizon_ticks;
+    assert_eq!(disbands(&w), 2, "the record as long as the horizon: every unit a decision");
+}
+
+/// The second duty of an army at peace (E3 (г), owner's decision 1 on §29.9): a revolt ends
+/// when any unit of the owner has stood in the province a tick, and a levy takes a tick — so a
+/// polity with no unit left values its first levy at the take the revolts withhold, a tick of
+/// it for every province in revolt and the hazard's share for every province that can rise; a
+/// second unit adds nothing to that; the levy that puts a standing revolt down pays.
+#[test]
+fn a_unit_in_being_is_worth_the_take_the_risings_withhold_and_the_first_levy_puts_a_revolt_down() {
+    let p = params();
+    let s0 = ActorId(0);
+    let mut w = world_of(&testworld::five_states_scenario(), 43);
+    w.tick.0 = w.actors[&s0].since.0 + p.goal_horizon_ticks;
+    for u in w.units_of(s0) {
+        w.apply_verb(&VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
+    }
+    assert_eq!(w.army_size(s0), 0);
+    let expected = w.suppression_a_tick(s0, &p);
+    assert!(expected > 0.0, "provinces that can rise withhold their take at the hazard");
+    let income = w.yearly_income(s0, &p) as f64;
+    let a_tick = |w: &World, q: ProvinceId| w.take_of(s0, q, &p) / 2.0 / income;
+    let by_hand: f64 = w.actors[&s0].provinces.iter().map(|q| w.revolt_chance_per_tick(*q, &p) * a_tick(&w, *q)).sum();
+    assert!((expected - by_hand).abs() < 1e-12, "{expected} vs {by_hand}");
+    let levy = |men: u32| VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Levy(at(0, 1), men) };
+    let first = w.utility(s0, &levy(50), &p);
+    assert!((first - (expected - w.soldiers_cost(s0, 50, 1.0, &p))).abs() < 1e-9, "the first unit: the take brought back less a tick of pay, no threat read: {first}");
+    // A province in revolt: its whole take a tick is the first levy's; the levy pays.
+    w.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(w.tick);
+    assert!(w.in_revolt(at(0, 3)));
+    assert!(w.suppression_a_tick(s0, &p) > expected, "a standing revolt withholds its whole take");
+    assert!(w.utility(s0, &levy(50), &p) > 0.0, "the levy that puts the revolt down pays");
+    // With a unit in being a second adds nothing to the suppression.
+    w.apply_verb(&levy(50), &p).unwrap();
+    assert!((w.utility(s0, &levy(50), &p) + w.soldiers_cost(s0, 50, 1.0, &p)).abs() < 1e-9, "a second unit: a tick of pay for nothing more");
 }

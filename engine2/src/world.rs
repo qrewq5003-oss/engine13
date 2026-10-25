@@ -208,6 +208,23 @@ pub struct Actor {
     /// bots' estimate of its room to levy (`levy_room_seen`). The polity's own
     /// `manpower_deficit` stays its own.
     pub losses_seen: f64,
+    /// The tick the polity entered the chronicle — the world's start, or its birth of a
+    /// rising: the span of its record anyone can read (E3 (г), plan §29.2).
+    pub since: Tick,
+    /// The wars it has been in, one for each — its own declarations, the wars declared on it,
+    /// the wars it entered by its bonds (a pair its war brings in is not a new war for it); not
+    /// a war of the starting facts — a public fact of the chronicle: with `since`, the frequency of its
+    /// wars that a bot reads (`worth::war_rate`; plan §29.2, owner's answer 1 on §29.6; by
+    /// wars and not by declarations — owner's decision 2 on §29.9: a polity gets into war by
+    /// its bonds too, and the record of declarations saw one war in fifteen). Whom its war
+    /// falls on is the battle formula's, not the record's. Its goals stay its own.
+    pub wars_entered: u32,
+    /// The soldiers the polity had when it entered the chronicle — its starting facts, or the
+    /// militia of its rising: while its record is shorter than the horizon a bot does not
+    /// disband below it (E3 (г), owner's decision 3 on §29.8: an empty chronicle says nothing,
+    /// not «no wars»; the starting army is a fact of the scenario and stands until the world has
+    /// been seen).
+    pub army_at_start: i64,
 }
 
 /// A map keyed by a pair of polities, lower id first (wars, treaties, relations). JSON
@@ -739,6 +756,10 @@ impl World {
                     goals: Vec::new(),
                     manpower_deficit: 0.0,
                     losses_seen: 0.0,
+                    since: tick,
+                    wars_entered: 0,
+                    // Set below, once the units are in.
+                    army_at_start: 0,
                 },
             );
             ledger.open(tick, Account::Treasury(id), a.treasury_kg)?;
@@ -878,6 +899,10 @@ impl World {
             let (lo, hi) = crate::army::pair(a, b);
             let held = (world.actors[&lo].provinces.len() as u32, world.actors[&hi].provinces.len() as u32);
             world.wars.insert((lo, hi), War { since: tick, taken: (0, 0), held, of: None, by: None, aim: None, counter_aim: None });
+        }
+        for id in world.actors.keys().copied().collect::<Vec<_>>() {
+            let soldiers = world.army_size(id);
+            world.actors.get_mut(&id).expect("known").army_at_start = soldiers;
         }
         for &(a, b, year) in &facts.relations.alliances {
             known(a)?;

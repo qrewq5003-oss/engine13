@@ -83,6 +83,11 @@ pub enum Target {
     Province(ProvinceId),
     House(HouseId),
     Unit(UnitId),
+    /// So many men levied from a province — any number up to the tick's levy
+    /// (`recruit_per_tick`; E3 (г), owner's decision 4 on §29.8: the world lets any size be
+    /// levied, the bot picks the size whose last man still pays). `Province` alone levies the
+    /// whole tick's levy.
+    Levy(ProvinceId, u32),
 }
 
 /// A call: who, what, at whom.
