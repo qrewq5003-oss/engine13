@@ -1574,8 +1574,11 @@ fn a_change_of_the_worlds_numbers_alone_changes_the_bots_choices() {
     eprintln!("a polity of its own to the carrier house: {i0:.2}, with the battle's exponent doubled {i1:.2}");
     assert!((i1 - i0).abs() > 1e-9, "the battle's exponent moves the worth of independence");
     // An ally against a goal's enemy: the battle formula with the ally's army and without it.
+    // The alliance is valued through the threat (E3 (г2)), so the enemy needs a record of war:
+    // on an empty chronicle no neighbour brings a war and no ally is worth anything.
     let mut w = world_of(&carrier_scenario(), 7);
     w.set_goal(a, GoalKind::AllianceAgainst, GoalTarget::Polity(ActorId(1))).unwrap();
+    w.actors.get_mut(&ActorId(1)).unwrap().wars_entered = 5;
     let (al0, al1) = (w.alliance_worth(a, ActorId(2), &p), w.alliance_worth(a, ActorId(2), &steep));
     eprintln!("an alliance with polity 2 against polity 1: {al0:.3}, with the battle's exponent doubled {al1:.3}");
     assert!((al1 - al0).abs() > 1e-9, "the battle's exponent moves the worth of an ally");

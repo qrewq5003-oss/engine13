@@ -123,10 +123,16 @@ pub struct Context {
     /// The terms of every war the polity is in (`World::war_terms`), read once: the verbs of
     /// the army ask the worth of each war at several strengths.
     wars: Vec<crate::worth::WarTerms>,
-    /// The threats at peace (`World::threats`, E3 (г), plan §29): the chance each neighbour
-    /// declares over the horizon and the terms of that war, read once; empty at war, where
-    /// the wars are the measure of the army.
+    /// The terms of the polity's war with every living polity it does not fight
+    /// (`World::peace_terms`, E3 (г2)), read once: the threats to it and to an ally of it.
+    others: Vec<(ActorId, crate::worth::WarTerms)>,
+    /// The threats at peace (`World::threats_of`, E3 (г), plan §29): each neighbour's war
+    /// declared on the polity, read once; empty at war, where the wars are the measure of the
+    /// army.
     threats: Vec<(ActorId, crate::worth::WarTerms)>,
+    /// Every polity's rate of war and odds against its neighbours (`World::war_rates`), read
+    /// once: facts of the world no decision moves.
+    rates: std::collections::BTreeMap<ActorId, crate::worth::WarRate>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -607,7 +613,7 @@ impl World {
         if ctx.at_war {
             self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
         } else {
-            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| self.wars_a_tick_from(t, a, extra, params) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
+            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| ctx.rates.get(&t).map_or(0.0, |r| self.wars_a_tick_in(r, a, extra, params)) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
             let wars: f64 = ctx.threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum();
             let units = |strength: f64| f64::from(u8::from(strength > 0.0));
             let now = self.army_strength(a);
@@ -717,12 +723,15 @@ impl World {
         let risk = self.risk_prices(a, params);
         let blow_per_province = self.ceded_province_blow(a, &risk, params);
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
+        let others = self.peace_terms(a, blow_per_province, params);
         Context {
             at_war,
             income: self.yearly_income(a, params).max(1) as f64,
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect(),
-            threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },
+            threats: if at_war { Vec::new() } else { self.threats_of(a, &others) },
+            others,
+            rates: self.war_rates(params),
             risk,
             blow_per_province,
         }
@@ -779,11 +788,16 @@ impl World {
             (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility_at(a, call.verb, &ctx.risk, params),
             // Order bought back: the gain of legitimacy at what the world turns it into.
             (VerbId::EnforceOrder, _) => self.blow_worth(a, -params.order_gain, &ctx.risk, params) - price_kg(self.order_cost(a, params)),
-            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth(a, b, params) - price_kg(self.embassy_cost(a, params)),
-            (VerbId::SendEmbassy, Target::Actor(b)) => self.relation_push_worth(a, b, params.embassy_gain, params) - price_kg(self.embassy_cost(a, params)),
-            (VerbId::Bribe, Target::Actor(b)) => self.relation_push_worth(a, b, self.gift_push(a, b, params), params) - price_kg(self.gift_size(a, params)),
+            // The alliance through the threat (E3 (г2), plan §29.3 п. 2), its terms read once.
+            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth_in(a, b, &ctx.others, &ctx.rates, unpaid, params) - price_kg(self.embassy_cost(a, params)),
+            (VerbId::SendEmbassy | VerbId::Bribe, Target::Actor(b)) => {
+                let (push, price) = if call.verb == VerbId::SendEmbassy { (params.embassy_gain, self.embassy_cost(a, params)) } else { (self.gift_push(a, b, params), self.gift_size(a, params)) };
+                let covered = self.relation_push_share(a, b, push, params);
+                let alliance = if covered > 0.0 { covered * self.alliance_worth_in(a, b, &ctx.others, &ctx.rates, unpaid, params) } else { 0.0 };
+                alliance - price_kg(price)
+            }
             // A match is the ruling house's: the bond against the dowry, in its own wheat.
-            (VerbId::ProposeMarriage, Target::House(g)) => self.proposal_worth(self.ruling_house(a), g, params),
+            (VerbId::ProposeMarriage, Target::House(g)) => self.proposal_worth_with(self.ruling_house(a), g, |mine, theirs| if mine == a { self.alliance_worth_in(a, theirs, &ctx.others, &ctx.rates, unpaid, params) } else { self.alliance_worth(mine, theirs, params) }, params),
             _ => 0.0,
         }
     }
