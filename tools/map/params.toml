@@ -1,0 +1,71 @@
+# Parameters of the map pipeline (plan docs/engine2_map.md §4). Tool parameters, not engine
+# parameters: each one is written here and printed in the report, none is tuned in code.
+
+[base]
+# lon_min, lat_min, lon_max, lat_max — the union of the three scenarios' coverage (plan §3):
+# Britain and Iberia to the edge of the Iranian plateau, the Sahara's edge and Upper Egypt to
+# the Baltic. A block belongs to the base when its representative point lies inside.
+bbox = [-12.0, 15.0, 66.0, 60.0]
+# Countries whose CGAZ ADM2 is a coarser level than their second-level units: their own
+# geoBoundaries release (a key of sources.toml) replaces it, cut to the CGAZ outline. CGAZ
+# gives Italy its 20 regions, Greece 14 regions, Germany 38 Regierungsbezirke; Lombardy as one
+# block cannot be shared between Milan and Venice, nor the Rhine frontier drawn.
+refine = { ITA = "gb_ita_adm3", GRC = "gb_grc_adm3", DEU = "gb_deu_adm3" }
+# Land no unit of the source covers (CGAZ drops some cities and islands): a piece of at
+# least this area (km²) is a block of its own — Kaffa must not dissolve into its neighbour —
+# a smaller one joins the block it touches most.
+hole_block_km2 = 300.0
+# Natural lakes (Natural Earth `featurecla`) are cut out of the blocks; reservoirs are not —
+# they did not exist in any scenario's year.
+lake_classes = ["Lake", "Alkaline Lake"]
+# Present-day Köppen–Geiger map inside Beck_KG_V1.zip, 1 km.
+koppen_raster = "Beck_KG_V1_present_0p0083.tif"
+# Areas are measured in this equal-area projection (plan §4).
+area_crs = "EPSG:6933"
+# A block's boundary within this distance of another block runs along their common border
+# (degrees; ~0.2 km). Absorbs the slivers between the countries of the block source.
+border_tol_deg = 0.002
+# Boundaries that are not a common border are sampled at this spacing (km) to find coasts.
+sample_km = 0.5
+
+[neighbours]
+# Land neighbours share a border at least this long (km); touching at a corner is not a
+# border (plan §4).
+l_min_km = 5.0
+
+[coast]
+# A boundary sample within this distance of an IHO sea area is coast (degrees; ~3 km). Covers
+# the gap between the block source's shoreline and the sea areas' own.
+snap_deg = 0.03
+# A province is coastal, and faces a sea area, with at least this much coast on it (km).
+min_km = 5.0
+
+[sea.inland]
+# Inland seas the IHO areas do not name: the hole of Natural Earth land containing the point.
+"Caspian Sea" = [50.8, 41.8]
+
+# Large sea areas are cut so that one area does not link every coast around it in one tick
+# (plan §4: «крупные — делятся»). Each cut splits the named area at a meridian (`lon`) or a
+# parallel (`lat`); the parts are named «<area> W/E» or «<area> S/N». Cuts apply in order,
+# a later cut may name a part made by an earlier one.
+# [[sea.cut]]
+# zone = "Black Sea"
+# lon = 34.0
+
+[land]
+# Local relief = highest minus lowest surface in a square window of ETOPO 2022 1′ cells,
+# sea counted as 0 m. A cell is rugged when its local relief reaches `relief_m`: 300 m is
+# Hammond's (1964) bound between hills and mountains, on a window of ~9 km like his.
+relief_window_cells = 5
+relief_m = 300.0
+# Order of the rule (plan §4): Hills, then Desert, then Steppe, else Arable.
+hills_share = 0.5    # share of the area that is rugged
+desert_share = 0.5   # share of the area in Köppen BW
+steppe_share = 0.5   # share of the area in Köppen BW or BS
+
+[irrigated]
+# The E4 question «орошаемая долина» (plan §4): a province is flagged, its land type is not
+# changed. Flag: Desert or Steppe land crossed by at least `min_river_km` of a major river
+# (Natural Earth scalerank ≤ `river_scalerank_max`).
+river_scalerank_max = 4
+min_river_km = 50.0
