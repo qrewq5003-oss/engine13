@@ -1,0 +1,198 @@
+# Observations for the density fit (density.py): the population of a region at its Malthusian
+# ceiling, with the source (E0 rule: no row without a source; «по памяти» is marked). The fit
+# chooses the land-type densities, and the classification parameters with them, that best
+# reproduce these densities from the map's own areas by land type.
+#
+# `density` — people per km² over the region as the source draws it (a range); `population` —
+# millions, divided by the map's area of the region (sources whose regions are modern countries).
+# `land` — observations of one land in different years; the envelope keeps the highest (E0 П1:
+# capacity is a property of the land, not of the year).
+
+[[obs]]
+id = "italy_165"
+land = "italy"
+region = "italy_islands"
+density = [26.0, 29.0]
+source = "Scheidel 2007, CEHGRW, с. 38–86, таблица по провинциям 165 г. (по McEvedy–Jones и Frier) — открыл (вторичное) через tabulae-geographicae.de (2017-06-06); «средняя оценка» Италии 39–42"
+
+[[obs]]
+id = "hispania_165"
+land = "iberia"
+region = "iberia"
+density = [12.0, 15.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "gaul_165"
+land = "gaul_france"
+region = "gaul"
+density = [13.0, 18.0]
+source = "Scheidel 2007, там же (Gallia et Germania)"
+
+[[obs]]
+id = "britain_165"
+land = "britain"
+region = "britain_roman"
+density = [9.0, 13.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "danube_165"
+region = "danube"
+density = [8.0, 9.0]
+source = "Scheidel 2007, там же (Danubian region)"
+
+[[obs]]
+id = "greece_165"
+region = "greece"
+density = [16.0, 19.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "asia_minor_165"
+region = "asia_minor"
+density = [14.0, 15.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "syria_165"
+region = "syria_settled"
+density = [36.0, 43.0]
+source = "Scheidel 2007, там же (Syria and Cyprus; площадь источника ≈ 139 тыс. км² — заселённая Сирия без пустыни)"
+
+[[obs]]
+id = "egypt_165"
+region = "egypt_valley"
+density = [167.0, 200.0]
+source = "Scheidel 2007, там же (площадь источника ≈ 30 тыс. км² — долина и Дельта)"
+
+[[obs]]
+id = "n_africa_165"
+region = "n_africa"
+density = [17.0, 19.0]
+source = "Scheidel 2007, там же (North Africa)"
+
+[[obs]]
+id = "italy_1300"
+land = "italy"
+region = "italy"
+population = [12.0, 13.0]
+source = "Munro J. H., лекции (Toronto, 2013), §9: Италия ок. 1300 г. ≈ 12,5 млн у потолка — E0 П1, открыл"
+
+[[obs]]
+id = "italy_1340"
+land = "italy"
+region = "italy"
+population = [10.0, 10.0]
+source = "Russell J. C., «Population in Europe», Fontana Economic History of Europe I (1972), с. 25–71, табл. 1340 г. — открыл (вторичное) через Fordham Medieval Sourcebook"
+
+[[obs]]
+id = "iberia_1340"
+land = "iberia"
+region = "iberia"
+population = [9.0, 9.0]
+source = "Russell 1972, там же (Spain/Portugal)"
+
+[[obs]]
+id = "france_lc_1340"
+land = "gaul_france"
+region = "france_lc"
+population = [19.0, 19.0]
+source = "Russell 1972, там же (France/Low countries)"
+
+[[obs]]
+id = "british_isles_1340"
+land = "britain"
+region = "british_isles"
+population = [5.0, 5.0]
+source = "Russell 1972, там же (British Isles)"
+
+[[obs]]
+id = "balkans_1340"
+region = "balkans"
+population = [6.0, 6.0]
+source = "Russell 1972, там же (Greece/Balkans)"
+
+[[obs]]
+id = "steppe_nomads"
+region = "steppe_pontic"
+density = [0.5, 2.0]
+source = "Khazanov A., Nomads and the Outside World (1994), гл. 1: плотность кочевников степи 0,5–2/км² — по памяти (E0 П1)"
+
+# Regions: unions of parts; a part takes blocks of the listed countries whose representative
+# point passes the box, optionally by name, by size, or by the block's dry share.
+
+[regions.italy]
+parts = [{ countries = ["ITA", "SMR", "VAT"] }]
+
+[regions.italy_islands]
+parts = [{ countries = ["ITA", "SMR", "VAT", "MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+
+[regions.iberia]
+parts = [{ countries = ["ESP", "PRT", "AND"] }]
+
+[regions.gaul]
+parts = [{ countries = ["FRA"], exclude_names = ["Corse-du-Sud", "Haute-Corse"] },
+         { countries = ["BEL", "LUX", "NLD", "CHE"] }]
+
+[regions.france_lc]
+parts = [{ countries = ["FRA", "BEL", "LUX", "NLD"] }]
+
+[regions.britain_roman]
+# England, Wales and the Lowlands south of the Forth–Clyde line, without Northern Ireland.
+parts = [{ countries = ["GBR"], lon_min = -5.5, lat_max = 55.8 },
+         { countries = ["GBR"], lon_max = -5.5, lat_max = 54.0 }]
+
+[regions.british_isles]
+parts = [{ countries = ["GBR", "IRL"] }]
+
+[regions.danube]
+# Raetia to Moesia and Dacia: the Danubian lands south of the river, Transdanubia, and Dacia
+# (Transylvania, Banat, Oltenia) — approximated by boxes on Hungary and Romania.
+parts = [{ countries = ["AUT", "SVN", "HRV", "BIH", "SRB", "XKX", "MNE", "MKD", "BGR"] },
+         { countries = ["HUN"], lon_max = 19.0 },
+         { countries = ["ROU"], lon_max = 24.5 },
+         { countries = ["ROU"], lon_min = 24.5, lon_max = 26.0, lat_min = 45.5 }]
+
+[regions.greece]
+parts = [{ countries = ["GRC", "ALB"] }]
+
+[regions.balkans]
+# Greece and the Balkans of 1340 with Thrace (European Turkey).
+parts = [{ countries = ["GRC", "ALB", "MKD", "BGR", "SRB", "XKX", "MNE", "BIH"] },
+         { countries = ["TUR"], lon_max = 29.05, lat_min = 40.4 }]
+
+[regions.asia_minor]
+parts = [{ countries = ["TUR"], lon_min = 29.05 },
+         { countries = ["TUR"], lon_max = 29.05, lat_max = 40.4 }]
+
+[regions.syria_settled]
+parts = [{ countries = ["SYR", "LBN", "ISR", "PSE", "JOR", "CYP"], max_bw = 0.5 }]
+
+[regions.egypt_valley]
+# The valley and the Delta: Egypt's own small units (299 blocks under 500 km², 32.6 thousand
+# km²; the source's area is ≈ 30 thousand km²). The desert is in large units of its own.
+parts = [{ countries = ["EGY"], max_area_km2 = 500.0 }]
+
+[regions.n_africa]
+parts = [{ countries = ["TUN"] },
+         { countries = ["DZA"], lat_min = 34.0 },
+         { countries = ["MAR"], lat_min = 33.5 },
+         { countries = ["LBY"], lon_max = 15.5, lat_min = 31.0 }]
+
+[regions.steppe_pontic]
+parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, lat_min = 44.0, lat_max = 52.0, min_dry = 0.5 }]
+
+# The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
+# параметры классификации, выбирать по невязке подгонки»).
+[scan]
+relief_m = [150.0, 200.0, 300.0, 400.0, 500.0, 600.0, 800.0, 1000.0]
+relief_window_cells = [5, 9]
+# Irrigated valleys are regions of the source, not a climate class: Egypt's cultivated land.
+irrigated_regions = ["egypt_valley"]
+steppe_share = [0.5, 0.65, 0.8, 0.95]
+# Desert density is not fitted: no region with a source is mostly desert. E0 П1 value.
+desert_density = 0.5
+# Pseudo-provinces for the province-scale fit: blocks grouped by this lon/lat grid.
+grid_deg = [1.0, 2.0]
