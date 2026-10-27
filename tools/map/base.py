@@ -36,6 +36,9 @@ import rules  # noqa: E402
 POLYGON_TYPES = (3, 6)  # shapely type ids of Polygon and MultiPolygon
 KOPPEN_BW = (4, 5)      # Beck et al. 2018 legend: BWh, BWk
 KOPPEN_BS = (6, 7)      # BSh, BSk
+# Subarctic and polar: Dsc Dsd Dwc Dwd Dfc Dfd ET EF — the order in which a land below Hills
+# turns sparse (plan §15a п. 4: the cold provinces first).
+KOPPEN_COLD = (19, 20, 23, 24, 27, 28, 29, 30)
 
 
 class Report:
@@ -128,7 +131,9 @@ def cut_to_land(df, land_parts, lakes, rep: Report):
     out = np.empty(len(df), dtype=object)
     inside = 0
     for k, g in enumerate(df.geometry.values):
-        near = tree.query(g, predicate="intersects")
+        # Sorted: a union depends on the order of its inputs, and the tree's order depends on
+        # everything else it holds — that is, on the bbox.
+        near = np.sort(tree.query(g, predicate="intersects"))
         if len(near) == 1 and land_parts[near[0]].contains(g):
             cut = g
             inside += 1
@@ -137,7 +142,7 @@ def cut_to_land(df, land_parts, lakes, rep: Report):
         else:
             cut = shapely.intersection(g, shapely.union_all(land_parts[near]) if len(near) > 1 else land_parts[near[0]])
         if cut is not None and lake_tree is not None:
-            wet = lake_tree.query(cut, predicate="intersects")
+            wet = np.sort(lake_tree.query(cut, predicate="intersects"))
             if len(wet):
                 cut = shapely.difference(cut, shapely.union_all(lakes[wet]))
         out[k] = polygonal(cut)
@@ -145,24 +150,110 @@ def cut_to_land(df, land_parts, lakes, rep: Report):
     return out
 
 
-def fill_holes(df, units_union, land, tol, area_crs, min_block_km2, rep: Report):
-    """Land no unit of the source covers. CGAZ drops some city units — Feodosia (Kaffa),
-    Annaba (Hippo), Benghazi — and some islands: a piece of at least `min_block_km2` becomes a
-    block of its own (country of the block it touches most, or of the nearest), a smaller one
-    joins the block it touches most; a small piece touching no block stays out."""
+def in_bbox(g, bbox):
+    """The unit as the base takes it. A unit whose point on the surface lies in the bbox is
+    taken whole, one whose point lies outside is left out — unless it has several parts and
+    some of them lie inside: then those parts are taken. CGAZ's Primorsky District reaches from
+    the White Sea to Franz Josef Land, and its point falls on the islands (plan §15)."""
+    x0, y0, x1, y1 = bbox
+    parts = shapely.get_parts(g)
+    pt = shapely.point_on_surface(parts)
+    inside = (shapely.get_x(pt) >= x0) & (shapely.get_x(pt) <= x1) & (shapely.get_y(pt) >= y0) & (shapely.get_y(pt) <= y1)
+    if len(parts) == 1 or inside.all() or not inside.any():
+        p = shapely.point_on_surface(g)
+        return g if x0 <= p.x <= x1 and y0 <= p.y <= y1 else None
+    keep = parts[inside]
+    return keep[0] if len(keep) == 1 else shapely.multipolygons(keep)
+
+
+def tiles_of(geoms, bbox, step: float):
+    """Pieces of `geoms` cut by the cells of a fixed `step`-degree grid (aligned to multiples
+    of the step, not to the bbox) that meet the bbox; exact intersection, so the pieces are
+    valid polygons."""
+    x0, y0, x1, y1 = bbox
+    out = []
+    for g in geoms:
+        gx0, gy0, gx1, gy1 = g.bounds
+        for iy in range(int(np.floor(max(y0, gy0) / step)), int(np.ceil(min(y1, gy1) / step))):
+            for ix in range(int(np.floor(max(x0, gx0) / step)), int(np.ceil(min(x1, gx1) / step))):
+                c = shapely.intersection(g, shapely.box(ix * step, iy * step, (ix + 1) * step, (iy + 1) * step))
+                out += [p for p in shapely.get_parts(c) if shapely.get_type_id(p) == 3 and p.area > 0]
+    return np.array(out, dtype=object)
+
+
+def source_holes(cover, cover_ids, land_parts, lakes, bbox, cell: float, tile: float):
+    """Land no unit of the source covers, found cell by cell on a fixed grid of `cell` degrees.
+    A cell sees only the units, land and lakes that touch it, each in a fixed order (units by
+    id), so a hole does not depend on what lies far from it: widening the bbox leaves the holes
+    inside the old one as they were (plan §15a п. 2). The pieces of one hole cut by the cell
+    edges are joined back."""
+    x0, y0, x1, y1 = bbox
+    rank = np.empty(len(cover_ids), dtype=np.int64)
+    rank[np.argsort(cover_ids, kind="stable")] = np.arange(len(cover_ids))
+    land = tiles_of(land_parts, bbox, tile)
+    utree, ltree = shapely.STRtree(cover), shapely.STRtree(land)
+    ktree = shapely.STRtree(lakes) if len(lakes) else None
+    pieces = []
+    for iy in range(int(np.floor(y0 / cell)), int(np.ceil(y1 / cell))):
+        for ix in range(int(np.floor(x0 / cell)), int(np.ceil(x1 / cell))):
+            c = shapely.box(max(ix * cell, x0), max(iy * cell, y0), min((ix + 1) * cell, x1), min((iy + 1) * cell, y1))
+            li = np.sort(ltree.query(c, predicate="intersects"))
+            if not len(li):
+                continue
+            g = shapely.union_all(shapely.intersection(land[li], c))
+            if ktree is not None:
+                ki = np.sort(ktree.query(c, predicate="intersects"))
+                if len(ki):
+                    g = shapely.difference(g, shapely.union_all(lakes[ki]))
+            ui = utree.query(c, predicate="intersects")
+            if len(ui):
+                ui = ui[np.argsort(rank[ui])]
+                g = shapely.difference(g, shapely.union_all(shapely.intersection(cover[ui], c)))
+            pieces += [p for p in shapely.get_parts(g) if shapely.get_type_id(p) == 3 and p.area > 0]
+    if not pieces:
+        return np.array([], dtype=object)
+    pieces = np.array(pieces, dtype=object)
+    # Join the pieces of one hole: pieces that touch, in the order the cells gave them.
+    a, b = shapely.STRtree(pieces).query(pieces, predicate="dwithin", distance=1e-9)
+    root = np.arange(len(pieces))
+
+    def find(i):
+        while root[i] != i:
+            root[i] = root[root[i]]
+            i = root[i]
+        return i
+
+    for i, j in zip(a, b):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            root[max(ri, rj)] = min(ri, rj)
+    groups = collections.defaultdict(list)
+    for i in range(len(pieces)):
+        groups[find(i)].append(i)
+    holes = []
+    for r in sorted(groups):
+        g = pieces[groups[r]]
+        u = g[0] if len(g) == 1 else shapely.union_all(g)
+        holes += [p for p in shapely.get_parts(u) if shapely.get_type_id(p) == 3 and p.area > 0]
+    return np.array(holes, dtype=object)
+
+
+def fill_holes(df, holes, tol, area_crs, min_block_km2, rep: Report):
+    """Land no unit of the source covers (`source_holes`). CGAZ drops some city units — Feodosia
+    (Kaffa), Annaba (Hippo), Benghazi — and some islands: a piece of at least `min_block_km2`
+    becomes a block of its own (country of the block it touches most, or of the nearest), a
+    smaller one joins the block it touches most; a small piece touching no block stays out."""
     blocks = df.geometry.values
-    holes = shapely.get_parts(shapely.difference(land, units_union))
-    holes = holes[shapely.get_type_id(holes) == 3]
-    km2 = gpd.GeoSeries(holes, crs="EPSG:4326").to_crs(area_crs).area.values / 1e6
+    km2 = gpd.GeoSeries(holes, crs="EPSG:4326").to_crs(area_crs).area.values / 1e6 if len(holes) else np.zeros(0)
     tree = shapely.STRtree(blocks)
     add = collections.defaultdict(list)
     joined, own = [], []
     for k, h in enumerate(holes):
         hb = shapely.buffer(h, tol)
-        near = tree.query(hb, predicate="intersects")
+        near = np.sort(tree.query(hb, predicate="intersects"))
         if km2[k] >= min_block_km2:
             if len(near) == 0:
-                near = tree.query_nearest(h, all_matches=False)
+                near = np.sort(tree.query_nearest(h, all_matches=True))[:1]
             to = int(near[np.argmax(shapely.area(shapely.intersection(hb, blocks[near])))]) if len(near) > 1 else int(near[0])
             pt = h.representative_point()
             own.append({"id": f"hole_{pt.x:+08.3f}_{pt.y:+07.3f}", "country": df.country.values[to],
@@ -243,14 +334,18 @@ def label_blocks(blocks, transform, shape):
     return rasterio.features.rasterize(shapes, out_shape=shape, transform=transform, fill=0, dtype="int32")
 
 
-def chunked_sums(labels, row_area, values, masks: dict, n: int, rows: int = 512):
+def chunked_sums(labels, row_area, values, masks: dict, n: int, transform, rows: int = 512):
     """Zonal sums of cell area under each mask (a function of a chunk of `values`), per
-    block, in row chunks: a full-size float grid per mask would not fit."""
+    block, in row chunks: a full-size float grid per mask would not fit. Chunks start at rows
+    of the global grid counted from 90° N, not at the top of the window, so a block's sum adds
+    its cells in the same groups whatever the bbox (plan §15a п. 2)."""
     out = {k: np.zeros(n) for k in masks}
-    for r0 in range(0, labels.shape[0], rows):
-        lab = labels[r0:r0 + rows]
-        area = np.broadcast_to(row_area[r0:r0 + rows, None], lab.shape)
-        chunk = values[r0:r0 + rows]
+    row0 = int(round((90.0 - transform.f) / abs(transform.e)))
+    starts = [0] + list(range(rows - row0 % rows, labels.shape[0], rows))
+    for r0, r1 in zip(starts, starts[1:] + [labels.shape[0]]):
+        lab = labels[r0:r1]
+        area = np.broadcast_to(row_area[r0:r1, None], lab.shape)
+        chunk = values[r0:r1]
         for k, fn in masks.items():
             out[k] += geo.zonal_sums(lab, area * fn(chunk), n)
     return out
@@ -321,11 +416,11 @@ def main() -> None:
     if refine_with:
         rep("Замена грубых единиц CGAZ ([base.refine]):")
         cg = refine(cg, src, sources, refine_with, tol, rep)
-    units_union = shapely.union_all(cg.geometry.values)
-    rp = shapely.point_on_surface(cg.geometry.values)
-    x, y = shapely.get_x(rp), shapely.get_y(rp)
-    sel = (x >= bbox[0]) & (x <= bbox[2]) & (y >= bbox[1]) & (y <= bbox[3])
-    cg = cg[sel].sort_values("id").reset_index(drop=True)
+    cover, cover_ids = cg.geometry.values, cg.id.values  # every unit read: land under any of them is no hole
+    taken = np.array([in_bbox(g, bbox) for g in cg.geometry.values], dtype=object)
+    split = sum(1 for g, t in zip(cg.geometry.values, taken) if t is not None and t is not g)
+    cg = cg.assign(geometry=taken)[[t is not None for t in taken]].sort_values("id").reset_index(drop=True)
+    rep(f"Единиц за краем bbox, взятых частями внутри: {split}")
     rep.step(f"{len(cg)} units in the base")
 
     rep.step("reading land and lakes")
@@ -344,9 +439,10 @@ def main() -> None:
     dropped = cg[[g is None for g in geoms]]
     cg = cg.assign(geometry=geoms)[[g is not None for g in geoms]].reset_index(drop=True)
     rep.step("filling holes of the source")
+    holes = source_holes(cover, cover_ids, land_parts, lake_geoms, bbox, pb["hole_cell_deg"], pb["hole_tile_deg"])
+    cg = fill_holes(cg, holes, tol, pb["area_crs"], pb["hole_block_km2"], rep)
     land_ext = shapely.difference(shapely.intersection(shapely.union_all(land_parts), shapely.box(*bbox)),
                                   shapely.union_all(lake_geoms))
-    cg = fill_holes(cg, units_union, land_ext, tol, pb["area_crs"], pb["hole_block_km2"], rep)
     cg["geometry"] = shapely.normalize(cg.geometry.values)
     blocks = cg.geometry.values
     n = len(cg)
@@ -435,7 +531,7 @@ def main() -> None:
     rugged = geo.local_relief(elev, pr["relief_window_cells"]) >= pr["relief_m"]
     labels = label_blocks(blocks, et, elev.shape)
     ra = geo.row_cell_area_km2(et, elev.shape[0])
-    s = chunked_sums(labels, ra, rugged, {"all": lambda c: 1.0, "rugged": lambda c: c}, n)
+    s = chunked_sums(labels, ra, rugged, {"all": lambda c: 1.0, "rugged": lambda c: c}, n, et)
     raster_km2, rugged_km2 = s["all"], s["rugged"]
     tiny = raster_km2 == 0
     if tiny.any():
@@ -454,14 +550,16 @@ def main() -> None:
     s = chunked_sums(labels, ka, cls, {
         "climate": lambda c: c > 0,
         "bw": lambda c: np.isin(c, KOPPEN_BW),
-        "bs": lambda c: np.isin(c, KOPPEN_BS)}, n)
-    climate_km2, bw_km2, bs_km2 = s["climate"], s["bw"], s["bs"]
+        "bs": lambda c: np.isin(c, KOPPEN_BS),
+        "cold": lambda c: np.isin(c, KOPPEN_COLD)}, n, kt)
+    climate_km2, bw_km2, bs_km2, cold_km2 = s["climate"], s["bw"], s["bs"], s["cold"]
     tiny = climate_km2 == 0
     if tiny.any():
         c = point_values(cls, kt, lon[tiny], lat[tiny])
         climate_km2[tiny] = np.where(c > 0, area[tiny], 0.0)
         bw_km2[tiny] = np.where(np.isin(c, KOPPEN_BW), area[tiny], 0.0)
         bs_km2[tiny] = np.where(np.isin(c, KOPPEN_BS), area[tiny], 0.0)
+        cold_km2[tiny] = np.where(np.isin(c, KOPPEN_COLD), area[tiny], 0.0)
     rep(f"Климат: Beck et al. 2018, {pb['koppen_raster']}; блоков без клетки климата: {int((climate_km2 == 0).sum())}")
     del cls, labels
 
@@ -470,6 +568,8 @@ def main() -> None:
     riv = pyogrio.read_dataframe(vsizip(src, ne_riv["file"], "ne_10m_rivers_lake_centerlines.shp"), bbox=bounds)
     major = riv[riv.scalerank <= params["irrigated"]["river_scalerank_max"]]
     ri, bk = shapely.STRtree(blocks).query(major.geometry.values, predicate="intersects")
+    order = np.lexsort((ri, bk))  # each block adds its rivers in one order, whatever the tree holds
+    ri, bk = ri[order], bk[order]
     river_km = np.bincount(bk, weights=geo.lengths_km(shapely.intersection(major.geometry.values[ri], blocks[bk])),
                            minlength=n)
     rep(f"Большие реки (scalerank ≤ {params['irrigated']['river_scalerank_max']}): "
@@ -480,10 +580,10 @@ def main() -> None:
     ids = cg.id.values
     write_csv(out / "blocks.csv",
               ["id", "country", "name", "lon", "lat", "area_km2", "raster_km2", "rugged_km2", "climate_km2",
-               "bw_km2", "bs_km2", "river_km", "geom_sha"],
+               "bw_km2", "bs_km2", "cold_km2", "river_km", "geom_sha"],
               ([ids[k], cg.country.values[k], cg.name.values[k], f"{lon[k]:.4f}", f"{lat[k]:.4f}",
                 float(area[k]), float(raster_km2[k]), float(rugged_km2[k]), float(climate_km2[k]),
-                float(bw_km2[k]), float(bs_km2[k]), float(river_km[k]), geom_sha(blocks[k])] for k in range(n)))
+                float(bw_km2[k]), float(bs_km2[k]), float(cold_km2[k]), float(river_km[k]), geom_sha(blocks[k])] for k in range(n)))
     border_rows = sorted((min(ids[i], ids[j]), max(ids[i], ids[j]), float(km)) for i, j, km in zip(bi, bj, bkm))
     write_csv(out / "borders.csv", ["a", "b", "km"], border_rows)
     coast_rows = sorted((ids[b], z, km) for (b, z), km in coast.items())
