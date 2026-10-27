@@ -394,15 +394,20 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
             else:
                 cls[free] = calibrate(*args, **{k: (v[free] if isinstance(v, np.ndarray) else v) for k, v in variant.items()})
         else:
-            cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
+            cls[free] = rule_class(rugged[free], bw[free], dry[free], p, cap_hills=True)
     rest = (cls >= 0) & np.isnan(d)
     d[rest] = dens[cls[rest]]
     return cls, d
 
 
-def rule_class(rugged, bw, dry, p: rules.Params) -> np.ndarray:
-    """Plan §4 for a land without an opened ceiling (owner's rule 1, §11a): relief, then climate."""
-    return np.array([TYPES.index(rules.land_type(r, b, d - b, p)) for r, b, d in zip(rugged, bw, dry)], dtype=np.int64)
+def rule_class(rugged, bw, dry, p: rules.Params, cap_hills=False) -> np.ndarray:
+    """Plan §4 for a land without an opened ceiling (owner's rule 1, §11a): relief, then climate.
+    `cap_hills` — a land without a source is not above Hills (owner's decision on §13b п. 1):
+    level ground that is not dry takes Hills, not the Arable density of the densest land."""
+    cls = np.array([TYPES.index(rules.land_type(r, b, d - b, p)) for r, b, d in zip(rugged, bw, dry)], dtype=np.int64)
+    if cap_hills:
+        cls[cls == A] = H
+    return cls
 
 
 def shares_row(area, cls) -> str:
@@ -469,7 +474,7 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
                                 dry_steppe=p.steppe_share)
                 how = "калибровка" + (" (ниже холмов: источник — нижняя граница)" if o["y"] < dens[H] else "")
             else:
-                cls = rule_class(rugged[m], bw[m], dry[m], p)
+                cls = rule_class(rugged[m], bw[m], dry[m], p, cap_hills=True)
                 how = "§4 (правило 1)"
             got = float(area[m] @ dens[cls]) / area[m].sum()
             rep(f"| {land} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {how} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "

@@ -168,18 +168,17 @@ def main() -> None:
     # Every arable density of [calibration] by both methods: "flip" turns whole provinces to
     # Hills, the most rugged first, while that brings the land closer to its ceiling; "nearest"
     # gives each province the class nearest to its continuous density (density.calibrate_nearest).
-    def classify(dens, method, cap4=False, **variant):
-        """Classes and densities of the provinces. `cap4` and `variant` (density.calibrate) are the
-        rule variants measured for the owner (plan §13b); the working rules use none of them."""
+    def classify(dens, method, **variant):
+        """Classes and densities of the provinces. `variant` (density.calibrate) — the rule variants
+        measured for the owner (plan §13b); the working rules use none of them."""
         cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method, **variant)
         for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
             if plands[pid] in how_land:
                 mine = block_prov == k
                 d[k] = float(blocks["area"][mine] @ dens[inherited[mine]]) / blocks["area"][mine].sum()
                 cls[k] = min((A, H, S, D), key=lambda c: abs(dens[c] - d[k]))
-        cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p)
-        if cap4:  # a land without a source: not above Hills
-            cls[no_land & (cls == A)] = H
+        # A province of no land with a source: §4, not above Hills (owner's decision on §13b п. 1).
+        cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p, cap_hills=True)
         for land in wet:
             cls[member[land]] = I if engine_irrigated else A
         d[no_land] = dens[cls[no_land]]
@@ -236,7 +235,6 @@ def main() -> None:
     cap, pop, stub = populate(dens, cls)
     # Rule variants measured for the owner (plan §13b; no decision): each against the working rules.
     rule_variants = {
-        "§4 для земли без источника — не выше холмов": dict(cap4=True),
         "в холмы первыми — по max(изрезанность, сухость)": dict(key=np.maximum(rugged, dry)),
         "в холмы первыми — по доле клеток изрезанных или сухих": dict(key=poor_share(cache, blocks, owner_of, pids, p, rep)),
     }

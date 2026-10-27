@@ -31,6 +31,7 @@ ungheria = "Ungheria"
 bosnia = "Bosnia"
 principati = "Principati"
 mamelucchi = "Sultanato mamelucco"
+levante_latino = "Levante latino"
 
 # The seat of each owner on this map. Off the map — a stand-in: Poland-Lithuania (Kraków, Vilnius)
 # — Podolia. The Ottoman capital is Adrianople, in Thrace; the Mamluks' — Cairo.
@@ -51,10 +52,14 @@ ragusa = "ragusa"
 wallachia = "valacchia"
 poland_lithuania = "podolia"
 mamluks = "egitto"
+moldavia = "moldavia"
+hospitallers = "rodi"
+cyprus = "cipro"
 
 [sources]
 shepherd_italy = "Shepherd W. R., Historical Atlas (1911), с. 90, «Italy about 1494» — открыл (UT PCL, shepherd-c-090-091.jpg)"
 shepherd_ottoman = "Shepherd 1911, с. 93, «The Ottoman Empire, 1451–1481» (состояние 1451 г., даты — годы перехода к Османам) — открыл (UT PCL, shepherd-c-093.jpg)"
+owner_13b = "Решение владельца по §13b п. 4 (2026-10-27): острова Эгеиды и Кипр"
 e0_genoa = "E0 §6.2: Генуя — держава моря (Пера, Хиос, Каффа); в 1421–1435 гг. Генуя под синьорией Висконти — по памяти"
 
 # ---------------------------------------------------------------- Italy: Milan, Genoa, Venice, the Papacy
@@ -284,6 +289,17 @@ religion = "orthodox"
 parts = [{ countries = ["GRC"], lon_min = 23.4, lon_max = 26.4, lat_max = 35.8 }]
 source = "shepherd_ottoman"
 
+[[province]]
+id = "arcipelago"
+name = "Arcipelago"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], lon_min = 24.3, lon_max = 26.25, lat_min = 36.3, lat_max = 37.95, exclude_names = ["Ikaria"] }]
+source = "owner_13b"
+note = "«Duchy of Naxos» (Shepherd, с. 93) — герцогство Архипелага (Криспо), вассал Венеции; Тинос и Миконос — венецианские прямо — по памяти; приближение «у Венеции»"
+
 # ---------------------------------------------------------------- Genoa overseas
 
 [[province]]
@@ -353,6 +369,17 @@ religion = "orthodox"
 parts = [{ countries = ["BGR"], names = ["Nesebar", "Pomorie"] }]
 source = "shepherd_ottoman"
 note = "Византийские до 1453 г. — по памяти"
+
+[[province]]
+id = "lemno"
+name = "Lemno e Imbro"
+owner = "byzantium"
+region = "romania"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Lemnos", "Agios Efstratios"] }, { countries = ["TUR"], names = ["Imbros"] }]
+source = "owner_13b"
+note = "Византийские в 1430 г.; Имброс сдан Мехмеду в 1453 г. — по памяти рецензента; на Shepherd, с. 93, Лемнос без отметки"
 
 [[province]]
 id = "morea"
@@ -550,13 +577,13 @@ note = "Граница с Трансильванией по Карпатам —
 [[province]]
 id = "moldavia"
 name = "Moldavia"
-owner = "poland_lithuania"
+owner = "moldavia"
 region = "principati"
 culture = "romanian"
 religion = "orthodox"
 parts = [{ countries = ["ROU"], lon_min = 26.2, lat_min = 45.3 }, { countries = ["ROU"], lon_min = 25.3, lat_min = 47.0 }, { countries = ["MDA"] }, { countries = ["UKR"], lon_min = 28.2, lon_max = 30.5, lat_max = 46.5 }, { countries = ["UKR"], lon_min = 25.0, lon_max = 27.4, lat_min = 47.7, lat_max = 48.6 }, { countries = ["UKR"], names = ["Verkhovyna"] }]
 source = "shepherd_ottoman"
-note = "Покутье (Верховина) — польское, спорное с Молдавией; Молдавское княжество Александра Доброго — вассал польской короны (с 1387 г.) — по памяти; отдельного актора в E0 нет, приближение «у Польши-Литвы»; Килия и Белгород — молдавские"
+note = "Молдавское княжество Александра Доброго — свой актор-край (решение владельца по §13b п. 5), вассал польской короны с 1387 г. — по памяти, вассалитет — данные E7; Покутье (Верховина) — польское, спорное, в блоке провинции; Килия и Белгород — молдавские"
 
 [[province]]
 id = "transilvania"
@@ -737,3 +764,27 @@ religion = "muslim"
 parts = [{ countries = ["EGY"], max_area_km2 = 500.0 }, { countries = ["EGY"], names = ["Bilqas"] }]
 source = "shepherd_ottoman"
 note = "Долина Нила и Дельта — малые единицы Египта, как регион `egypt_valley` (density.toml); пустыни — вне охвата"
+
+# ---------------------------------------------------------------- The Latin Levant: edges
+
+[[province]]
+id = "rodi"
+name = "Rodi e Dodecaneso"
+owner = "hospitallers"
+region = "levante_latino"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], lon_min = 26.25, lat_max = 37.5 }]
+source = "owner_13b"
+note = "«Knights of St. John» (Shepherd, с. 93); Карпатос и Касос — венецианские Корнаро, Астипалея — Квирини — по памяти; приближение «у иоаннитов»; вера большинства — православная"
+
+[[province]]
+id = "cipro"
+name = "Cipro"
+owner = "cyprus"
+region = "levante_latino"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["CYP"] }]
+source = "owner_13b"
+note = "«Kingdom of Cyprus» (Shepherd, с. 93) — Лузиньяны, данники мамлюков с 1426 г. — по памяти, данные — E7; вера большинства — православная, двор — латинский"
