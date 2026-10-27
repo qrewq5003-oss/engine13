@@ -575,20 +575,31 @@ owner = "rome"
 region = "oriens"
 culture = "aramaic"
 religion = "christian"
-parts = [{ countries = ["LBN"] }, { countries = ["SYR"], lon_max = 39.6, lat_min = 33.2, lat_max = 35.0 }]
+parts = [{ countries = ["LBN"] }, { countries = ["SYR"], lon_max = 39.6, lat_min = 33.2, lat_max = 35.0, exclude_names = ["Tadmor", "Duma", "Al Qutayfah"] }]
 source = "shepherd_395"
-note = "Тир, Берит, Дамаск, Эмеса, Пальмира"
+note = "Тир, Берит, Дамаск, Эмеса; пустыня Пальмиры — в palmyrene (решение владельца по §16a п. 3)"
+
+[[province]]
+id = "palmyrene"
+name = "Palmyrene"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "pagan"
+parts = [{ countries = ["SYR"], names = ["Tadmor", "Duma", "Al Qutayfah"] }]
+source = "shepherd_395"
+note = "Сирийская пустыня Финикии Ливанской: Пальмира — крепость на Strata Diocletiana; кочевники-сарацины, восстание Мавии 375–378 гг. — по памяти; отделена от заселённой Финикии, чтобы земля римской Сирии была её заселённой частью (§16a п. 3)"
 
 [[province]]
 id = "arabia"
-name = "Arabia et Palaestina Salutaris"
+name = "Arabia"
 owner = "rome"
 region = "oriens"
 culture = "aramaic"
 religion = "christian"
-parts = [{ countries = ["SYR"], lat_max = 33.2, lon_max = 37.5 }, { countries = ["JOR"], lon_max = 37.8 }]
+parts = [{ countries = ["SYR"], lat_max = 33.2, lon_max = 37.5 }, { countries = ["JOR"], lon_max = 37.8, lat_min = 30.9 }]
 source = "shepherd_395"
-note = "Бостра, Петра; пустыня — до лимеса"
+note = "Бостра, Гераса, Филадельфия: Хауран и Заиорданье севернее Вади-эль-Хасы; юг с Петрой — в palaestina_salutaris"
 
 [[province]]
 id = "palaestina"
@@ -597,9 +608,20 @@ owner = "rome"
 region = "oriens"
 culture = "aramaic"
 religion = "christian"
-parts = [{ countries = ["ISR"] }, { countries = ["EGY"], lon_min = 32.6, lat_min = 27.5 }]
+parts = [{ countries = ["ISR"], exclude_names = ["Be'er Sheva"] }]
 source = "shepherd_395"
-note = "Кесария, Иерусалим; Синай (Палестина III) — большие блоки Египта восточнее Суэца; вера — христиане, иудеи и язычники, приближение"
+note = "Кесария, Иерусалим, Скифополь (Палестина I и II); вера — христиане, иудеи и язычники, приближение"
+
+[[province]]
+id = "palaestina_salutaris"
+name = "Palaestina Salutaris"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["EGY"], lon_min = 32.6, lat_min = 27.5 }, { countries = ["ISR"], names = ["Be'er Sheva"] }, { countries = ["JOR"], lat_max = 30.9 }]
+source = "shepherd_395"
+note = "Петра, Негев, Синай — пустынная Палестина III (отделена от Аравии в IV в. — по памяти); отделена, чтобы земля римской Сирии была её заселённой частью (§16a п. 3)"
 
 [[province]]
 id = "cilicia"
