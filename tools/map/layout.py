@@ -168,6 +168,25 @@ def main() -> None:
     # Every arable density of [calibration] by both methods: "flip" turns whole provinces to
     # Hills, the most rugged first, while that brings the land closer to its ceiling; "nearest"
     # gives each province the class nearest to its continuous density (density.calibrate_nearest).
+    def classify(dens, method, cap4=False, **variant):
+        """Classes and densities of the provinces. `cap4` and `variant` (density.calibrate) are the
+        rule variants measured for the owner (plan §13b); the working rules use none of them."""
+        cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method, **variant)
+        for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
+            if plands[pid] in how_land:
+                mine = block_prov == k
+                d[k] = float(blocks["area"][mine] @ dens[inherited[mine]]) / blocks["area"][mine].sum()
+                cls[k] = min((A, H, S, D), key=lambda c: abs(dens[c] - d[k]))
+        cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p)
+        if cap4:  # a land without a source: not above Hills
+            cls[no_land & (cls == A)] = H
+        for land in wet:
+            cls[member[land]] = I if engine_irrigated else A
+        d[no_land] = dens[cls[no_land]]
+        for land in wet:
+            d[member[land]] = dens[cls[member[land]]]
+        return cls, d
+
     variants = {}
     for arable in dcfg["calibration"]["arable"]:
         dens = np.zeros(5)
@@ -176,18 +195,7 @@ def main() -> None:
         dens[A] = arable
         dens[I] = top[wet[0]]["y"] if wet else 0.0
         for method in METHODS:
-            cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method)
-            for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
-                if plands[pid] in how_land:
-                    mine = block_prov == k
-                    d[k] = float(blocks["area"][mine] @ dens[inherited[mine]]) / blocks["area"][mine].sum()
-                    cls[k] = min((A, H, S, D), key=lambda c: abs(dens[c] - d[k]))
-            cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p)
-            for land in wet:
-                cls[member[land]] = I if engine_irrigated else A
-            d[no_land] = dens[cls[no_land]]
-            for land in wet:
-                d[member[land]] = dens[cls[member[land]]]
+            cls, d = classify(dens, method)
             variants[(arable, method)] = (dens, cls, d)
     pending = [pid for pid in pids if any(member[land][k_of[pid]] for land in wet)] if not engine_irrigated else []
 
@@ -226,6 +234,13 @@ def main() -> None:
     work = (dcfg["calibration"]["arable"][0], dcfg["calibration"]["method"])
     dens, cls, _ = variants[work]
     cap, pop, stub = populate(dens, cls)
+    # Rule variants measured for the owner (plan §13b; no decision): each against the working rules.
+    rule_variants = {
+        "§4 для земли без источника — не выше холмов": dict(cap4=True),
+        "в холмы первыми — по изрезанности + сухости": dict(key=rugged + dry),
+        "Steppe — только где климат сухой": dict(dry_steppe=p.steppe_share),
+    }
+    measured = {name: classify(dens, work[1], **kw)[0] for name, kw in rule_variants.items()}
 
     # --- checks of §7
     provs = {}
@@ -353,6 +368,43 @@ def main() -> None:
     rep(f"**Столицы** (тип при {work[0]:g}: " + "/".join(METHODS) + "): " +
         ", ".join(f"{o} — {brief(pid)}" for o, pid in sorted(layout["capitals"].items())))
     rep()
+
+    rep(f"## Варианты правил — замер для владельца, решения нет (план §13b; пашня {work[0]:g}, «{work[1]}»)")
+    rep()
+    for name, vcls in measured.items():
+        vcap, vpop, vstub = populate(dens, vcls)
+        changed = np.flatnonzero(vcls != cls)
+        rep(f"### {name}")
+        rep()
+        if not len(changed):
+            rep("Ни одна провинция не меняет класс.")
+            rep()
+            continue
+        rep("| провинция | владелец | земля | класс | ёмкость, тыс. | население, тыс. |")
+        rep("|---|---|---|---|---|---|")
+        for k in changed:
+            pid = pids[k]
+            rep(f"| {pid} | {provs_cfg[pid]['owner']} | {plands[pid] or '—'} | {TYPES[cls[k]]} → {TYPES[vcls[k]]} | "
+                f"{cap[k] / 1e3:,.0f} → {vcap[k] / 1e3:,.0f} | {pop[k] / 1e3:,.0f} → {vpop[k] / 1e3:,.0f}"
+                f"{' (заглушка)' if vstub[k] else ''} |")
+        rep()
+        touched = [land for land in sc["lands"] if member[land][changed].any()]
+        for land in touched:
+            m = member[land]
+            ref = top[land]["y"] if land in top else None
+            c0, c1 = float(cap[m].sum()), float(vcap[m].sum())
+            res = (lambda c: f"{100 * (c / area[m].sum() - ref) / ref:+.0f} %") if ref else (lambda c: "—")
+            rep(f"- земля {land}: ёмкость {c0 / 1e6:.2f} → {c1 / 1e6:.2f} млн, невязка {res(c0)} → {res(c1)}, "
+                f"заполненность {float(pop[m].sum()) / c0:.2f} → {float(vpop[m].sum()) / c1:.2f}")
+        owners_pop = collections.defaultdict(lambda: [0.0, 0.0])
+        for k, pid in enumerate(pids):
+            owners_pop[provs_cfg[pid]["owner"]][0] += pop[k]
+            owners_pop[provs_cfg[pid]["owner"]][1] += vpop[k]
+        moved = {o: v for o, v in owners_pop.items() if abs(v[0] - v[1]) > 0.5}
+        if moved:
+            rep("- население владельцев на старте: " + ", ".join(
+                f"{o} {v[0] / 1e6:.2f} → {v[1] / 1e6:.2f} млн" for o, v in sorted(moved.items(), key=lambda kv: -kv[1][0])))
+        rep()
 
     rep("## Морские зоны (план §10a п. 5: разрез — по числу провинций зоны)")
     rep()

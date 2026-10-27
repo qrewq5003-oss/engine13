@@ -54,6 +54,17 @@ def test_calibrate_keeps_desert_and_stops_at_the_closest_capacity():
     assert list(cls) == [H, A, D]
 
 
+def test_calibrate_variants_order_to_hills_and_steppe_only_where_dry():
+    # Order to Hills by another key: the second unit, not the more rugged first, goes to Hills.
+    area, rugged, dry, desert = land([0.9, 0.2])
+    cls = density.calibrate(area, rugged, dry, desert, 5200.0, DENS, key=np.array([0.2, 0.9]))
+    assert list(cls) == [A, H]
+    # Steppe only where the climate is dry: no unit is dry enough, so the land stays Hills.
+    area, rugged, dry, desert = land([0.0, 0.0], dry=[0.2, 0.4])
+    assert list(density.calibrate(area, rugged, dry, desert, 1300.0, DENS)) == [H, S]
+    assert list(density.calibrate(area, rugged, dry, desert, 1300.0, DENS, dry_steppe=0.5)) == [H, H]
+
+
 def test_calibrate_nearest_gives_continuous_densities_and_the_nearest_class():
     area, rugged, dry, desert = land([0.5, 1.0])
     # 100·(40 − 28·0.5k) + 100·(40 − 28·min(1, k)) = 3900 → k = 4100/4200; d = 26.33 and 12.67.
