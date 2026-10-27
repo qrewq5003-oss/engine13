@@ -416,6 +416,35 @@ def hills_share(area, poor, desert, target, dens):
     return h, k
 
 
+def hills_share_lands(order, member, ceiling, area, poor, bw, dens, cls, skip=frozenset(), river=frozenset()):
+    """`hills_share` for the lands of a scenario, inner lands first, as `calibrate_lands`. A land
+    without h — no opened ceiling (rule 1), below Hills, or in `skip` (irrigated, inherited) —
+    keeps its units at the density of their class `cls`, and an outer land meets its ceiling with
+    the units left (the Italian Alps stay Hills inside the Centre-North). Returns per unit h (NaN
+    where there is none), the density under h (the class density for the units kept), whether the
+    unit is under h, and k per land."""
+    hshare = np.full(len(area), np.nan)
+    hdens = np.full(len(area), np.nan)
+    under = np.zeros(len(area), bool)
+    hland = {}
+    for land in order:
+        m = member[land] & np.isnan(hdens)
+        if not m.any():
+            continue
+        if ceiling[land] is None or ceiling[land] < dens[H] or land in skip:
+            hdens[m] = dens[cls[m]]
+            continue
+        fixed = member[land] & ~np.isnan(hdens)
+        target = ceiling[land] * area[member[land]].sum() - float(area[fixed] @ hdens[fixed])
+        desert = (bw[m] >= 0.5) & (land not in river)
+        h, k = hills_share(area[m], poor[m], desert, target, dens)
+        hshare[m] = np.where(desert, np.nan, h)
+        hdens[m] = np.where(desert, dens[D], dens[A] - (dens[A] - dens[H]) * h)
+        under |= m
+        hland[land] = k
+    return hshare, hdens, under, hland
+
+
 def land_depth(land: str, lands: dict) -> int:
     d = 0
     while land in lands and "within" in lands[land]:

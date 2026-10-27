@@ -148,6 +148,9 @@ def main() -> None:
     sparse = density.sparse_lands(obs, top, e0, dcfg["calibration"]["sparse_below"]) & set(order)
     # Lands that live off their river (the Sawad): a desert climate does not hold them at Desert.
     river = {land for land in order if lands_cfg.get(land, {}).get("river")}
+    for land in river:  # without an opened source the flag would bypass rule 1
+        if not (land in top and top[land].get("opened", True)):
+            raise SystemExit(f"land {land}: `river` needs an opened source of the land's density")
     inp = block_prov >= 0
     cold = (np.bincount(block_prov[inp], weights=(blocks["area"] * blocks["cold"])[inp], minlength=len(pids))
             / np.bincount(block_prov[inp], weights=blocks["area"][inp], minlength=len(pids)))
@@ -256,20 +259,8 @@ def main() -> None:
     # The hills share h (plan §12b, §17; a question for the owner at E4, measured only — the layout
     # keeps its classes): the provinces of a land with a ceiling between Hills and Arable hold
     # A·(1 − h) + H·h with h = min(1, k·poor), inner lands first, as in the calibration.
-    hshare = np.full(len(pids), np.nan)
-    hdens = np.full(len(pids), np.nan)
-    hland = {}
-    for land in order:
-        m = member[land] & np.isnan(hdens)
-        if ceiling[land] is None or ceiling[land] < dens[H] or land in wet or land in how_land or not m.any():
-            continue
-        fixed = member[land] & ~np.isnan(hdens)
-        target = ceiling[land] * area[member[land]].sum() - float(area[fixed] @ hdens[fixed])
-        desert = (bw[m] >= 0.5) & (land not in river)
-        h, k = density.hills_share(area[m], poor[m], desert, target, dens)
-        hshare[m] = np.where(desert, np.nan, h)
-        hdens[m] = np.where(desert, dens[D], dens[A] - (dens[A] - dens[H]) * h)
-        hland[land] = k
+    hshare, hdens, hunder, hland = density.hills_share_lands(order, member, ceiling, area, poor, bw, dens, cls,
+                                                             skip=set(wet) | set(how_land), river=river)
 
     # --- checks of §7
     provs = {}
@@ -447,7 +438,9 @@ def main() -> None:
     hrep.append(f"### {args.scenario}")
     hrep.append("")
     hrep.append(f"Пашня {work[0]:g}, холмы {dens[H]:g}. Земли с потолком между холмами и пашней; ниже холмов, "
-                "орошаемые, унаследованные и по правилу 1 — без h, их класс как сейчас.")
+                "орошаемые, унаследованные и по правилу 1 — без h, их класс как сейчас. Провинции такой земли "
+                "внутри земли с h (Альпы Италии внутри Центра-Севера) остаются в своём классе, и внешняя земля "
+                "держит потолок остальными — в таблице провинций они с h «—».")
     hrep.append("")
     hrep.append("| земля | потолок, чел./км² | провинций | k | ёмкость flip, млн | невязка flip | ёмкость при h, млн | невязка при h |")
     hrep.append("|---|---|---|---|---|---|---|---|")
@@ -460,7 +453,8 @@ def main() -> None:
     hrep.append("")
     hrep.append("| провинция | владелец | земля | класс flip | изрезано или сухо | h | чел./км² при h | ёмкость flip → при h, тыс. |")
     hrep.append("|---|---|---|---|---|---|---|---|")
-    for k in np.flatnonzero(~np.isnan(hdens)):
+    in_h = np.any(np.stack([member[land] for land in hland]), axis=0) if hland else np.zeros(len(pids), bool)
+    for k in np.flatnonzero(in_h):
         hv = "—" if np.isnan(hshare[k]) else f"{hshare[k]:.2f}"
         hrep.append(f"| {pids[k]} | {provs_cfg[pids[k]]['owner']} | {plands[pids[k]]} | {TYPES[cls[k]]} | {poor[k]:.2f} | {hv} | "
                     f"{hdens[k]:.1f} | {cap[k] / 1e3:,.0f} → {area[k] * hdens[k] / 1e3:,.0f} |")

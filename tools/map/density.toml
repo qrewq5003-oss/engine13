@@ -494,7 +494,9 @@ parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, la
 # land is settled first, and the outer one meets its own ceiling with the units left.
 [lands.sawad]
 # The Sawad lives off the Tigris and the Euphrates: its desert climate (BWh) does not hold its
-# provinces at Desert; the source sets their class (plan §17).
+# provinces at Desert; the source sets their class (plan §17). Water decides the class there, not
+# the climate. The flag is set only on a land with an opened source of its density (here Allen
+# & Heldring, obs sawad_800): without one it would bypass rule 1, so layout.py refuses it.
 river = true
 
 [lands.italy_alps]

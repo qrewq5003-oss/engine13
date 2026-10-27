@@ -85,6 +85,20 @@ def test_hills_share_holds_the_ceiling_without_flipping_a_unit():
     assert list(density.hills_share(area, poor, np.zeros(2, bool), 9000.0, DENS)[0]) == [0.0, 0.0]
 
 
+def test_a_nested_rule_1_land_keeps_its_class_under_hills_share():
+    # Outer land of three units at a ceiling of 40 (= Arable); the inner «alps» (rule 1, Hills) is
+    # its third unit. The alps keep 12; the outer land cannot reach 40 with them and keeps the
+    # residual — it does not lift the alps to Arable.
+    area, poor, bw = np.full(3, 100.0), np.array([0.3, 0.5, 0.9]), np.zeros(3)
+    member = {"alps": np.array([False, False, True]), "outer": np.ones(3, bool)}
+    ceiling = {"alps": None, "outer": 40.0}
+    cls = np.array([A, A, H])
+    hshare, hdens, under, hland = density.hills_share_lands(["alps", "outer"], member, ceiling, area, poor, bw, DENS, cls)
+    assert list(hdens) == [40.0, 40.0, 12.0]
+    assert list(under) == [True, True, False] and np.isnan(hshare[2])
+    assert float(area @ hdens) / area.sum() == pytest.approx(30.67, abs=0.01)
+
+
 def test_a_river_land_is_not_held_at_desert_by_its_climate():
     # Two desert-climate units, a source of 26 per km² (5200 people on 200 km²): as a river land
     # they calibrate like any other land; otherwise both stay Desert.
