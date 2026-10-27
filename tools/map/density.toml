@@ -283,6 +283,17 @@ within = "italy_cn"
 # take the §4 class, as rule 1. The scenario's provinces are calibrated at its layout; here, blocks.
 [scenarios.milan_1477]
 lands = ["italy_cn", "tuscany", "italy_alps", "italy_si"]
+# Population of the start year by land (millions): the fill at start (plan §7) next to the fill
+# at which engine2's growth equals the plague loss.
+start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407 }
+start_population_source = "Malanima 2002, приложение: табл. A.4 по десятилетиям (Центр-Север 4,95 млн в 1470 г. и 5,20 в 1480; Тоскана 469 и 493 тыс.) и табл. A.3 (Юг с островами 3,075 млн в 1450 г. и 3,69 в 1500) — линейно к 1477 г."
+
+# Arable density for the calibration. First — the proposal for the engine (owner via the reviewer,
+# plan §11c): the densest land with an opened source at the finer split, the Centre-North,
+# 50.0 people per km² in 1330 (Malanima 2002, табл. A.4). Then E0's 40, for comparison. The other
+# densities stay at E0.
+[calibration]
+arable = [50.0, 40.0]
 
 # The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
 # параметры классификации, выбирать по невязке подгонки»).

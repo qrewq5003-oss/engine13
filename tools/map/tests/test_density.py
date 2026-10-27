@@ -54,6 +54,12 @@ def test_calibrate_keeps_desert_and_stops_at_the_closest_capacity():
     assert list(cls) == [H, A, D]
 
 
+def test_plague_balance_fill_is_where_growth_meets_the_loss():
+    engine = {"plague": {"outbreaks_per_year": {"value": 0.08}, "mortality": {"value": 0.03}},
+              "population": {"growth_per_year": {"value": 0.012}}}
+    assert density.plague_balance_fill(engine) == pytest.approx(0.8)
+
+
 def test_calibrate_above_arable_everywhere_leaves_a_residual():
     area, rugged, dry, desert = land([0.9, 0.1])
     cls = density.calibrate(area, rugged, dry, desert, 10000.0, DENS)

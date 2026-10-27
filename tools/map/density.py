@@ -320,21 +320,27 @@ def shares_row(area, cls) -> str:
     return " | ".join(f"{100 * area[cls == t].sum() / tot:.0f} %" for t in (H, S, D, A))
 
 
+def plague_balance_fill(engine_params: dict) -> float:
+    """The fill at which engine2's logistic growth r·(1 − fill) equals the mean plague loss
+    (outbreaks × mortality per year): a land above it shrinks in a world with plague."""
+    loss = engine_params["plague"]["outbreaks_per_year"]["value"] * engine_params["plague"]["mortality"]["value"]
+    return 1.0 - loss / engine_params["population"]["growth_per_year"]["value"]
+
+
 def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
-    """The alternative to fitting densities (plan §11a, method (А)): E0 densities stay, and each
+    """The alternative to fitting densities (plan §11a, method (А)): the densities stay, and each
     unit's class is chosen so that its land holds its documented ceiling. Lands whose ceiling
-    is only «по памяти» take the §4 class instead (rule 1). Measured on blocks: the scenarios'
-    provinces are calibrated with the same function at their layouts."""
+    is only «по памяти» take the §4 class instead (rule 1). Measured on blocks for each arable
+    density of `[calibration]`: the scenarios' provinces are calibrated with the same function
+    at their layouts."""
     with (base_dir / "blocks.csv").open(encoding="utf-8") as f:
         rows = {r["id"]: r for r in csv.DictReader(f)}
     rugged = np.array([float(rows[b]["rugged_km2"]) / max(float(rows[b]["raster_km2"]), 1e-9) for b in blocks["id"]])
     p = rules.Params.from_toml(tomllib.loads((HERE / "params.toml").read_text(encoding="utf-8")))
+    # Read only: the engine's constants of growth and plague, for the fill they balance at.
+    balance = plague_balance_fill(tomllib.loads((HERE.parent.parent / "engine2" / "params.toml").read_text(encoding="utf-8")))
     area, bw, dry = blocks["area"], blocks["bw"], blocks["dry"]
-    dens = np.zeros(5)
-    for t in ("Arable", "Hills", "Steppe", "Desert"):
-        dens[TYPES.index(t)] = E0[t][0]
     wet = [o for o in obs if o["region"] in cfg["scan"]["irrigated_regions"]]
-    dens[I] = wet[0]["y"] if wet else 0.0
     lands = cfg.get("lands", {})
 
     def region_of(land):
@@ -343,67 +349,88 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
     def opened(land):
         return land in top and top[land].get("opened", True)
 
-    rep("# Альтернатива (А): плотности E0 без изменений, класс — по потолку земли")
+    rep("# Альтернатива (А): плотности без изменений, класс — по потолку земли")
     rep()
     rep("Desert — блоки с BW ≥ ½. Из остальных первыми становятся Hills самые изрезанные (шаг 1: перепад "
         "≥ 300 м в окне 5); если земля реже холмов везде — все Hills, и первыми становятся Steppe самые сухие. "
-        "Единица меняет класс, пока это приближает ёмкость к потолку. Плотности — E0 (Arable 40, Hills 12, "
-        "Steppe 1, Desert 0,5). Земля без открытого источника потолка — по правилу §4 (правило 1). "
-        "Здесь единицы — блоки; на раскладке сценария — его провинции.")
+        "Единица меняет класс, пока это приближает ёмкость к потолку. Плотности — E0 (Hills 12, Steppe 1, "
+        "Desert 0,5), пашня — по каждому варианту ниже. Земля без открытого источника потолка — по правилу §4 "
+        "(правило 1). Здесь единицы — блоки; на раскладке сценария — его провинции.")
     rep()
-    rep("## Каждая земля отдельно")
+    rep(f"Заполненность, при которой рост движка равен средней потере от чумы (engine2/params.toml: "
+        f"1 − вспышки × смертность / рост): {balance:.2f}. Земля выше неё в мире с чумой убывает.")
     rep()
-    rep("| земля (наблюдение) | источник, чел./км² | способ | достигнуто | невязка | Hills по рельефу | Hills | Steppe | Desert | Arable |")
-    rep("|---|---|---|---|---|---|---|---|---|---|")
-    for land, o in sorted(top.items(), key=lambda kv: -kv[1]["y"]):
-        if o["region"] in cfg["scan"]["irrigated_regions"]:
-            continue
-        m = masks[o["region"]]
-        if opened(land):
-            cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens)
-            how = "калибровка"
-        else:
-            cls = rule_class(rugged[m], bw[m], dry[m], p)
-            how = "§4 (правило 1)"
-        got = float(area[m] @ dens[cls]) / area[m].sum()
-        rep(f"| {land} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {how} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "
-            f"{100 * area[m][rugged[m] >= p.hills_share].sum() / area[m].sum():.0f} % | {shares_row(area[m], cls)} |")
-    rep()
+    for arable in cfg["calibration"]["arable"]:
+        dens = np.zeros(5)
+        for t in ("Arable", "Hills", "Steppe", "Desert"):
+            dens[TYPES.index(t)] = E0[t][0]
+        dens[A] = arable
+        dens[I] = wet[0]["y"] if wet else 0.0
+        rep(f"## Каждая земля отдельно — пашня {arable:g}")
+        rep()
+        rep("| земля (наблюдение) | источник, чел./км² | способ | достигнуто | невязка | Hills по рельефу | Hills | Steppe | Desert | Arable |")
+        rep("|---|---|---|---|---|---|---|---|---|---|")
+        for land, o in sorted(top.items(), key=lambda kv: -kv[1]["y"]):
+            if o["region"] in cfg["scan"]["irrigated_regions"]:
+                continue
+            m = masks[o["region"]]
+            if opened(land):
+                cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens)
+                how = "калибровка"
+            else:
+                cls = rule_class(rugged[m], bw[m], dry[m], p)
+                how = "§4 (правило 1)"
+            got = float(area[m] @ dens[cls]) / area[m].sum()
+            rep(f"| {land} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {how} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "
+                f"{100 * area[m][rugged[m] >= p.hills_share].sum() / area[m].sum():.0f} % | {shares_row(area[m], cls)} |")
+        rep()
 
-    for name, sc in cfg.get("scenarios", {}).items():
-        # Inner lands first: an outer land meets its own ceiling with what the inner ones left.
-        depth = {}
-        for land in sc["lands"]:
-            d, x = 0, land
-            while x in lands and "within" in lands[x]:
-                d, x = d + 1, lands[x]["within"]
-            depth[land] = d
-        order = sorted(sc["lands"], key=lambda land: (-depth[land], sc["lands"].index(land)))
-        cls = np.full(len(area), -1)
-        for land in order:
-            m = masks[region_of(land)]
-            free = m & (cls < 0)
-            if opened(land):
-                fixed = m & (cls >= 0)
-                target = top[land]["y"] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
-                cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
-            else:
-                cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
-        rep(f"## Сценарий {name}")
-        rep()
-        rep("| земля | внутри | источник, чел./км² | способ | площадь, км² | достигнуто | невязка | Hills | Steppe | Desert | Arable |")
-        rep("|---|---|---|---|---|---|---|---|---|---|---|")
-        for land in sc["lands"]:
-            m = masks[region_of(land)]
-            got = float(area[m] @ dens[cls[m]]) / area[m].sum()
-            within = lands.get(land, {}).get("within", "—")
-            if opened(land):
-                o = top[land]
-                src, how, res = f"{o['lo']:.1f}–{o['hi']:.1f}", "калибровка", f"{100 * (got - o['y']) / o['y']:+.0f} %"
-            else:
-                src, how, res = "нет открытого", "§4 (правило 1)", "—"
-            rep(f"| {land} | {within} | {src} | {how} | {area[m].sum():,.0f} | {got:.1f} | {res} | {shares_row(area[m], cls[m])} |")
-        rep()
+        for name, sc in cfg.get("scenarios", {}).items():
+            # Inner lands first: an outer land meets its own ceiling with what the inner ones left.
+            depth = {}
+            for land in sc["lands"]:
+                d, x = 0, land
+                while x in lands and "within" in lands[x]:
+                    d, x = d + 1, lands[x]["within"]
+                depth[land] = d
+            order = sorted(sc["lands"], key=lambda land: (-depth[land], sc["lands"].index(land)))
+            cls = np.full(len(area), -1)
+            for land in order:
+                m = masks[region_of(land)]
+                free = m & (cls < 0)
+                if opened(land):
+                    fixed = m & (cls >= 0)
+                    target = top[land]["y"] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
+                    cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+                else:
+                    cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
+            start = sc.get("start_population", {})
+            rep(f"## Сценарий {name} — пашня {arable:g}")
+            rep()
+            rep("| земля | внутри | источник, чел./км² | способ | площадь, км² | ёмкость, млн | достигнуто | невязка | "
+                f"население на старте, млн | заполненность (равновесие {balance:.2f}) | Hills | Steppe | Desert | Arable |")
+            rep("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+            for land in sc["lands"]:
+                m = masks[region_of(land)]
+                cap = float(area[m] @ dens[cls[m]])
+                got = cap / area[m].sum()
+                within = lands.get(land, {}).get("within", "—")
+                if opened(land):
+                    o = top[land]
+                    src, how, res = f"{o['lo']:.1f}–{o['hi']:.1f}", "калибровка", f"{100 * (got - o['y']) / o['y']:+.0f} %"
+                else:
+                    src, how, res = "нет открытого", "§4 (правило 1)", "—"
+                if land in start:
+                    fill = start[land] * 1e6 / cap
+                    pop, fl = f"{start[land]:.2f}", f"{fill:.2f}" + (" — выше" if fill > balance else "")
+                else:
+                    pop, fl = "—", "—"
+                rep(f"| {land} | {within} | {src} | {how} | {area[m].sum():,.0f} | {cap / 1e6:.2f} | {got:.1f} | {res} | "
+                    f"{pop} | {fl} | {shares_row(area[m], cls[m])} |")
+            rep()
+            if start:
+                rep(f"Население на старте: {sc['start_population_source']}")
+                rep()
 
 
 if __name__ == "__main__":
