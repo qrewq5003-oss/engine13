@@ -328,7 +328,7 @@ def calibrate(area, rugged, dry, desert, target, dens, key=None, dry_steppe=None
     return cls
 
 
-def calibrate_nearest(area, rugged, dry, desert, target, dens):
+def calibrate_nearest(area, rugged, dry, desert, target, dens, dry_steppe=None):
     """The alternative to `calibrate` (reviewer on 500f44c): no whole unit flips 50 ↔ 12 for a
     fraction of a per cent of its land. Each unit gets a continuous density
     d = A − (A − H)·min(1, k·rugged), with k found so that the land holds its ceiling (no new
@@ -339,7 +339,7 @@ def calibrate_nearest(area, rugged, dry, desert, target, dens):
     rest = ~desert
     need = target - float(area[desert].sum()) * dens[D]
     if need <= area[rest].sum() * dens[H]:
-        cls = calibrate(area, rugged, dry, desert, target, dens)
+        cls = calibrate(area, rugged, dry, desert, target, dens, dry_steppe=dry_steppe)
         return cls, dens[cls].astype(float), float("nan")
     a, r = area[rest], rugged[rest]
 
@@ -377,7 +377,9 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
     are members of the outer one too); `ceiling[land]` — people per km², or None for a land
     without an opened ceiling, which takes the §4 class (owner's rule 1). An outer land meets
     its own ceiling with the units its inner lands left. `method` — "flip" (`calibrate`) or
-    "nearest" (`calibrate_nearest`)."""
+    "nearest" (`calibrate_nearest`). Steppe only where the climate is dry, BW + BS ≥ the §4 steppe
+    share (owner's decision §13a п. 4): a land below Hills that is not dry stays Hills."""
+    variant.setdefault("dry_steppe", p.steppe_share)
     cls = np.full(len(area), -1)
     d = np.full(len(area), np.nan)
     for land in order:
@@ -388,7 +390,7 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
             target = ceiling[land] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
             args = (area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
             if method == "nearest":
-                cls[free], d[free], _ = calibrate_nearest(*args)
+                cls[free], d[free], _ = calibrate_nearest(*args, dry_steppe=variant["dry_steppe"])
             else:
                 cls[free] = calibrate(*args, **{k: (v[free] if isinstance(v, np.ndarray) else v) for k, v in variant.items()})
         else:
@@ -458,23 +460,14 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
         rep()
         rep("| земля (наблюдение) | источник, чел./км² | способ | достигнуто | невязка | Hills по рельефу | Hills | Steppe | Desert | Arable |")
         rep("|---|---|---|---|---|---|---|---|---|---|")
-        variants_note = []
         for land, o in sorted(top.items(), key=lambda kv: -kv[1]["y"]):
             if o["region"] in cfg["scan"]["irrigated_regions"]:
                 continue
             m = masks[o["region"]]
             if opened(land):
-                cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens)
-                # The variant measured for the owner (plan §13b): Steppe only where the climate is dry.
-                dry_only = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens,
-                                     dry_steppe=p.steppe_share)
-                if (dry_only != cls).any():
-                    got2 = float(area[m] @ dens[dry_only]) / area[m].sum()
-                    variants_note.append(f"{land}: {float(area[m] @ dens[cls]) / area[m].sum():.1f} → {got2:.1f} "
-                                         f"({100 * (got2 - o['y']) / o['y']:+.0f} %), Steppe "
-                                         f"{100 * area[m][cls == S].sum() / area[m].sum():.0f} % → "
-                                         f"{100 * area[m][dry_only == S].sum() / area[m].sum():.0f} %")
-                how = "калибровка"
+                cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens,
+                                dry_steppe=p.steppe_share)
+                how = "калибровка" + (" (ниже холмов: источник — нижняя граница)" if o["y"] < dens[H] else "")
             else:
                 cls = rule_class(rugged[m], bw[m], dry[m], p)
                 how = "§4 (правило 1)"
@@ -482,9 +475,6 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
             rep(f"| {land} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {how} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "
                 f"{100 * area[m][rugged[m] >= p.hills_share].sum() / area[m].sum():.0f} % | {shares_row(area[m], cls)} |")
         rep()
-        if variants_note:
-            rep("Вариант «Steppe — только где климат сухой» (план §13b, замер; решения нет): " + "; ".join(variants_note) + ".")
-            rep()
 
         for name, sc in cfg.get("scenarios", {}).items():
             # Inner lands first: an outer land meets its own ceiling with what the inner ones left.

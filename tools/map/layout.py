@@ -239,7 +239,6 @@ def main() -> None:
         "§4 для земли без источника — не выше холмов": dict(cap4=True),
         "в холмы первыми — по max(изрезанность, сухость)": dict(key=np.maximum(rugged, dry)),
         "в холмы первыми — по доле клеток изрезанных или сухих": dict(key=poor_share(cache, blocks, owner_of, pids, p, rep)),
-        "Steppe — только где климат сухой": dict(dry_steppe=p.steppe_share),
     }
     measured = {name: classify(dens, work[1], **kw)[0] for name, kw in rule_variants.items()}
 
@@ -318,7 +317,7 @@ def main() -> None:
         elif land in how_land:
             how = f"{top[land]['y']:.1f}, покрыта частью → класс провинции — ближайший к плотности её блоков в {how_land[land]}"
         elif ceiling[land] is not None:
-            how = f"{ceiling[land]:.1f}"
+            how = f"{ceiling[land]:.1f}" + (" (ниже холмов: источник — нижняя граница)" if ceiling[land] < dens[H] else "")
         elif land in top and top[land].get("opened", True):
             how = f"{top[land]['y']:.1f}, покрыта частью → §4"
         else:
