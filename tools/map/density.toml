@@ -117,6 +117,14 @@ population = [6.0, 6.0]
 source = "Russell 1972, там же (Greece/Balkans)"
 
 [[obs]]
+id = "hungary_1340"
+fit = false
+land = "hungary"
+region = "hungary"
+population = [2.0, 2.0]
+source = "Russell 1972, там же (Hungary: 1340 — 2, 1450 — 1,5 млн) — открыл (вторичное) через Fordham Medieval Sourcebook"
+
+[[obs]]
 id = "steppe_nomads"
 region = "steppe_pontic"
 density = [0.5, 2.0]
@@ -277,13 +285,39 @@ parts = [{ countries = ["AUT", "SVN", "HRV", "BIH", "SRB", "XKX", "MNE", "MKD", 
 parts = [{ countries = ["GRC", "ALB"] }]
 
 [regions.balkans]
-# Greece and the Balkans of 1340 with Thrace (European Turkey).
-parts = [{ countries = ["GRC", "ALB", "MKD", "BGR", "SRB", "XKX", "MNE", "BIH"] },
+# Greece and the Balkans of 1340 with Thrace (European Turkey); Serbia south of the Sava and the
+# Danube — Vojvodina is Hungary's (regions.hungary).
+parts = [{ countries = ["GRC", "ALB", "MKD", "BGR", "XKX", "MNE", "BIH"] },
+         { countries = ["SRB"], lat_max = 44.75 },
          { countries = ["TUR"], lon_max = 29.05, lat_min = 40.4 }]
 
 [regions.asia_minor]
-parts = [{ countries = ["TUR"], lon_min = 29.05 },
-         { countries = ["TUR"], lon_max = 29.05, lat_max = 40.4 }]
+# Roman Asia Minor of 165 — Anatolia west of the upper Euphrates, the frontier of Cappadocia
+# (Melitene 38.3° E, Satala 39.6° E): lon < 39° E, with the Pontic coast to Trapezus and Rhizaion
+# (lon < 41.6°, lat ≥ 40.55°). Not Armenia and Mesopotamia east of the river.
+parts = [{ countries = ["TUR"], lon_min = 29.05, lon_max = 39.0 },
+         { countries = ["TUR"], lon_max = 29.05, lat_max = 40.4 },
+         { countries = ["TUR"], lon_min = 39.0, lon_max = 41.6, lat_min = 40.55 }]
+
+[regions.hungary]
+# The kingdom of Hungary without Croatia: Hungary, Slovakia, Transcarpathia, Romania west of the
+# Carpathians (Transylvania, Banat, Crișana, Maramureș — Romania without Wallachia, Moldavia and
+# Dobruja, by the boxes of the layouts), Vojvodina with Belgrade.
+parts = [{ countries = ["HUN", "SVK"] },
+         { countries = ["UKR"], lon_max = 24.7, lat_min = 47.9 },
+         { countries = ["SRB"], lat_min = 44.75 },
+         { countries = ["ROU"] }]
+minus = ["wallachia", "moldavia_rou", "dobruja"]
+
+[regions.wallachia]
+parts = [{ countries = ["ROU"], lat_max = 45.3, lon_min = 22.4 }]
+minus = ["dobruja"]
+
+[regions.moldavia_rou]
+parts = [{ countries = ["ROU"], lon_min = 26.2, lat_min = 45.3 }, { countries = ["ROU"], lon_min = 25.3, lat_min = 47.0 }]
+
+[regions.dobruja]
+parts = [{ countries = ["ROU"], lon_min = 28.0, lat_max = 45.3 }]
 
 [regions.syria_settled]
 parts = [{ countries = ["SYR", "LBN", "ISR", "PSE", "JOR", "CYP"], max_bw = 0.5 }]
@@ -322,6 +356,15 @@ within = "italy_si"
 # The lands of each scenario that its own sources cover whole. A land the scenario covers only
 # in part is not calibrated on that part (the part need not have the land's mean): its provinces
 # take the §4 class, as rule 1. The scenario's provinces are calibrated at its layout; here, blocks.
+[scenarios.constantinople_1430]
+# A land this scenario covers only in part takes the capacity its blocks have in the layout of a
+# scenario that covers it whole (Italy — milan_1477), and its provinces are calibrated to that.
+inherit = "milan_1477"
+lands = ["italy_cn", "italy_alps", "italy_si", "italy_sud", "italy_isole", "balkans_1340", "asia_minor_165", "hungary",
+         "syria_165", "egypt_165"]
+start_population = { italy_cn = 4.2, italy_si = 3.157, italy_sud = 2.220, italy_isole = 0.937, balkans_1340 = 4.5, hungary = 1.5 }
+start_population_source = "Malanima 2002, приложение: табл. A.4 (Центр-Север 4,2 млн в 1430 г.), табл. A.3 (Юг с островами 3,28 млн в 1400 г. и 3,075 в 1450 — линейно к 1430 г.; Юг и острова — доли 1600 г., табл. A.7); Russell 1972 (Fordham): Greece/Balkans 4,5 и Hungary 1,5 млн в 1450 г. — ближайшая точка ряда к 1430 г.; Малая Азия, Сирия, Египет — открытого числа нет, заглушка"
+
 [scenarios.milan_1477]
 lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
 # Population of the start year by land (millions): the fill at start (plan §7) next to the fill
@@ -337,6 +380,10 @@ start_population_source = "Malanima 2002, приложение: табл. A.4 п
 arable = [50.0, 40.0]
 # How a land's provinces get their class (plan §12b): "flip" or "nearest" (density.calibrate_nearest).
 method = "flip"
+# A land is calibrated only on a scenario that covers it whole (owner's decision on §11b п. 1);
+# «whole» — at least this share of the land's area lies in the scenario's provinces of the land.
+# milan_1477 covers its lands at 94–100 %.
+min_cover = 0.9
 
 # The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
 # параметры классификации, выбирать по невязке подгонки»).
