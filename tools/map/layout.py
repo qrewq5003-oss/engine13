@@ -146,6 +146,11 @@ def main() -> None:
     for t in ("Arable", "Hills", "Steppe", "Desert"):
         e0[TYPES.index(t)] = density.E0[t][0]
     sparse = density.sparse_lands(obs, top, e0, dcfg["calibration"]["sparse_below"]) & set(order)
+    # Lands that live off their river (the Sawad): a desert climate does not hold them at Desert.
+    river = {land for land in order if lands_cfg.get(land, {}).get("river")}
+    for land in river:  # without an opened source the flag would bypass rule 1
+        if not (land in top and top[land].get("opened", True)):
+            raise SystemExit(f"land {land}: `river` needs an opened source of the land's density")
     inp = block_prov >= 0
     cold = (np.bincount(block_prov[inp], weights=(blocks["area"] * blocks["cold"])[inp], minlength=len(pids))
             / np.bincount(block_prov[inp], weights=blocks["area"][inp], minlength=len(pids)))
@@ -181,7 +186,7 @@ def main() -> None:
         """Classes and densities of the provinces. `variant` (density.calibrate) — the rule variants
         measured for the owner (plan §13b); the working rules use none of them."""
         cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method,
-                                         sparse=sparse, cold=cold, **variant)
+                                         sparse=sparse, cold=cold, river=river, **variant)
         for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
             if plands[pid] in how_land:
                 mine = block_prov == k
@@ -244,11 +249,18 @@ def main() -> None:
     dens, cls, _ = variants[work]
     cap, pop, stub = populate(dens, cls)
     # Rule variants measured for the owner (plan §13b; no decision): each against the working rules.
+    poor = poor_share(cache, blocks, owner_of, pids, p, rep)
     rule_variants = {
         "в холмы первыми — по max(изрезанность, сухость)": dict(key=np.maximum(rugged, dry)),
-        "в холмы первыми — по доле клеток изрезанных или сухих": dict(key=poor_share(cache, blocks, owner_of, pids, p, rep)),
+        "в холмы первыми — по доле клеток изрезанных или сухих": dict(key=poor),
     }
     measured = {name: classify(dens, work[1], **kw)[0] for name, kw in rule_variants.items()}
+
+    # The hills share h (plan §12b, §17; a question for the owner at E4, measured only — the layout
+    # keeps its classes): the provinces of a land with a ceiling between Hills and Arable hold
+    # A·(1 − h) + H·h with h = min(1, k·poor), inner lands first, as in the calibration.
+    hshare, hdens, hunder, hland = density.hills_share_lands(order, member, ceiling, area, poor, bw, dens, cls,
+                                                             skip=set(wet) | set(how_land), river=river)
 
     # --- checks of §7
     provs = {}
@@ -325,7 +337,7 @@ def main() -> None:
         elif land in how_land:
             how = f"{top[land]['y']:.1f}, покрыта частью → класс провинции — ближайший к плотности её блоков в {how_land[land]}"
         elif ceiling[land] is not None:
-            how = f"{ceiling[land]:.1f}" + ("" if ceiling[land] >= dens[H] else
+            how = f"{ceiling[land]:.1f}" + (" (земля реки: пустынный климат не держит Desert)" if land in river else "") + ("" if ceiling[land] >= dens[H] else
                                             " (ниже холмов: позже — меньше половины холмов → потолок, редкая земля — Steppe, холодные первыми)"
                                             if land in sparse else " (ниже холмов: источник — нижняя граница)")
         elif land in top and top[land].get("opened", True):
@@ -420,6 +432,38 @@ def main() -> None:
             rep("- население владельцев на старте: " + ", ".join(
                 f"{o} {v[0] / 1e6:.2f} → {v[1] / 1e6:.2f} млн" for o, v in sorted(moved.items(), key=lambda kv: -kv[1][0])))
         rep()
+
+    # The hills share h beside the working classes; also written alone for the plan (§17).
+    hrep = []
+    hrep.append(f"### {args.scenario}")
+    hrep.append("")
+    hrep.append(f"Пашня {work[0]:g}, холмы {dens[H]:g}. Земли с потолком между холмами и пашней; ниже холмов, "
+                "орошаемые, унаследованные и по правилу 1 — без h, их класс как сейчас. Провинции такой земли "
+                "внутри земли с h (Альпы Италии внутри Центра-Севера) остаются в своём классе, и внешняя земля "
+                "держит потолок остальными — в таблице провинций они с h «—».")
+    hrep.append("")
+    hrep.append("| земля | потолок, чел./км² | провинций | k | ёмкость flip, млн | невязка flip | ёмкость при h, млн | невязка при h |")
+    hrep.append("|---|---|---|---|---|---|---|---|")
+    for land, k in hland.items():
+        m = member[land]
+        c0, c1 = float(cap[m].sum()), float(area[m] @ hdens[m])
+        ref = ceiling[land] * area[m].sum()
+        hrep.append(f"| {land} | {ceiling[land]:.1f} | {int(m.sum())} | {k:.3f} | {c0 / 1e6:.2f} | {100 * (c0 - ref) / ref:+.1f} % | "
+                    f"{c1 / 1e6:.2f} | {100 * (c1 - ref) / ref:+.1f} % |")
+    hrep.append("")
+    hrep.append("| провинция | владелец | земля | класс flip | изрезано или сухо | h | чел./км² при h | ёмкость flip → при h, тыс. |")
+    hrep.append("|---|---|---|---|---|---|---|---|")
+    in_h = np.any(np.stack([member[land] for land in hland]), axis=0) if hland else np.zeros(len(pids), bool)
+    for k in np.flatnonzero(in_h):
+        hv = "—" if np.isnan(hshare[k]) else f"{hshare[k]:.2f}"
+        hrep.append(f"| {pids[k]} | {provs_cfg[pids[k]]['owner']} | {plands[pids[k]]} | {TYPES[cls[k]]} | {poor[k]:.2f} | {hv} | "
+                    f"{hdens[k]:.1f} | {cap[k] / 1e3:,.0f} → {area[k] * hdens[k] / 1e3:,.0f} |")
+    hrep.append("")
+    rep("## Доля холмов h — замер для E4, раскладка не меняется (план §12b, §17)")
+    rep()
+    for line in hrep[2:]:
+        rep(line)
+    (out / "hills_share.md").write_text("\n".join(hrep) + "\n", encoding="utf-8", newline="\n")
 
     rep("## Морские зоны (план §10a п. 5: разрез — по числу провинций зоны)")
     rep()

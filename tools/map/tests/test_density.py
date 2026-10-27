@@ -74,6 +74,44 @@ def test_calibrate_a_ceiling_below_hills_turns_the_coldest_sparse_whatever_the_d
     assert list(density.calibrate(area, rugged, dry, desert, 1400.0, DENS, dry_steppe=0.5)) == [H, H, H]
 
 
+def test_hills_share_holds_the_ceiling_without_flipping_a_unit():
+    # 200 km², poor shares 0.2 and 0.6, target 31 per km² = 6200 people. With h = min(1, k·poor):
+    # 100·(40 − 28·0.2k) + 100·(40 − 28·0.6k) = 6200 → k = 1800 / 2240; no unit flips whole.
+    area, poor = np.full(2, 100.0), np.array([0.2, 0.6])
+    h, k = density.hills_share(area, poor, np.zeros(2, bool), 6200.0, DENS)
+    assert k == pytest.approx(1800 / 2240)
+    assert float(area @ (40 - 28 * h)) == pytest.approx(6200.0)
+    # A land at Arable or above keeps h = 0.
+    assert list(density.hills_share(area, poor, np.zeros(2, bool), 9000.0, DENS)[0]) == [0.0, 0.0]
+
+
+def test_a_nested_rule_1_land_keeps_its_class_under_hills_share():
+    # Outer land of three units at a ceiling of 40 (= Arable); the inner «alps» (rule 1, Hills) is
+    # its third unit. The alps keep 12; the outer land cannot reach 40 with them and keeps the
+    # residual — it does not lift the alps to Arable.
+    area, poor, bw = np.full(3, 100.0), np.array([0.3, 0.5, 0.9]), np.zeros(3)
+    member = {"alps": np.array([False, False, True]), "outer": np.ones(3, bool)}
+    ceiling = {"alps": None, "outer": 40.0}
+    cls = np.array([A, A, H])
+    hshare, hdens, under, hland = density.hills_share_lands(["alps", "outer"], member, ceiling, area, poor, bw, DENS, cls)
+    assert list(hdens) == [40.0, 40.0, 12.0]
+    assert list(under) == [True, True, False] and np.isnan(hshare[2])
+    assert float(area @ hdens) / area.sum() == pytest.approx(30.67, abs=0.01)
+
+
+def test_a_river_land_is_not_held_at_desert_by_its_climate():
+    # Two desert-climate units, a source of 26 per km² (5200 people on 200 km²): as a river land
+    # they calibrate like any other land; otherwise both stay Desert.
+    area, rugged, dry = np.full(2, 100.0), np.array([0.1, 0.0]), np.ones(2)
+    member, ceiling = {"sawad": np.ones(2, bool)}, {"sawad": 26.0}
+    p = type("P", (), {"steppe_share": 0.5})()
+    bw = np.ones(2)
+    cls, _ = density.calibrate_lands(["sawad"], member, ceiling, area, rugged, dry, bw, DENS, p, river={"sawad"})
+    assert list(cls) == [H, A]
+    cls, _ = density.calibrate_lands(["sawad"], member, ceiling, area, rugged, dry, bw, DENS, p)
+    assert list(cls) == [D, D]
+
+
 def test_sparse_lands_are_those_a_later_source_keeps_under_half_of_hills():
     top = {"north": {"y": 0.6}, "plain": {"y": 6.0}, "hungary": {"y": 6.3}}
     obs = [{"land": "north", "y": 1.9, "later": True}, {"land": "plain", "y": 16.0, "later": True}]

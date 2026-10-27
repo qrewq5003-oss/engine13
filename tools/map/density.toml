@@ -72,6 +72,14 @@ population = [5.0, 6.0]
 source = "Scheidel 2007, там же: «Syria and Cyprus» — 5–6 млн; отдельных строк Иудеи и Аравии в таблице нет, это весь римский Левант — открыл (вторичное) через tabulae-geographicae.de. Для rome_375: регион — заселённые римские провинции, пустыня (Пальмирена, Палестина III) — вне него (решение владельца по §16a п. 3); syria_165 и syria_settled Константинополя не тронуты"
 
 [[obs]]
+id = "sawad_800"
+fit = false
+land = "sawad"
+region = "sawad"
+population = [5.8, 5.8]
+source = "Allen R. C., Heldring L. — через Wikipedia «Sawad» (примечание 11): ранние Аббасиды, конец VIII — начало IX в. — 4 млн сельского населения Ирака (Савада) при 3 млн га озимых зерновых (с паром — 6 млн га) и 1,8 млн несельскохозяйственного с городами — открыл (вторичное). Савад — Ирак без Сирийской пустыни и Верхней Месопотамии; высшая документированная точка земли (у Адамса, «Heartland of Cities», 1981, плотность заселения при Сасанидах — пик, числа не открыты)"
+
+[[obs]]
 id = "egypt_165"
 region = "egypt_valley"
 density = [167.0, 200.0]
@@ -430,6 +438,14 @@ parts = [{ countries = ["CYP", "LBN"] },
          { countries = ["SYR"], lat_max = 33.2, lon_max = 37.5 },
          { countries = ["JOR"], lon_max = 37.8, lat_min = 30.9 }]
 
+[regions.sawad]
+# The Sawad of rome_375 along its provinces (the boxes of its layout): Asorestan (Ctesiphon) and
+# Mesene — the alluvium of the Tigris and the Euphrates with their desert margins; Upper
+# Mesopotamia (Adiabene, Arzanene) and the desert west and south of the Euphrates (Rutba, Najaf)
+# are outside.
+parts = [{ countries = ["IRQ"], lon_min = 41.0, lat_min = 32.0, lat_max = 34.8, exclude_names = ["Al-Rutba"] },
+         { countries = ["IRQ"], lon_min = 44.5, lat_max = 32.0 }]
+
 [regions.egypt_valley]
 # The valley and the Delta: Egypt's own small units (299 blocks under 500 km², 32.6 thousand
 # km²; the source's area is ≈ 30 thousand km²). The desert is in large units of its own.
@@ -476,6 +492,13 @@ parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, la
 # envelope) unless it is named here with a `region` of its own: such a land has no opened
 # ceiling and takes the §4 class (owner's rule 1). `within` nests a land in another: the inner
 # land is settled first, and the outer one meets its own ceiling with the units left.
+[lands.sawad]
+# The Sawad lives off the Tigris and the Euphrates: its desert climate (BWh) does not hold its
+# provinces at Desert; the source sets their class (plan §17). Water decides the class there, not
+# the climate. The flag is set only on a land with an opened source of its density (here Allen
+# & Heldring, obs sawad_800): without one it would bypass rule 1, so layout.py refuses it.
+river = true
+
 [lands.italy_alps]
 region = "italy_alps"
 within = "italy_cn"
@@ -511,7 +534,7 @@ start_population_source = "Malanima 2002, приложение: табл. A.4 (�
 # population for 375 — every province carries a stub until E4.
 lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole", "gaul_france", "iberia",
          "britain_roman", "danube_165", "greece_165", "asia_minor_165", "syria_roman", "egypt_165", "n_africa_165",
-         "germany", "denmark", "scandinavia", "russia"]
+         "germany", "denmark", "scandinavia", "russia", "sawad"]
 
 [scenarios.milan_1477]
 lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
