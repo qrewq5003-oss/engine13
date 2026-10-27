@@ -237,7 +237,8 @@ def main() -> None:
     # Rule variants measured for the owner (plan §13b; no decision): each against the working rules.
     rule_variants = {
         "§4 для земли без источника — не выше холмов": dict(cap4=True),
-        "в холмы первыми — по изрезанности + сухости": dict(key=rugged + dry),
+        "в холмы первыми — по max(изрезанность, сухость)": dict(key=np.maximum(rugged, dry)),
+        "в холмы первыми — по доле клеток изрезанных или сухих": dict(key=poor_share(cache, blocks, owner_of, pids, p, rep)),
         "Steppe — только где климат сухой": dict(dry_steppe=p.steppe_share),
     }
     measured = {name: classify(dens, work[1], **kw)[0] for name, kw in rule_variants.items()}
@@ -380,11 +381,13 @@ def main() -> None:
             rep("Ни одна провинция не меняет класс.")
             rep()
             continue
-        rep("| провинция | владелец | земля | класс | ёмкость, тыс. | население, тыс. |")
-        rep("|---|---|---|---|---|---|")
+        key = rule_variants[name].get("key")
+        rep("| провинция | владелец | земля | изрезано | сухо | ключ | класс | ёмкость, тыс. | население, тыс. |")
+        rep("|---|---|---|---|---|---|---|---|---|")
         for k in changed:
             pid = pids[k]
-            rep(f"| {pid} | {provs_cfg[pid]['owner']} | {plands[pid] or '—'} | {TYPES[cls[k]]} → {TYPES[vcls[k]]} | "
+            rep(f"| {pid} | {provs_cfg[pid]['owner']} | {plands[pid] or '—'} | {rugged[k]:.2f} | {dry[k]:.2f} | "
+                f"{'—' if key is None else f'{key[k]:.2f}'} | {TYPES[cls[k]]} → {TYPES[vcls[k]]} | "
                 f"{cap[k] / 1e3:,.0f} → {vcap[k] / 1e3:,.0f} | {pop[k] / 1e3:,.0f} → {vpop[k] / 1e3:,.0f}"
                 f"{' (заглушка)' if vstub[k] else ''} |")
         rep()
@@ -438,6 +441,22 @@ def main() -> None:
     rep()
     (out / "report.txt").write_text("\n".join(rep.lines) + "\n", encoding="utf-8")
     rep.step("done")
+
+
+def poor_share(cache, blocks, owner_of, pids, p, rep):
+    """Per province, the share of its 1′ cells that are rugged (relief ≥ the step-1 threshold in
+    the step-1 window) or dry (Köppen BW or BS) — the union, which neither share alone gives."""
+    params = tomllib.loads((HERE / "params.toml").read_text(encoding="utf-8"))["land"]
+    sources = tomllib.loads((HERE / "sources.toml").read_text(encoding="utf-8"))
+    scan = {"relief_window_cells": [params["relief_window_cells"]], "relief_m": [params["relief_m"]]}
+    inside = owner_of != ""
+    areas = density.cell_type_areas(blocks, inside, np.zeros(len(inside), bool), cache / "src", sources, scan, rep)
+    cells = areas[(params["relief_m"], params["relief_window_cells"])]
+    out = np.zeros(len(pids))
+    for k, pid in enumerate(pids):
+        a = cells[owner_of == pid].sum(axis=0)
+        out[k] = (a[H] + a[D] + a[S]) / a.sum() if a.sum() > 0 else 0.0
+    return out
 
 
 def inherit_classes(scenario, blocks):
