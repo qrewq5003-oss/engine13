@@ -153,6 +153,29 @@ region = "italy_si"
 population = [4.75, 4.75]
 source = "Malanima 2002, там же, табл. A.3 (Юг и острова, с Корсикой и Мальтой; плотность 31,9 — табл. A.6)"
 
+# The South and the Islands inside the South-Islands: Malanima has no split for 1300, and for
+# 1400 and 1500 he distributes the population by the areas' shares in 1600 («per il 1400 e per il
+# 1500 si è distribuita la popolazione sulla base dei valori percentuali delle diverse zone nel
+# 1600»). The same method for 1300: densities of 1600 (табл. A.7: Sud 42.4, Isole 27.5) over the
+# map's areas (90,484 and 58,909 km²) give the South 70.31 % of the South-Islands (and 5.457 M in
+# 1600 against 5.445 of табл. A.3).
+
+[[obs]]
+id = "italy_sud_1300"
+fit = false
+land = "italy_sud"
+region = "italy_sud"
+population = [3.340, 3.340]
+source = "Malanima 2002, приложение: табл. A.3 (Юг с островами 4,75 млн в 1300 г.), разделено по долям 1600 г. (табл. A.7) — его же способ для 1400 и 1500 гг."
+
+[[obs]]
+id = "italy_isole_1300"
+fit = false
+land = "italy_isole"
+region = "italy_isole"
+population = [1.410, 1.410]
+source = "Malanima 2002, там же (острова: Сицилия, Сардиния, Корсика, Мальта)"
+
 [[obs]]
 id = "tuscany_1300"
 fit = false
@@ -201,6 +224,18 @@ parts = [{ countries = ["ITA"], names = [
 parts = [{ countries = ["ITA", "VAT", "MLT"] },
          { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
 minus = ["italy_cn"]
+
+[regions.italy_isole]
+# Malanima's Isole: Sicily, Sardinia, Corsica and the minor islands with Malta.
+parts = [{ countries = ["ITA"], names = ["Agrigento", "Caltanissetta", "Catania", "Enna", "Messina", "Palermo", "Ragusa",
+                                        "Siracusa", "Trapani", "Cagliari", "Nuoro", "Oristano", "Sassari", "Sud Sardegna"] },
+         { countries = ["MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+
+[regions.italy_sud]
+# Malanima's Sud: Lazio, Abruzzo, Molise, Campania, Puglia, Basilicata, Calabria.
+parts = [{ countries = ["ITA", "VAT"] }]
+minus = ["italy_cn", "italy_isole"]
 
 [regions.tuscany]
 parts = [{ countries = ["ITA"], names = ["Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara",
@@ -278,15 +313,21 @@ within = "italy_cn"
 [lands.tuscany]
 within = "italy_cn"
 
+[lands.italy_sud]
+within = "italy_si"
+
+[lands.italy_isole]
+within = "italy_si"
+
 # The lands of each scenario that its own sources cover whole. A land the scenario covers only
 # in part is not calibrated on that part (the part need not have the land's mean): its provinces
 # take the §4 class, as rule 1. The scenario's provinces are calibrated at its layout; here, blocks.
 [scenarios.milan_1477]
-lands = ["italy_cn", "tuscany", "italy_alps", "italy_si"]
+lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
 # Population of the start year by land (millions): the fill at start (plan §7) next to the fill
 # at which engine2's growth equals the plague loss.
-start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407 }
-start_population_source = "Malanima 2002, приложение: табл. A.4 по десятилетиям (Центр-Север 4,95 млн в 1470 г. и 5,20 в 1480; Тоскана 469 и 493 тыс.) и табл. A.3 (Юг с островами 3,075 млн в 1450 г. и 3,69 в 1500) — линейно к 1477 г."
+start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407, italy_sud = 2.395, italy_isole = 1.012 }
+start_population_source = "Malanima 2002, приложение: табл. A.4 по десятилетиям (Центр-Север 4,95 млн в 1470 г. и 5,20 в 1480; Тоскана 469 и 493 тыс.) и табл. A.3 (Юг с островами 3,075 млн в 1450 г. и 3,69 в 1500) — линейно к 1477 г.; Юг и острова — доли 1600 г. (табл. A.7), способ Маланимы для 1400 и 1500 гг."
 
 # Arable density for the calibration. First — the proposal for the engine (owner via the reviewer,
 # plan §11c): the densest land with an opened source at the finer split, the Centre-North,

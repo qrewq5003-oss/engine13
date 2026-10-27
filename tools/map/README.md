@@ -32,6 +32,15 @@ conda run -n engine13-map python -I -X utf8 -m pytest -p no:cacheprovider tools/
 - `density.py` подбирает плотности по типам земли вместе с классификацией по регионам
   с источниками (`density.toml`) и калибрует классы по потолкам земель (`calibrate`).
   Замер — `<cache>/out/density/report.txt`, план §11 и §11b.
+- `layout.py <сценарий>` раскладывает провинции сценария по таблице `layouts/<сценарий>.toml`,
+  план §12:
+  - `public/geodata2/<сценарий>/provinces.geojson` — полигоны для интерфейса;
+  - `public/geodata2/<сценарий>/provinces.toml` — провинции и регионы в полях схемы engine2;
+  - замер и превью — `<cache>/out/<сценарий>/`.
+
+  ```bash
+  conda run -n engine13-map python -I -X utf8 tools/map/layout.py milan_1477 --cache D:/map-cache
+  ```
 
 ## Файлы
 

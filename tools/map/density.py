@@ -79,8 +79,44 @@ def region_mask(blocks, parts) -> np.ndarray:
                              ("min_dry", "dry", np.greater_equal)):
             if key in p:
                 k &= op(blocks[arr], p[key])
+        if "coastal" in p:  # blocks with a shore on some sea area (layouts only)
+            k &= blocks["coastal"] == p["coastal"]
         m |= k
     return m
+
+
+def region_masks(cfg, blocks) -> dict:
+    masks = {r: region_mask(blocks, v["parts"]) for r, v in cfg["regions"].items()}
+    for r, v in cfg["regions"].items():
+        for other in v.get("minus", []):
+            masks[r] &= ~masks[other]
+    return masks
+
+
+def envelope(cfg, blocks, masks):
+    """The observations with their densities on the map, and the envelope of each land.
+    A land's capacity is the highest density it is documented to have held before a plague
+    (E0 П1: «ёмкость — свойство земли, не года»); of the observations of one land, only the
+    highest is kept. Observations are one land only if their regions are one land: they may
+    differ by at most LAND_REGION_DIFF of the area of their union."""
+    obs = [dict(o) for o in cfg["obs"]]
+    for o in obs:
+        a = blocks["area"][masks[o["region"]]].sum()
+        lo, hi = o["density"] if "density" in o else (o["population"][0] * 1e6 / a, o["population"][1] * 1e6 / a)
+        o["lo"], o["hi"], o["y"], o["area"] = lo, hi, (lo + hi) / 2, a
+    top, land_regions = {}, collections.defaultdict(set)
+    for o in obs:
+        g = o.get("land", o["id"])
+        land_regions[g].add(o["region"])
+        if g not in top or o["y"] > top[g]["y"]:
+            top[g] = o
+    for g, regions in land_regions.items():
+        union = np.any(np.stack([masks[r] for r in regions]), axis=0)
+        common = np.all(np.stack([masks[r] for r in regions]), axis=0)
+        diff = blocks["area"][union & ~common].sum() / blocks["area"][union].sum()
+        if diff > LAND_REGION_DIFF:
+            raise SystemExit(f"land {g}: its observations' regions {sorted(regions)} differ by {100 * diff:.0f} % of the area")
+    return obs, top
 
 
 def cell_type_areas(blocks, members: np.ndarray, irrigated: np.ndarray, src, sources, scan, rep):
@@ -195,33 +231,10 @@ def main() -> None:
     rep = base.Report()
 
     blocks = read_blocks(cache / "out" / "base")
-    masks = {r: region_mask(blocks, v["parts"]) for r, v in cfg["regions"].items()}
-    for r, v in cfg["regions"].items():
-        for other in v.get("minus", []):
-            masks[r] &= ~masks[other]
+    masks = region_masks(cfg, blocks)
     irrigated = np.any(np.stack([masks[r] for r in scan["irrigated_regions"]]), axis=0)
     members = np.any(np.stack(list(masks.values())), axis=0)
-    obs = [o for o in cfg["obs"]]
-    for o in obs:
-        a = blocks["area"][masks[o["region"]]].sum()
-        lo, hi = o["density"] if "density" in o else (o["population"][0] * 1e6 / a, o["population"][1] * 1e6 / a)
-        o["lo"], o["hi"], o["y"], o["area"] = lo, hi, (lo + hi) / 2, a
-    # The envelope: a land's capacity is the highest density it is documented to have held
-    # before a plague (E0 П1: «ёмкость — свойство земли, не года»); of the observations of one
-    # land, only the highest is kept. Observations are one land only if their regions are one
-    # land: they may differ by at most LAND_REGION_DIFF of the area of their union.
-    top, land_regions = {}, collections.defaultdict(set)
-    for o in obs:
-        g = o.get("land", o["id"])
-        land_regions[g].add(o["region"])
-        if g not in top or o["y"] > top[g]["y"]:
-            top[g] = o
-    for g, regions in land_regions.items():
-        union = np.any(np.stack([masks[r] for r in regions]), axis=0)
-        common = np.all(np.stack([masks[r] for r in regions]), axis=0)
-        diff = blocks["area"][union & ~common].sum() / blocks["area"][union].sum()
-        if diff > LAND_REGION_DIFF:
-            raise SystemExit(f"land {g}: its observations' regions {sorted(regions)} differ by {100 * diff:.0f} % of the area")
+    obs, top = envelope(cfg, blocks, masks)
     # Sub-lands (`fit = false`) split a land the fit already has; they serve the calibration only.
     fit = [o for o in obs if o["region"] not in scan["irrigated_regions"] and o.get("fit", True)]
     sets = {"все наблюдения": fit,
@@ -310,6 +323,32 @@ def calibrate(area, rugged, dry, desert, target, dens) -> np.ndarray:
     return cls
 
 
+def land_depth(land: str, lands: dict) -> int:
+    d = 0
+    while land in lands and "within" in lands[land]:
+        d, land = d + 1, lands[land]["within"]
+    return d
+
+
+def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params) -> np.ndarray:
+    """Classes of units (blocks, or a scenario's provinces) for the lands of a scenario.
+    `order` — the lands, inner ones first; `member[land]` — its units (an inner land's units
+    are members of the outer one too); `ceiling[land]` — people per km², or None for a land
+    without an opened ceiling, which takes the §4 class (owner's rule 1). An outer land meets
+    its own ceiling with the units its inner lands left."""
+    cls = np.full(len(area), -1)
+    for land in order:
+        m = member[land]
+        free = m & (cls < 0)
+        if ceiling[land] is not None:
+            fixed = m & (cls >= 0)
+            target = ceiling[land] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
+            cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+        else:
+            cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
+    return cls
+
+
 def rule_class(rugged, bw, dry, p: rules.Params) -> np.ndarray:
     """Plan §4 for a land without an opened ceiling (owner's rule 1, §11a): relief, then climate."""
     return np.array([TYPES.index(rules.land_type(r, b, d - b, p)) for r, b, d in zip(rugged, bw, dry)], dtype=np.int64)
@@ -387,23 +426,10 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
 
         for name, sc in cfg.get("scenarios", {}).items():
             # Inner lands first: an outer land meets its own ceiling with what the inner ones left.
-            depth = {}
-            for land in sc["lands"]:
-                d, x = 0, land
-                while x in lands and "within" in lands[x]:
-                    d, x = d + 1, lands[x]["within"]
-                depth[land] = d
-            order = sorted(sc["lands"], key=lambda land: (-depth[land], sc["lands"].index(land)))
-            cls = np.full(len(area), -1)
-            for land in order:
-                m = masks[region_of(land)]
-                free = m & (cls < 0)
-                if opened(land):
-                    fixed = m & (cls >= 0)
-                    target = top[land]["y"] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
-                    cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
-                else:
-                    cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
+            order = sorted(sc["lands"], key=lambda land: (-land_depth(land, lands), sc["lands"].index(land)))
+            cls = calibrate_lands(order, {land: masks[region_of(land)] for land in order},
+                                  {land: top[land]["y"] if opened(land) else None for land in order},
+                                  area, rugged, dry, bw, dens, p)
             start = sc.get("start_population", {})
             rep(f"## Сценарий {name} — пашня {arable:g}")
             rep()
