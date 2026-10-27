@@ -80,7 +80,8 @@ def record(name: str, digest: str) -> None:
     text, n = pattern.subn(lambda m: m.group(1) + f'"{digest}"', text, count=1)
     if n != 1:
         sys.exit(f"cannot record sha256 of {name}")
-    SOURCES.write_text(text, encoding="utf-8")
+    SOURCES.write_text(text, encoding="utf-8", newline="
+")  # LF: guard no_crlf_in_the_repositorys_…
 
 
 def main() -> None:
