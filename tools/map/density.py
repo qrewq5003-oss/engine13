@@ -56,11 +56,12 @@ def read_blocks(base_dir: pathlib.Path):
     with np.errstate(invalid="ignore", divide="ignore"):
         bw = np.nan_to_num(np.array([float(r["bw_km2"]) for r in rows]) / climate)
         bs = np.nan_to_num(np.array([float(r["bs_km2"]) for r in rows]) / climate)
+        cold = np.nan_to_num(np.array([float(r["cold_km2"]) for r in rows]) / climate)
     return {
         "id": np.array([r["id"] for r in rows]), "country": np.array([r["country"] for r in rows]),
         "name": np.array([r["name"] for r in rows]),
         "lon": np.array([float(r["lon"]) for r in rows]), "lat": np.array([float(r["lat"]) for r in rows]),
-        "area": np.array([float(r["area_km2"]) for r in rows]), "bw": bw, "dry": bw + bs,
+        "area": np.array([float(r["area_km2"]) for r in rows]), "bw": bw, "dry": bw + bs, "cold": cold,
         "geometry": gdf.geometry.values,
     }
 
@@ -98,7 +99,9 @@ def envelope(cfg, blocks, masks):
     A land's capacity is the highest density it is documented to have held before a plague
     (E0 П1: «ёмкость — свойство земли, не года»); of the observations of one land, only the
     highest is kept. Observations are one land only if their regions are one land: they may
-    differ by at most LAND_REGION_DIFF of the area of their union."""
+    differ by at most LAND_REGION_DIFF of the area of their union. An observation marked `later`
+    (a later pre-industrial point) is no envelope: it only tells a ceiling from a lower bound
+    (`sparse_lands`)."""
     obs = [dict(o) for o in cfg["obs"]]
     for o in obs:
         a = blocks["area"][masks[o["region"]]].sum()
@@ -106,6 +109,8 @@ def envelope(cfg, blocks, masks):
         o["lo"], o["hi"], o["y"], o["area"] = lo, hi, (lo + hi) / 2, a
     top, land_regions = {}, collections.defaultdict(set)
     for o in obs:
+        if o.get("later"):
+            continue
         g = o.get("land", o["id"])
         land_regions[g].add(o["region"])
         if g not in top or o["y"] > top[g]["y"]:
@@ -117,6 +122,19 @@ def envelope(cfg, blocks, masks):
         if diff > LAND_REGION_DIFF:
             raise SystemExit(f"land {g}: its observations' regions {sorted(regions)} differ by {100 * diff:.0f} % of the area")
     return obs, top
+
+
+def sparse_lands(obs, top, dens, below: float) -> set:
+    """Lands below Hills whose source is a ceiling, not a lower bound (owner's decision on §15a
+    п. 4): a later pre-industrial observation of the land stays under `below` × Hills, so the
+    land never came near Hills before industry (Russia, Scandinavia). Such a land may turn its
+    provinces sparse — Steppe, «редкая земля» — the coldest first. A land below Hills without a
+    later observation keeps Hills: its source is a lower bound (Hungary, §13a п. 4)."""
+    later = collections.defaultdict(list)
+    for o in obs:
+        if o.get("later"):
+            later[o["land"]].append(o["y"])
+    return {land for land, ys in later.items() if land in top and top[land]["y"] < dens[H] and max(ys) < below * dens[H]}
 
 
 def cell_type_areas(blocks, members: np.ndarray, irrigated: np.ndarray, src, sources, scan, rep):
@@ -300,7 +318,7 @@ def main() -> None:
     rep.step("done")
 
 
-def calibrate(area, rugged, dry, desert, target, dens, key=None, dry_steppe=None) -> np.ndarray:
+def calibrate(area, rugged, dry, desert, target, dens, key=None, dry_steppe=None, cold=None) -> np.ndarray:
     """Classes (TYPES indices) of the units of one land — blocks, or a scenario's provinces —
     whose capacity comes closest to `target` people at the densities `dens` (indexed by type).
     Desert units stay Desert. Of the rest, the most rugged become Hills first; a land sparser
@@ -308,15 +326,21 @@ def calibrate(area, rugged, dry, desert, target, dens, key=None, dry_steppe=None
     first. Units are whole: a unit changes class only while that brings the capacity closer
     to the target, so a land of few units keeps a residual.
     Variants measured for the owner (plan §13b): `key` — the order to Hills (default: rugged);
-    `dry_steppe` — only units at least this dry may become Steppe (default: any)."""
+    `dry_steppe` — only units at least this dry may become Steppe (default: any).
+    `cold` — a land whose source is a ceiling below Hills (`sparse_lands`): any unit may become
+    Steppe, the coldest first (subarctic and polar share), then the driest; `dry_steppe` is not
+    applied."""
     key = rugged if key is None else key
     cls = np.where(desert, D, A)
     rest = np.flatnonzero(~desert)
     if target < area[rest].sum() * dens[H] + area[desert].sum() * dens[D]:
         cls[rest] = H
-        to, order = S, rest[np.lexsort((rugged[rest], -dry[rest]))]
-        if dry_steppe is not None:
-            order = order[dry[order] >= dry_steppe]
+        if cold is not None:
+            to, order = S, rest[np.lexsort((rugged[rest], -dry[rest], -cold[rest]))]
+        else:
+            to, order = S, rest[np.lexsort((rugged[rest], -dry[rest]))]
+            if dry_steppe is not None:
+                order = order[dry[order] >= dry_steppe]
     else:
         to, order = H, rest[np.argsort(-key[rest], kind="stable")]
     cap = float(area @ dens[cls])
@@ -328,7 +352,7 @@ def calibrate(area, rugged, dry, desert, target, dens, key=None, dry_steppe=None
     return cls
 
 
-def calibrate_nearest(area, rugged, dry, desert, target, dens, dry_steppe=None):
+def calibrate_nearest(area, rugged, dry, desert, target, dens, dry_steppe=None, cold=None):
     """The alternative to `calibrate` (reviewer on 500f44c): no whole unit flips 50 ↔ 12 for a
     fraction of a per cent of its land. Each unit gets a continuous density
     d = A − (A − H)·min(1, k·rugged), with k found so that the land holds its ceiling (no new
@@ -339,7 +363,7 @@ def calibrate_nearest(area, rugged, dry, desert, target, dens, dry_steppe=None):
     rest = ~desert
     need = target - float(area[desert].sum()) * dens[D]
     if need <= area[rest].sum() * dens[H]:
-        cls = calibrate(area, rugged, dry, desert, target, dens, dry_steppe=dry_steppe)
+        cls = calibrate(area, rugged, dry, desert, target, dens, dry_steppe=dry_steppe, cold=cold)
         return cls, dens[cls].astype(float), float("nan")
     a, r = area[rest], rugged[rest]
 
@@ -370,7 +394,8 @@ def land_depth(land: str, lands: dict) -> int:
     return d
 
 
-def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params, method="flip", **variant):
+def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params, method="flip",
+                    sparse=frozenset(), cold=None, **variant):
     """Classes of units (blocks, or a scenario's provinces) for the lands of a scenario, with
     each unit's density (its class's, or the continuous one of `calibrate_nearest`).
     `order` — the lands, inner ones first; `member[land]` — its units (an inner land's units
@@ -378,7 +403,9 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
     without an opened ceiling, which takes the §4 class (owner's rule 1). An outer land meets
     its own ceiling with the units its inner lands left. `method` — "flip" (`calibrate`) or
     "nearest" (`calibrate_nearest`). Steppe only where the climate is dry, BW + BS ≥ the §4 steppe
-    share (owner's decision §13a п. 4): a land below Hills that is not dry stays Hills."""
+    share (owner's decision §13a п. 4): a land below Hills that is not dry stays Hills — unless
+    the land is in `sparse` (`sparse_lands`): then any unit may turn Steppe, by `cold`, the
+    coldest first (owner's decision on §15a п. 4)."""
     variant.setdefault("dry_steppe", p.steppe_share)
     cls = np.full(len(area), -1)
     d = np.full(len(area), np.nan)
@@ -389,10 +416,12 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
             fixed = m & (cls >= 0)
             target = ceiling[land] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
             args = (area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+            c = cold[free] if land in sparse else None
             if method == "nearest":
-                cls[free], d[free], _ = calibrate_nearest(*args, dry_steppe=variant["dry_steppe"])
+                cls[free], d[free], _ = calibrate_nearest(*args, dry_steppe=variant["dry_steppe"], cold=c)
             else:
-                cls[free] = calibrate(*args, **{k: (v[free] if isinstance(v, np.ndarray) else v) for k, v in variant.items()})
+                cls[free] = calibrate(*args, **{k: (v[free] if isinstance(v, np.ndarray) else v) for k, v in variant.items()},
+                                      **({"cold": c} if c is not None else {}))
         else:
             cls[free] = rule_class(rugged[free], bw[free], dry[free], p, cap_hills=True)
     rest = (cls >= 0) & np.isnan(d)
@@ -434,7 +463,7 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
     p = rules.Params.from_toml(tomllib.loads((HERE / "params.toml").read_text(encoding="utf-8")))
     # Read only: the engine's constants of growth and plague, for the fill they balance at.
     balance = plague_balance_fill(tomllib.loads((HERE.parent.parent / "engine2" / "params.toml").read_text(encoding="utf-8")))
-    area, bw, dry = blocks["area"], blocks["bw"], blocks["dry"]
+    area, bw, dry, cold = blocks["area"], blocks["bw"], blocks["dry"], blocks["cold"]
     wet = [o for o in obs if o["region"] in cfg["scan"]["irrigated_regions"]]
     lands = cfg.get("lands", {})
 
@@ -461,6 +490,7 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
             dens[TYPES.index(t)] = E0[t][0]
         dens[A] = arable
         dens[I] = wet[0]["y"] if wet else 0.0
+        sparse = sparse_lands(obs, top, dens, cfg["calibration"]["sparse_below"])
         rep(f"## Каждая земля отдельно — пашня {arable:g}")
         rep()
         rep("| земля (наблюдение) | источник, чел./км² | способ | достигнуто | невязка | Hills по рельефу | Hills | Steppe | Desert | Arable |")
@@ -471,8 +501,9 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
             m = masks[o["region"]]
             if opened(land):
                 cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens,
-                                dry_steppe=p.steppe_share)
-                how = "калибровка" + (" (ниже холмов: источник — нижняя граница)" if o["y"] < dens[H] else "")
+                                dry_steppe=p.steppe_share, cold=cold[m] if land in sparse else None)
+                how = "калибровка" + ("" if o["y"] >= dens[H] else " (ниже холмов: потолок, редкая земля)" if land in sparse
+                                      else " (ниже холмов: источник — нижняя граница)")
             else:
                 cls = rule_class(rugged[m], bw[m], dry[m], p, cap_hills=True)
                 how = "§4 (правило 1)"
@@ -486,7 +517,7 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
             order = sorted(sc["lands"], key=lambda land: (-land_depth(land, lands), sc["lands"].index(land)))
             cls, _ = calibrate_lands(order, {land: masks[region_of(land)] for land in order},
                                   {land: top[land]["y"] if opened(land) else None for land in order},
-                                  area, rugged, dry, bw, dens, p)
+                                  area, rugged, dry, bw, dens, p, sparse=sparse, cold=cold)
             start = sc.get("start_population", {})
             rep(f"## Сценарий {name} — пашня {arable:g}")
             rep()

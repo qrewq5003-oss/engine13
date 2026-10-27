@@ -4,8 +4,10 @@
 [base]
 # lon_min, lat_min, lon_max, lat_max — the union of the three scenarios' coverage (plan §3):
 # Britain and Iberia to the edge of the Iranian plateau, the Sahara's edge and Upper Egypt to
-# the Baltic. A block belongs to the base when its representative point lies inside.
-bbox = [-12.0, 15.0, 66.0, 60.0]
+# the North Cape and the Urals (rome_375 takes all of Europe, plan §15). A unit belongs to the
+# base when its representative point lies inside; a unit of several parts that crosses the
+# edge keeps the parts whose point lies inside (§15a п. 2).
+bbox = [-12.0, 15.0, 66.0, 72.0]
 # Countries whose CGAZ ADM2 is a coarser level than their second-level units: their own
 # geoBoundaries release (a key of sources.toml) replaces it, cut to the CGAZ outline. CGAZ
 # gives Italy its 20 regions, Greece 14 regions, Germany 38 Regierungsbezirke; Lombardy as one
@@ -15,6 +17,13 @@ refine = { ITA = "gb_ita_adm3", GRC = "gb_grc_adm3", DEU = "gb_deu_adm3" }
 # least this area (km²) is a block of its own — Kaffa must not dissolve into its neighbour —
 # a smaller one joins the block it touches most.
 hole_block_km2 = 300.0
+# Holes are found cell by cell on a fixed grid of this step (degrees), so that a hole sees only
+# the units, land and lakes near it and widening the bbox leaves the old holes as they were
+# (plan §15a п. 2).
+hole_cell_deg = 1.0
+# Land is first cut to tiles of this step (degrees) on the same fixed grid: a continent is one
+# polygon of Natural Earth, and cutting it whole for every cell would take hours.
+hole_tile_deg = 8.0
 # Natural lakes (Natural Earth `featurecla`) are cut out of the blocks; reservoirs are not —
 # they did not exist in any scenario's year.
 lake_classes = ["Lake", "Alkaline Lake"]

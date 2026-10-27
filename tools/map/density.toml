@@ -64,6 +64,14 @@ density = [36.0, 43.0]
 source = "Scheidel 2007, там же (Syria and Cyprus; площадь источника ≈ 139 тыс. км² — заселённая Сирия без пустыни)"
 
 [[obs]]
+id = "syria_roman_165"
+fit = false
+land = "syria_roman"
+region = "syria_roman"
+population = [5.0, 6.0]
+source = "Scheidel 2007, там же: «Syria and Cyprus» — 5–6 млн; отдельных строк Иудеи и Аравии в таблице нет, это весь римский Левант — открыл (вторичное) через tabulae-geographicae.de. Для rome_375: регион — заселённые римские провинции, пустыня (Пальмирена, Палестина III) — вне него (решение владельца по §16a п. 3); syria_165 и syria_settled Константинополя не тронуты"
+
+[[obs]]
 id = "egypt_165"
 region = "egypt_valley"
 density = [167.0, 200.0]
@@ -123,6 +131,72 @@ land = "hungary"
 region = "hungary"
 population = [2.0, 2.0]
 source = "Russell 1972, там же (Hungary: 1340 — 2, 1450 — 1,5 млн) — открыл (вторичное) через Fordham Medieval Sourcebook"
+
+# Europe beyond the limes for rome_375 (plan §15a п. 4): Germany and Scandinavia by separate
+# numbers — one land «Germany and Scandinavia» (Russell) would give Scandinavia Germany's surplus.
+# `later = true` — a later pre-industrial point of the same land: not an envelope; it tells a
+# ceiling from a lower bound (density.sparse_lands, [calibration] sparse_below).
+
+[[obs]]
+id = "germany_1300"
+fit = false
+land = "germany"
+# The density of all of Germany on the map (12 million on 356.9 thousand km²) held by its part
+# beyond the limes: the Roman Rhineland and Raetia belong to the provinces of other lands.
+region = "germany_beyond_limes"
+density = [33.6, 33.6]
+source = "Cipolla C. M., Before the Industrial Revolution, 3-е изд. (Norton, 1994), с. 4: Германия 1300 г. — 12 млн (1500 — 13, 1700 — 15) — открыл (вторичное) через Fordham Medieval Sourcebook; граница «Германии» в источнике не дана — нынешняя ФРГ (356,9 тыс. км² на карте → 33,6/км²), приближение"
+
+[[obs]]
+id = "denmark_1000"
+fit = false
+land = "denmark"
+region = "denmark"
+population = [0.36, 0.36]
+source = "Maddison A., Statistics on World Population, GDP and Per Capita GDP, 1–2008 AD (GGDC), в нынешних границах: Дания 1000 г. — 360 тыс. (до чумы других точек нет) — открыл (вторичное) через Wikipedia «Demographics of Europe»"
+
+[[obs]]
+id = "denmark_1700"
+later = true
+fit = false
+land = "denmark"
+region = "denmark"
+population = [0.70, 0.70]
+source = "Maddison, там же: Дания 1700 г. — 700 тыс. (16/км² — выше холмов: точка 1000 г. — нижняя граница)"
+
+[[obs]]
+id = "scandinavia_1000"
+fit = false
+land = "scandinavia"
+region = "scandinavia"
+population = [0.64, 0.64]
+source = "Maddison, там же: 1000 г. — Норвегия 200, Швеция 400, Финляндия 40 тыс. (до чумы других точек по странам нет; Russell даёт Скандинавию только вместе с Германией)"
+
+[[obs]]
+id = "scandinavia_1700"
+later = true
+fit = false
+land = "scandinavia"
+region = "scandinavia"
+population = [2.16, 2.16]
+source = "Maddison, там же: 1700 г. — Норвегия 500, Швеция 1260, Финляндия 400 тыс.; сверка — Cipolla 1994, с. 4: «Scandinavia» 1700 г. — 3 млн, с Данией (700 тыс.)"
+
+[[obs]]
+id = "russia_1340"
+fit = false
+land = "russia"
+region = "russia"
+population = [8.0, 8.0]
+source = "Russell 1972, там же (Russia 1340 — 8 млн); граница «России» в источнике не дана — Европейская Россия без Северного Кавказа и Калининграда, приближение"
+
+[[obs]]
+id = "russia_1700"
+later = true
+fit = false
+land = "russia"
+region = "russia"
+population = [18.0, 18.0]
+source = "Cipolla 1994, с. 4: Россия 1700 г. — 18 млн (1500 — 10)"
 
 [[obs]]
 id = "steppe_nomads"
@@ -280,9 +354,31 @@ parts = [{ countries = ["AUT", "SVN", "HRV", "BIH", "SRB", "XKX", "MNE", "MKD", 
          { countries = ["HUN"], lon_max = 19.0 },
          { countries = ["ROU"], lon_max = 24.5 },
          { countries = ["ROU"], lon_min = 24.5, lon_max = 26.0, lat_min = 45.5 }]
+# The source's Danubian region drawn along the provinces of rome_375 (the boxes of its layout), so
+# that the scenario covers it whole (§11b п. 1): Noricum without the Alpine Raetia, Pannonia
+# without Venetia's Istria and Carniola, Macedonia to Greece — and not the Quadi north of the
+# Danube nor the Vandals of Crișana.
+minus = ["danube_not_rome"]
+
+[regions.danube_not_rome]
+parts = [{ countries = ["AUT"], lat_min = 48.35 },
+         { countries = ["AUT"], lon_max = 12.0 },
+         { countries = ["SVN"], lon_max = 14.6 },
+         { countries = ["HRV"], lon_max = 14.2, lat_min = 44.7 },
+         { countries = ["HRV"], lon_min = 14.3, lon_max = 14.45, lat_max = 45.0 },
+         { countries = ["MKD"], lat_max = 41.9 },
+         { countries = ["ROU"], lon_max = 24.0, lat_min = 46.6 }]
 
 [regions.greece]
-parts = [{ countries = ["GRC", "ALB"] }]
+# Greece and Albania of 165 along the provinces of rome_375: Thrace and the islands off Asia go to
+# their own dioceses, northern Albania to Dardania.
+parts = [{ countries = ["GRC"] }, { countries = ["ALB"], lat_max = 41.75 }]
+minus = ["greece_not_rome"]
+
+[regions.greece_not_rome]
+parts = [{ countries = ["GRC"], lon_min = 24.6, lat_min = 40.75 },
+         { countries = ["GRC"], lon_min = 25.9, lat_min = 35.8 },
+         { countries = ["GRC"], names = ["Lemnos", "Agios Efstratios", "Samothrakis"] }]
 
 [regions.balkans]
 # Greece and the Balkans of 1340 with Thrace (European Turkey); Serbia south of the Sava and the
@@ -322,16 +418,56 @@ parts = [{ countries = ["ROU"], lon_min = 28.0, lat_max = 45.3 }]
 [regions.syria_settled]
 parts = [{ countries = ["SYR", "LBN", "ISR", "PSE", "JOR", "CYP"], max_bw = 0.5 }]
 
+[regions.syria_roman]
+# The settled Roman Levant of rome_375, along its provinces (the boxes of its layout): Syria with
+# Hatay, Phoenicia without the Palmyrene desert, Palaestina without the Negev, Arabia north of the
+# Wadi al-Hasa, Cyprus. The desert provinces (palmyrene, palaestina_salutaris) are outside.
+parts = [{ countries = ["CYP", "LBN"] },
+         { countries = ["ISR"], exclude_names = ["Be'er Sheva"] },
+         { countries = ["TUR"], lon_min = 35.8, lat_max = 36.95 },
+         { countries = ["SYR"], lon_max = 38.0, lat_min = 35.0 },
+         { countries = ["SYR"], lon_max = 39.6, lat_min = 33.2, lat_max = 35.0, exclude_names = ["Tadmor", "Duma", "Al Qutayfah"] },
+         { countries = ["SYR"], lat_max = 33.2, lon_max = 37.5 },
+         { countries = ["JOR"], lon_max = 37.8, lat_min = 30.9 }]
+
 [regions.egypt_valley]
 # The valley and the Delta: Egypt's own small units (299 blocks under 500 km², 32.6 thousand
 # km²; the source's area is ≈ 30 thousand km²). The desert is in large units of its own.
 parts = [{ countries = ["EGY"], max_area_km2 = 500.0 }]
 
 [regions.n_africa]
+# Roman North Africa along the limes of rome_375's layout: Algeria north of 34.6° N and east of
+# 1.9° W, Tingitana north of 33.8° N and east of 7° W.
 parts = [{ countries = ["TUN"] },
-         { countries = ["DZA"], lat_min = 34.0 },
-         { countries = ["MAR"], lat_min = 33.5 },
+         { countries = ["DZA"], lon_min = -1.9, lat_min = 34.6 },
+         { countries = ["MAR"], lon_min = -7.0, lat_min = 33.8 },
          { countries = ["LBY"], lon_max = 15.5, lat_min = 31.0 }]
+
+[regions.germany_beyond_limes]
+# Germany without the Roman provinces of rome_375 (the boxes of its layout: Germania and Belgica on
+# the left bank, Raetia and Noricum south of the Danube) and without Schleswig (the Jutes').
+parts = [{ countries = ["DEU"], lat_max = 54.3 }]
+minus = ["germany_roman"]
+
+[regions.germany_roman]
+parts = [{ countries = ["DEU"], lon_max = 6.65, lat_min = 51.4 },
+         { countries = ["DEU"], lon_max = 6.85, lat_min = 50.75, lat_max = 51.4 },
+         { countries = ["DEU"], lon_max = 7.25, lat_min = 49.0, lat_max = 50.75 },
+         { countries = ["DEU"], lon_max = 7.7, lat_min = 49.9, lat_max = 50.3 },
+         { countries = ["DEU"], lon_max = 8.3, lat_min = 49.0, lat_max = 49.9 },
+         { countries = ["DEU"], lon_min = 10.0, lat_max = 48.75 }]
+
+[regions.denmark]
+parts = [{ countries = ["DNK"] }]
+
+[regions.scandinavia]
+parts = [{ countries = ["NOR", "SWE", "FIN", "ALA"] }]
+
+[regions.russia]
+# European Russia to the Urals (plan §15): the crest about 59.5° E, in the north the Polar Urals
+# reach 66° E; without the North Caucasus (south of 46° N) and Kaliningrad.
+parts = [{ countries = ["RUS"], lon_min = 23.0, lon_max = 59.5, lat_min = 46.0, lat_max = 61.0 },
+         { countries = ["RUS"], lon_min = 23.0, lon_max = 66.0, lat_min = 61.0 }]
 
 [regions.steppe_pontic]
 parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, lat_min = 44.0, lat_max = 52.0, min_dry = 0.5 }]
@@ -365,6 +501,18 @@ lands = ["italy_cn", "italy_alps", "italy_si", "italy_sud", "italy_isole", "balk
 start_population = { italy_cn = 4.2, italy_si = 3.157, italy_sud = 2.220, italy_isole = 0.937, balkans_1340 = 4.5, hungary = 1.5 }
 start_population_source = "Malanima 2002, приложение: табл. A.4 (Центр-Север 4,2 млн в 1430 г.), табл. A.3 (Юг с островами 3,28 млн в 1400 г. и 3,075 в 1450 — линейно к 1430 г.; Юг и острова — доли 1600 г., табл. A.7); Russell 1972 (Fordham): Greece/Balkans 4,5 и Hungary 1,5 млн в 1450 г. — ближайшая точка ряда к 1430 г.; Малая Азия, Сирия, Египет — открытого числа нет, заглушка"
 
+[scenarios.rome_375]
+# The lands of 165 (Scheidel) and their envelopes: Italy, Gaul and Iberia hold their pre-plague
+# highs of 1300–1340, Britain and the Danube their own 165 lows (below Hills — the source is a lower
+# bound, §13a п. 4). Beyond the limes (§15a п. 4): Germany, Denmark, Scandinavia and Russia by
+# their own sources — Scandinavia and Russia stayed far below Hills before industry, so their
+# sources are ceilings and their provinces turn sparse, the coldest first. Persia, Mesopotamia,
+# the Caucasus and the rest beyond the limes have no opened ceiling (rule 1). No opened start
+# population for 375 — every province carries a stub until E4.
+lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole", "gaul_france", "iberia",
+         "britain_roman", "danube_165", "greece_165", "asia_minor_165", "syria_roman", "egypt_165", "n_africa_165",
+         "germany", "denmark", "scandinavia", "russia"]
+
 [scenarios.milan_1477]
 lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
 # Population of the start year by land (millions): the fill at start (plan §7) next to the fill
@@ -384,6 +532,11 @@ method = "flip"
 # «whole» — at least this share of the land's area lies in the scenario's provinces of the land.
 # milan_1477 covers its lands at 94–100 %.
 min_cover = 0.9
+# A land below Hills is a ceiling, not a lower bound, when a later pre-industrial point of it
+# (`later` observations) stays under this share of Hills (owner's decision on §15a п. 4): Hungary
+# reached ≈ 0.8 of Hills by 1490 (§13a п. 4 — a lower bound); Scandinavia stood at 0.17 of Hills in
+# 1700, Russia at about 0.4.
+sparse_below = 0.5
 
 # The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
 # параметры классификации, выбирать по невязке подгонки»).

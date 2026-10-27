@@ -65,6 +65,22 @@ def test_calibrate_variants_order_to_hills_and_steppe_only_where_dry():
     assert list(density.calibrate(area, rugged, dry, desert, 1300.0, DENS, dry_steppe=0.5)) == [H, H]
 
 
+def test_calibrate_a_ceiling_below_hills_turns_the_coldest_sparse_whatever_the_dryness():
+    # 300 km² at 4.67 per km² = 1400 people = 100 × 12 + 2 × 100 × 1: two units turn Steppe — the
+    # two coldest, though none is dry; without `cold` no unit may (Steppe only where dry).
+    area, rugged, dry, desert = land([0.0, 0.0, 0.0], dry=[0.0, 0.1, 0.0])
+    cold = np.array([0.9, 0.0, 0.6])
+    assert list(density.calibrate(area, rugged, dry, desert, 1400.0, DENS, dry_steppe=0.5, cold=cold)) == [S, H, S]
+    assert list(density.calibrate(area, rugged, dry, desert, 1400.0, DENS, dry_steppe=0.5)) == [H, H, H]
+
+
+def test_sparse_lands_are_those_a_later_source_keeps_under_half_of_hills():
+    top = {"north": {"y": 0.6}, "plain": {"y": 6.0}, "hungary": {"y": 6.3}}
+    obs = [{"land": "north", "y": 1.9, "later": True}, {"land": "plain", "y": 16.0, "later": True}]
+    # «hungary» has no later point: its source stays a lower bound.
+    assert density.sparse_lands(obs, top, DENS, 0.5) == {"north"}
+
+
 def test_calibrate_nearest_gives_continuous_densities_and_the_nearest_class():
     area, rugged, dry, desert = land([0.5, 1.0])
     # 100·(40 − 28·0.5k) + 100·(40 − 28·min(1, k)) = 3900 → k = 4100/4200; d = 26.33 and 12.67.

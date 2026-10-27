@@ -60,7 +60,7 @@ def borders(blocks, tol_deg: float):
     upper = a < b
     i, j = a[upper], b[upper]
     km = lengths_km(shapely.intersection(bounds[i], buffers[j]))
-    order = np.argsort(a, kind="stable")
+    order = np.lexsort((b, a))  # neighbours in index order: a union depends on the order of its inputs
     a, b = a[order], b[order]
     starts = np.searchsorted(a, np.arange(len(blocks)))
     ends = np.searchsorted(a, np.arange(len(blocks)), side="right")
@@ -76,9 +76,14 @@ def nearest_zone(lon, lat, pieces, piece_zone, max_deg: float):
     """For each point, the zone of the nearest sea piece within `max_deg`, or -1."""
     pts = shapely.points(lon, lat)
     tree = shapely.STRtree(pieces)
-    p, q = tree.query_nearest(pts, max_distance=max_deg, all_matches=False)
+    p, q = tree.query_nearest(pts, max_distance=max_deg, all_matches=True)
+    # A tie goes to the first piece in the pieces' own order, not in the tree's: the tree's order
+    # depends on everything it holds, that is, on the bbox.
+    order = np.lexsort((q, p))
+    p, q = p[order], q[order]
+    first = np.r_[True, p[1:] != p[:-1]] if len(p) else np.zeros(0, bool)
     zone = np.full(len(pts), -1, dtype=np.int64)
-    zone[p] = np.asarray(piece_zone)[q]
+    zone[p[first]] = np.asarray(piece_zone)[q[first]]
     return zone
 
 

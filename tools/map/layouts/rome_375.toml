@@ -1,0 +1,1479 @@
+# The layout of rome_375 (plan docs/engine2_map.md §3, §8 п. 4): block → province → owner at the
+# start, 375 — one Roman state with two courts (Valens and Gratian); `rome_west` and `rome_east`
+# are successors only (AGENTS §10). Read like milan_1477.toml: provinces in order, a block goes to
+# the first province that selects it, a catch-all comes last. Roman provinces are grouped inside
+# their dioceses (plan §3); the Goths are still north of the Danube (Adrianople is 378), Nisibis
+# and the lands east of the Tigris are Persian since the peace of 363.
+#
+# Coverage — all of Europe uncut (owner, 2026-10-27; plan §15): Scandinavia and Finland to the
+# North Cape, Russia to the Urals and the Ural river, the whole Caucasus; edges are full actors
+# (plan §3). Beyond the edge — only the steppe east of the Ural river, the Huns' rear.
+#
+# Culture and religion — coarse groups (§9a п. 2; for 375 — the Latin and the Greek halves and so
+# on): latin, greek, celtic, aramaic, coptic, berber, germanic, iranian, hunnic, armenian, persian,
+# slavic, baltic, finnic, kartvelian, caucasian; christian, pagan, zoroastrian. Majority faith of the Roman provinces — Christian by the middle of
+# the 4th century (Stark R., The Rise of Christianity, 1996 — по памяти).
+
+scenario = "rome_375"
+start_year = 375
+# The actors of the scenario by E0 (docs/engine2_e0.md §6.1): kushans, guptas and eastern_jin are
+# removed (owner, 2026-10-13); rome_west / rome_east and the other successors are not at the start.
+e0_actors = ["rome", "huns", "visigoths", "ostrogoths", "sassanids", "vandals", "burgundians", "franks",
+             "alamanni", "saxons", "berbers", "armenia"]
+
+[regions]
+britanniae = "Britanniae"
+galliae = "Galliae"
+septem_provinciae = "Septem Provinciae"
+hispaniae = "Hispaniae"
+italia_annonaria = "Italia annonaria"
+italia_suburbicaria = "Italia suburbicaria"
+pannoniae = "Pannoniae"
+dacia = "Dacia"
+macedonia = "Macedonia"
+thracia = "Thracia"
+asiana = "Asiana"
+pontica = "Pontica"
+oriens = "Oriens"
+africa = "Africa"
+germania_magna = "Germania magna"
+gothia = "Gothia"
+scythia = "Scythia"
+mauri = "Mauri"
+armenia = "Armenia"
+eranshahr = "Eranshahr"
+caledonia = "Caledonia et Hibernia"
+scandza = "Scandza"
+sarmatia_europaea = "Sarmatia Europaea"
+caucasus = "Caucasus"
+
+# The seat of each owner on this map: Rome — Mediolanum, the western court and the seat of the
+# Anicii (E0 §6.1); Persia — Ctesiphon.
+[capitals]
+rome = "liguria"
+sassanids = "asorestan"
+armenia = "armenia"
+huns = "itil"
+visigoths = "gothia_dacia"
+ostrogoths = "greutungia_w"
+vandals = "vandalia"
+burgundians = "burgundia"
+franks = "francia"
+alamanni = "alamannia"
+saxons = "saxonia"
+berbers = "mauri"
+quadi = "quadia"
+picts = "caledonia"
+scots = "hibernia"
+jutes = "iutia"
+northmen = "svealand"
+fenni = "finnia"
+aestii = "aestia"
+slavs = "venedia"
+volga_finns = "meria"
+thuringians = "thuringia"
+lombards = "langobardia"
+rugians = "rugia"
+marcomanni = "bohemia"
+alans = "alania"
+lazica = "lazica"
+iberia = "kartli"
+caucasian_albania = "albania_caucasica"
+
+[sources]
+shepherd_395 = "Shepherd W. R., Historical Atlas (1911), с. 42–43, «The Roman Empire about 395» (диоцезы и провинции, Сасаниды, варвары) — открыл (UT PCL, shepherd-c-042-043.jpg)"
+shepherd_migrations = "Shepherd 1911, с. 45, «Germanic Migrations and Conquests, 150–1066» — открыл (UT PCL, shepherd-c-045.jpg)"
+ammianus = "Ammianus Marcellinus, кн. 27–31 (события 360–378 гг.) — по памяти"
+tacitus = "Tacitus, Germania 43–46 (Lugii, Rugii, Suiones, Aestii, Fenni, Venethi) — по памяти"
+jordanes = "Jordanes, Getica 116–120 (народы державы Германариха: Golthescytha, Thiudos, Vasinabroncae, Merens, Mordens, Venethi, Aesti) — по памяти"
+
+# ================================================================ Rome: Britanniae
+
+[[province]]
+id = "britannia_superior"
+name = "Britannia Prima et Maxima Caesariensis"
+owner = "rome"
+region = "britanniae"
+culture = "celtic"
+religion = "christian"
+parts = [{ countries = ["GBR"], lon_min = -5.5, lat_max = 52.6 }, { countries = ["GBR"], lon_max = -5.5, lat_max = 54.0 }]
+source = "shepherd_395"
+note = "Юг Британии с Лондинием; деление на провинции — по широте 52,6°, приближение"
+
+[[province]]
+id = "britannia_inferior"
+name = "Flavia, Britannia Secunda et Valentia"
+owner = "rome"
+region = "britanniae"
+culture = "celtic"
+religion = "christian"
+parts = [{ countries = ["GBR"], lon_min = -5.5, lat_min = 52.6, lat_max = 56.05 }]
+source = "shepherd_395"
+note = "Эборак и Вал Адриана; Валентия (369 г.) — между валами, как у Shepherd; север за Фортом и Клайдом — пикты (caledonia), Ольстер — скотты (hibernia)"
+
+# ================================================================ Rome: Galliae and Septem Provinciae
+
+[[province]]
+id = "belgica"
+name = "Belgica"
+owner = "rome"
+region = "galliae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Nord", "Pas-de-Calais", "Somme", "Aisne", "Oise", "Ardennes", "Marne", "Meuse", "Moselle", "Meurthe-et-Moselle", "Vosges"] }, { countries = ["BEL", "LUX"] }, { countries = ["DEU"], lon_max = 7.25, lat_min = 49.0, lat_max = 50.3 }]
+source = "shepherd_395"
+note = "Белгика I и II с Тревери — резиденцией Грациана; Тонгерен (Германия II) — в блоках Бельгии; приближение"
+
+[[province]]
+id = "germania"
+name = "Germania I et II"
+owner = "rome"
+region = "galliae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Bas-Rhin", "Haut-Rhin"] }, { countries = ["NLD"], lat_max = 51.85 }, { countries = ["DEU"], lon_max = 6.65, lat_min = 51.4 }, { countries = ["DEU"], lon_max = 6.85, lat_min = 50.75, lat_max = 51.4 }, { countries = ["DEU"], lon_max = 7.25, lat_min = 50.3, lat_max = 50.75 }, { countries = ["DEU"], lon_max = 7.7, lat_min = 49.9, lat_max = 50.3 }, { countries = ["DEU"], lon_max = 8.3, lat_min = 49.0, lat_max = 49.9 }]
+source = "shepherd_395"
+note = "Левый берег Рейна (граница — по полосам широты, приближение); Токсандрия — салические франки, федераты с 358 г. — по памяти"
+
+[[province]]
+id = "sequania"
+name = "Maxima Sequanorum et Alpes Poeninae"
+owner = "rome"
+region = "galliae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Doubs", "Jura", "Haute-Saône", "Territoire de Belfort"] }, { countries = ["CHE"], lon_max = 8.6, exclude_names = ["Locarno", "Vallemaggia"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "lugdunensis"
+name = "Lugdunensis I et Senonia"
+owner = "rome"
+region = "galliae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Rhône", "Loire", "Ain", "Saône-et-Loire", "Côte-d'Or", "Haute-Marne", "Aube", "Yonne", "Nièvre", "Loiret", "Paris", "Seine-et-Marne", "Essonne", "Yvelines", "Val-d'Oise", "Hauts-de-Seine", "Seine-Saint-Denis", "Val-de-Marne", "Eure-et-Loir"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "armorica"
+name = "Lugdunensis II et III"
+owner = "rome"
+region = "galliae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Seine-Maritime", "Eure", "Calvados", "Manche", "Orne", "Sarthe", "Mayenne", "Ille-et-Vilaine", "Côtes d'Armor", "Finistère", "Morbihan", "Loire-Atlantique", "Maine-et-Loire", "Indre-et-Loire ", "Loir-et-Cher"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "aquitania"
+name = "Aquitania I et II"
+owner = "rome"
+region = "septem_provinciae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Vendée", "Deux-Sèvres", "Vienne", "Charente-Maritime", "Charente", "Haute-Vienne", "Creuse", "Indre", "Cher", "Allier", "Puy-de-Dôme", "Cantal", "Corrèze", "Dordogne", "Gironde", "Lot", "Aveyron", "Tarn", "Lozère", "Haute-Loire", "Tarn-et-Garonne"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "novempopulana"
+name = "Novempopulana"
+owner = "rome"
+region = "septem_provinciae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Landes", "Gers", "Pyrénées-Atlantiques", "Hautes-Pyrénées", "Lot-et-Garonne"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "narbonensis"
+name = "Narbonensis I"
+owner = "rome"
+region = "septem_provinciae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Haute-Garonne", "Ariège", "Aude", "Pyrénées-Orientales", "Hérault", "Gard"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "viennensis"
+name = "Viennensis, Narbonensis II et Alpes Maritimae"
+owner = "rome"
+region = "septem_provinciae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["FRA"], names = ["Bouches-du-Rhône", "Var", "Vaucluse", "Alpes-de-Haute-Provence", "Hautes-Alpes", "Alpes-Maritimes", "Drôme", "Ardèche", "Isère", "Savoie", "Haute-Savoie"] }, { countries = ["MCO"] }]
+source = "shepherd_395"
+
+# ================================================================ Rome: Hispaniae
+
+[[province]]
+id = "tingitana"
+name = "Mauretania Tingitana"
+owner = "rome"
+region = "hispaniae"
+culture = "berber"
+religion = "christian"
+parts = [{ countries = ["MAR"], lon_min = -7.0, lat_min = 33.8 }, { countries = ["ESP"], names = ["Ceuta", "Melilla"] }]
+source = "shepherd_395"
+note = "Провинция диоцеза Испаний; Риф к востоку от Танжера — римский лишь по побережью, приближение; язык большинства — берберский, вера — по памяти"
+
+[[province]]
+id = "gallaecia"
+name = "Gallaecia"
+owner = "rome"
+region = "hispaniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ESP"], names = ["Coruna", "Lugo", "Ourense", "Pontevedra", "Asturias", "Leon", "Zamora", "Palencia"] }, { countries = ["PRT"], lat_min = 41.0 }]
+source = "shepherd_395"
+
+[[province]]
+id = "lusitania"
+name = "Lusitania"
+owner = "rome"
+region = "hispaniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ESP"], names = ["Caceres", "Badajoz", "Salamanca", "Avila"] }, { countries = ["PRT"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "baetica"
+name = "Baetica"
+owner = "rome"
+region = "hispaniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ESP"], names = ["Sevilla", "Huelva", "Cadiz", "Cordoba", "Malaga", "Jaen", "Granada"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "carthaginiensis"
+name = "Carthaginiensis et Insulae Baleares"
+owner = "rome"
+region = "hispaniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ESP"], names = ["Murcia", "Alicante", "Valencia", "Albacete", "Ciudad Real", "Toledo", "Cuenca", "Guadalajara", "Madrid", "Segovia", "Valladolid", "Almeria"] }, { countries = ["ESP"], lon_min = 1.0, lon_max = 4.6, lat_min = 38.5, lat_max = 40.2 }]
+source = "shepherd_395"
+
+[[province]]
+id = "tarraconensis"
+name = "Tarraconensis"
+owner = "rome"
+region = "hispaniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ESP"] }, { countries = ["AND"] }]
+source = "shepherd_395"
+note = "Каталония, Арагон, долина Эбро, Наварра, Страна басков, Кантабрия, Бургос, Сория"
+
+# ================================================================ Rome: Italia annonaria and suburbicaria
+
+[[province]]
+id = "liguria"
+name = "Liguria, Alpes Cottiae et Graiae"
+owner = "rome"
+region = "italia_annonaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Milano", "Monza e della Brianza", "Lodi", "Pavia", "Como", "Lecco", "Varese", "Novara", "Verbano-Cusio-Ossola", "Vercelli", "Biella", "Torino", "Asti", "Alessandria", "Cuneo", "Aosta", "Genova", "Savona", "Imperia", "La Spezia", "Piacenza"] }, { countries = ["CHE"], names = ["Lugano", "Mendrisio", "Locarno", "Bellinzona", "Vallemaggia", "Riviera", "Blenio", "Leventina"] }]
+source = "shepherd_395"
+note = "Медиолан — резиденция западного двора и семья Анициев (E0 §6.1)"
+
+[[province]]
+id = "venetia"
+name = "Venetia et Histria"
+owner = "rome"
+region = "italia_annonaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Venezia", "Padova", "Vicenza", "Verona", "Treviso", "Rovigo", "Belluno", "Udine", "Pordenone", "Gorizia", "Trieste", "Trento", "Bergamo", "Brescia", "Cremona", "Mantova", "Sondrio"] }, { countries = ["SVN"], lon_max = 14.6 }, { countries = ["HRV"], lon_max = 14.2, lat_min = 44.7 }, { countries = ["HRV"], lon_min = 14.3, lon_max = 14.45, lat_max = 45.0 }]
+source = "shepherd_395"
+note = "Аквилея; Эмона — в блоках Словении западнее 14,6°"
+
+[[province]]
+id = "aemilia"
+name = "Aemilia, Flaminia et Picenum"
+owner = "rome"
+region = "italia_annonaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Parma", "Reggio nell'Emilia", "Modena", "Bologna", "Ferrara", "Ravenna", "Forli'-Cesena", "Rimini", "Pesaro e Urbino", "Ancona", "Macerata", "Fermo", "Ascoli Piceno"] }, { countries = ["SMR"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "raetia"
+name = "Raetia I et II"
+owner = "rome"
+region = "italia_annonaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Bolzano"] }, { countries = ["CHE"] }, { countries = ["LIE"] }, { countries = ["AUT"], lon_max = 12.0 }, { countries = ["DEU"], lon_min = 10.0, lon_max = 13.0, lat_max = 48.75 }]
+source = "shepherd_395"
+note = "Лимес по Дунаю, Иллеру и Рейну; Августа Винделиков"
+
+[[province]]
+id = "tuscia"
+name = "Tuscia et Umbria, Urbs Roma"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Massa Carrara", "Lucca", "Pistoia", "Prato", "Firenze", "Pisa", "Livorno", "Arezzo", "Siena", "Grosseto", "Perugia", "Terni", "Viterbo", "Roma"] }, { countries = ["VAT"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "campania"
+name = "Campania"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Latina", "Frosinone", "Caserta", "Napoli", "Benevento", "Avellino", "Salerno"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "samnium"
+name = "Samnium et Valeria"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["L'Aquila", "Teramo", "Pescara", "Chieti", "Campobasso", "Isernia", "Rieti"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "apulia"
+name = "Apulia et Calabria"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Foggia", "Barletta-Andria-Trani", "Bari", "Brindisi", "Taranto", "Lecce"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "bruttii"
+name = "Lucania et Bruttii"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Potenza", "Matera", "Cosenza", "Crotone", "Catanzaro", "Vibo Valentia", "Reggio di Calabria"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "sicilia"
+name = "Sicilia"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Palermo", "Trapani", "Agrigento", "Caltanissetta", "Enna", "Messina", "Catania", "Siracusa", "Ragusa"] }, { countries = ["MLT"] }]
+source = "shepherd_395"
+note = "Язык — латинский и греческий (восток острова) — по памяти"
+
+[[province]]
+id = "sardinia"
+name = "Sardinia et Corsica"
+owner = "rome"
+region = "italia_suburbicaria"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["ITA"], names = ["Cagliari", "Sud Sardegna", "Sassari", "Nuoro", "Oristano"] }, { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+source = "shepherd_395"
+
+# ================================================================ Rome: Pannoniae (Illyricum West)
+
+[[province]]
+id = "noricum"
+name = "Noricum ripense et mediterraneum"
+owner = "rome"
+region = "pannoniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["AUT"], lon_min = 12.0, lon_max = 16.0, lat_max = 48.35 }, { countries = ["DEU"], lon_min = 13.0, lat_max = 48.75 }, { countries = ["SVN"], lat_min = 46.0 }]
+source = "shepherd_395"
+
+[[province]]
+id = "pannonia_i"
+name = "Pannonia I et Valeria"
+owner = "rome"
+region = "pannoniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["AUT"], lon_min = 16.0, lat_max = 48.35 }, { countries = ["HUN"], lon_max = 19.05 }]
+source = "shepherd_395"
+note = "Карнунт, Савария, Аквинк; Бригецио — здесь Валентиниан I умер в ноябре 375 г. на переговорах с квадами — по памяти"
+
+[[province]]
+id = "pannonia_ii"
+name = "Pannonia II et Savia"
+owner = "rome"
+region = "pannoniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["SRB"], lon_max = 20.25, lat_min = 44.75, lat_max = 45.22 }, { countries = ["HRV"], lat_min = 45.0 }, { countries = ["SVN"] }, { countries = ["BIH"], names = ["Una-Sana Canton", "Posavina Canton", "Brcko District", "Tuzla Canton"] }]
+source = "shepherd_395"
+note = "Сирмий — столица префектуры Иллирика; Сисция, Мурса"
+
+[[province]]
+id = "dalmatia"
+name = "Dalmatia"
+owner = "rome"
+region = "pannoniae"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["HRV"] }, { countries = ["BIH"] }, { countries = ["MNE"], names = ["Herceg Novi Municipality", "Kotor Municipality", "Tivat Municipality", "Budva Municipality"] }]
+source = "shepherd_395"
+note = "Салона; Республика Сербская — один большой блок, восток Боснии частью Превалитаны и Мезии — приближение"
+
+# ================================================================ Rome: Dacia (Illyricum East)
+
+[[province]]
+id = "moesia"
+name = "Moesia I"
+owner = "rome"
+region = "dacia"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["SRB"], lat_min = 43.7, lat_max = 44.8 }]
+source = "shepherd_395"
+note = "Виминаций, Сингидун"
+
+[[province]]
+id = "dacia"
+name = "Dacia Ripensis et Mediterranea"
+owner = "rome"
+region = "dacia"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["BGR"], lon_max = 24.6 }, { countries = ["SRB"], lon_min = 21.6, lat_max = 43.7 }]
+source = "shepherd_395"
+note = "Сердика, Наисс, Рациария; «Дакия» Аврелиана — к югу от Дуная"
+
+[[province]]
+id = "dardania"
+name = "Dardania et Praevalitana"
+owner = "rome"
+region = "dacia"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["XKX"] }, { countries = ["SRB"], lat_max = 43.7 }, { countries = ["MKD"], lat_min = 41.9 }, { countries = ["MNE"] }, { countries = ["ALB"], lat_min = 41.75 }]
+source = "shepherd_395"
+note = "Скупи, Доклея, Скодра"
+
+# ================================================================ Rome: Thracia
+
+[[province]]
+id = "moesia_ii"
+name = "Moesia II et Scythia"
+owner = "rome"
+region = "thracia"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["BGR"], lat_min = 42.9 }, { countries = ["ROU"], lon_min = 28.0, lat_max = 45.3 }]
+source = "shepherd_395"
+note = "Дуросторум, Маркианополь, Томы; дунайский лимес против готов"
+
+[[province]]
+id = "europa"
+name = "Europa et Constantinopolis"
+owner = "rome"
+region = "thracia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 27.3, lon_max = 29.04, lat_min = 40.6, exclude_names = ["Marmara", "Ç?narc?k"] }, { countries = ["TUR"], names = ["Gelibolu", "Eceabat"] }]
+source = "shepherd_395"
+note = "Константинополь — восточная столица; Валент в 370-х — в Антиохии"
+
+[[province]]
+id = "thracia"
+name = "Thracia, Haemimontus et Rhodope"
+owner = "rome"
+region = "thracia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["BGR"] }, { countries = ["GRC"], lon_min = 24.6, lat_min = 40.75 }, { countries = ["GRC"], names = ["Samothrakis"] }, { countries = ["TUR"], lon_max = 27.3, lat_min = 40.6 }]
+source = "shepherd_395"
+note = "Филиппополь, Адрианополь"
+
+# ================================================================ Rome: Macedonia
+
+[[province]]
+id = "epirus"
+name = "Epirus vetus et nova"
+owner = "rome"
+region = "macedonia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["GRC"], names = ["Arta", "Nikolaos Skoufas", "Georgios Karaiskakis", "Central Tzoumerka", "North Tzoumerka", "Preveza", "Ziros", "Souli", "Igoumenitsa", "Filiates", "Ioannina", "Zitsa", "Dodoni", "Pogoni", "Konitsa", "Zagori", "Metsovo", "Agrinio", "Missolonghi", "Thermo", "Xiromero", "Amfilochia", "Aktio-Vonitsa", "Nafpaktia", "Corfu", "Paxos", "Parga", "Lefkada", "Cephalonia", "Ithaca", "Zakynthos"] }, { countries = ["ALB"] }]
+source = "shepherd_395"
+note = "Никополь, Диррахий; язык Эпира Нового — латинский и иллирийский, приближение «греческий»"
+
+[[province]]
+id = "macedonia"
+name = "Macedonia"
+owner = "rome"
+region = "macedonia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["MKD"] }, { countries = ["GRC"], lon_min = 20.9, lon_max = 24.6, lat_min = 39.95 }, { countries = ["GRC"], names = ["Thassou"] }]
+source = "shepherd_395"
+note = "Фессалоника; Македония Салутарис (Стоби) — в блоках Северной Македонии"
+
+[[province]]
+id = "thessalia"
+name = "Thessalia"
+owner = "rome"
+region = "macedonia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["GRC"], lon_min = 21.3, lon_max = 24.0, lat_min = 38.75, lat_max = 39.95, exclude_names = ["Istiaia-Aidipsos", "Mantoudi-Limni-Agia Anna"] }]
+source = "shepherd_395"
+
+[[province]]
+id = "achaea"
+name = "Achaea"
+owner = "rome"
+region = "macedonia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["GRC"], lon_min = 21.0, lon_max = 24.7, lat_min = 36.2, lat_max = 39.0 }, { countries = ["GRC"], lon_min = 24.3, lon_max = 25.95, lat_min = 36.3, lat_max = 38.95 }]
+source = "shepherd_395"
+note = "Коринф, Афины, Эвбея; Киклады (провинция Островов — в диоцезе Азии) — здесь, приближение"
+
+[[province]]
+id = "creta"
+name = "Creta"
+owner = "rome"
+region = "macedonia"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["GRC"], lon_min = 23.4, lon_max = 26.4, lat_max = 35.8 }]
+source = "shepherd_395"
+
+# ================================================================ Rome: Oriens (Syria first: Antioch is in Hatay)
+
+[[province]]
+id = "syria"
+name = "Syria et Coele"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 35.8, lat_max = 36.95 }, { countries = ["SYR"], lon_max = 38.0, lat_min = 35.0 }]
+source = "shepherd_395"
+note = "Антиохия — резиденция Валента в 370-х — по памяти; язык деревни — арамейский, городов — греческий"
+
+[[province]]
+id = "phoenicia"
+name = "Phoenice et Phoenice Libanensis"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["LBN"] }, { countries = ["SYR"], lon_max = 39.6, lat_min = 33.2, lat_max = 35.0, exclude_names = ["Tadmor", "Duma", "Al Qutayfah"] }]
+source = "shepherd_395"
+note = "Тир, Берит, Дамаск, Эмеса; пустыня Пальмиры — в palmyrene (решение владельца по §16a п. 3)"
+
+[[province]]
+id = "palmyrene"
+name = "Palmyrene"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "pagan"
+parts = [{ countries = ["SYR"], names = ["Tadmor", "Duma", "Al Qutayfah"] }]
+source = "shepherd_395"
+note = "Сирийская пустыня Финикии Ливанской: Пальмира — крепость на Strata Diocletiana; кочевники-сарацины, восстание Мавии 375–378 гг. — по памяти; отделена от заселённой Финикии, чтобы земля римской Сирии была её заселённой частью (§16a п. 3)"
+
+[[province]]
+id = "arabia"
+name = "Arabia"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["SYR"], lat_max = 33.2, lon_max = 37.5 }, { countries = ["JOR"], lon_max = 37.8, lat_min = 30.9 }]
+source = "shepherd_395"
+note = "Бостра, Гераса, Филадельфия: Хауран и Заиорданье севернее Вади-эль-Хасы; юг с Петрой — в palaestina_salutaris"
+
+[[province]]
+id = "palaestina"
+name = "Palaestina"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["ISR"], exclude_names = ["Be'er Sheva"] }]
+source = "shepherd_395"
+note = "Кесария, Иерусалим, Скифополь (Палестина I и II); вера — христиане, иудеи и язычники, приближение"
+
+[[province]]
+id = "palaestina_salutaris"
+name = "Palaestina Salutaris"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["EGY"], lon_min = 32.6, lat_min = 27.5 }, { countries = ["ISR"], names = ["Be'er Sheva"] }, { countries = ["JOR"], lat_max = 30.9 }]
+source = "shepherd_395"
+note = "Петра, Негев, Синай — пустынная Палестина III (отделена от Аравии в IV в. — по памяти); отделена, чтобы земля римской Сирии была её заселённой частью (§16a п. 3)"
+
+[[province]]
+id = "cilicia"
+name = "Cilicia I et II, Isauria"
+owner = "rome"
+region = "oriens"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 33.6, lon_max = 36.6, lat_max = 37.6 }]
+source = "shepherd_395"
+note = "Тарс, Аназарб; восток Исаврии — здесь"
+
+[[province]]
+id = "osrhoene"
+name = "Euphratensis, Osrhoene et Mesopotamia"
+owner = "rome"
+region = "oriens"
+culture = "aramaic"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 36.6, lon_max = 41.1, lat_min = 36.6, lat_max = 38.25 }, { countries = ["SYR"], lon_min = 37.5, lon_max = 40.5, lat_min = 34.5 }]
+source = "shepherd_395"
+note = "Иераполь, Эдесса, Амида, Каллиник; Нисибис, Сингара и земли за Тигром — персидские с 363 г. — по памяти"
+
+[[province]]
+id = "cyprus"
+name = "Cyprus"
+owner = "rome"
+region = "oriens"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["CYP"] }]
+source = "shepherd_395"
+
+# ================================================================ Rome: Asiana and Pontica
+
+[[province]]
+id = "asia"
+name = "Asia, Hellespontus et Insulae"
+owner = "rome"
+region = "asiana"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_max = 28.9, lat_min = 37.6 }, { countries = ["GRC"], lon_min = 25.9, lat_min = 35.3 }, { countries = ["GRC"], names = ["Lemnos", "Agios Efstratios"] }]
+source = "shepherd_395"
+note = "Эфес, Смирна, Кизик; острова Эгеиды (Лесбос, Хиос, Самос, Родос) — провинция Островов"
+
+[[province]]
+id = "caria_lycia"
+name = "Caria et Lycia"
+owner = "rome"
+region = "asiana"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_max = 30.5, lat_max = 37.6 }]
+source = "shepherd_395"
+
+[[province]]
+id = "phrygia"
+name = "Phrygia et Pisidia"
+owner = "rome"
+region = "asiana"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 28.9, lon_max = 31.6, lat_min = 37.6, lat_max = 39.95 }]
+source = "shepherd_395"
+note = "Лаодикея, Синнада, Антиохия Писидийская, Дорилей"
+
+[[province]]
+id = "pamphylia"
+name = "Pamphylia et Isauria"
+owner = "rome"
+region = "asiana"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 30.5, lon_max = 33.6, lat_max = 37.6 }]
+source = "shepherd_395"
+
+[[province]]
+id = "lycaonia"
+name = "Lycaonia"
+owner = "rome"
+region = "asiana"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 31.6, lon_max = 33.6, lat_min = 37.6, lat_max = 38.9 }]
+source = "shepherd_395"
+note = "Иконий"
+
+[[province]]
+id = "bithynia"
+name = "Bithynia et Honorias"
+owner = "rome"
+region = "pontica"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 28.9, lon_max = 32.4, lat_min = 39.95, exclude_names = ["Imbros"] }, { countries = ["TUR"], lon_max = 28.9, lat_min = 39.95, exclude_names = ["Imbros"] }]
+source = "shepherd_395"
+note = "Никомедия, Никея"
+
+[[province]]
+id = "paphlagonia"
+name = "Paphlagonia"
+owner = "rome"
+region = "pontica"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 32.4, lon_max = 34.4, lat_min = 40.75 }]
+source = "shepherd_395"
+
+[[province]]
+id = "galatia"
+name = "Galatia"
+owner = "rome"
+region = "pontica"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 31.6, lon_max = 34.4, lat_min = 38.9, lat_max = 40.75 }]
+source = "shepherd_395"
+note = "Анкира"
+
+[[province]]
+id = "pontus"
+name = "Helenopontus et Pontus Polemoniacus"
+owner = "rome"
+region = "pontica"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 34.4, lon_max = 41.6, lat_min = 40.0 }]
+source = "shepherd_395"
+note = "Амасия, Неокесария, Трапезунд"
+
+[[province]]
+id = "cappadocia"
+name = "Cappadocia I et II"
+owner = "rome"
+region = "pontica"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 33.6, lon_max = 38.0, lat_min = 37.6, lat_max = 40.0 }]
+source = "shepherd_395"
+note = "Кесария, Тиана"
+
+[[province]]
+id = "armenia_minor"
+name = "Armenia I et II"
+owner = "rome"
+region = "pontica"
+culture = "armenian"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 38.0, lon_max = 39.6, lat_min = 37.8, lat_max = 40.0 }]
+source = "shepherd_395"
+note = "Мелитена, Сатала; язык — армянский и греческий — по памяти"
+
+# ================================================================ Rome: Aegyptus and Libya (in the diocese of Oriens until about 380)
+
+[[province]]
+id = "aegyptus"
+name = "Aegyptus et Augustamnica"
+owner = "rome"
+region = "oriens"
+culture = "coptic"
+religion = "christian"
+parts = [{ countries = ["EGY"], max_area_km2 = 500.0, lat_min = 29.0, lon_max = 32.6 }, { countries = ["EGY"], names = ["Bilqas"] }]
+source = "shepherd_395"
+note = "Дельта, Александрия, Фаюм (Аркадия); долина — регион `egypt_valley` (density.toml)"
+
+[[province]]
+id = "thebais"
+name = "Thebais"
+owner = "rome"
+region = "oriens"
+culture = "coptic"
+religion = "christian"
+parts = [{ countries = ["EGY"], max_area_km2 = 500.0, lon_max = 33.2 }]
+source = "shepherd_395"
+note = "Долина Нила южнее 29° с. ш."
+
+[[province]]
+id = "libya"
+name = "Libya Pentapolis et Marmarica"
+owner = "rome"
+region = "oriens"
+culture = "greek"
+religion = "christian"
+parts = [{ countries = ["LBY"], lon_min = 19.0, lat_min = 30.0 }, { countries = ["EGY"], lon_max = 29.8, lat_min = 29.0 }]
+source = "shepherd_395"
+note = "Кирена, Птолемаида; Мармарика с Аммонием — большой блок Матруха"
+
+# ================================================================ Rome: Africa
+
+[[province]]
+id = "tripolitania"
+name = "Tripolitania"
+owner = "rome"
+region = "africa"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["LBY"], lon_max = 19.0, lat_min = 30.5 }, { countries = ["TUN"], lat_max = 33.3 }]
+source = "shepherd_395"
+note = "Лептис Магна, Эя; набеги австуриан в 360-х — по памяти; Феццан (гараманты) — вне охвата"
+
+[[province]]
+id = "byzacena"
+name = "Byzacena"
+owner = "rome"
+region = "africa"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["TUN"], lat_max = 35.6 }]
+source = "shepherd_395"
+
+[[province]]
+id = "africa_proconsularis"
+name = "Africa Proconsularis"
+owner = "rome"
+region = "africa"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["TUN"] }]
+source = "shepherd_395"
+note = "Карфаген"
+
+[[province]]
+id = "numidia"
+name = "Numidia"
+owner = "rome"
+region = "africa"
+culture = "latin"
+religion = "christian"
+parts = [{ countries = ["DZA"], lon_min = 5.6, lat_min = 34.6 }]
+source = "shepherd_395"
+note = "Цирта, Гиппон; донатисты — по памяти"
+
+[[province]]
+id = "mauretania"
+name = "Mauretania Sitifensis et Caesariensis"
+owner = "rome"
+region = "africa"
+culture = "berber"
+religion = "christian"
+parts = [{ countries = ["DZA"], lon_min = -1.9, lon_max = 5.6, lat_min = 34.6 }]
+source = "shepherd_395"
+note = "Цезарея, Ситифис; восстание Фирма 372–375 гг. подавлено Феодосием Старшим — по памяти; язык большинства — берберский"
+
+# ================================================================ Barbaricum: the Germans beyond the Rhine and the Danube
+
+[[province]]
+id = "iutia"
+name = "Chersonesus Cimbrica"
+owner = "jutes"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DNK"] }, { countries = ["DEU"], lat_min = 54.3 }]
+source = "shepherd_395"
+note = "«Jutes» и «Angles» у Shepherd 395 — юты и англы Ютландии, Шлезвиг и датские острова; один актор, приближение"
+
+[[province]]
+id = "saxonia"
+name = "Saxonia"
+owner = "saxons"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lon_max = 11.3, lat_min = 52.2 }, { countries = ["NLD"], lat_min = 52.6 }]
+source = "shepherd_395"
+note = "Саксы между Эмсом и Эльбой; фризы на севере Нидерландов — здесь, приближение"
+
+[[province]]
+id = "francia"
+name = "Francia"
+owner = "franks"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lon_max = 9.0, lat_min = 50.3, lat_max = 52.2 }, { countries = ["NLD"], lat_min = 51.85, lat_max = 52.6 }]
+source = "shepherd_395"
+note = "Рипуарии, хамавы, бруктеры правобережья Рейна — по памяти"
+
+[[province]]
+id = "burgundia"
+name = "Burgundia"
+owner = "burgundians"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lon_min = 9.0, lon_max = 11.6, lat_min = 49.5, lat_max = 50.6 }]
+source = "ammianus"
+note = "Бургунды на среднем Майне, соседи алеманнов (Аммиан, кн. 28) — по памяти; у Shepherd 395 бургунды ещё восточнее"
+
+[[province]]
+id = "alamannia"
+name = "Alamannia"
+owner = "alamanni"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lon_max = 10.0, lat_max = 50.3 }, { countries = ["DEU"], lon_min = 10.0, lon_max = 11.6, lat_min = 48.75, lat_max = 49.5 }]
+source = "shepherd_395"
+note = "Декуматские поля, Неккар, Шварцвальд; ютунги на франконском Юре — здесь"
+
+[[province]]
+id = "quadia"
+name = "Quadia"
+owner = "quadi"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["CZE"], lon_min = 15.5 }, { countries = ["SVK"], lon_max = 19.5 }, { countries = ["AUT"], lat_min = 48.35 }]
+source = "ammianus"
+note = "Квады (Моравия, запад Словакии) — война с Валентинианом 374–375 гг.; актора в E0 нет — решение владельца"
+
+[[province]]
+id = "sarmatia"
+name = "Sarmatia"
+owner = "quadi"
+region = "germania_magna"
+culture = "iranian"
+religion = "pagan"
+parts = [{ countries = ["HUN"], lon_min = 19.05, lat_max = 47.6 }, { countries = ["SRB"], lat_min = 44.8 }, { countries = ["ROU"], lon_max = 22.4, lat_max = 46.6 }]
+source = "ammianus"
+note = "Сарматы-язиги и лимиганты между Дунаем и Тисой, в Бачке и Банате — союзники квадов в 374 г.; своего актора нет, приближение «у квадов»"
+
+[[province]]
+id = "vandalia"
+name = "Vandalia"
+owner = "vandals"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["SVK"] }, { countries = ["HUN"], lon_min = 19.05 }, { countries = ["UKR"], lon_max = 24.7, lat_min = 47.9 }, { countries = ["ROU"], lon_max = 24.0, lat_min = 46.6 }]
+source = "shepherd_migrations"
+note = "Вандалы-асдинги в верховьях Тисы — по памяти; у Shepherd 395 здесь «Gepids» — гепиды сложены сюда, приближение; силинги — в lugia"
+
+
+[[province]]
+id = "thuringia"
+name = "Thuringia"
+owner = "thuringians"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lon_min = 9.0, lat_min = 49.5, lat_max = 52.2 }, { countries = ["DEU"], lon_min = 11.6, lat_max = 49.5 }]
+source = "shepherd_395"
+note = "«Thuringians» у Shepherd 395 между франками и Эльбой; Саксония и Лужица — здесь, приближение"
+
+[[province]]
+id = "langobardia"
+name = "Langobardia"
+owner = "lombards"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lat_min = 52.2, lon_max = 13.0 }]
+source = "shepherd_395"
+note = "«Lombards» на нижней Эльбе у Shepherd 395: Альтмарк, Пригниц, запад Мекленбурга"
+
+[[province]]
+id = "rugia"
+name = "Rugia et Pomerania"
+owner = "rugians"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["DEU"], lat_min = 52.2 }, { countries = ["POL"], lat_min = 53.0, lon_max = 19.5 }]
+source = "shepherd_migrations"
+note = "«Rugians» на балтийском берегу между Одером и Вислой (Shepherd 1911, с. 45); Тацит, Germania 43 — по памяти; Бранденбург — здесь, приближение"
+
+[[province]]
+id = "bohemia"
+name = "Boiohaemum"
+owner = "marcomanni"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["CZE"] }]
+source = "shepherd_migrations"
+note = "«Sueves» в Богемии у Shepherd 1911, с. 45 — маркоманы, союзники квадов (Аммиан, кн. 29 — по памяти)"
+
+[[province]]
+id = "lugia"
+name = "Lugia"
+owner = "vandals"
+region = "germania_magna"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["POL"], lon_max = 19.5, lat_max = 53.0 }]
+source = "shepherd_395"
+note = "«Vandals» между Одером и Вислой у Shepherd 395 — вандалы-силинги и лугии Тацита (Germania 43 — по памяти): Силезия, Великая и запад Малой Польши"
+
+# ================================================================ Gothia and Scythia
+
+[[province]]
+id = "gothia_moldavia"
+name = "Gothia (Moldavia)"
+owner = "visigoths"
+region = "gothia"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["ROU"], lon_min = 26.2, lat_min = 45.3 }, { countries = ["ROU"], lon_min = 25.3, lat_min = 47.0 }, { countries = ["MDA"] }, { countries = ["UKR"], lon_min = 28.2, lon_max = 30.5, lat_max = 46.5 }, { countries = ["UKR"], lon_min = 25.0, lon_max = 27.4, lat_min = 47.7, lat_max = 48.6 }]
+source = "shepherd_395"
+note = "Тервинги Атанариха между Днестром и Карпатами; гонение на христиан 369–372 гг. — по памяти"
+
+[[province]]
+id = "gothia_dacia"
+name = "Gothia (Dacia)"
+owner = "visigoths"
+region = "gothia"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["ROU"] }]
+source = "shepherd_395"
+note = "«West Goths» на землях бывшей Дакии; тайфалы в Олтении, карпы и свободные даки — здесь, приближение"
+
+[[province]]
+id = "greutungia_w"
+name = "Greutungia"
+owner = "ostrogoths"
+region = "gothia"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["UKR"], lon_max = 33.0, lat_min = 45.5, lat_max = 51.0 }]
+source = "shepherd_395"
+note = "«East Goths» — грейтунги Германариха между Днестром и Днепром — по памяти"
+
+[[province]]
+id = "greutungia_e"
+name = "Greutungia orientalis et Taurica"
+owner = "ostrogoths"
+region = "gothia"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["UKR"], lon_min = 33.0, lon_max = 40.3, lat_min = 44.3, lat_max = 51.0 }]
+source = "shepherd_395"
+note = "Левобережье Днепра и Крым; Боспор и крымские готы — здесь, приближение; в 375 г. гунны громят державу Германариха — по памяти"
+
+[[province]]
+id = "tanais"
+name = "Tanais"
+owner = "huns"
+region = "scythia"
+culture = "hunnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 37.5, lon_max = 44.0, lat_min = 44.8, lat_max = 50.0 }]
+source = "shepherd_395"
+note = "Аланы между Доном и Волгой, покорены гуннами около 370 г. — по памяти; у Shepherd 395 — «Alans»"
+
+[[province]]
+id = "itil"
+name = "Itil"
+owner = "huns"
+region = "scythia"
+culture = "hunnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 44.0, lon_max = 49.0, lat_min = 45.0, lat_max = 50.5 }]
+source = "ammianus"
+note = "Степь нижней Волги — гунны в 370-х — по памяти"
+
+
+# ================================================================ Caledonia et Hibernia
+
+[[province]]
+id = "caledonia"
+name = "Caledonia"
+owner = "picts"
+region = "caledonia"
+culture = "celtic"
+religion = "pagan"
+parts = [{ countries = ["GBR"], lat_min = 56.05, lat_max = 61.0 }]
+source = "shepherd_migrations"
+note = "«Picts» за Фортом и Клайдом (Shepherd 1911, с. 45; на с. 42–43 — «Caledonia»); «великий заговор» 367 г. (Аммиан, кн. 27) — по памяти; Фареры и Ян-Майен (блоки «вне единиц источника» с меткой GBR) — вне охвата, необитаемы (план §15)"
+
+[[province]]
+id = "hibernia"
+name = "Hibernia"
+owner = "scots"
+region = "caledonia"
+culture = "celtic"
+religion = "pagan"
+parts = [{ countries = ["IRL", "IMN"] }, { countries = ["GBR"], lon_max = -5.4, lat_max = 55.5 }]
+source = "shepherd_395"
+note = "«Scots» в Ирландии у Shepherd 395; с Ольстером и островом Мэн"
+
+# ================================================================ Scandza
+
+[[province]]
+id = "gautia"
+name = "Gautia"
+owner = "northmen"
+region = "scandza"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["SWE"], lat_max = 59.0 }]
+source = "shepherd_migrations"
+note = "«Goths» на юге Швеции (Shepherd 1911, с. 45) — гауты; Сконе, Готланд, Эланд; у Shepherd 395 вся Скандинавия — «Northmen», один актор, приближение"
+
+[[province]]
+id = "svealand"
+name = "Suionia"
+owner = "northmen"
+region = "scandza"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["SWE"], lat_max = 63.0 }]
+source = "shepherd_395"
+note = "Свеи Тацита (Germania 44 — по памяти) у озера Меларен и Уппсалы; юг Норрланда — здесь"
+
+[[province]]
+id = "norvegia"
+name = "Norvegia"
+owner = "northmen"
+region = "scandza"
+culture = "germanic"
+religion = "pagan"
+parts = [{ countries = ["NOR"], lat_max = 65.0 }]
+source = "shepherd_395"
+note = "«Northmen» у Shepherd 395; юг и середина Норвегии с Трёнделагом"
+
+[[province]]
+id = "lappia"
+name = "Scritifinnia"
+owner = "fenni"
+region = "scandza"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["NOR", "SWE"] }, { countries = ["FIN"], lat_min = 64.5 }, { countries = ["RUS"], lat_min = 66.0, lon_max = 41.0 }]
+source = "tacitus"
+note = "Охотники севера — «Fenni» Тацита (Germania 46 — по памяти), саамы; Лапландия, Норрботтен, Финнмарк, Кольский полуостров"
+
+[[province]]
+id = "finnia"
+name = "Finnia"
+owner = "fenni"
+region = "scandza"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["FIN", "ALA"] }]
+source = "tacitus"
+note = "Финны юга и середины Финляндии с Аландами — «Fenni» Тацита, приближение (по памяти)"
+
+# ================================================================ Sarmatia Europaea: Balts, Slavs and the Finns of the forest
+
+[[province]]
+id = "aestia"
+name = "Aestia"
+owner = "aestii"
+region = "sarmatia_europaea"
+culture = "baltic"
+religion = "pagan"
+parts = [{ countries = ["LTU", "LVA"] }, { countries = ["RUS"], lon_max = 23.0 }, { countries = ["POL"], lat_min = 53.3, lon_min = 19.5 }]
+source = "tacitus"
+note = "«Aestii» янтарного берега (Тацит, Germania 45; Иордан — по памяти): пруссы, галинды, курши; Литва и Латвия"
+
+[[province]]
+id = "chudia"
+name = "Chudia"
+owner = "fenni"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["EST"] }, { countries = ["RUS"], lon_max = 36.0, lat_min = 56.8, lat_max = 61.0 }]
+source = "jordanes"
+note = "Прибалтийские финны — эсты, водь, чудь, «Thiudos» Иордана (по памяти); Эстония, Ингрия, Новгород, Псков"
+
+[[province]]
+id = "karelia"
+name = "Karelia"
+owner = "fenni"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_max = 41.0, lat_min = 61.0 }]
+source = "tacitus"
+note = "Карелия и Онега; «Fenni», приближение (по памяти)"
+
+[[province]]
+id = "bjarmia"
+name = "Bjarmia"
+owner = "fenni"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lat_min = 61.0, lon_max = 66.0 }]
+source = "tacitus"
+note = "Север за Двиной: Архангельск, Коми, Печора до Полярного Урала — пермские народы и охотники севера, «Fenni», приближение (по памяти)"
+
+[[province]]
+id = "venedia"
+name = "Venedia"
+owner = "slavs"
+region = "sarmatia_europaea"
+culture = "slavic"
+religion = "pagan"
+parts = [{ countries = ["BLR"] }, { countries = ["POL"] }]
+source = "shepherd_395"
+note = "«Slavs» к востоку от Вислы у Shepherd 395 — венеды Тацита и Иордана (по памяти): Мазовия, Подляшье, Люблин, Белоруссия; восточные балты Поднепровья — здесь, приближение"
+
+[[province]]
+id = "polesia"
+name = "Venedia australis"
+owner = "slavs"
+region = "sarmatia_europaea"
+culture = "slavic"
+religion = "pagan"
+parts = [{ countries = ["UKR"], lat_min = 51.0 }]
+source = "shepherd_395"
+note = "Полесье, Волынь и Чернигов севернее держав готов — «Slavs» у Shepherd 395"
+
+[[province]]
+id = "venedia_orientalis"
+name = "Venedia orientalis"
+owner = "slavs"
+region = "sarmatia_europaea"
+culture = "slavic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 23.0, lon_max = 36.0, lat_min = 52.0, lat_max = 56.8 }]
+source = "shepherd_395"
+note = "Верхний Днепр и Десна: Смоленск, Брянск — «Slavs» у Shepherd 395 простираются до Днепра; восточные балты (по памяти) — здесь, приближение"
+
+[[province]]
+id = "silva_tanais"
+name = "Silva Tanais"
+owner = "slavs"
+region = "sarmatia_europaea"
+culture = "slavic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 34.0, lon_max = 42.0, lat_min = 50.0, lat_max = 54.0 }]
+source = "shepherd_395"
+note = "Лесостепь верхнего Дона и Оки: Курск, Орёл, Липецк, Воронеж — к востоку от «Slavs» Shepherd 395, на краю готской державы; приближение"
+
+[[province]]
+id = "vasinia"
+name = "Vasinia"
+owner = "volga_finns"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 36.0, lon_max = 47.0, lat_min = 58.0, lat_max = 61.0 }]
+source = "jordanes"
+note = "Весь Белоозера и верхней Сухоны: Вологда, север Ярославля и Костромы — «Vasinabroncae» Иордана (по памяти)"
+
+[[province]]
+id = "meria"
+name = "Meria"
+owner = "volga_finns"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 36.0, lon_max = 47.0, lat_min = 54.0, lat_max = 58.0 }]
+source = "jordanes"
+note = "Меря и мурома верхней Волги и Оки: Москва, Владимир, Ярославль, Рязань — «Merens» Иордана (по памяти)"
+
+[[province]]
+id = "mordvinia"
+name = "Mordvinia"
+owner = "volga_finns"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 42.0, lon_max = 50.0, lat_min = 52.0, lat_max = 54.5 }]
+source = "jordanes"
+note = "Мордва средней Волги и Суры: Пенза, Мордовия, Ульяновск — «Mordens» Иордана (по памяти)"
+
+[[province]]
+id = "permia"
+name = "Permia"
+owner = "volga_finns"
+region = "sarmatia_europaea"
+culture = "finnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 47.0, lon_max = 59.5, lat_min = 54.5, lat_max = 61.0 }]
+source = "jordanes"
+note = "Вятка и Кама до Урала: Киров, Марий Эл, Татарстан, Удмуртия, Пермь — финно-угры Поволжья, один актор, приближение (по памяти)"
+
+[[province]]
+id = "rhymmus"
+name = "Rhymmus et Daix"
+owner = "huns"
+region = "scythia"
+culture = "hunnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 50.0, lon_max = 59.5, lat_max = 54.5 }, { countries = ["KAZ"], lon_max = 51.5, lat_min = 46.0 }]
+source = "ammianus"
+note = "Заволжье и Южный Урал до реки Урал (Daix и Rhymmus Птолемея): Самара, Оренбург, Башкирия, запад Казахстана — тыл гуннов; за рекой Урал — край карты (план §15); по памяти"
+
+[[province]]
+id = "volga_inferior"
+name = "Volga inferior"
+owner = "huns"
+region = "scythia"
+culture = "hunnic"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 42.0, lon_max = 59.5, lat_min = 44.8, lat_max = 52.0 }]
+source = "ammianus"
+note = "Саратовское и Астраханское Поволжье вокруг Итиля — гунны в 370-х (по памяти)"
+
+# ================================================================ Caucasus
+
+[[province]]
+id = "albania_caucasica"
+name = "Albania"
+owner = "caucasian_albania"
+region = "caucasus"
+culture = "caucasian"
+religion = "christian"
+parts = [{ countries = ["AZE"] }, { countries = ["RUS"], lon_min = 47.0, lat_max = 42.6 }]
+source = "ammianus"
+note = "Кавказская Албания — союзник Шапура II (Аммиан, кн. 18–19); Дербентский проход; крещение царя Урнайра — IV в., по памяти"
+
+[[province]]
+id = "lazica"
+name = "Lazica"
+owner = "lazica"
+region = "caucasus"
+culture = "kartvelian"
+religion = "pagan"
+parts = [{ countries = ["GEO"], lon_max = 43.3 }]
+source = "shepherd_395"
+note = "Колхида: римские посты Фасис и Питиунт у Shepherd 395; царство лазов — клиент Рима (по памяти); с Абхазией"
+
+[[province]]
+id = "kartli"
+name = "Iberia"
+owner = "iberia"
+region = "caucasus"
+culture = "kartvelian"
+religion = "christian"
+parts = [{ countries = ["GEO"] }]
+source = "ammianus"
+note = "Картли: Валент и Шапур делят Иберию в 370-х (Аммиан, кн. 27, 30); христианство при Мириане III — по памяти"
+
+[[province]]
+id = "alania"
+name = "Alania"
+owner = "alans"
+region = "caucasus"
+culture = "iranian"
+religion = "pagan"
+parts = [{ countries = ["RUS"], lon_min = 36.0, lat_max = 46.0 }]
+source = "shepherd_395"
+note = "«Alans» у Shepherd 395 к северу от Кавказа: Кубань, Ставрополь, Терек, Дагестан; аланы Дона покорены гуннами около 370 г. — в tanais (по памяти)"
+
+# ================================================================ Mauri
+
+[[province]]
+id = "mauri"
+name = "Mauri"
+owner = "berbers"
+region = "mauri"
+culture = "berber"
+religion = "pagan"
+parts = [{ countries = ["MAR"], lat_min = 29.0 }]
+source = "shepherd_395"
+note = "«Mauretanians» за пределами Тингитаны — Атлас и атлантические равнины"
+
+[[province]]
+id = "gaetuli"
+name = "Gaetuli"
+owner = "berbers"
+region = "mauri"
+culture = "berber"
+religion = "pagan"
+parts = [{ countries = ["DZA"], lat_min = 32.0 }]
+source = "shepherd_395"
+note = "Высокие плато и Сахарский Атлас южнее лимеса; Сахара — вне охвата"
+
+# ================================================================ Armenia and Eranshahr
+
+[[province]]
+id = "armenia"
+name = "Armenia"
+owner = "armenia"
+region = "armenia"
+culture = "armenian"
+religion = "christian"
+parts = [{ countries = ["ARM"] }, { countries = ["TUR"], lon_min = 39.6, lat_min = 38.25 }, { countries = ["AZE"], lon_max = 46.2, lat_max = 39.9 }]
+source = "shepherd_395"
+note = "Царство Аршакидов (Пап, убит в 374/375 г. — по памяти) между Римом и Персией; с Нахичеванью"
+
+[[province]]
+id = "arzanene"
+name = "Arzanene et Nisibis"
+owner = "sassanids"
+region = "eranshahr"
+culture = "armenian"
+religion = "christian"
+parts = [{ countries = ["TUR"], lon_min = 40.5, lat_max = 38.3 }, { countries = ["SYR"], lon_min = 40.5 }, { countries = ["IRQ"], lon_max = 44.0, lat_min = 36.6 }]
+source = "shepherd_395"
+note = "Нисибис, Сингара и Пять областей за Тигром — к Персии по миру 363 г. — по памяти; язык и вера — армяне и сирийцы, приближение"
+
+[[province]]
+id = "adiabene"
+name = "Adiabene et Ninive"
+owner = "sassanids"
+region = "eranshahr"
+culture = "aramaic"
+religion = "zoroastrian"
+parts = [{ countries = ["IRQ"], lat_min = 34.8 }]
+source = "shepherd_395"
+note = "Арбела, Мосул; христиане-сирийцы многочисленны — вера большинства по памяти"
+
+[[province]]
+id = "asorestan"
+name = "Asorestan"
+owner = "sassanids"
+region = "eranshahr"
+culture = "aramaic"
+religion = "zoroastrian"
+parts = [{ countries = ["IRQ"], lon_min = 41.0, lat_min = 32.0, exclude_names = ["Al-Rutba"] }]
+source = "shepherd_395"
+note = "Ктесифон — столица Сасанидов; Савад — кандидат в Irrigated (§11e), открытого числа нет — правило 1"
+
+[[province]]
+id = "mesene"
+name = "Mesene"
+owner = "sassanids"
+region = "eranshahr"
+culture = "aramaic"
+religion = "zoroastrian"
+parts = [{ countries = ["IRQ"], lon_min = 44.5, lat_max = 32.0 }]
+source = "shepherd_395"
+note = "Низовья Тигра и Евфрата; кандидат в Irrigated (§11e) — правило 1"
+
+[[province]]
+id = "khuzestan"
+name = "Khuzistan"
+owner = "sassanids"
+region = "eranshahr"
+culture = "persian"
+religion = "zoroastrian"
+parts = [{ countries = ["IRN"], lon_min = 47.5, lon_max = 50.6, lat_min = 29.9, lat_max = 33.0 }]
+source = "shepherd_395"
+note = "Сузиана; кандидат в Irrigated (§11e, Wenke 1975–76) — правило 1"
+
+[[province]]
+id = "media"
+name = "Media"
+owner = "sassanids"
+region = "eranshahr"
+culture = "persian"
+religion = "zoroastrian"
+parts = [{ countries = ["IRN"], lon_max = 49.8, lat_min = 32.5, lat_max = 36.5 }]
+source = "shepherd_395"
+note = "Загрос до края Иранского нагорья (план §3): Экбатана, Керманшах, Луристан"
+
+[[province]]
+id = "atropatene"
+name = "Atropatene"
+owner = "sassanids"
+region = "eranshahr"
+culture = "persian"
+religion = "zoroastrian"
+parts = [{ countries = ["IRN"], lon_max = 49.0, lat_min = 36.5 }]
+source = "shepherd_395"
+note = "Ганзак; спорная с Арменией"

@@ -140,6 +140,15 @@ def main() -> None:
     block_prov = np.array([k_of.get(x, -1) for x in owner_of])
     block_rugged = np.array([bdata[b].rugged_km2 / bdata[b].raster_km2 if bdata[b].raster_km2 > 0 else 0.0
                              for b in blocks["id"]])
+    # Lands whose source is a ceiling below Hills (owner's decision on §15a п. 4) turn sparse by the
+    # provinces' subarctic and polar share, the coldest first.
+    e0 = np.zeros(5)
+    for t in ("Arable", "Hills", "Steppe", "Desert"):
+        e0[TYPES.index(t)] = density.E0[t][0]
+    sparse = density.sparse_lands(obs, top, e0, dcfg["calibration"]["sparse_below"]) & set(order)
+    inp = block_prov >= 0
+    cold = (np.bincount(block_prov[inp], weights=(blocks["area"] * blocks["cold"])[inp], minlength=len(pids))
+            / np.bincount(block_prov[inp], weights=blocks["area"][inp], minlength=len(pids)))
 
     # A land is calibrated only where the scenario covers it whole (owner's decision on §11b п. 1):
     # at least `min_cover` of its area lies in the scenario's provinces of the land. A land covered
@@ -171,7 +180,8 @@ def main() -> None:
     def classify(dens, method, **variant):
         """Classes and densities of the provinces. `variant` (density.calibrate) — the rule variants
         measured for the owner (plan §13b); the working rules use none of them."""
-        cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method, **variant)
+        cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method,
+                                         sparse=sparse, cold=cold, **variant)
         for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
             if plands[pid] in how_land:
                 mine = block_prov == k
@@ -315,7 +325,9 @@ def main() -> None:
         elif land in how_land:
             how = f"{top[land]['y']:.1f}, покрыта частью → класс провинции — ближайший к плотности её блоков в {how_land[land]}"
         elif ceiling[land] is not None:
-            how = f"{ceiling[land]:.1f}" + (" (ниже холмов: источник — нижняя граница)" if ceiling[land] < dens[H] else "")
+            how = f"{ceiling[land]:.1f}" + ("" if ceiling[land] >= dens[H] else
+                                            " (ниже холмов: позже — меньше половины холмов → потолок, редкая земля — Steppe, холодные первыми)"
+                                            if land in sparse else " (ниже холмов: источник — нижняя граница)")
         elif land in top and top[land].get("opened", True):
             how = f"{top[land]['y']:.1f}, покрыта частью → §4"
         else:
@@ -327,6 +339,9 @@ def main() -> None:
                 dv, cv, _ = variants[(a, method)]
                 cp, pp, _ = populate(dv, cv)
                 c = float(cp[m].sum())
+                if not m.any():  # a land of the scenario whose share no province holds by majority
+                    row += ["0.00", "—", "—"]
+                    continue
                 ref = top[land]["y"] if land in top else None
                 res = f"{100 * (c / area[m].sum() - ref) / ref:+.1f} %" if ref else "—"
                 fl = float(pp[m].sum()) / c
