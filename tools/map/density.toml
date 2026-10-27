@@ -6,7 +6,10 @@
 # `density` — people per km² over the region as the source draws it (a range); `population` —
 # millions, divided by the map's area of the region (sources whose regions are modern countries).
 # `land` — observations of one land in different years; the envelope keeps the highest (E0 П1:
-# capacity is a property of the land, not of the year).
+# capacity is a property of the land, not of the year). Their regions must be one land: at most
+# 10 % of the area of their union differs (density.py checks it).
+# `opened = false` — the source is «по памяти»: the land is not calibrated (owner's rule 1, §11a).
+# `fit = false` — a sub-land of a land the fit already has: for the calibration only.
 
 [[obs]]
 id = "italy_165"
@@ -31,7 +34,7 @@ source = "Scheidel 2007, там же (Gallia et Germania)"
 
 [[obs]]
 id = "britain_165"
-land = "britain"
+land = "britain_roman"
 region = "britain_roman"
 density = [9.0, 13.0]
 source = "Scheidel 2007, там же"
@@ -102,7 +105,7 @@ source = "Russell 1972, там же (France/Low countries)"
 
 [[obs]]
 id = "british_isles_1340"
-land = "britain"
+land = "british_isles"
 region = "british_isles"
 population = [5.0, 5.0]
 source = "Russell 1972, там же (British Isles)"
@@ -117,7 +120,54 @@ source = "Russell 1972, там же (Greece/Balkans)"
 id = "steppe_nomads"
 region = "steppe_pontic"
 density = [0.5, 2.0]
+opened = false
 source = "Khazanov A., Nomads and the Outside World (1994), гл. 1: плотность кочевников степи 0,5–2/км² — по памяти (E0 П1)"
+
+# Sub-lands of Italy (owner's decision on §11a, п. 1: lands finer where the scenario is played).
+# Malanima's boundary: the Centre-North reaches the southern borders of Tuscany, Umbria and the
+# Marche, without Lazio; the South-Islands is the rest. His 1300 split follows Russell's shares by
+# area («per il 1300 si è fatto riferimento alla distribuzione percentuale per aree proposta da
+# Russell»).
+
+[[obs]]
+id = "italy_cn_1300"
+fit = false
+land = "italy_cn"
+region = "italy_cn"
+population = [7.75, 7.75]
+source = "Malanima P., L'economia italiana (il Mulino, 2002), Appendice, табл. A.3 и A.4 (в нынешних границах; плотность 48,1 — табл. A.6) — открыл (appendice_malanima.pdf, mulino.it); то же — Federico G., Malanima P., EHR 57 (2004), с. 437–464, табл. 4 — открыл"
+
+[[obs]]
+id = "italy_cn_1330"
+fit = false
+land = "italy_cn"
+region = "italy_cn"
+population = [8.0, 8.0]
+source = "Malanima 2002, там же, табл. A.4 (по десятилетиям; 1330 — наибольшее до чумы)"
+
+[[obs]]
+id = "italy_si_1300"
+fit = false
+land = "italy_si"
+region = "italy_si"
+population = [4.75, 4.75]
+source = "Malanima 2002, там же, табл. A.3 (Юг и острова, с Корсикой и Мальтой; плотность 31,9 — табл. A.6)"
+
+[[obs]]
+id = "tuscany_1300"
+fit = false
+land = "tuscany"
+region = "tuscany"
+population = [1.045, 1.045]
+source = "Malanima 2002, там же, табл. A.4 (Тоскана в нынешних границах)"
+
+[[obs]]
+id = "tuscany_1330"
+fit = false
+land = "tuscany"
+region = "tuscany"
+population = [1.1, 1.1]
+source = "Malanima 2002, там же, табл. A.4 (1330 — наибольшее до чумы)"
 
 # Regions: unions of parts; a part takes blocks of the listed countries whose representative
 # point passes the box, optionally by name, by size, or by the block's dry share.
@@ -128,6 +178,39 @@ parts = [{ countries = ["ITA", "SMR", "VAT"] }]
 [regions.italy_islands]
 parts = [{ countries = ["ITA", "SMR", "VAT", "MLT"] },
          { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+
+[regions.italy_cn]
+# Piemonte, Valle d'Aosta, Lombardia, Trentino-Alto Adige, Veneto, Friuli-Venezia Giulia,
+# Liguria, Emilia-Romagna, Toscana, Umbria, Marche — by their provinces — and San Marino.
+parts = [{ countries = ["ITA"], names = [
+    "Alessandria", "Asti", "Biella", "Cuneo", "Novara", "Torino", "Verbano-Cusio-Ossola", "Vercelli",
+    "Aosta",
+    "Bergamo", "Brescia", "Como", "Cremona", "Lecco", "Lodi", "Mantova", "Milano", "Monza e della Brianza",
+    "Pavia", "Sondrio", "Varese",
+    "Bolzano", "Trento",
+    "Belluno", "Padova", "Rovigo", "Treviso", "Venezia", "Verona", "Vicenza",
+    "Gorizia", "Pordenone", "Trieste", "Udine",
+    "Genova", "Imperia", "La Spezia", "Savona",
+    "Bologna", "Ferrara", "Forli'-Cesena", "Modena", "Parma", "Piacenza", "Ravenna", "Reggio nell'Emilia", "Rimini",
+    "Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara", "Pisa", "Pistoia", "Prato", "Siena",
+    "Perugia", "Terni",
+    "Ancona", "Ascoli Piceno", "Fermo", "Macerata", "Pesaro e Urbino"] },
+         { countries = ["SMR"] }]
+
+[regions.italy_si]
+parts = [{ countries = ["ITA", "VAT", "MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+minus = ["italy_cn"]
+
+[regions.tuscany]
+parts = [{ countries = ["ITA"], names = ["Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara",
+                                        "Pisa", "Pistoia", "Prato", "Siena"] }]
+
+[regions.italy_alps]
+# The Italian provinces wholly in the Alps: of the provinces north of 45.5° N, those whose rugged
+# share (step 1: relief ≥ 300 m in a window of 5) is at least 0.95 — measured 0.99–1.00; the next
+# one, Lecco, is 0.86.
+parts = [{ countries = ["ITA"], names = ["Aosta", "Sondrio", "Verbano-Cusio-Ossola", "Bolzano", "Trento", "Belluno"] }]
 
 [regions.iberia]
 parts = [{ countries = ["ESP", "PRT", "AND"] }]
@@ -183,6 +266,23 @@ parts = [{ countries = ["TUN"] },
 
 [regions.steppe_pontic]
 parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, lat_min = 44.0, lat_max = 52.0, min_dry = 0.5 }]
+
+# Lands for the calibration (plan §11a, method (А)). A land is the land of an observation (its
+# envelope) unless it is named here with a `region` of its own: such a land has no opened
+# ceiling and takes the §4 class (owner's rule 1). `within` nests a land in another: the inner
+# land is settled first, and the outer one meets its own ceiling with the units left.
+[lands.italy_alps]
+region = "italy_alps"
+within = "italy_cn"
+
+[lands.tuscany]
+within = "italy_cn"
+
+# The lands of each scenario that its own sources cover whole. A land the scenario covers only
+# in part is not calibrated on that part (the part need not have the land's mean): its provinces
+# take the §4 class, as rule 1. The scenario's provinces are calibrated at its layout; here, blocks.
+[scenarios.milan_1477]
+lands = ["italy_cn", "tuscany", "italy_alps", "italy_si"]
 
 # The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
 # параметры классификации, выбирать по невязке подгонки»).

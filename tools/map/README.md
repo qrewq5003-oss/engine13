@@ -30,7 +30,8 @@ conda run -n engine13-map python -I -X utf8 -m pytest -p no:cacheprovider tools/
   - `report.txt` — замер.
 - `preview.py` рисует превью: тип земли по блокам и прибрежные блоки по морским зонам.
 - `density.py` подбирает плотности по типам земли вместе с классификацией по регионам
-  с источниками (`density.toml`). Замер — `<cache>/out/density/report.txt`, план §11.
+  с источниками (`density.toml`) и калибрует классы по потолкам земель (`calibrate`).
+  Замер — `<cache>/out/density/report.txt`, план §11 и §11b.
 
 ## Файлы
 

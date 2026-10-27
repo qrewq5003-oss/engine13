@@ -38,12 +38,14 @@ import shapely  # noqa: E402
 
 import base  # noqa: E402
 import geo  # noqa: E402
+import rules  # noqa: E402
 
 TYPES = ["Irrigated", "Hills", "Desert", "Steppe", "Arable"]
 I, H, D, S, A = range(5)
 FITTED = [A, H, S]
 E0 = {"Arable": (40.0, 26.0, 42.0), "Hills": (12.0, 8.0, 19.0), "Steppe": (1.0, 0.5, 2.0),
       "Desert": (0.5, 0.1, 1.0)}
+LAND_REGION_DIFF = 0.10
 
 
 def read_blocks(base_dir: pathlib.Path):
@@ -194,6 +196,9 @@ def main() -> None:
 
     blocks = read_blocks(cache / "out" / "base")
     masks = {r: region_mask(blocks, v["parts"]) for r, v in cfg["regions"].items()}
+    for r, v in cfg["regions"].items():
+        for other in v.get("minus", []):
+            masks[r] &= ~masks[other]
     irrigated = np.any(np.stack([masks[r] for r in scan["irrigated_regions"]]), axis=0)
     members = np.any(np.stack(list(masks.values())), axis=0)
     obs = [o for o in cfg["obs"]]
@@ -203,15 +208,24 @@ def main() -> None:
         o["lo"], o["hi"], o["y"], o["area"] = lo, hi, (lo + hi) / 2, a
     # The envelope: a land's capacity is the highest density it is documented to have held
     # before a plague (E0 П1: «ёмкость — свойство земли, не года»); of the observations of one
-    # land, only the highest is kept.
-    top = {}
+    # land, only the highest is kept. Observations are one land only if their regions are one
+    # land: they may differ by at most LAND_REGION_DIFF of the area of their union.
+    top, land_regions = {}, collections.defaultdict(set)
     for o in obs:
         g = o.get("land", o["id"])
+        land_regions[g].add(o["region"])
         if g not in top or o["y"] > top[g]["y"]:
             top[g] = o
-    sets = {"все наблюдения": [o for o in obs if o["region"] not in scan["irrigated_regions"]],
-            "огибающая (наибольшая плотность земли)": [o for o in top.values()
-                                                      if o["region"] not in scan["irrigated_regions"]]}
+    for g, regions in land_regions.items():
+        union = np.any(np.stack([masks[r] for r in regions]), axis=0)
+        common = np.all(np.stack([masks[r] for r in regions]), axis=0)
+        diff = blocks["area"][union & ~common].sum() / blocks["area"][union].sum()
+        if diff > LAND_REGION_DIFF:
+            raise SystemExit(f"land {g}: its observations' regions {sorted(regions)} differ by {100 * diff:.0f} % of the area")
+    # Sub-lands (`fit = false`) split a land the fit already has; they serve the calibration only.
+    fit = [o for o in obs if o["region"] not in scan["irrigated_regions"] and o.get("fit", True)]
+    sets = {"все наблюдения": fit,
+            "огибающая (наибольшая плотность земли)": [o for o in top.values() if o in fit]}
     wet_obs = [o for o in obs if o["region"] in scan["irrigated_regions"]]
     areas = cell_type_areas(blocks, members, irrigated, src, sources, scan, rep)
 
@@ -268,62 +282,128 @@ def main() -> None:
                     f"{b['e0'][k]:.1f} | {100 * (b['e0'][k] - y[k]) / y[k]:+.0f} % | "
                     f"{100 * sh[H]:.0f} % | {100 * sh[D]:.0f} % | {100 * sh[S]:.0f} % | {100 * sh[A]:.0f} % |")
             rep()
-    calibrated(top, masks, blocks, cache / "out" / "base", scan, rep)
+    calibration(cfg, obs, top, masks, blocks, cache / "out" / "base", rep)
     (out / "report.txt").write_text("\n".join(rep.lines) + "\n", encoding="utf-8")
     rep.step("done")
 
 
-def calibrated(top, masks, blocks, base_dir, scan, rep):
-    """The alternative to fitting densities: E0 densities stay, and the class of each block is
-    chosen so that the region holds its documented ceiling. Desert blocks (BW ≥ ½) stay Desert;
-    of the rest, the most rugged become Hills, or — below the Hills density — the driest
-    become Steppe, until the region's capacity meets the source."""
+def calibrate(area, rugged, dry, desert, target, dens) -> np.ndarray:
+    """Classes (TYPES indices) of the units of one land — blocks, or a scenario's provinces —
+    whose capacity comes closest to `target` people at the densities `dens` (indexed by type).
+    Desert units stay Desert. Of the rest, the most rugged become Hills first; a land sparser
+    than Hills everywhere is all Hills, and its driest (then flattest) units become Steppe
+    first. Units are whole: a unit changes class only while that brings the capacity closer
+    to the target, so a land of few units keeps a residual."""
+    cls = np.where(desert, D, A)
+    rest = np.flatnonzero(~desert)
+    if target < area[rest].sum() * dens[H] + area[desert].sum() * dens[D]:
+        cls[rest] = H
+        to, order = S, rest[np.lexsort((rugged[rest], -dry[rest]))]
+    else:
+        to, order = H, rest[np.argsort(-rugged[rest], kind="stable")]
+    cap = float(area @ dens[cls])
+    for k in order:
+        after = cap - area[k] * (dens[cls[k]] - dens[to])
+        if abs(after - target) >= abs(cap - target):
+            break
+        cls[k], cap = to, after
+    return cls
+
+
+def rule_class(rugged, bw, dry, p: rules.Params) -> np.ndarray:
+    """Plan §4 for a land without an opened ceiling (owner's rule 1, §11a): relief, then climate."""
+    return np.array([TYPES.index(rules.land_type(r, b, d - b, p)) for r, b, d in zip(rugged, bw, dry)], dtype=np.int64)
+
+
+def shares_row(area, cls) -> str:
+    tot = area.sum()
+    return " | ".join(f"{100 * area[cls == t].sum() / tot:.0f} %" for t in (H, S, D, A))
+
+
+def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
+    """The alternative to fitting densities (plan §11a, method (А)): E0 densities stay, and each
+    unit's class is chosen so that its land holds its documented ceiling. Lands whose ceiling
+    is only «по памяти» take the §4 class instead (rule 1). Measured on blocks: the scenarios'
+    provinces are calibrated with the same function at their layouts."""
     with (base_dir / "blocks.csv").open(encoding="utf-8") as f:
         rows = {r["id"]: r for r in csv.DictReader(f)}
     rugged = np.array([float(rows[b]["rugged_km2"]) / max(float(rows[b]["raster_km2"]), 1e-9) for b in blocks["id"]])
-    d_a, d_h, d_s, d_d = (E0[t][0] for t in ("Arable", "Hills", "Steppe", "Desert"))
-    rep("# Альтернатива: плотности E0 без изменений, класс провинции — по потолку региона")
+    p = rules.Params.from_toml(tomllib.loads((HERE / "params.toml").read_text(encoding="utf-8")))
+    area, bw, dry = blocks["area"], blocks["bw"], blocks["dry"]
+    dens = np.zeros(5)
+    for t in ("Arable", "Hills", "Steppe", "Desert"):
+        dens[TYPES.index(t)] = E0[t][0]
+    wet = [o for o in obs if o["region"] in cfg["scan"]["irrigated_regions"]]
+    dens[I] = wet[0]["y"] if wet else 0.0
+    lands = cfg.get("lands", {})
+
+    def region_of(land):
+        return lands[land]["region"] if land in lands and "region" in lands[land] else top[land]["region"]
+
+    def opened(land):
+        return land in top and top[land].get("opened", True)
+
+    rep("# Альтернатива (А): плотности E0 без изменений, класс — по потолку земли")
     rep()
-    rep("Блоки с BW ≥ ½ — Desert; из остальных самые изрезанные (шаг 1: перепад ≥ 300 м в окне 5) становятся "
-        "Hills, а если нужна плотность ниже холмов — самые сухие становятся Steppe, пока ёмкость региона не "
-        "сравняется с источником. Плотности — E0 (Arable 40, Hills 12, Steppe 1, Desert 0,5).")
+    rep("Desert — блоки с BW ≥ ½. Из остальных первыми становятся Hills самые изрезанные (шаг 1: перепад "
+        "≥ 300 м в окне 5); если земля реже холмов везде — все Hills, и первыми становятся Steppe самые сухие. "
+        "Единица меняет класс, пока это приближает ёмкость к потолку. Плотности — E0 (Arable 40, Hills 12, "
+        "Steppe 1, Desert 0,5). Земля без открытого источника потолка — по правилу §4 (правило 1). "
+        "Здесь единицы — блоки; на раскладке сценария — его провинции.")
     rep()
-    rep("| земля (наблюдение) | источник, чел./км² | достигнуто | невязка | Hills по рельефу | Hills после | Steppe после | Desert |")
-    rep("|---|---|---|---|---|---|---|---|")
-    for o in sorted(top.values(), key=lambda o: -o["y"]):
-        if o["region"] in scan["irrigated_regions"]:
+    rep("## Каждая земля отдельно")
+    rep()
+    rep("| земля (наблюдение) | источник, чел./км² | способ | достигнуто | невязка | Hills по рельефу | Hills | Steppe | Desert | Arable |")
+    rep("|---|---|---|---|---|---|---|---|---|---|")
+    for land, o in sorted(top.items(), key=lambda kv: -kv[1]["y"]):
+        if o["region"] in cfg["scan"]["irrigated_regions"]:
             continue
-        m = np.flatnonzero(masks[o["region"]])
-        area = blocks["area"][m]
-        total = area.sum()
-        desert = blocks["bw"][m] >= 0.5
-        cls = np.where(desert, D, A)
-        need = o["y"] * total - d_d * area[desert].sum()
-        rest = ~desert
-        if need < d_h * area[rest].sum():  # below Hills everywhere: Hills, then the driest as Steppe
-            cls[rest] = H
-            for k in np.argsort(-blocks["dry"][m] - 1e-3 * rugged[m], kind="stable"):
-                if not rest[k]:
-                    continue
-                cap = d_h * area[(cls == H)].sum() + d_s * area[(cls == S)].sum()
-                if cap <= need:
-                    break
-                cls[k] = S
-        else:  # Arable, then the most rugged as Hills
-            for k in np.argsort(-rugged[m], kind="stable"):
-                if not rest[k]:
-                    continue
-                cap = d_a * area[cls == A].sum() + d_h * area[cls == H].sum()
-                if cap - (d_a - d_h) * area[k] < need:
-                    break
-                cls[k] = H
-        cap = d_a * area[cls == A].sum() + d_h * area[cls == H].sum() + d_s * area[cls == S].sum() + d_d * area[desert].sum()
-        got = cap / total
-        terrain = area[rest & (rugged[m] >= 0.5)].sum() / total
-        rep(f"| {o.get('land', o['id'])} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "
-            f"{100 * terrain:.0f} % | {100 * area[cls == H].sum() / total:.0f} % | {100 * area[cls == S].sum() / total:.0f} % | "
-            f"{100 * area[desert].sum() / total:.0f} % |")
+        m = masks[o["region"]]
+        if opened(land):
+            cls = calibrate(area[m], rugged[m], dry[m], bw[m] >= 0.5, o["y"] * area[m].sum(), dens)
+            how = "калибровка"
+        else:
+            cls = rule_class(rugged[m], bw[m], dry[m], p)
+            how = "§4 (правило 1)"
+        got = float(area[m] @ dens[cls]) / area[m].sum()
+        rep(f"| {land} ({o['id']}) | {o['lo']:.1f}–{o['hi']:.1f} | {how} | {got:.1f} | {100 * (got - o['y']) / o['y']:+.0f} % | "
+            f"{100 * area[m][rugged[m] >= p.hills_share].sum() / area[m].sum():.0f} % | {shares_row(area[m], cls)} |")
     rep()
+
+    for name, sc in cfg.get("scenarios", {}).items():
+        # Inner lands first: an outer land meets its own ceiling with what the inner ones left.
+        depth = {}
+        for land in sc["lands"]:
+            d, x = 0, land
+            while x in lands and "within" in lands[x]:
+                d, x = d + 1, lands[x]["within"]
+            depth[land] = d
+        order = sorted(sc["lands"], key=lambda land: (-depth[land], sc["lands"].index(land)))
+        cls = np.full(len(area), -1)
+        for land in order:
+            m = masks[region_of(land)]
+            free = m & (cls < 0)
+            if opened(land):
+                fixed = m & (cls >= 0)
+                target = top[land]["y"] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
+                cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+            else:
+                cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
+        rep(f"## Сценарий {name}")
+        rep()
+        rep("| земля | внутри | источник, чел./км² | способ | площадь, км² | достигнуто | невязка | Hills | Steppe | Desert | Arable |")
+        rep("|---|---|---|---|---|---|---|---|---|---|---|")
+        for land in sc["lands"]:
+            m = masks[region_of(land)]
+            got = float(area[m] @ dens[cls[m]]) / area[m].sum()
+            within = lands.get(land, {}).get("within", "—")
+            if opened(land):
+                o = top[land]
+                src, how, res = f"{o['lo']:.1f}–{o['hi']:.1f}", "калибровка", f"{100 * (got - o['y']) / o['y']:+.0f} %"
+            else:
+                src, how, res = "нет открытого", "§4 (правило 1)", "—"
+            rep(f"| {land} | {within} | {src} | {how} | {area[m].sum():,.0f} | {got:.1f} | {res} | {shares_row(area[m], cls[m])} |")
+        rep()
 
 
 if __name__ == "__main__":
