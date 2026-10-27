@@ -1,0 +1,71 @@
+# Source data of the map pipeline (plan docs/engine2_map.md §5). Downloaded by fetch.py into
+# the cache outside the repository (default D:\map-cache\src); only this list lives here.
+# `sha256` is of the file as stored in the cache. A WFS response is normalised by fetch.py
+# (features sorted, timestamp dropped) before hashing, so the hash pins the data, not the
+# server's framing.
+
+[ne_land]
+url = "https://naciscdn.org/naturalearth/10m/physical/ne_10m_land.zip"
+file = "ne_10m_land.zip"
+license = "public domain (Natural Earth)"
+sha256 = "e547d749445eaa0964aba76738090ec88f5e63c4585122170f98c67a7ea922dc"
+
+[ne_lakes]
+url = "https://naciscdn.org/naturalearth/10m/physical/ne_10m_lakes.zip"
+file = "ne_10m_lakes.zip"
+license = "public domain (Natural Earth)"
+sha256 = "0803a06f9c3cb4671d89b68c48b142aad9366ba40f665245e12a913fbc61722a"
+
+[ne_rivers]
+url = "https://naciscdn.org/naturalearth/10m/physical/ne_10m_rivers_lake_centerlines.zip"
+file = "ne_10m_rivers_lake_centerlines.zip"
+license = "public domain (Natural Earth)"
+sha256 = "ded71b01870855ccfe19b51f2ec14c9bb48fae23c0e9f3c11974d426433b5c38"
+
+[cgaz_adm2]
+url = "https://github.com/wmgeolab/geoBoundaries/raw/main/releaseData/CGAZ/geoBoundariesCGAZ_ADM2.zip"
+file = "geoBoundariesCGAZ_ADM2.zip"
+license = "CC BY 4.0 (geoBoundaries, Runfola et al. 2020)"
+sha256 = "598f6c70893d60a35b96eb0dc31fd1c045e69177e4b8203407710306f6585de1"
+
+# Where CGAZ's ADM2 is a coarser level than the country's second-level units, the country's
+# own geoBoundaries release replaces it (params.toml [base.refine]): Italian provinces, Greek
+# municipalities, German districts. Pinned to the release commit 9469f09.
+
+[gb_ita_adm3]
+url = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/ITA/ADM3/geoBoundaries-ITA-ADM3_simplified.geojson"
+file = "geoBoundaries-ITA-ADM3_simplified.geojson"
+license = "CC BY 3.0 (ISTAT, via geoBoundaries)"
+sha256 = "6ebb3baf5744d16fcc37ed417ce4b62321833577b62b8b927d0bc71d640b6e87"
+
+[gb_grc_adm3]
+url = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/GRC/ADM3/geoBoundaries-GRC-ADM3_simplified.geojson"
+file = "geoBoundaries-GRC-ADM3_simplified.geojson"
+license = "CC0 1.0 (Wikimedia Commons, via geoBoundaries)"
+sha256 = "72179d50a8a85aa9fecf996761f905db9e8a59f4eb882f8481f88651692b7e18"
+
+[gb_deu_adm3]
+url = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/DEU/ADM3/geoBoundaries-DEU-ADM3_simplified.geojson"
+file = "geoBoundaries-DEU-ADM3_simplified.geojson"
+license = "Datenlizenz Deutschland – Namensnennung 2.0 (BKG, via geoBoundaries)"
+sha256 = "a711f65d1eafa075e24c9efe0b37af042567bea00e7b2b6d9e49d63f0a421ade"
+
+[etopo_2022_60s]
+url = "https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/60s/60s_surface_elev_netcdf/ETOPO_2022_v1_60s_N90W180_surface.nc"
+file = "ETOPO_2022_v1_60s_N90W180_surface.nc"
+license = "public domain (NOAA NCEI)"
+sha256 = "74bbc5c23e85188d93f0beba8116babf69e1a8f160e8dc9f053bf8df01b197b6"
+
+[koppen_beck_2018]
+url = "https://ndownloader.figshare.com/files/12407516"
+file = "Beck_KG_V1.zip"
+license = "CC BY 4.0 (Beck et al. 2018, Scientific Data 5:180214)"
+md5 = "69594689d3cdd8323a0f74ce658125a1"
+sha256 = "a33f861200e32e80d5615bba1350ceeb8b0f5e6a6ffdc18b2d1715a3293d7b4b"
+
+[iho_sea_areas]
+url = "https://geo.vliz.be/geoserver/MarineRegions/wfs?service=WFS&version=1.0.0&request=GetFeature&typeName=MarineRegions:iho&outputFormat=application/json"
+file = "iho_sea_areas.geojson"
+license = "CC BY 4.0 (Flanders Marine Institute, IHO Sea Areas v3, marineregions.org)"
+wfs = true
+sha256 = "c7b88bcc3f591c792d6650415fa3b742afb5c5203b5a2417827a49b0dec1695e"

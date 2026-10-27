@@ -1,0 +1,352 @@
+# Observations for the density fit (density.py): the population of a region at its Malthusian
+# ceiling, with the source (E0 rule: no row without a source; «по памяти» is marked). The fit
+# chooses the land-type densities, and the classification parameters with them, that best
+# reproduce these densities from the map's own areas by land type.
+#
+# `density` — people per km² over the region as the source draws it (a range); `population` —
+# millions, divided by the map's area of the region (sources whose regions are modern countries).
+# `land` — observations of one land in different years; the envelope keeps the highest (E0 П1:
+# capacity is a property of the land, not of the year). Their regions must be one land: at most
+# 10 % of the area of their union differs (density.py checks it).
+# `opened = false` — the source is «по памяти»: the land is not calibrated (owner's rule 1, §11a).
+# `fit = false` — a sub-land of a land the fit already has: for the calibration only.
+
+[[obs]]
+id = "italy_165"
+land = "italy"
+region = "italy_islands"
+density = [26.0, 29.0]
+source = "Scheidel 2007, CEHGRW, с. 38–86, таблица по провинциям 165 г. (по McEvedy–Jones и Frier) — открыл (вторичное) через tabulae-geographicae.de (2017-06-06); «средняя оценка» Италии 39–42"
+
+[[obs]]
+id = "hispania_165"
+land = "iberia"
+region = "iberia"
+density = [12.0, 15.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "gaul_165"
+land = "gaul_france"
+region = "gaul"
+density = [13.0, 18.0]
+source = "Scheidel 2007, там же (Gallia et Germania)"
+
+[[obs]]
+id = "britain_165"
+land = "britain_roman"
+region = "britain_roman"
+density = [9.0, 13.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "danube_165"
+region = "danube"
+density = [8.0, 9.0]
+source = "Scheidel 2007, там же (Danubian region)"
+
+[[obs]]
+id = "greece_165"
+region = "greece"
+density = [16.0, 19.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "asia_minor_165"
+region = "asia_minor"
+density = [14.0, 15.0]
+source = "Scheidel 2007, там же"
+
+[[obs]]
+id = "syria_165"
+region = "syria_settled"
+density = [36.0, 43.0]
+source = "Scheidel 2007, там же (Syria and Cyprus; площадь источника ≈ 139 тыс. км² — заселённая Сирия без пустыни)"
+
+[[obs]]
+id = "egypt_165"
+region = "egypt_valley"
+density = [167.0, 200.0]
+source = "Scheidel 2007, там же (площадь источника ≈ 30 тыс. км² — долина и Дельта)"
+
+[[obs]]
+id = "n_africa_165"
+region = "n_africa"
+density = [17.0, 19.0]
+source = "Scheidel 2007, там же (North Africa)"
+
+[[obs]]
+id = "italy_1300"
+land = "italy"
+region = "italy"
+population = [12.0, 13.0]
+source = "Munro J. H., лекции (Toronto, 2013), §9: Италия ок. 1300 г. ≈ 12,5 млн у потолка — E0 П1, открыл"
+
+[[obs]]
+id = "italy_1340"
+land = "italy"
+region = "italy"
+population = [10.0, 10.0]
+source = "Russell J. C., «Population in Europe», Fontana Economic History of Europe I (1972), с. 25–71, табл. 1340 г. — открыл (вторичное) через Fordham Medieval Sourcebook"
+
+[[obs]]
+id = "iberia_1340"
+land = "iberia"
+region = "iberia"
+population = [9.0, 9.0]
+source = "Russell 1972, там же (Spain/Portugal)"
+
+[[obs]]
+id = "france_lc_1340"
+land = "gaul_france"
+region = "france_lc"
+population = [19.0, 19.0]
+source = "Russell 1972, там же (France/Low countries)"
+
+[[obs]]
+id = "british_isles_1340"
+land = "british_isles"
+region = "british_isles"
+population = [5.0, 5.0]
+source = "Russell 1972, там же (British Isles)"
+
+[[obs]]
+id = "balkans_1340"
+region = "balkans"
+population = [6.0, 6.0]
+source = "Russell 1972, там же (Greece/Balkans)"
+
+[[obs]]
+id = "steppe_nomads"
+region = "steppe_pontic"
+density = [0.5, 2.0]
+opened = false
+source = "Khazanov A., Nomads and the Outside World (1994), гл. 1: плотность кочевников степи 0,5–2/км² — по памяти (E0 П1)"
+
+# Sub-lands of Italy (owner's decision on §11a, п. 1: lands finer where the scenario is played).
+# Malanima's boundary: the Centre-North reaches the southern borders of Tuscany, Umbria and the
+# Marche, without Lazio; the South-Islands is the rest. His 1300 split follows Russell's shares by
+# area («per il 1300 si è fatto riferimento alla distribuzione percentuale per aree proposta da
+# Russell»).
+
+[[obs]]
+id = "italy_cn_1300"
+fit = false
+land = "italy_cn"
+region = "italy_cn"
+population = [7.75, 7.75]
+source = "Malanima P., L'economia italiana (il Mulino, 2002), Appendice, табл. A.3 и A.4 (в нынешних границах; плотность 48,1 — табл. A.6) — открыл (appendice_malanima.pdf, mulino.it); то же — Federico G., Malanima P., EHR 57 (2004), с. 437–464, табл. 4 — открыл"
+
+[[obs]]
+id = "italy_cn_1330"
+fit = false
+land = "italy_cn"
+region = "italy_cn"
+population = [8.0, 8.0]
+source = "Malanima 2002, там же, табл. A.4 (по десятилетиям; 1330 — наибольшее до чумы)"
+
+[[obs]]
+id = "italy_si_1300"
+fit = false
+land = "italy_si"
+region = "italy_si"
+population = [4.75, 4.75]
+source = "Malanima 2002, там же, табл. A.3 (Юг и острова, с Корсикой и Мальтой; плотность 31,9 — табл. A.6)"
+
+# The South and the Islands inside the South-Islands: Malanima has no split for 1300, and for
+# 1400 and 1500 he distributes the population by the areas' shares in 1600 («per il 1400 e per il
+# 1500 si è distribuita la popolazione sulla base dei valori percentuali delle diverse zone nel
+# 1600»). The same method for 1300: densities of 1600 (табл. A.7: Sud 42.4, Isole 27.5) over the
+# map's areas (90,484 and 58,909 km²) give the South 70.31 % of the South-Islands (and 5.457 M in
+# 1600 against 5.445 of табл. A.3).
+
+[[obs]]
+id = "italy_sud_1300"
+fit = false
+land = "italy_sud"
+region = "italy_sud"
+population = [3.340, 3.340]
+source = "Malanima 2002, приложение: табл. A.3 (Юг с островами 4,75 млн в 1300 г.), разделено по долям 1600 г. (табл. A.7) — его же способ для 1400 и 1500 гг."
+
+[[obs]]
+id = "italy_isole_1300"
+fit = false
+land = "italy_isole"
+region = "italy_isole"
+population = [1.410, 1.410]
+source = "Malanima 2002, там же (острова: Сицилия, Сардиния, Корсика, Мальта)"
+
+[[obs]]
+id = "tuscany_1300"
+fit = false
+land = "tuscany"
+region = "tuscany"
+population = [1.045, 1.045]
+source = "Malanima 2002, там же, табл. A.4 (Тоскана в нынешних границах)"
+
+[[obs]]
+id = "tuscany_1330"
+fit = false
+land = "tuscany"
+region = "tuscany"
+population = [1.1, 1.1]
+source = "Malanima 2002, там же, табл. A.4 (1330 — наибольшее до чумы)"
+
+# Regions: unions of parts; a part takes blocks of the listed countries whose representative
+# point passes the box, optionally by name, by size, or by the block's dry share.
+
+[regions.italy]
+parts = [{ countries = ["ITA", "SMR", "VAT"] }]
+
+[regions.italy_islands]
+parts = [{ countries = ["ITA", "SMR", "VAT", "MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+
+[regions.italy_cn]
+# Piemonte, Valle d'Aosta, Lombardia, Trentino-Alto Adige, Veneto, Friuli-Venezia Giulia,
+# Liguria, Emilia-Romagna, Toscana, Umbria, Marche — by their provinces — and San Marino.
+parts = [{ countries = ["ITA"], names = [
+    "Alessandria", "Asti", "Biella", "Cuneo", "Novara", "Torino", "Verbano-Cusio-Ossola", "Vercelli",
+    "Aosta",
+    "Bergamo", "Brescia", "Como", "Cremona", "Lecco", "Lodi", "Mantova", "Milano", "Monza e della Brianza",
+    "Pavia", "Sondrio", "Varese",
+    "Bolzano", "Trento",
+    "Belluno", "Padova", "Rovigo", "Treviso", "Venezia", "Verona", "Vicenza",
+    "Gorizia", "Pordenone", "Trieste", "Udine",
+    "Genova", "Imperia", "La Spezia", "Savona",
+    "Bologna", "Ferrara", "Forli'-Cesena", "Modena", "Parma", "Piacenza", "Ravenna", "Reggio nell'Emilia", "Rimini",
+    "Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara", "Pisa", "Pistoia", "Prato", "Siena",
+    "Perugia", "Terni",
+    "Ancona", "Ascoli Piceno", "Fermo", "Macerata", "Pesaro e Urbino"] },
+         { countries = ["SMR"] }]
+
+[regions.italy_si]
+parts = [{ countries = ["ITA", "VAT", "MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+minus = ["italy_cn"]
+
+[regions.italy_isole]
+# Malanima's Isole: Sicily, Sardinia, Corsica and the minor islands with Malta.
+parts = [{ countries = ["ITA"], names = ["Agrigento", "Caltanissetta", "Catania", "Enna", "Messina", "Palermo", "Ragusa",
+                                        "Siracusa", "Trapani", "Cagliari", "Nuoro", "Oristano", "Sassari", "Sud Sardegna"] },
+         { countries = ["MLT"] },
+         { countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+
+[regions.italy_sud]
+# Malanima's Sud: Lazio, Abruzzo, Molise, Campania, Puglia, Basilicata, Calabria.
+parts = [{ countries = ["ITA", "VAT"] }]
+minus = ["italy_cn", "italy_isole"]
+
+[regions.tuscany]
+parts = [{ countries = ["ITA"], names = ["Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara",
+                                        "Pisa", "Pistoia", "Prato", "Siena"] }]
+
+[regions.italy_alps]
+# The Italian provinces wholly in the Alps: of the provinces north of 45.5° N, those whose rugged
+# share (step 1: relief ≥ 300 m in a window of 5) is at least 0.95 — measured 0.99–1.00; the next
+# one, Lecco, is 0.86.
+parts = [{ countries = ["ITA"], names = ["Aosta", "Sondrio", "Verbano-Cusio-Ossola", "Bolzano", "Trento", "Belluno"] }]
+
+[regions.iberia]
+parts = [{ countries = ["ESP", "PRT", "AND"] }]
+
+[regions.gaul]
+parts = [{ countries = ["FRA"], exclude_names = ["Corse-du-Sud", "Haute-Corse"] },
+         { countries = ["BEL", "LUX", "NLD", "CHE"] }]
+
+[regions.france_lc]
+parts = [{ countries = ["FRA", "BEL", "LUX", "NLD"] }]
+
+[regions.britain_roman]
+# England, Wales and the Lowlands south of the Forth–Clyde line, without Northern Ireland.
+parts = [{ countries = ["GBR"], lon_min = -5.5, lat_max = 55.8 },
+         { countries = ["GBR"], lon_max = -5.5, lat_max = 54.0 }]
+
+[regions.british_isles]
+parts = [{ countries = ["GBR", "IRL"] }]
+
+[regions.danube]
+# Raetia to Moesia and Dacia: the Danubian lands south of the river, Transdanubia, and Dacia
+# (Transylvania, Banat, Oltenia) — approximated by boxes on Hungary and Romania.
+parts = [{ countries = ["AUT", "SVN", "HRV", "BIH", "SRB", "XKX", "MNE", "MKD", "BGR"] },
+         { countries = ["HUN"], lon_max = 19.0 },
+         { countries = ["ROU"], lon_max = 24.5 },
+         { countries = ["ROU"], lon_min = 24.5, lon_max = 26.0, lat_min = 45.5 }]
+
+[regions.greece]
+parts = [{ countries = ["GRC", "ALB"] }]
+
+[regions.balkans]
+# Greece and the Balkans of 1340 with Thrace (European Turkey).
+parts = [{ countries = ["GRC", "ALB", "MKD", "BGR", "SRB", "XKX", "MNE", "BIH"] },
+         { countries = ["TUR"], lon_max = 29.05, lat_min = 40.4 }]
+
+[regions.asia_minor]
+parts = [{ countries = ["TUR"], lon_min = 29.05 },
+         { countries = ["TUR"], lon_max = 29.05, lat_max = 40.4 }]
+
+[regions.syria_settled]
+parts = [{ countries = ["SYR", "LBN", "ISR", "PSE", "JOR", "CYP"], max_bw = 0.5 }]
+
+[regions.egypt_valley]
+# The valley and the Delta: Egypt's own small units (299 blocks under 500 km², 32.6 thousand
+# km²; the source's area is ≈ 30 thousand km²). The desert is in large units of its own.
+parts = [{ countries = ["EGY"], max_area_km2 = 500.0 }]
+
+[regions.n_africa]
+parts = [{ countries = ["TUN"] },
+         { countries = ["DZA"], lat_min = 34.0 },
+         { countries = ["MAR"], lat_min = 33.5 },
+         { countries = ["LBY"], lon_max = 15.5, lat_min = 31.0 }]
+
+[regions.steppe_pontic]
+parts = [{ countries = ["UKR", "RUS", "KAZ"], lon_min = 30.0, lon_max = 56.0, lat_min = 44.0, lat_max = 52.0, min_dry = 0.5 }]
+
+# Lands for the calibration (plan §11a, method (А)). A land is the land of an observation (its
+# envelope) unless it is named here with a `region` of its own: such a land has no opened
+# ceiling and takes the §4 class (owner's rule 1). `within` nests a land in another: the inner
+# land is settled first, and the outer one meets its own ceiling with the units left.
+[lands.italy_alps]
+region = "italy_alps"
+within = "italy_cn"
+
+[lands.tuscany]
+within = "italy_cn"
+
+[lands.italy_sud]
+within = "italy_si"
+
+[lands.italy_isole]
+within = "italy_si"
+
+# The lands of each scenario that its own sources cover whole. A land the scenario covers only
+# in part is not calibrated on that part (the part need not have the land's mean): its provinces
+# take the §4 class, as rule 1. The scenario's provinces are calibrated at its layout; here, blocks.
+[scenarios.milan_1477]
+lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
+# Population of the start year by land (millions): the fill at start (plan §7) next to the fill
+# at which engine2's growth equals the plague loss.
+start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407, italy_sud = 2.395, italy_isole = 1.012 }
+start_population_source = "Malanima 2002, приложение: табл. A.4 по десятилетиям (Центр-Север 4,95 млн в 1470 г. и 5,20 в 1480; Тоскана 469 и 493 тыс.) и табл. A.3 (Юг с островами 3,075 млн в 1450 г. и 3,69 в 1500) — линейно к 1477 г.; Юг и острова — доли 1600 г. (табл. A.7), способ Маланимы для 1400 и 1500 гг."
+
+# Arable density for the calibration. First — the proposal for the engine (owner via the reviewer,
+# plan §11c): the densest land with an opened source at the finer split, the Centre-North,
+# 50.0 people per km² in 1330 (Malanima 2002, табл. A.4). Then E0's 40, for comparison. The other
+# densities stay at E0.
+[calibration]
+arable = [50.0, 40.0]
+# How a land's provinces get their class (plan §12b): "flip" or "nearest" (density.calibrate_nearest).
+method = "flip"
+
+# The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
+# параметры классификации, выбирать по невязке подгонки»).
+[scan]
+relief_m = [150.0, 200.0, 300.0, 400.0, 500.0, 600.0, 800.0, 1000.0]
+relief_window_cells = [5, 9]
+# Irrigated valleys are regions of the source, not a climate class: Egypt's cultivated land.
+irrigated_regions = ["egypt_valley"]
+steppe_share = [0.5, 0.65, 0.8, 0.95]
+# Desert density is not fitted: no region with a source is mostly desert. E0 П1 value.
+desert_density = 0.5
+# Pseudo-provinces for the province-scale fit: blocks grouped by this lon/lat grid.
+grid_deg = [1.0, 2.0]

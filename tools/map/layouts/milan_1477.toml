@@ -1,0 +1,966 @@
+# The layout of milan_1477 (plan docs/engine2_map.md §3, §8 п. 2): block → province → owner at
+# the start (1477). A province is a union of blocks of the common base; `parts` select blocks the
+# way density.toml selects regions (countries, names, lon/lat boxes, `coastal`). Provinces are
+# read in order and a block goes to the first province that selects it, so a catch-all comes last.
+# Every province names its source; where blocks cut a historical border, `note` records the
+# approximation (E0 rule: no row without a source; «по памяти» is marked).
+#
+# Culture and religion — coarse groups (owner's decision §9a п. 2): italian, french (Occitan and
+# French), german, greek, south_slavic, albanian, arabic; catholic, orthodox.
+
+scenario = "milan_1477"
+start_year = 1477
+# The actors of the scenario by E0 (docs/engine2_e0.md §1, §6.3): the 13 polities, the Ottomans
+# (at war with Venice at the start) and France (external force). Owners outside this list are new
+# actors with land — the owner's decision.
+e0_actors = ["milan", "venice", "florence", "naples", "papacy", "genoa", "ferrara", "mantua", "siena", "urbino",
+             "bologna", "savoy", "sicily", "ottomans", "france"]
+# The lands calibrated in this scenario and the start population by land — density.toml,
+# [scenarios.milan_1477] (plan §11b, §11d).
+
+# Historical areas: the `region` of a province on the map, and the scenario's regions (the
+# target of «unite»; E7 may add others).
+[regions]
+lombardia = "Lombardia"
+piemonte = "Piemonte"
+savoia = "Savoia"
+liguria = "Liguria"
+corsica = "Corsica"
+veneto = "Veneto"
+emilia = "Emilia"
+romagna = "Romagna"
+marche = "Marche"
+umbria = "Umbria"
+toscana = "Toscana"
+lazio = "Lazio"
+regno_napoli = "Regno di Napoli"
+sicilia = "Sicilia"
+sardegna = "Sardegna"
+stato_da_mar = "Stato da Mar"
+francia = "Francia"
+svizzera = "Svizzera"
+austria = "Austria"
+balcani = "Balcani"
+
+# The seat of each owner on this map (the actors' `capital` of E7). Off the map — a stand-in on
+# the owner's edge: France (Paris) — Dauphiné, Hungary (Buda) — Croatia, the Ottomans
+# (Constantinople) — Albania, their front with Venice in 1477. Savoy's court — Chambéry (по
+# памяти); Montferrat's Casale lies in the block of Alessandria (Milan), so — Asti's block.
+[capitals]
+milan = "milano"
+venice = "venezia"
+florence = "firenze"
+naples = "napoli"
+papacy = "roma"
+genoa = "liguria"
+ferrara = "ferrara"
+mantua = "mantova"
+siena = "siena"
+urbino = "urbino"
+bologna = "bologna"
+savoy = "savoia"
+sicily = "palermo"
+montferrat = "monferrato"
+lucca = "lucca"
+provence = "provenza"
+france = "delfinato"
+swiss = "svizzera"
+austria = "tirolo"
+hungary = "croazia"
+ragusa = "ragusa"
+ottomans = "albania_ottomana"
+
+[sources]
+shepherd_italy = "Shepherd W. R., Historical Atlas (1911), с. 90, «Italy about 1494» — открыл (UT PCL, shepherd-c-090-091.jpg)"
+shepherd_swiss = "Shepherd 1911, с. 91, «The Swiss Confederation, 1291–1513» — открыл (там же)"
+shepherd_ottoman = "Shepherd 1911, с. 93, «The Ottoman Empire, 1451–1481» (даты — годы перехода к Османам) — открыл (UT PCL, shepherd-c-093.jpg)"
+shepherd_france = "Shepherd 1911, с. 84, «England and France, 1455–1494» (даты — годы перехода к короне) — открыл (UT PCL, shepherd-c-084.jpg)"
+e0_genoa = "E0 §5.6, §6.3: Генуя на старте — вассал Милана (синьория Сфорца 1464–1478), условно до открытия Epstein 1996 — решение владельца"
+
+# ---------------------------------------------------------------- Duchy of Milan
+
+[[province]]
+id = "milano"
+name = "Milano"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Milano", "Monza e della Brianza", "Lodi"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "pavia"
+name = "Pavia"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Pavia"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "como"
+name = "Como"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Como", "Lecco", "Varese"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "cremona"
+name = "Cremona"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Cremona"] }]
+source = "shepherd_italy"
+note = "Крема — венецианская (с 1449), в блоке провинции Кремона; приближение"
+
+[[province]]
+id = "parma"
+name = "Parma e Piacenza"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Parma", "Piacenza"] }]
+source = "shepherd_italy"
+note = "Корреджо и мелкие синьории у Реджо — вне блоков"
+
+[[province]]
+id = "novara"
+name = "Novara"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Novara"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "alessandria"
+name = "Alessandria e Tortona"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Alessandria"] }]
+source = "shepherd_italy"
+note = "Казале и Акви — Монферрат, Нови — генуэзский; в блоке провинции Алессандрия, большая часть — Милан; приближение"
+
+[[province]]
+id = "valtellina"
+name = "Valtellina"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Sondrio"] }]
+source = "shepherd_italy"
+note = "С Бормио и Кьявенной; к Граубюндену — с 1512 (Shepherd, с. 91)"
+
+[[province]]
+id = "ossola"
+name = "Ossola e Ticino"
+owner = "milan"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Verbano-Cusio-Ossola"] },
+         { countries = ["CHE"], names = ["Lugano", "Mendrisio", "Locarno", "Bellinzona", "Vallemaggia", "Riviera", "Blenio"] }]
+source = "shepherd_swiss"
+note = "Беллинцона — миланская до 1500, Лугано и Локарно — до 1512; Левентина — у Ури (Shepherd, с. 91)"
+
+# ---------------------------------------------------------------- Genoa (vassal of Milan)
+
+[[province]]
+id = "liguria"
+name = "Genova e Riviere"
+owner = "genoa"
+region = "liguria"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Genova", "La Spezia", "Savona", "Imperia", "Massa Carrara"] }]
+source = "e0_genoa"
+note = "Владение — Shepherd 1911, с. 90; Финале — маркизы дель Карретто; Луниджана (Масса и Каррара — Маласпина, Понтремоли — Милан, Фивиццано — Флоренция) ни у кого не большинство, отнесена сюда; приближение"
+
+[[province]]
+id = "corsica"
+name = "Corsica"
+owner = "genoa"
+region = "corsica"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
+source = "shepherd_italy"
+note = "«To Genoa» на карте 1494; власть на острове дробная — по памяти"
+
+# ---------------------------------------------------------------- Savoy
+
+[[province]]
+id = "torino"
+name = "Torino"
+owner = "savoy"
+region = "piemonte"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Torino"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "cuneo"
+name = "Cuneo e Mondovì"
+owner = "savoy"
+region = "piemonte"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Cuneo"] }]
+source = "shepherd_italy"
+note = "Маркизат Салуццо (самостоятельный) и Альба (Монферрат) — в блоке провинции Кунео; большая часть — Савойя; приближение"
+
+[[province]]
+id = "vercelli"
+name = "Vercelli e Biella"
+owner = "savoy"
+region = "piemonte"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Vercelli", "Biella"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "aosta"
+name = "Aosta"
+owner = "savoy"
+region = "piemonte"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Aosta"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "nizza"
+name = "Nizza"
+owner = "savoy"
+region = "savoia"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Alpes-Maritimes"] }, { countries = ["MCO"] }]
+source = "shepherd_italy"
+note = "Грас и Антиб (запад департамента, за Варом) — Прованс; Монако — Гримальди; приближение"
+
+[[province]]
+id = "savoia"
+name = "Savoia e Ginevra"
+owner = "savoy"
+region = "savoia"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Savoie", "Haute-Savoie"] }, { countries = ["CHE"], names = ["Genève"] }]
+source = "shepherd_swiss"
+note = "Женева — епископский город под влиянием Савойи; приближение"
+
+[[province]]
+id = "bresse"
+name = "Bresse e Vaud"
+owner = "savoy"
+region = "savoia"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Ain"] },
+         { countries = ["CHE"], names = ["Nyon", "Morges", "Lausanne", "Ouest lausannois", "Lavaux-Oron", "Gros-de-Vaud", "Jura-North Vaudois", "Broye-Vully", "Pays-d'Enhaut"] }]
+source = "shepherd_swiss"
+note = "Во — савойский до 1536; Грансон, Орб и Эшалан — у Берна и Фрибура с 1476 (Shepherd, с. 91); приближение"
+
+# ---------------------------------------------------------------- Montferrat
+
+[[province]]
+id = "monferrato"
+name = "Monferrato e Asti"
+owner = "montferrat"
+region = "piemonte"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Asti"] }]
+source = "shepherd_italy"
+note = "Асти с графством — Людовик Орлеанский (с 1387), остальное — Монферрат; столица Монферрата Казале — в блоке Алессандрии; приближение"
+
+# ---------------------------------------------------------------- Venice: Terraferma
+
+[[province]]
+id = "venezia"
+name = "Venezia e Trevigiano"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Venezia", "Treviso"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "padova"
+name = "Padova"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Padova"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "vicenza"
+name = "Vicenza"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Vicenza"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "verona"
+name = "Verona"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Verona"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "brescia"
+name = "Brescia"
+owner = "venice"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Brescia"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "bergamo"
+name = "Bergamo"
+owner = "venice"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Bergamo"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "belluno"
+name = "Belluno e Cadore"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Belluno"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "friuli"
+name = "Friuli"
+owner = "venice"
+region = "veneto"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Udine", "Pordenone"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "ravenna"
+name = "Ravenna"
+owner = "venice"
+region = "romagna"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Ravenna"] }]
+source = "shepherd_italy"
+note = "«Ravenna to Venice till 1509»; Фаэнца (Манфреди) и Луго (Эсте) — в блоке провинции Равенна, ни у кого не большинство; приближение"
+
+# ---------------------------------------------------------------- Venice: Stato da Mar
+
+[[province]]
+id = "istria"
+name = "Istria"
+owner = "venice"
+region = "stato_da_mar"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["SVN"], names = ["Koper / Capodistria", "Izola / Isola", "Piran / Pirano", "Ankaran / Ancarano"] },
+         { countries = ["HRV"], lon_max = 14.2, lat_min = 44.7 },
+         { countries = ["HRV"], lon_min = 14.3, lon_max = 14.45, lat_max = 45.0 }]
+source = "shepherd_italy"
+note = "С Кресом и Лошинем; графство Пазин в глубине Истрии — Габсбургов; культура — побережье, глубина полуострова славянская; приближение"
+
+[[province]]
+id = "dalmazia"
+name = "Dalmazia"
+owner = "venice"
+region = "stato_da_mar"
+culture = "south_slavic"
+religion = "catholic"
+parts = [{ countries = ["HRV"], coastal = true, lon_min = 14.65, lon_max = 16.8, lat_min = 43.0, lat_max = 44.85, exclude_names = ["Grad Senj", "Op?ina Karlobag", "Op?ina Starigrad", "Op?ina Posedarje", "Grad Novi Vinodolski"] },
+         { countries = ["HRV"], names = ["Grad Kor?ula", "Op?ina Vela Luka", "Op?ina Blato", "Op?ina Smokvica", "Op?ina Lumbarda", "Op?ina Su?uraj"] }]
+source = "shepherd_ottoman"
+note = "Венецианское побережье от Нина до Омиша с островами (Паг, Раб, Брач, Хвар, Вис, Корчула); Крк — Франкопаны до 1480; Велебитское побережье — Хорватия; глубинка — Хорватия (Венгрия); Shepherd помечен как спорный для Далмации — по каждому муниципалитету приближение"
+
+[[province]]
+id = "albania_veneta"
+name = "Albania veneta"
+owner = "venice"
+region = "stato_da_mar"
+culture = "albanian"
+religion = "catholic"
+parts = [{ countries = ["MNE"], names = ["Kotor Municipality", "Tivat Municipality", "Budva Municipality", "Bar Municipality", "Ulcinj Municipality"] },
+         { countries = ["ALB"], names = ["Shkodër", "Malësi e Madhe", "Pukë", "Tropojë", "Has", "Kukës", "Lezhë", "Mirditë", "Kurbin", "Krujë", "Mat", "Dibër", "Bulqizë", "Durrës"] }]
+source = "shepherd_ottoman"
+note = "Каттаро, Будва, Антивари, Дульчиньо, Скутари, Алессио, Дураццо — венецианские; Круя — венецианская до 1478, Скутари — до 1479; горная Албания — князья (Дукаджини), союзники Венеции, к Османам 1478–1479 — приближение «у Венеции»"
+
+[[province]]
+id = "corfu"
+name = "Corfù"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Corfu", "Paxos", "Parga"] }]
+source = "shepherd_ottoman"
+note = "С Паксосом и Паргой (венецианская на материке с 1401 — по памяти)"
+
+[[province]]
+id = "lepanto"
+name = "Lepanto"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Nafpaktia"] }]
+source = "shepherd_ottoman"
+
+[[province]]
+id = "modone"
+name = "Modone e Corone"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Pylos-Nestoras"] }]
+source = "shepherd_ottoman"
+
+[[province]]
+id = "nauplia"
+name = "Nauplia"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Nafplio"] }]
+source = "shepherd_ottoman"
+note = "Аргос — у Османов с 1463 — по памяти"
+
+[[province]]
+id = "malvasia"
+name = "Malvasia e Cerigo"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Monemvasia", "Kythira"] }]
+source = "shepherd_ottoman"
+
+[[province]]
+id = "creta"
+name = "Candia"
+owner = "venice"
+region = "stato_da_mar"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], lon_min = 23.4, lon_max = 26.4, lat_max = 35.8 }]
+source = "shepherd_ottoman"
+
+# ---------------------------------------------------------------- Ferrara, Mantua, Bologna, Urbino
+
+[[province]]
+id = "ferrara"
+name = "Ferrara e Polesine"
+owner = "ferrara"
+region = "emilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Ferrara", "Rovigo"] }]
+source = "shepherd_italy"
+note = "Полезине (Ровиго) — у Феррары до мира в Баньоло 1484, на карте 1494 уже венецианское — по памяти"
+
+[[province]]
+id = "modena"
+name = "Modena e Reggio"
+owner = "ferrara"
+region = "emilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Modena", "Reggio nell'Emilia"] }]
+source = "shepherd_italy"
+note = "Карпи (Пио), Мирандола (Пико), Корреджо — малые синьории в блоках; приближение"
+
+[[province]]
+id = "mantova"
+name = "Mantova"
+owner = "mantua"
+region = "lombardia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Mantova"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "bologna"
+name = "Bologna"
+owner = "bologna"
+region = "emilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Bologna"] }]
+source = "shepherd_italy"
+note = "Имола (Риарио, папский викарий с 1473) — в блоке провинции Болонья; приближение"
+
+[[province]]
+id = "urbino"
+name = "Urbino e Pesaro"
+owner = "urbino"
+region = "marche"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Pesaro e Urbino"] }]
+source = "shepherd_italy"
+note = "Пезаро — Костанцо Сфорца, Фано — папский; большая часть — Урбино; приближение"
+
+# ---------------------------------------------------------------- Tuscany
+
+[[province]]
+id = "firenze"
+name = "Firenze"
+owner = "florence"
+region = "toscana"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Firenze", "Prato", "Pistoia"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "pisa"
+name = "Pisa e Livorno"
+owner = "florence"
+region = "toscana"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Pisa", "Livorno"] }]
+source = "shepherd_italy"
+note = "Пьомбино с Эльбой — Аппиани, в блоке провинции Ливорно; приближение"
+
+[[province]]
+id = "arezzo"
+name = "Arezzo"
+owner = "florence"
+region = "toscana"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Arezzo"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "lucca"
+name = "Lucca"
+owner = "lucca"
+region = "toscana"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Lucca"] }]
+source = "shepherd_italy"
+note = "Гарфаньяна — у Эсте, в блоке провинции Лукка; приближение"
+
+[[province]]
+id = "siena"
+name = "Siena"
+owner = "siena"
+region = "toscana"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Siena", "Grosseto"] }]
+source = "shepherd_italy"
+
+# ---------------------------------------------------------------- States of the Church
+
+[[province]]
+id = "romagna"
+name = "Romagna"
+owner = "papacy"
+region = "romagna"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Forli'-Cesena", "Rimini"] }, { countries = ["SMR"] }]
+source = "shepherd_italy"
+note = "Римини — Малатеста, Форли — Орделаффи, папские викарии; Сан-Марино — республика; приближение «у папы»"
+
+[[province]]
+id = "marca"
+name = "Marca d'Ancona"
+owner = "papacy"
+region = "marche"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Ancona", "Macerata", "Fermo", "Ascoli Piceno"] }]
+source = "shepherd_italy"
+note = "Камерино — Варано, Сенигаллия — Джованни делла Ровере (с 1474 — по памяти), папские викарии"
+
+[[province]]
+id = "umbria"
+name = "Perugia e Spoleto"
+owner = "papacy"
+region = "umbria"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Perugia", "Terni"] }]
+source = "shepherd_italy"
+note = "Перуджа — Бальони, Читта-ди-Кастелло — Вителли, под папой"
+
+[[province]]
+id = "roma"
+name = "Roma e Patrimonio"
+owner = "papacy"
+region = "lazio"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Roma", "Viterbo", "Rieti"] }, { countries = ["VAT"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "campagna"
+name = "Campagna e Marittima"
+owner = "papacy"
+region = "lazio"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Frosinone", "Latina"] }]
+source = "shepherd_italy"
+note = "Фонди и Гаэта (юг Латины), Сора и Арпино (восток Фрозиноне) — Неаполь; большая часть — папская; приближение"
+
+# ---------------------------------------------------------------- Kingdom of Naples
+
+[[province]]
+id = "napoli"
+name = "Napoli e Terra di Lavoro"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Napoli", "Caserta"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "principato"
+name = "Principato"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Salerno", "Avellino", "Benevento"] }]
+source = "shepherd_italy"
+note = "Беневенто — папский анклав, в блоке провинции Беневенто; приближение"
+
+[[province]]
+id = "abruzzo"
+name = "Abruzzi"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["L'Aquila", "Teramo", "Pescara", "Chieti"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "capitanata"
+name = "Capitanata e Molise"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Foggia", "Campobasso", "Isernia"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "bari"
+name = "Terra di Bari"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Bari", "Barletta-Andria-Trani"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "otranto"
+name = "Terra d'Otranto"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Lecce", "Brindisi", "Taranto"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "basilicata"
+name = "Basilicata"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Potenza", "Matera"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "calabria_citra"
+name = "Calabria Citra"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Cosenza"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "calabria_ultra"
+name = "Calabria Ultra"
+owner = "naples"
+region = "regno_napoli"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Catanzaro", "Crotone", "Vibo Valentia", "Reggio di Calabria"] }]
+source = "shepherd_italy"
+
+# ---------------------------------------------------------------- Aragon: Sicily, Sardinia, Malta
+
+[[province]]
+id = "palermo"
+name = "Palermo e Trapani"
+owner = "sicily"
+region = "sicilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Palermo", "Trapani"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "agrigento"
+name = "Girgenti e Castrogiovanni"
+owner = "sicily"
+region = "sicilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Agrigento", "Caltanissetta", "Enna"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "messina"
+name = "Messina"
+owner = "sicily"
+region = "sicilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Messina"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "catania"
+name = "Val di Noto"
+owner = "sicily"
+region = "sicilia"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Catania", "Siracusa", "Ragusa"] }]
+source = "shepherd_italy"
+
+[[province]]
+id = "malta"
+name = "Malta"
+owner = "sicily"
+region = "sicilia"
+culture = "arabic"
+religion = "catholic"
+parts = [{ countries = ["MLT"] }]
+source = "shepherd_italy"
+note = "Мальта — часть Сицилийского королевства; язык — мальтийский (группа «арабская») — по памяти"
+
+[[province]]
+id = "cagliari"
+name = "Cagliari"
+owner = "sicily"
+region = "sardegna"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Cagliari", "Sud Sardegna"] }]
+source = "shepherd_italy"
+note = "Сардиния — отдельное королевство Арагонской короны; в сценарии один актор Арагона в Италии (E0: sicily) — приближение"
+
+[[province]]
+id = "sassari"
+name = "Logudoro e Arborea"
+owner = "sicily"
+region = "sardegna"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Sassari", "Nuoro", "Oristano"] }]
+source = "shepherd_italy"
+note = "Ористано — мятеж маркиза Леонардо Алагона 1470–1478 — по памяти; на старте у Арагона — приближение"
+
+# ---------------------------------------------------------------- Edges: France, Provence, the Swiss, Austria
+
+[[province]]
+id = "delfinato"
+name = "Dauphiné"
+owner = "france"
+region = "francia"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Isère", "Drôme", "Hautes-Alpes"] }]
+source = "shepherd_france"
+
+[[province]]
+id = "provenza"
+name = "Provence"
+owner = "provence"
+region = "francia"
+culture = "french"
+religion = "catholic"
+parts = [{ countries = ["FRA"], names = ["Bouches-du-Rhône", "Var", "Alpes-de-Haute-Provence", "Vaucluse"] }]
+source = "shepherd_france"
+note = "Графство Прованс — Рене Анжуйский, к короне с 1481 (дата на карте); Конта-Венессен и Авиньон (Воклюз) — папские, Оранж — княжество; приближение"
+
+[[province]]
+id = "svizzera"
+name = "Confederazione"
+owner = "swiss"
+region = "svizzera"
+culture = "german"
+religion = "catholic"
+parts = [{ countries = ["CHE"] }]
+source = "shepherd_swiss"
+note = "Восемь кантонов с союзниками: Фрибур и Золотурн (кантоны с 1481), Вале, Граубюнден, Невшатель, Базель и Шаффхаузен (с 1501) — одной провинцией; приближение"
+
+[[province]]
+id = "tirolo"
+name = "Tirolo"
+owner = "austria"
+region = "austria"
+culture = "german"
+religion = "catholic"
+parts = [{ countries = ["AUT"], names = ["Landeck", "Imst", "Reutte", "Innsbruck-Stadt", "Innsbruck-Land", "Schwaz", "Kufstein", "Kitzbühel", "Lienz"] }, { countries = ["ITA"], names = ["Bolzano"] }]
+source = "shepherd_italy"
+note = "Графство Тироль — эрцгерцог Сигизмунд; Лиенц — графы Горицкие; Куфштайн и Китцбюэль — Бавария до 1504 — по памяти; приближение"
+
+[[province]]
+id = "trento"
+name = "Trento"
+owner = "austria"
+region = "austria"
+culture = "italian"
+religion = "catholic"
+parts = [{ countries = ["ITA"], names = ["Trento"] }]
+source = "shepherd_italy"
+note = "«B. of Trent» — епископство под защитой Тироля, у владельца графства; Роверето и Рива — венецианские (с 1416 — по памяти); приближение"
+
+[[province]]
+id = "carniola"
+name = "Carniola, Gorizia e Trieste"
+owner = "austria"
+region = "austria"
+culture = "south_slavic"
+religion = "catholic"
+parts = [{ countries = ["SVN"] }, { countries = ["ITA"], names = ["Gorizia", "Trieste"] }]
+source = "shepherd_italy"
+note = "Крайна и Триест — Фридрих III; графство Горица — граф Леонгард до 1500 — по памяти; Штирийская часть Словении — Габсбурги; приближение"
+
+# ---------------------------------------------------------------- Edges: Hungary, Ragusa, the Ottomans
+
+[[province]]
+id = "ragusa"
+name = "Ragusa"
+owner = "ragusa"
+region = "balcani"
+culture = "south_slavic"
+religion = "catholic"
+parts = [{ countries = ["HRV"], names = ["Grad Dubrovnik", "Op?ina ?upa dubrova?ka", "Op?ina Konavle", "Op?ina Dubrova?ko primorje", "Op?ina Ston", "Op?ina Janjina", "Op?ina Orebi?", "Op?ina Trpanj", "Op?ina Mljet", "Op?ina Lastovo"] }]
+source = "shepherd_ottoman"
+note = "Республика, данник Османов — по памяти"
+
+[[province]]
+id = "erzegovina"
+name = "Erzegovina"
+owner = "ottomans"
+region = "balcani"
+culture = "south_slavic"
+religion = "orthodox"
+parts = [{ countries = ["BIH"], names = ["Herzegovina-Neretva Canton", "West Herzegovina Canton"] },
+         { countries = ["MNE"], names = ["Herceg Novi Municipality"] },
+         { countries = ["HRV"], lon_min = 16.85, lat_max = 43.45 }]
+source = "shepherd_ottoman"
+note = "«Herzegovina 1465»; Херцег-Нови — у Херцеговичей до 1482, Макарское приморье и Неретва — к Османам постепенно; приближение; вера большинства — по памяти"
+
+[[province]]
+id = "croazia"
+name = "Croazia"
+owner = "hungary"
+region = "balcani"
+culture = "south_slavic"
+religion = "catholic"
+parts = [{ countries = ["HRV"], lon_max = 16.4 }, { countries = ["HRV"], lat_max = 44.0 }, { countries = ["BIH"], names = ["Una-Sana Canton"] }]
+source = "shepherd_ottoman"
+note = "Королевство Хорватия под венгерской короной; Риека и Кастав — Габсбурги (с 1466 — по памяти), Крк — Франкопаны до 1480, Бихач — Венгрия до 1592; Славония — вне охвата; приближение"
+
+[[province]]
+id = "bosnia"
+name = "Bosnia"
+owner = "ottomans"
+region = "balcani"
+culture = "south_slavic"
+religion = "catholic"
+parts = [{ countries = ["BIH"] }]
+source = "shepherd_ottoman"
+note = "«Bosnia 1463»; Яйце и Сребреник — венгерские бановины (с 1463–1464 — по памяти); вера большинства — смешанная (католики, православные, Боснийская церковь) — по памяти"
+
+[[province]]
+id = "albania_ottomana"
+name = "Albania ottomana"
+owner = "ottomans"
+region = "balcani"
+culture = "albanian"
+religion = "orthodox"
+parts = [{ countries = ["ALB"] }]
+source = "shepherd_ottoman"
+note = "Влёра, Берат, Гирокастра, Эльбасан — у Османов; Бутринт — венецианский; вера большинства юга — православная — по памяти"
+
+[[province]]
+id = "epiro"
+name = "Epiro e Acarnania"
+owner = "ottomans"
+region = "balcani"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], names = ["Arta", "Nikolaos Skoufas", "Georgios Karaiskakis", "Central Tzoumerka", "North Tzoumerka", "Preveza", "Ziros", "Souli", "Igoumenitsa", "Filiates", "Ioannina", "Zitsa", "Dodoni", "Pogoni", "Konitsa", "Zagori", "Metsovo", "Agrinio", "Missolonghi", "Thermo", "Xiromero", "Amfilochia", "Aktio-Vonitsa"] }]
+source = "shepherd_ottoman"
+note = "Янина — с 1430, Арта — с 1449; Воница — Токко до 1479 — по памяти; Левкада, Кефалония, Итака, Закинф (Токко) — вне охвата"
+
+[[province]]
+id = "morea"
+name = "Morea"
+owner = "ottomans"
+region = "balcani"
+culture = "greek"
+religion = "orthodox"
+parts = [{ countries = ["GRC"], lon_min = 21.0, lon_max = 23.3, lat_min = 36.2, lat_max = 38.25, exclude_names = ["Megara"] }]
+source = "shepherd_ottoman"
+note = "«Morea 1460»; венецианские порты — свои провинции"

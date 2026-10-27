@@ -1,0 +1,23 @@
+# Environment of the map pipeline. The geometry and raster engines (geos, proj, gdal) are
+# pinned with the Python packages: the byte-for-byte output depends on them. Built and checked
+# on win-64, 2026-10-27.
+name: engine13-map
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12.16
+  - numpy=2.5.4
+  - pandas=3.1.0
+  - shapely=2.2.0
+  - geos=3.14.1
+  - pyproj=3.8.0
+  - proj=9.9.0
+  - pyogrio=0.13.0
+  - geopandas=1.2.0
+  - rasterio=1.5.2
+  - libgdal-core=3.13.3
+  - libgdal-netcdf=3.13.3
+  - libnetcdf=4.10.1
+  - matplotlib-base=3.11.2
+  - pytest=9.1.1
