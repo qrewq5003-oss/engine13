@@ -37,6 +37,7 @@ from density import A, D, H, I, S, TYPES  # noqa: E402
 REPO = HERE.parent.parent
 SIMPLIFY_DEG = 0.005  # the interface polygons (E5): ~0.5 km, below a pixel of the map at Italy's scale
 STUB_FILL = 0.5       # population of a province of no land with a start population — a stub until E4
+METHODS = ("flip", "nearest")
 
 
 def read_base(base_dir: pathlib.Path):
@@ -136,15 +137,20 @@ def main() -> None:
     dry = bw + np.array([facts[pid].shares["bs"] for pid in pids])
     no_land = np.array([plands[pid] is None for pid in pids])
 
+    # Every arable density of [calibration] by both methods: "flip" turns whole provinces to
+    # Hills, the most rugged first, while that brings the land closer to its ceiling; "nearest"
+    # gives each province the class nearest to its continuous density (density.calibrate_nearest).
     variants = {}
     for arable in dcfg["calibration"]["arable"]:
         dens = np.zeros(5)
         for t in ("Arable", "Hills", "Steppe", "Desert"):
             dens[TYPES.index(t)] = density.E0[t][0]
         dens[A] = arable
-        cls = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p)
-        cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p)
-        variants[arable] = (dens, cls)
+        for method in METHODS:
+            cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method)
+            cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p)
+            d[no_land] = dens[cls[no_land]]
+            variants[(arable, method)] = (dens, cls, d)
 
     # Start population (§11d): one fill per land; a land's number covers its whole region, so the
     # share of it this scenario's provinces of the land carry is the share of the region's
@@ -174,8 +180,8 @@ def main() -> None:
         pop[stub] = STUB_FILL * cap[stub]
         return cap, np.round(pop), stub
 
-    work = dcfg["calibration"]["arable"][0]
-    dens, cls = variants[work]
+    work = (dcfg["calibration"]["arable"][0], dcfg["calibration"]["method"])
+    dens, cls, _ = variants[work]
     cap, pop, stub = populate(dens, cls)
 
     # --- checks of §7
@@ -210,8 +216,12 @@ def main() -> None:
     # --- the measure
     rep("# Раскладка " + args.scenario)
     rep()
-    rep(f"Провинций — {len(pids)}, блоков — {len(asg)}, площадь — {area.sum():,.0f} км². Тип земли — по пашне {work:g}; "
-        f"рядом — {', '.join(f'{a:g}' for a in variants if a != work)}. Равновесие роста и чумы движка — {balance:.2f}.")
+    rep(f"Провинций — {len(pids)}, блоков — {len(asg)}, площадь — {area.sum():,.0f} км². Тип земли — пашня {work[0]:g}, "
+        f"способ «{work[1]}»; рядом — остальные пашни и способы. Равновесие роста и чумы движка — {balance:.2f}.")
+    rep()
+    rep("Способы калибровки: «flip» — целые провинции становятся Hills, самые изрезанные первыми, пока это приближает "
+        "землю к потолку; «nearest» — у провинции непрерывная плотность d = A − (A − H)·min(1, k·изрезанность), "
+        "k такое, что земля держит потолок, и класс — ближайший к d.")
     rep()
     rep("## Приёмка (план §7)")
     rep()
@@ -234,36 +244,57 @@ def main() -> None:
 
     rep("## Земли (невязка ёмкости и заполненность на старте)")
     rep()
-    rep("| земля | внутри | потолок, чел./км² | провинций | площадь, км² | " +
-        " | ".join(f"ёмкость при {a:g}, млн | невязка | заполн." for a in variants) + " |")
-    rep("|---|---|---|---|---|" + "---|---|---|" * len(variants))
+    arables = dcfg["calibration"]["arable"]
+    rep("| земля | внутри | потолок, чел./км² | провинций | площадь, км² | способ | " +
+        " | ".join(f"ёмкость при {a:g}, млн | невязка | заполн." for a in arables) + " |")
+    rep("|---|---|---|---|---|---|" + "---|---|---|" * len(arables))
     for land in sc["lands"]:
         m = member[land]
-        row = [land, lands_cfg.get(land, {}).get("within", "—"),
-               f"{ceiling[land]:.1f}" if ceiling[land] is not None else "§4 (правило 1)", str(int(m.sum())), f"{area[m].sum():,.0f}"]
-        for a, (dv, cv) in variants.items():
-            cp, pp, _ = populate(dv, cv)
-            c = float(cp[m].sum())
-            res = f"{100 * (c / area[m].sum() - ceiling[land]) / ceiling[land]:+.0f} %" if ceiling[land] is not None else "—"
-            fl = float(pp[m].sum()) / c
-            row += [f"{c / 1e6:.2f}", res, f"{fl:.2f}" + (" — выше" if fl > balance else "")]
-        rep("| " + " | ".join(row) + " |")
+        for method in METHODS:
+            row = [land, lands_cfg.get(land, {}).get("within", "—"),
+                   f"{ceiling[land]:.1f}" if ceiling[land] is not None else "§4 (правило 1)", str(int(m.sum())),
+                   f"{area[m].sum():,.0f}", method]
+            for a in arables:
+                dv, cv, _ = variants[(a, method)]
+                cp, pp, _ = populate(dv, cv)
+                c = float(cp[m].sum())
+                res = f"{100 * (c / area[m].sum() - ceiling[land]) / ceiling[land]:+.1f} %" if ceiling[land] is not None else "—"
+                fl = float(pp[m].sum()) / c
+                row += [f"{c / 1e6:.2f}", res, f"{fl:.2f}" + (" — выше" if fl > balance else "")]
+            rep("| " + " | ".join(row) + " |")
     rep()
     rep(f"Население на старте: {sc.get('start_population_source', '—')}")
     rep()
 
     rep("## Провинции")
     rep()
-    rep(f"| id | название | владелец | земля | тип при {work:g} | " + " | ".join(f"тип при {a:g}" for a in variants if a != work) +
+    combos = [(a, m) for a in arables for m in METHODS]
+    rep(f"| id | название | владелец | земля | тип (пашня {work[0]:g}, {work[1]}) | d при {work[0]:g}, чел./км² | " +
+        " | ".join(f"{a:g} {m}" for a, m in combos) +
         " | площадь, км² | изрезано | прибрежная | соседи | по морю | ёмкость, тыс. | население, тыс. | заполн. |")
-    rep("|---|---|---|---|---|" + "---|" * (len(variants) - 1) + "---|---|---|---|---|---|---|---|")
+    rep("|---|---|---|---|---|---|" + "---|" * len(combos) + "---|---|---|---|---|---|---|---|")
     for k, pid in enumerate(pids):
         pc, f = provs_cfg[pid], provs[pid]
-        other = " | ".join(TYPES[variants[a][1][k]] for a in variants if a != work)
+        other = " | ".join(TYPES[variants[c][1][k]] for c in combos)
         fl = pop[k] / cap[k]
-        rep(f"| {pid} | {pc['name']} | {pc['owner']} | {plands[pid] or '—'} | {f.land} | {other} | {f.area_km2:,} | "
+        rep(f"| {pid} | {pc['name']} | {pc['owner']} | {plands[pid] or '—'} | {f.land} | "
+            f"{variants[(work[0], 'nearest')][2][k]:.1f} | {other} | {f.area_km2:,} | "
             f"{100 * rugged[k]:.0f} % | {'да' if f.coastal else 'нет'} | {len(f.neighbours)} | {len(f.sea_neighbours)} | "
             f"{cap[k] / 1e3:,.0f} | {pop[k] / 1e3:,.0f}{' (заглушка)' if stub[k] else ''} | {fl:.2f}{' — выше' if fl > balance else ''} |")
+    rep()
+
+    def brief(pid):
+        k = k_of[pid]
+        kinds = "/".join(TYPES[variants[(work[0], m)][1][k]] for m in METHODS)
+        return (f"{pid} ({kinds}, d {variants[(work[0], 'nearest')][2][k]:.1f}, население {pop[k] / 1e3:,.0f} тыс."
+                f"{', заглушка' if stub[k] else ''})")
+
+    rep(f"**Провинции-государства** (одна провинция у владельца; тип при {work[0]:g}: " + "/".join(METHODS) + "): " +
+        ", ".join(f"{o} — {brief(next(pid for pid in pids if provs_cfg[pid]['owner'] == o))}"
+                  for o in sorted(owners) if owners[o] == 1))
+    rep()
+    rep(f"**Столицы** (тип при {work[0]:g}: " + "/".join(METHODS) + "): " +
+        ", ".join(f"{o} — {brief(pid)}" for o, pid in sorted(layout["capitals"].items())))
     rep()
 
     rep("## Морские зоны (план §10a п. 5: разрез — по числу провинций зоны)")
@@ -308,7 +339,8 @@ def write_toml(path, scenario, layout, provs_cfg, pids, provs, pop, stub, work, 
     """The province table in the field names of engine2's schema (`ProvinceData`, `RegionData`)."""
     lines = [f"# {scenario}: provinces and regions in the field names of engine2's scenario schema.",
              "# Generated by tools/map/layout.py from tools/map/layouts/" + scenario + ".toml — do not edit by hand.",
-             f"# land — the capacity class calibrated at arable {work:g} per km² (docs/engine2_map.md §11a–§11c);",
+             f"# land — the capacity class calibrated at arable {work[0]:g} per km², method «{work[1]}»"
+             " (docs/engine2_map.md §11a–§11c, §12b);",
              "# population — the start population by the rule of §11d; provinces of no land carry a stub",
              f"# ({STUB_FILL:g} of capacity) until E4: " + ", ".join(pid for k, pid in enumerate(pids) if stub[k]) + ".",
              ""]

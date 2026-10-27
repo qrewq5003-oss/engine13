@@ -335,6 +335,8 @@ start_population_source = "Malanima 2002, приложение: табл. A.4 п
 # densities stay at E0.
 [calibration]
 arable = [50.0, 40.0]
+# How a land's provinces get their class (plan §12b): "flip" or "nearest" (density.calibrate_nearest).
+method = "flip"
 
 # The classification parameters the fit scans (plan §4: «порог и правило сухого климата —
 # параметры классификации, выбирать по невязке подгонки»).

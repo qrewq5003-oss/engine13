@@ -42,6 +42,34 @@ svizzera = "Svizzera"
 austria = "Austria"
 balcani = "Balcani"
 
+# The seat of each owner on this map (the actors' `capital` of E7). Off the map — a stand-in on
+# the owner's edge: France (Paris) — Dauphiné, Hungary (Buda) — Croatia, the Ottomans
+# (Constantinople) — Albania, their front with Venice in 1477. Savoy's court — Chambéry (по
+# памяти); Montferrat's Casale lies in the block of Alessandria (Milan), so — Asti's block.
+[capitals]
+milan = "milano"
+venice = "venezia"
+florence = "firenze"
+naples = "napoli"
+papacy = "roma"
+genoa = "liguria"
+ferrara = "ferrara"
+mantua = "mantova"
+siena = "siena"
+urbino = "urbino"
+bologna = "bologna"
+savoy = "savoia"
+sicily = "palermo"
+montferrat = "monferrato"
+lucca = "lucca"
+provence = "provenza"
+france = "delfinato"
+swiss = "svizzera"
+austria = "tirolo"
+hungary = "croazia"
+ragusa = "ragusa"
+ottomans = "albania_ottomana"
+
 [sources]
 shepherd_italy = "Shepherd W. R., Historical Atlas (1911), с. 90, «Italy about 1494» — открыл (UT PCL, shepherd-c-090-091.jpg)"
 shepherd_swiss = "Shepherd 1911, с. 91, «The Swiss Confederation, 1291–1513» — открыл (там же)"

@@ -54,6 +54,21 @@ def test_calibrate_keeps_desert_and_stops_at_the_closest_capacity():
     assert list(cls) == [H, A, D]
 
 
+def test_calibrate_nearest_gives_continuous_densities_and_the_nearest_class():
+    area, rugged, dry, desert = land([0.5, 1.0])
+    # 100·(40 − 28·0.5k) + 100·(40 − 28·min(1, k)) = 3900 → k = 4100/4200; d = 26.33 and 12.67.
+    cls, d, k = density.calibrate_nearest(area, rugged, dry, desert, 3900.0, DENS)
+    assert k == pytest.approx(4100 / 4200)
+    assert d == pytest.approx([40 - 14 * 4100 / 4200, 40 - 28 * 4100 / 4200])
+    assert list(cls) == [A, H]  # 26.33 is above the middle of 40 and 12, 12.67 below
+
+
+def test_calibrate_nearest_above_arable_everywhere_is_all_arable():
+    area, rugged, dry, desert = land([0.9, 0.1])
+    cls, d, k = density.calibrate_nearest(area, rugged, dry, desert, 10000.0, DENS)
+    assert (list(cls), list(d), k) == ([A, A], [40.0, 40.0], 0.0)
+
+
 def test_plague_balance_fill_is_where_growth_meets_the_loss():
     engine = {"plague": {"outbreaks_per_year": {"value": 0.08}, "mortality": {"value": 0.03}},
               "population": {"growth_per_year": {"value": 0.012}}}

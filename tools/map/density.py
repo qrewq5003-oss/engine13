@@ -323,6 +323,41 @@ def calibrate(area, rugged, dry, desert, target, dens) -> np.ndarray:
     return cls
 
 
+def calibrate_nearest(area, rugged, dry, desert, target, dens):
+    """The alternative to `calibrate` (reviewer on 500f44c): no whole unit flips 50 ↔ 12 for a
+    fraction of a per cent of its land. Each unit gets a continuous density
+    d = A − (A − H)·min(1, k·rugged), with k found so that the land holds its ceiling (no new
+    constant), and takes the class nearest to its d; the land keeps whatever residual the classes
+    leave. Desert units stay Desert; a land sparser than Hills everywhere is left to `calibrate`.
+    Returns the classes, the densities d and k."""
+    cls = np.where(desert, D, A)
+    rest = ~desert
+    need = target - float(area[desert].sum()) * dens[D]
+    if need <= area[rest].sum() * dens[H]:
+        cls = calibrate(area, rugged, dry, desert, target, dens)
+        return cls, dens[cls].astype(float), float("nan")
+    a, r = area[rest], rugged[rest]
+
+    def cap(k):
+        return float(a @ (dens[A] - (dens[A] - dens[H]) * np.minimum(1.0, k * r)))
+
+    k = 0.0
+    if need < cap(0.0):
+        hi = 1.0 / r[r > 0].min() if (r > 0).any() else 0.0
+        if cap(hi) >= need:
+            k = hi
+        else:
+            lo = 0.0
+            for _ in range(100):  # bisection: cap() falls as k grows
+                mid = (lo + hi) / 2
+                lo, hi = (mid, hi) if cap(mid) > need else (lo, mid)
+            k = (lo + hi) / 2
+    d = dens[cls].astype(float)
+    d[rest] = dens[A] - (dens[A] - dens[H]) * np.minimum(1.0, k * r)
+    cls[rest] = np.where(d[rest] >= (dens[A] + dens[H]) / 2, A, H)
+    return cls, d, k
+
+
 def land_depth(land: str, lands: dict) -> int:
     d = 0
     while land in lands and "within" in lands[land]:
@@ -330,23 +365,32 @@ def land_depth(land: str, lands: dict) -> int:
     return d
 
 
-def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params) -> np.ndarray:
-    """Classes of units (blocks, or a scenario's provinces) for the lands of a scenario.
+def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params, method="flip"):
+    """Classes of units (blocks, or a scenario's provinces) for the lands of a scenario, with
+    each unit's density (its class's, or the continuous one of `calibrate_nearest`).
     `order` — the lands, inner ones first; `member[land]` — its units (an inner land's units
     are members of the outer one too); `ceiling[land]` — people per km², or None for a land
     without an opened ceiling, which takes the §4 class (owner's rule 1). An outer land meets
-    its own ceiling with the units its inner lands left."""
+    its own ceiling with the units its inner lands left. `method` — "flip" (`calibrate`) or
+    "nearest" (`calibrate_nearest`)."""
     cls = np.full(len(area), -1)
+    d = np.full(len(area), np.nan)
     for land in order:
         m = member[land]
         free = m & (cls < 0)
         if ceiling[land] is not None:
             fixed = m & (cls >= 0)
             target = ceiling[land] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
-            cls[free] = calibrate(area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+            args = (area[free], rugged[free], dry[free], bw[free] >= 0.5, target, dens)
+            if method == "nearest":
+                cls[free], d[free], _ = calibrate_nearest(*args)
+            else:
+                cls[free] = calibrate(*args)
         else:
             cls[free] = rule_class(rugged[free], bw[free], dry[free], p)
-    return cls
+    rest = (cls >= 0) & np.isnan(d)
+    d[rest] = dens[cls[rest]]
+    return cls, d
 
 
 def rule_class(rugged, bw, dry, p: rules.Params) -> np.ndarray:
@@ -427,7 +471,7 @@ def calibration(cfg, obs, top, masks, blocks, base_dir, rep):
         for name, sc in cfg.get("scenarios", {}).items():
             # Inner lands first: an outer land meets its own ceiling with what the inner ones left.
             order = sorted(sc["lands"], key=lambda land: (-land_depth(land, lands), sc["lands"].index(land)))
-            cls = calibrate_lands(order, {land: masks[region_of(land)] for land in order},
+            cls, _ = calibrate_lands(order, {land: masks[region_of(land)] for land in order},
                                   {land: top[land]["y"] if opened(land) else None for land in order},
                                   area, rugged, dry, bw, dens, p)
             start = sc.get("start_population", {})
