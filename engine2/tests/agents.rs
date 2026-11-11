@@ -979,6 +979,10 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
         pay -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Upkeep).map(|q| q.milli / 1000).sum::<i64>();
         court -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Court).map(|q| q.milli / 1000).sum::<i64>();
     }
+    // The instrument checks itself against the world: a war of principals the test lost the
+    // end of — or never saw open — would part the count «open at the run's end» from the
+    // world's in silence ((д1) and (д2) change how wars open and end).
+    assert_eq!(open_wars.keys().copied().collect::<Vec<_>>(), g.world().wars.iter().filter(|(_, x)| x.of.is_none()).map(|(k, _)| *k).collect::<Vec<_>>(), "seed {seed}: the open wars of the test part with the world's");
     polity_centuries += n0 as f64 * 1.5;
     let people_end = people_of(&g);
     let w = g.world();
