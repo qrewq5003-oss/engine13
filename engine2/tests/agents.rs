@@ -333,6 +333,56 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     assert!(kinds.contains(&None) && kinds.len() >= n_choices.min(3), "hot: the choices spread, doing nothing among them: {kinds:?} of {n_choices}");
 }
 
+/// A side of a war as it stood when the war began (the base of (д1), plan §30.10): its yearly
+/// income (`yearly_income`) and its army by the battle's measure (`army_strength` — with
+/// every unit at quality 50, as in main, the number of its men). Read at the start of the
+/// tick the war opened in; for a polity born in that tick (a secession), at the tick's end —
+/// its first state.
+#[derive(Clone, Copy)]
+struct Side {
+    income: i64,
+    army: f64,
+}
+
+/// A war of principals under way: not a war of obligation (`War::of` none).
+struct OpenWar {
+    since: u32,
+    battles: u32,
+    /// Provinces taken in it by conquest, by the lower id and by the higher — the test's own
+    /// count off the events, checked against the peace's record (`Event::Defeat`).
+    taken: (u32, u32),
+    start: (Side, Side),
+}
+
+/// How a decided war of principals ended.
+struct Won {
+    winner: Side,
+    loser: Side,
+    /// The provinces ceded on balance, by the peace's record (`Event::Defeat`); none when
+    /// the war ended by the loser's fall — no peace was made.
+    ceded: Option<u32>,
+    /// Ended by the loser's fall with nothing taken from it by the survivor in this war: it
+    /// fell to another.
+    fell_to_another: bool,
+}
+
+/// A war of principals that ended in the run (plan §30.10). **Decided** — the peace found a
+/// loser (the sides took unequal numbers of provinces, `War::taken`; the world's
+/// `Event::Defeat`), or a side fell; the winner took more, or survived. Otherwise a status quo.
+struct EndedWar {
+    /// Ticks from the tick it opened in to the tick it ended in.
+    length: u32,
+    /// Battles of the two principals, and of those in the war by its obligations.
+    battles: u32,
+    won: Option<Won>,
+}
+
+/// The `q`-quantile of a sorted slice: the element at `⌊q · n⌋`, the last at most — the
+/// median as this file already reads it (`len / 2`).
+fn quantile<T: Copy + Default>(sorted: &[T], q: f64) -> T {
+    sorted.get(((sorted.len() as f64 * q) as usize).min(sorted.len().saturating_sub(1))).copied().unwrap_or_default()
+}
+
 /// What one generated world adds to the measures of E2 with the bots (one world per thread,
 /// `engine2::par`; folded in the order of the seeds — the run of the worlds one after
 /// another, byte for byte).
@@ -397,6 +447,18 @@ struct Measures {
     court: i64,
     conquests: u64,
     conquests_unfought: u64,
+    /// The base of (д1) (plan §30.9 p. 4, §30.10) — printed, no bands: the wars of principals
+    /// that ended, those still open at the run's end, and the wars that opened and were gone
+    /// within one tick (whether of principals or of obligation cannot be read: the war is not
+    /// in the world after the tick).
+    principal_wars: Vec<EndedWar>,
+    principal_wars_open: u64,
+    wars_within_a_tick: u64,
+    /// А13 on the bots' battles: (the men of the side with more, of the side with fewer, the
+    /// side with more won); battles of equal numbers apart, and the drawn among all.
+    battles: Vec<(u64, u64, bool)>,
+    battles_even: u64,
+    battles_drawn: u64,
 }
 
 /// The measures of E2/E3 with the bots, read off the worlds' sums.
@@ -536,6 +598,90 @@ impl Measures {
         self.court += o.court;
         self.conquests += o.conquests;
         self.conquests_unfought += o.conquests_unfought;
+        self.principal_wars.extend(o.principal_wars);
+        self.principal_wars_open += o.principal_wars_open;
+        self.wars_within_a_tick += o.wars_within_a_tick;
+        self.battles.extend(o.battles);
+        self.battles_even += o.battles_even;
+        self.battles_drawn += o.battles_drawn;
+    }
+
+    /// The base of (д1) on main (plan §30.9 p. 4, §30.10), one line a group — **printed, never
+    /// asserted**: no source gives a band (rule 1 of §24.1). The wars of principals (no war of
+    /// obligation), how they ended, their length, battles and provinces ceded; of the decided,
+    /// the share the richer and the share the larger army at the start won (equal incomes or
+    /// armies out of the denominator, counted beside it); and А13 on the bots' battles.
+    fn war_lines(&self) -> Vec<String> {
+        let wars = &self.principal_wars;
+        let decided: Vec<&Won> = wars.iter().filter_map(|x| x.won.as_ref()).collect();
+        let fallen = decided.iter().filter(|x| x.ceded.is_none()).count();
+        let fell_to_another = decided.iter().filter(|x| x.fell_to_another).count();
+        let sorted_u32 = |mut v: Vec<u32>| {
+            v.sort();
+            v
+        };
+        let sorted_f64 = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v
+        };
+        let lengths = sorted_u32(wars.iter().map(|x| x.length).collect());
+        let fought = sorted_u32(wars.iter().map(|x| x.battles).collect());
+        let ceded = sorted_u32(decided.iter().filter_map(|x| x.ceded).collect());
+        // Who won of the decided, by a measure of the sides at the start: (the greater won,
+        // the wars with a greater side, the wars with equal sides).
+        let by = |greater: &dyn Fn(&Won) -> Option<bool>| {
+            let known: Vec<bool> = decided.iter().filter_map(|x| greater(x)).collect();
+            (known.iter().filter(|x| **x).count(), known.len(), decided.len() - known.len())
+        };
+        let (rich_won, rich_of, rich_even) = by(&|x| (x.winner.income != x.loser.income).then_some(x.winner.income > x.loser.income));
+        let (army_won, army_of, army_even) = by(&|x| (x.winner.army != x.loser.army).then_some(x.winner.army > x.loser.army));
+        let share = |n: usize, of: usize| n as f64 / of.max(1) as f64;
+        let incomes = sorted_f64(decided.iter().map(|x| x.winner.income.max(x.loser.income) as f64 / x.winner.income.min(x.loser.income).max(1) as f64).collect());
+        let stronger_won = self.battles.iter().filter(|(_, _, won)| *won).count();
+        let odds = sorted_f64(self.battles.iter().map(|(more, fewer, _)| *more as f64 / (*fewer).max(1) as f64).collect());
+        vec![
+            format!(
+                "wars of principals (no war of obligation): ended {} — decided {} (of them by a fall {fallen}, of those the fallen lost nothing to the survivor in the war {fell_to_another}), status quo {}, without a battle {}; open at the run's end {}; wars opened and gone within one tick, kind unreadable {}",
+                wars.len(),
+                decided.len(),
+                wars.len() - decided.len(),
+                wars.iter().filter(|x| x.battles == 0).count(),
+                self.principal_wars_open,
+                self.wars_within_a_tick
+            ),
+            format!(
+                "wars of principals: length q50 {} / q90 {} / max {} ticks; battles a war q50 {} / q90 {}; provinces ceded at a defeat (the peace's record) q50 {} / q90 {} / max {}",
+                quantile(&lengths, 0.5),
+                quantile(&lengths, 0.9),
+                lengths.last().copied().unwrap_or(0),
+                quantile(&fought, 0.5),
+                quantile(&fought, 0.9),
+                quantile(&ceded, 0.5),
+                quantile(&ceded, 0.9),
+                ceded.last().copied().unwrap_or(0)
+            ),
+            format!(
+                "decided wars of principals: the richer at the start won {rich_won} of {rich_of} = {:.3} (equal incomes {rich_even}); the larger army at the start won {army_won} of {army_of} = {:.3} (equal armies {army_even}); income of the richer over the poorer q25 {:.2} / q50 {:.2} / q75 {:.2}",
+                share(rich_won, rich_of),
+                share(army_won, army_of),
+                quantile(&incomes, 0.25),
+                quantile(&incomes, 0.5),
+                quantile(&incomes, 0.75)
+            ),
+            format!(
+                "А13 on the bots' battles: the side with more men won {stronger_won} of {} = {:.3} (battles {}, of equal numbers {}, drawn {}); men of the stronger over the weaker q10 {:.2} / q25 {:.2} / q50 {:.2} / q75 {:.1} / q90 {:.0} — printed, the assertion comes with (д3)",
+                self.battles.len(),
+                share(stronger_won, self.battles.len()),
+                self.battles.len() as u64 + self.battles_even,
+                self.battles_even,
+                self.battles_drawn,
+                quantile(&odds, 0.1),
+                quantile(&odds, 0.25),
+                quantile(&odds, 0.5),
+                quantile(&odds, 0.75),
+                quantile(&odds, 0.9)
+            ),
+        ]
     }
 }
 
@@ -579,9 +725,18 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     polities_start += n0;
     let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
     let mut war_by_actor: BTreeMap<ActorId, (u64, u64)> = BTreeMap::new();
+    // The base of (д1) (plan §30.10): the wars of principals by the events of the tick, in
+    // their order; the wars of the starting facts are open from the first tick.
+    let side_of = |w: &World, a: ActorId| Side { income: w.yearly_income(a, p), army: w.army_strength(a) };
+    let mut open_wars: BTreeMap<(ActorId, ActorId), OpenWar> =
+        g.world().wars.iter().filter(|(_, x)| x.of.is_none()).map(|(k, _)| (*k, OpenWar { since: 0, battles: 0, taken: (0, 0), start: (side_of(g.world(), k.0), side_of(g.world(), k.1)) })).collect();
+    let (mut principal_wars, mut wars_within_a_tick) = (Vec::<EndedWar>::new(), 0u64);
+    let (mut battles, mut battles_even, mut battles_drawn) = (Vec::<(u64, u64, bool)>::new(), 0u64, 0u64);
     for t in 0..300u32 {
         let w = g.world();
         let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+        let sides_before: BTreeMap<ActorId, Side> = living.iter().map(|a| (*a, side_of(w, *a))).collect();
+        let obligations_before: BTreeMap<(ActorId, ActorId), (ActorId, ActorId)> = w.wars.iter().filter_map(|(k, x)| x.of.map(|principal| (*k, principal))).collect();
         let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
         for a in &living {
             let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
@@ -753,6 +908,73 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
                 _ => {}
             }
         }
+        // The wars of principals and the battles (plan §30.10), in the order of the events.
+        {
+            let after = g.world();
+            let pair = |a: ActorId, b: ActorId| (a.min(b), a.max(b));
+            let side = |a: ActorId| sides_before.get(&a).copied().unwrap_or_else(|| side_of(after, a));
+            for e in &r.events {
+                match e.event {
+                    Event::War { a, b } => match after.wars.get(&pair(a, b)) {
+                        Some(x) if x.of.is_none() => {
+                            let k = pair(a, b);
+                            open_wars.insert(k, OpenWar { since: t, battles: 0, taken: (0, 0), start: (side(k.0), side(k.1)) });
+                        }
+                        Some(_) => {}
+                        None => wars_within_a_tick += 1,
+                    },
+                    Event::Battle { attacker, defender, outcome, soldiers, .. } => {
+                        // A battle of a war of obligation is its principals' war's.
+                        let k = pair(attacker, defender);
+                        let principal = after.wars.get(&k).and_then(|x| x.of).or_else(|| obligations_before.get(&k).copied()).unwrap_or(k);
+                        if let Some(x) = open_wars.get_mut(&principal) {
+                            x.battles += 1;
+                        }
+                        battles_drawn += u64::from(outcome == engine2::event::Outcome::Drawn);
+                        match soldiers.0.cmp(&soldiers.1) {
+                            std::cmp::Ordering::Greater => battles.push((soldiers.0, soldiers.1, outcome == engine2::event::Outcome::AttackerWon)),
+                            std::cmp::Ordering::Less => battles.push((soldiers.1, soldiers.0, outcome == engine2::event::Outcome::DefenderWon)),
+                            std::cmp::Ordering::Equal => battles_even += 1,
+                        }
+                    }
+                    Event::ProvinceChangedHands { from, to, how: engine2::event::Transfer::Conquest, .. } => {
+                        if let Some(x) = open_wars.get_mut(&pair(from, to)) {
+                            if to < from {
+                                x.taken.0 += 1;
+                            } else {
+                                x.taken.1 += 1;
+                            }
+                        }
+                    }
+                    Event::Peace { a, b } => {
+                        let k = pair(a, b);
+                        if let Some(x) = open_wars.remove(&k) {
+                            // The peace's own record of the loser, if it found one.
+                            let defeat = r.events.iter().find_map(|e| match e.event {
+                                Event::Defeat { actor, by, provinces } if pair(actor, by) == k => Some((by, provinces)),
+                                _ => None,
+                            });
+                            assert_eq!(x.taken.0.abs_diff(x.taken.1), defeat.map_or(0, |(_, n)| n), "the test's count of the war's conquests parts with the peace's record");
+                            let won = defeat.map(|(winner, ceded)| {
+                                let (winner, loser) = if winner == k.0 { x.start } else { (x.start.1, x.start.0) };
+                                Won { winner, loser, ceded: Some(ceded), fell_to_another: false }
+                            });
+                            principal_wars.push(EndedWar { length: t - x.since, battles: x.battles, won });
+                        }
+                    }
+                    // A fall closes every war of the fallen (`army::fall`): the survivor won.
+                    Event::ActorDied { actor } => {
+                        let closed: Vec<(ActorId, ActorId)> = open_wars.keys().copied().filter(|k| k.0 == actor || k.1 == actor).collect();
+                        for k in closed {
+                            let x = open_wars.remove(&k).unwrap();
+                            let (winner, loser, taken_by_survivor) = if actor == k.1 { (x.start.0, x.start.1, x.taken.0) } else { (x.start.1, x.start.0, x.taken.1) };
+                            principal_wars.push(EndedWar { length: t - x.since, battles: x.battles, won: Some(Won { winner, loser, ceded: None, fell_to_another: taken_by_survivor == 0 }) });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         tax += r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Tax).map(|q| q.milli / 1000).sum::<i64>();
         pay -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Upkeep).map(|q| q.milli / 1000).sum::<i64>();
         court -= r.postings.iter().filter(|q| matches!(q.account, engine2::Account::Treasury(_)) && q.source == Source::Court).map(|q| q.milli / 1000).sum::<i64>();
@@ -769,7 +991,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -781,7 +1003,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought } = m;
+    let war_lines = m.war_lines();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -916,6 +1139,11 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     // plan §28.9–28.13); a bot that stops levying at war would fall below it. Removed with (д),
     // when the band of the source comes back as the assertion.
     assert!(a11_war >= 0.007, "А11 at war {a11_war:.4} below the regression floor 0,007 (plan §28.13)");
+    // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals and А13 on
+    // the bots' battles — printed, no bands (rule 1 of §24.1: no source gives one).
+    for line in war_lines {
+        eprintln!("{line}");
+    }
 }
 
 #[test]
@@ -1442,9 +1670,27 @@ fn the_outcome_depends_on_the_players_strategy_and_on_the_seed_the_sentinel_matr
 fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
     let p = params();
     for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
-        let r = Measures::over(&seeds, &p).rates();
+        let m = Measures::over(&seeds, &p);
+        let r = m.rates();
         let row: Vec<String> = r.against_bands(&p).into_iter().map(|(n, v, b, ok)| format!("{n} {v:.3}{}", if ok { String::new() } else { format!(" OUTSIDE {b:?}") })).collect();
         eprintln!("{label}: {}", row.join("; "));
+        // The base of (д1) on main (plan §30.10) on both sets of seeds: the measures with no
+        // band in the file the row above does not carry, and the wars of principals — printed.
+        eprintln!(
+            "{label}: А11 at war {:.4}; А11 at peace {:.4}, by windows of 50 ticks {:?}; Э9 the army's share of spending {:.3}; war declarations {}, the tick after a peace of the same pair {} ({:.3}), within five years of it {} ({:.3})",
+            r.a11_war,
+            r.a11_peace,
+            m.a11_peace_windows.iter().map(|(a, n)| format!("{:.4}", *a as f64 / (*n).max(1) as f64)).collect::<Vec<_>>(),
+            m.pay as f64 / (m.pay + m.court).max(1) as f64,
+            m.declarations,
+            m.declared_after_peace,
+            m.declared_after_peace as f64 / m.declarations.max(1) as f64,
+            m.declared_within_five_years,
+            m.declared_within_five_years as f64 / m.declarations.max(1) as f64
+        );
+        for line in m.war_lines() {
+            eprintln!("{label}: {line}");
+        }
     }
 }
 
