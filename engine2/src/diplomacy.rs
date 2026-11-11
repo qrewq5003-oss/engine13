@@ -293,23 +293,43 @@ impl World {
     }
 
     /// The side forced to accept any peace in the war of `a` and `b` (plan §28.1, owner's
-    /// rule after the stop of (е2) on #298): the one that has lost more provinces in it
-    /// (`losing_side`) **and** whose side is the weaker by the battle formula — the strength
-    /// of its side against the other's, each with those in the war by its obligations
-    /// (`war_sides`, `army_strength`), `win_chance` below a half; at even strength nobody is
-    /// forced. A loser of provinces with the stronger side is not forced: it would take back
-    /// what it lost (measured on #298: polity 9 with 13 441 men against 6 lost undefended
-    /// provinces, accepted the peace as the loser and took them back the next tick — the
-    /// revanche that stopped (е2)). Not stricter than that (plan §28.12, owner's decision
-    /// 2026-10-20): «beaten» read as the capital taken or besieged added nothing to the
-    /// revanche (25 → 24 of 331) and gave wars without end — 17 polities of 149 always at war,
-    /// the weaker never making peace until the enemy reached its capital.
+    /// rule after the stop of (е2) on #298; §30.3 (д1), §30.6 pp. 1–2, §30.9 p. 5): the one
+    /// that has lost more provinces in it (`losing_side`) **and** whose side is the weaker by
+    /// the battle formula on **what each side can field over the war's length**
+    /// (`field_strengths` by the truth, `war_length`) — each side with those in the war by its
+    /// obligations (`war_sides`), every polity's army, the levy of those ticks and the hire
+    /// its treasury covers (`can_field`); odds below a half (`field_odds`); at even strength
+    /// nobody is forced. A loser of provinces whose side can field the more is not forced: it
+    /// would take back what it lost (measured on #298: polity 9 with 13 441 men against 6
+    /// lost undefended provinces, accepted the peace as the loser and took them back the next
+    /// tick — the revanche that stopped (е2)). Not stricter than that (plan §28.12, owner's
+    /// decision 2026-10-20): «beaten» read as the capital taken or besieged added nothing to
+    /// the revanche (25 → 24 of 331) and gave wars without end — 17 polities of 149 always at
+    /// war, the weaker never making peace until the enemy reached its capital.
     pub fn forced_to_peace(&self, a: ActorId, b: ActorId, params: &Params) -> Option<ActorId> {
         let loser = self.losing_side(a, b)?;
+        let other = if loser == a { b } else { a };
+        let ticks = self.war_length(a, b, params)?;
+        let (mine, theirs) = self.field_strengths(loser, other, ticks, None, params);
+        (Self::field_odds(mine, theirs, params) < 0.5).then_some(loser)
+    }
+
+    /// What the two sides of the war of `a` and `b` can field over `ticks` — `a`'s side and
+    /// `b`'s, each polity of a side (`war_sides`: the principals and those in the war by its
+    /// obligations) by `can_field`. `by` — whose eyes: none — the truth, as the rule of the
+    /// peace reads it; a polity's — its own by the truth and every other's by what anyone
+    /// sees, as a bot foresees the rule (plan §30.12). **One body for the world and the bot.**
+    pub fn field_strengths(&self, a: ActorId, b: ActorId, ticks: f64, by: Option<ActorId>, params: &Params) -> (f64, f64) {
         let (side_a, side_b) = self.war_sides(a, b);
-        let strength = |side: &[ActorId]| side.iter().map(|x| self.army_strength(*x)).sum::<f64>();
-        let (mine, theirs) = if loser == a { (strength(&side_a), strength(&side_b)) } else { (strength(&side_b), strength(&side_a)) };
-        let odds = if theirs <= 0.0 {
+        let strength = |side: &[ActorId]| side.iter().map(|x| self.can_field(*x, ticks, by, params)).sum::<f64>();
+        (strength(&side_a), strength(&side_b))
+    }
+
+    /// The odds of a side of strength `mine` against `theirs` by the battle formula, as the
+    /// rule of the peace weighs them: even with nothing on either side, all or nothing with
+    /// nothing on one.
+    pub fn field_odds(mine: f64, theirs: f64, params: &Params) -> f64 {
+        if theirs <= 0.0 {
             if mine > 0.0 {
                 1.0
             } else {
@@ -319,8 +339,45 @@ impl World {
             0.0
         } else {
             crate::army::win_chance(mine, theirs, params)
-        };
-        (odds < 0.5).then_some(loser)
+        }
+    }
+
+    /// The length of the war of `a` and `b` in ticks, by its public facts alone (plan §30.9
+    /// p. 2, owner's decisions 2026-11-11) — none when the two are not at war:
+    /// - **a war with a claim** — the march of the declarer (`War::by`) from its capital to
+    ///   the province it claimed (`WarAim::Province`) and the siege there, or for a claim on
+    ///   a polity (`WarAim::Polity`) to that polity's capital — by the rule of `war_ticks`
+    ///   (`campaign_ticks`), but off the claim, a public act, not off the declarer's goals,
+    ///   which are hidden;
+    /// - **a war of obligation** (`War::of`) — the length of its principals' war: it ends
+    ///   with their peace, and one war has one length;
+    /// - **a war with no claim** — of the starting facts (no declarer, no claim, no
+    ///   principals), and the remnant cases with nothing to read (an entrant's war whose
+    ///   principals' war is gone) — to the enemy's capital, the longer of the two sides'.
+    ///
+    /// The other side's own claim (`War::counter_aim`) does not move it: one length a war,
+    /// by the declarer's claim; a counter-claim bears on the cause, not on the term.
+    ///
+    /// **Read on the state as it stands; nothing new is saved.** The claim does not change
+    /// when the province is taken (`War::aim` is written at the opening only), and the march
+    /// to it and its siege stay the same once it is the declarer's own, so the length does
+    /// not jump at the first conquest — as `war_ticks` does, whose target moves on. What is
+    /// left of the jump: a claimed **capital** stands `siege.capital_ticks` while it is its
+    /// owner's capital and one tick once taken (the capital moves on), a claim on a polity
+    /// follows that polity's capital when it moves, and the march follows the declarer's own
+    /// capital. Not mended here.
+    pub fn war_length(&self, a: ActorId, b: ActorId, params: &Params) -> Option<f64> {
+        let key = pair(a, b);
+        let war = self.wars.get(&key)?;
+        if let Some(principals) = war.of.filter(|p| *p != key && self.wars.contains_key(p)) {
+            return self.war_length(principals.0, principals.1, params);
+        }
+        let other = |x: ActorId| if x == key.0 { key.1 } else { key.0 };
+        Some(match (war.by, war.aim) {
+            (Some(declarer), Some(WarAim::Province(q))) if war.of.is_none() && self.provinces.contains_key(&q) => self.campaign_ticks(declarer, other(declarer), q, params),
+            (Some(declarer), Some(WarAim::Polity(x))) if war.of.is_none() && self.actors.contains_key(&x) => self.campaign_ticks(declarer, other(declarer), self.actors[&x].capital, params),
+            _ => self.campaign_ticks(key.0, key.1, self.actors[&key.1].capital, params).max(self.campaign_ticks(key.1, key.0, self.actors[&key.0].capital, params)),
+        })
     }
 
     /// Could `a` declare war on `b`?

@@ -103,6 +103,16 @@ pub struct Dues {
     pub pay_due: i64,
 }
 
+impl Dues {
+    /// What the tick leaves free once everything due is paid, kg, never below nothing: the
+    /// take and the vassals' tribute, less the tribute to the lord, the houses' seats, the
+    /// court, the interest and the pay. The loan is no income, and the debt's repayment is no
+    /// charge: it takes the surplus.
+    pub fn free(&self) -> i64 {
+        (self.income + self.tribute_in - self.tribute_due - self.seats.iter().map(|(_, kg)| kg).sum::<i64>() - self.court - self.interest - self.pay_due).max(0)
+    }
+}
+
 /// A polity's budget of the tick, as the economy computes it (`World::tick_budget`) and then
 /// posts it (`phase_economy`): every article in the order the phase takes it, each bounded by
 /// what the treasury holds when its turn comes.

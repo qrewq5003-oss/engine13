@@ -84,6 +84,11 @@ pub struct WarTerms {
     /// own march and siege to the stake, the rule closes the war before the stake is reached
     /// — the war wins nothing (`World::war_worth_of`).
     first_blow: f64,
+    /// What the sides of the war can field over its length as the polity reads it — its
+    /// own side's and the other's (`World::field_strengths` by its eyes): the strengths the
+    /// rule of the peace weighs (`World::forced_to_peace`), the polity's own by the truth,
+    /// the others' by what anyone sees.
+    field: (f64, f64),
     blow: f64,
     tribute: f64,
     to_submit: u32,
@@ -412,22 +417,17 @@ impl World {
     }
 
     /// The odds that `b` takes back what `a` takes from it (plan §27.3, (б)), as `by` can
-    /// know them: by the battle formula, each side's army and what it can levy over the
-    /// war's expected length `ticks` — the rate of a tick (А2) times the ticks, within the
-    /// room (plan §28.12, owner's decision 2: not the whole ceiling, which А2 reaches only
-    /// over many ticks) — `by`'s own count exactly (`recruit_per_tick`, `recruit_room`),
-    /// another's as anyone sees it (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by
-    /// its people less its dead by the battles seen, plan §28.7).
+    /// know them: by the battle formula on what each can field over the war's expected
+    /// length `ticks` (`can_field`, the function the rule of the peace reads — plan §30.3
+    /// (д1)): its army, the levy of those ticks within the room (plan §28.12, owner's
+    /// decision 2: not the whole ceiling, which А2 reaches only over many ticks) and the
+    /// mercenaries it can hire — `by`'s own count exactly, another's as anyone sees it
+    /// (plan §28.7).
     pub fn retake_odds(&self, a: ActorId, b: ActorId, by: ActorId, ticks: f64, params: &Params) -> f64 {
         if !self.alive(b) {
             return 0.0;
         }
-        let could = |x: ActorId| {
-            let (per_tick, room) = if x == by { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
-            let raised = ((per_tick as f64 * ticks).floor() as i64).min(room).max(0);
-            self.army_strength(x) + World::new_soldiers_strength(raised)
-        };
-        let (theirs, mine) = (could(b), could(a));
+        let (theirs, mine) = (self.can_field(b, ticks, Some(by), params), self.can_field(a, ticks, Some(by), params));
         if theirs <= 0.0 {
             return 0.0;
         }
@@ -534,6 +534,7 @@ impl World {
             at_risk,
             fall,
             first_blow,
+            field: self.field_strengths(a, b, ticks, Some(a), params),
             blow: blow_per_province,
             tribute,
             to_submit,
@@ -606,7 +607,11 @@ impl World {
     /// stayed worth fighting).
     pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
         let p = self.war_odds(a, t.b, extra, params);
-        let closed = p < 0.5 && t.first_blow <= t.ticks;
+        // The rule of the peace as the polity can foresee it (plan §30.12): forced when the
+        // weaker by what the sides can field over the war's length (`field_odds` on the
+        // strengths of `WarTerms::field`, the very weighing of `forced_to_peace`), `extra`
+        // on its own side.
+        let closed = Self::field_odds((t.field.0 + extra).max(0.0), t.field.1, params) < 0.5 && t.first_blow <= t.ticks;
         let gain = if unpaid || t.at_threshold || closed { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
         let (mut lose, mut blow, mut odds, mut taken) = (0.0, 0.0, 1.0, 0.0);
@@ -661,9 +666,7 @@ impl World {
     /// province it aims at, as the march goes in that war whether or not it is on
     /// (`path_at_war`, `march_steps_per_tick`), and the siege there (`siege_ticks`).
     pub fn war_ticks(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
-        let target = self.war_target(a, b);
-        let steps = self.path_at_war(a, b, self.actors[&a].capital, target).map(|p| p.len()).unwrap_or(0);
-        (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
+        self.campaign_ticks(a, b, self.war_target(a, b), params)
     }
 
     /// What `n` soldiers kept under arms for `ticks` cost a polity, in years of its income:

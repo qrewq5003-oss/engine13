@@ -238,6 +238,48 @@ impl World {
         (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
     }
 
+    /// Mercenaries another polity could hire over `ticks` as anyone sees it (plan §30.9 p. 1,
+    /// owner's decision 2026-11-11 — its treasury is hidden): what its tick leaves free once
+    /// everything due is paid (`tick_dues` with the pay by where its units stand, `Dues::free`
+    /// — the take, tribute, seats, court, interest and pay are open to anyone), over the
+    /// ticks, at the advance of a mercenary, within the ceiling of А1 less its army and the
+    /// `raised` levy counted beside it — the ceiling `hire_count` hires within. Nothing for a
+    /// polity short of its pay this tick (`exhausted` — the shortfall is an event anyone
+    /// sees). Not its treasury, its units' orders nor its count of the dead.
+    pub fn hire_count_seen(&self, b: ActorId, ticks: f64, raised: i64, params: &Params) -> i64 {
+        if params.mercenary_advance_kg <= 0 || self.exhausted(b) {
+            return 0;
+        }
+        let free = self.tick_dues(b, true, params).free();
+        let room = (self.recruit_ceiling(b, params) - self.army_size(b) - raised).max(0);
+        ((free as f64 * ticks / params.mercenary_advance_kg as f64).floor() as i64).clamp(0, room)
+    }
+
+    /// What a polity can field over `ticks`, by the battle's measure (plan §30.3 (д1), §30.6
+    /// p. 1, §30.12): its army, the levy it can raise in that time — the rate of a tick (А2)
+    /// times the ticks, within the room — and the mercenaries it can hire, within the ceiling
+    /// of А1 less the levy. **The one function the rule of the peace and the bots read.**
+    /// `by` — whose eyes: none, or the polity's own — the truth (`recruit_per_tick`,
+    /// `recruit_room`, the hire its treasury covers now, `hire_count`); another's — what
+    /// anyone sees (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by its people less its
+    /// dead by the battles seen; `hire_count_seen`: its free income over the ticks).
+    pub fn can_field(&self, x: ActorId, ticks: f64, by: Option<ActorId>, params: &Params) -> f64 {
+        let own = by.is_none_or(|viewer| viewer == x);
+        let (per_tick, room) = if own { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
+        let raised = ((per_tick as f64 * ticks).floor() as i64).min(room).max(0);
+        let hired = if own { self.hire_count(x, params).min((self.recruit_ceiling(x, params) - self.army_size(x) - raised).max(0)) } else { self.hire_count_seen(x, ticks, raised, params) };
+        self.army_strength(x) + World::new_soldiers_strength(raised + hired)
+    }
+
+    /// The ticks `who`'s march from its capital to `target` and the siege there take in its
+    /// war with `enemy`, as the march goes in that war whether or not it is on
+    /// (`path_at_war`, `march_steps_per_tick` — a tick at least) and the siege stands
+    /// (`siege_ticks`). Positions, owners and capitals only: open to anyone.
+    pub fn campaign_ticks(&self, who: ActorId, enemy: ActorId, target: ProvinceId, params: &Params) -> f64 {
+        let steps = self.path_at_war(who, enemy, self.actors[&who].capital, target).map(|p| p.len()).unwrap_or(0);
+        (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
+    }
+
     /// The men of a unit killed: all of them into their polity's count of the dead that
     /// anyone sees (`Actor::losses_seen` — every call here comes with a `Battle` or
     /// `UnitDestroyed` event), a levy's into its polity's ceiling until the cohort grows up.
