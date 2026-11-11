@@ -84,6 +84,67 @@ pub fn battle_losses_ppm(won: bool, params: &Params) -> i64 {
     }
 }
 
+/// What a polity has to field more men with over a war (`World::fielding`): the strength in
+/// hand and the three bounds on what it adds to it — its people (the room under the ceiling
+/// of А1), the rate of a levy (А2), and its money (the budget of the war).
+///
+/// **Why the money** (owner's decision 2026-11-11, plan §30.12): the world itself is built
+/// so — an army short of its pay is exhausted and must accept a peace (`peace_rule`), and the
+/// unpaid melt away; men beyond what a side can pay it cannot field. This is the first half
+/// of §30.1's «income → pay and hire → men; ceiling and cohort → levy»: the people alone
+/// bound the levy, and the war's length reached the whole ceiling in nearly every war.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fielding {
+    /// The army's strength in hand.
+    pub army: f64,
+    /// Men a levy raises a tick, and the room left for levies.
+    pub per_tick: i64,
+    pub room: i64,
+    /// The room under the ceiling of А1 for the men hired (the spent cohort does not hold
+    /// them back, as in `hire_count`).
+    pub hire_room: i64,
+    /// The budget of the war, kg: the treasury (one's own only) and the free income of the
+    /// war's ticks. The pay of the army in hand is out of it already (`Dues::free`).
+    pub budget: f64,
+    /// A man's pay a tick, kg — the pay at home: a levy is raised on its own land.
+    pub pay: f64,
+    /// A mercenary's advance, kg.
+    pub advance: f64,
+    /// The war's length, ticks.
+    pub ticks: f64,
+}
+
+impl Fielding {
+    /// The strength the polity can field with `extra` strength put in hand first — a levy
+    /// or a hire a bot weighs, or a unit sent away (negative). **Nothing is counted twice**
+    /// (owner's decision 2026-11-11): `extra` is strength in hand, so its men take their
+    /// place under the ceiling and their pay for the war out of the budget; what is added on
+    /// top is only what the room and the money still allow.
+    ///
+    /// Tick by tick, as the world would raise them: each tick a levy of what the rate, the
+    /// room left and the money left allow — a man raised in tick `k` is paid from then to
+    /// the war's end; then mercenaries with what is left, each at the advance and the pay of
+    /// the whole war, within the ceiling less the levies.
+    pub fn strength(&self, extra: f64) -> f64 {
+        let man = World::new_soldiers_strength(1);
+        let extra_men = extra / man;
+        let mut budget = self.budget - self.pay * extra_men * self.ticks;
+        let (mut room, mut hire_room) = (self.room as f64 - extra_men, self.hire_room as f64 - extra_men);
+        let mut men = 0.0;
+        for k in 0..self.ticks.max(0.0).ceil() as u32 {
+            let serve = self.ticks - f64::from(k);
+            let afford = if self.pay > 0.0 { budget / (self.pay * serve) } else { f64::INFINITY };
+            let n = (self.per_tick as f64).min(room).min(afford).floor().max(0.0);
+            men += n;
+            room -= n;
+            hire_room -= n;
+            budget -= n * self.pay * serve;
+        }
+        let hired = if self.advance > 0.0 { (budget / (self.advance + self.pay * self.ticks)).min(hire_room).floor().max(0.0) } else { 0.0 };
+        (self.army + extra).max(0.0) + man * (men + hired)
+    }
+}
+
 impl World {
     /// A polity is alive while it holds land and its ruler lives: a polity whose last house
     /// died out has fallen with its land (`politics.rs`), one conquered has none.
@@ -238,37 +299,39 @@ impl World {
         (self.treasury(a) / params.mercenary_advance_kg).min((self.recruit_ceiling(a, params) - self.army_size(a)).max(0)).max(0)
     }
 
-    /// Mercenaries another polity could hire over `ticks` as anyone sees it (plan §30.9 p. 1,
-    /// owner's decision 2026-11-11 — its treasury is hidden): what its tick leaves free once
-    /// everything due is paid (`tick_dues` with the pay by where its units stand, `Dues::free`
-    /// — the take, tribute, seats, court, interest and pay are open to anyone), over the
-    /// ticks, at the advance of a mercenary, within the ceiling of А1 less its army and the
-    /// `raised` levy counted beside it — the ceiling `hire_count` hires within. Nothing for a
-    /// polity short of its pay this tick (`exhausted` — the shortfall is an event anyone
-    /// sees). Not its treasury, its units' orders nor its count of the dead.
-    pub fn hire_count_seen(&self, b: ActorId, ticks: f64, raised: i64, params: &Params) -> i64 {
-        if params.mercenary_advance_kg <= 0 || self.exhausted(b) {
-            return 0;
-        }
-        let free = self.tick_dues(b, true, params).free();
-        let room = (self.recruit_ceiling(b, params) - self.army_size(b) - raised).max(0);
-        ((free as f64 * ticks / params.mercenary_advance_kg as f64).floor() as i64).clamp(0, room)
-    }
-
-    /// What a polity can field over `ticks`, by the battle's measure (plan §30.3 (д1), §30.6
-    /// p. 1, §30.12): its army, the levy it can raise in that time — the rate of a tick (А2)
-    /// times the ticks, within the room — and the mercenaries it can hire, within the ceiling
-    /// of А1 less the levy. **The one function the rule of the peace and the bots read.**
-    /// `by` — whose eyes: none, or the polity's own — the truth (`recruit_per_tick`,
-    /// `recruit_room`, the hire its treasury covers now, `hire_count`); another's — what
-    /// anyone sees (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by its people less its
-    /// dead by the battles seen; `hire_count_seen`: its free income over the ticks).
-    pub fn can_field(&self, x: ActorId, ticks: f64, by: Option<ActorId>, params: &Params) -> f64 {
+    /// What a polity has to field more men with over a war of `ticks` (`Fielding`; plan §30.3
+    /// (д1), §30.12, owner's decision 2026-11-11): its army, the rate and the room of its
+    /// levy, the room of the ceiling of А1 for hired men, and **the budget of the war** — its
+    /// treasury and what its ticks leave free once everything due is paid (`tick_dues`,
+    /// `Dues::free`), over the war. `by` — whose eyes: none, or the polity's own — the truth
+    /// (`recruit_per_tick`, `recruit_room`, its treasury, the pay by the rule of the world);
+    /// another's — what anyone sees (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by
+    /// its people less its dead by the battles seen; **no treasury** — it is hidden; the pay
+    /// by where its units stand, not by their orders). The two part by the hidden alone: the
+    /// treasury, the count of the dead, the orders.
+    pub fn fielding(&self, x: ActorId, ticks: f64, by: Option<ActorId>, params: &Params) -> Fielding {
         let own = by.is_none_or(|viewer| viewer == x);
         let (per_tick, room) = if own { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
-        let raised = ((per_tick as f64 * ticks).floor() as i64).min(room).max(0);
-        let hired = if own { self.hire_count(x, params).min((self.recruit_ceiling(x, params) - self.army_size(x) - raised).max(0)) } else { self.hire_count_seen(x, ticks, raised, params) };
-        self.army_strength(x) + World::new_soldiers_strength(raised + hired)
+        let treasury = if own { self.treasury(x) } else { 0 };
+        let free = self.tick_dues(x, !own, params).free();
+        Fielding {
+            army: self.army_strength(x),
+            per_tick,
+            room,
+            hire_room: (self.recruit_ceiling(x, params) - self.army_size(x)).max(0),
+            budget: treasury as f64 + free as f64 * ticks,
+            pay: crate::economy::pay_per_tick(1000, params) as f64 / 1000.0,
+            advance: params.mercenary_advance_kg as f64,
+            ticks,
+        }
+    }
+
+    /// What a polity can field over `ticks`, by the battle's measure (`fielding`,
+    /// `Fielding::strength`): its army and the men it can raise and hire in that time, as far
+    /// as its people **and its money** reach. **The one function the rule of the peace and the
+    /// bots read** (plan §30.3 (д1)).
+    pub fn can_field(&self, x: ActorId, ticks: f64, by: Option<ActorId>, params: &Params) -> f64 {
+        self.fielding(x, ticks, by, params).strength(0.0)
     }
 
     /// The ticks `who`'s march from its capital to `target` and the siege there take in its

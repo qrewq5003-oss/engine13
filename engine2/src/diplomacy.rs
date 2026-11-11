@@ -297,9 +297,9 @@ impl World {
     /// that has lost more provinces in it (`losing_side`) **and** whose side is the weaker by
     /// the battle formula on **what each side can field over the war's length**
     /// (`field_strengths` by the truth, `war_length`) — each side with those in the war by its
-    /// obligations (`war_sides`), every polity's army, the levy of those ticks and the hire
-    /// its treasury covers (`can_field`); odds below a half (`field_odds`); at even strength
-    /// nobody is forced. A loser of provinces whose side can field the more is not forced: it
+    /// obligations (`war_sides`), every polity's army and the men it can raise and hire in
+    /// those ticks as far as its people and its money reach (`can_field`); odds below a half
+    /// (`field_odds`); at even strength nobody is forced. A loser of provinces whose side can field the more is not forced: it
     /// would take back what it lost (measured on #298: polity 9 with 13 441 men against 6
     /// lost undefended provinces, accepted the peace as the loser and took them back the next
     /// tick — the revanche that stopped (е2)). Not stricter than that (plan §28.12, owner's

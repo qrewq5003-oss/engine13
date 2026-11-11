@@ -84,11 +84,14 @@ pub struct WarTerms {
     /// own march and siege to the stake, the rule closes the war before the stake is reached
     /// — the war wins nothing (`World::war_worth_of`).
     first_blow: f64,
-    /// What the sides of the war can field over its length as the polity reads it — its
-    /// own side's and the other's (`World::field_strengths` by its eyes): the strengths the
-    /// rule of the peace weighs (`World::forced_to_peace`), the polity's own by the truth,
-    /// the others' by what anyone sees.
-    field: (f64, f64),
+    /// What the sides of the war can field over its length as the polity reads it — the
+    /// strengths the rule of the peace weighs (`World::forced_to_peace`,
+    /// `World::field_strengths` by its eyes): what the polity itself has to field with (by
+    /// the truth; `Fielding::strength` takes the strength a decision puts in), what the rest
+    /// of its side can field and what the other side can — by what anyone sees.
+    field_own: crate::army::Fielding,
+    field_with: f64,
+    field_against: f64,
     blow: f64,
     tribute: f64,
     to_submit: u32,
@@ -527,6 +530,9 @@ impl World {
             }
             _ => (0.0, 1),
         };
+        // What the rest of the polity's side and the other side can field, as it sees them.
+        let (side, against) = self.war_sides(a, b);
+        let fielded = |side: &[ActorId]| side.iter().filter(|x| **x != a).map(|x| self.can_field(*x, ticks, Some(a), params)).sum::<f64>();
         WarTerms {
             b,
             ticks,
@@ -534,7 +540,9 @@ impl World {
             at_risk,
             fall,
             first_blow,
-            field: self.field_strengths(a, b, ticks, Some(a), params),
+            field_own: self.fielding(a, ticks, Some(a), params),
+            field_with: fielded(&side),
+            field_against: fielded(&against),
             blow: blow_per_province,
             tribute,
             to_submit,
@@ -608,10 +616,11 @@ impl World {
     pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
         let p = self.war_odds(a, t.b, extra, params);
         // The rule of the peace as the polity can foresee it (plan §30.12): forced when the
-        // weaker by what the sides can field over the war's length (`field_odds` on the
-        // strengths of `WarTerms::field`, the very weighing of `forced_to_peace`), `extra`
-        // on its own side.
-        let closed = Self::field_odds((t.field.0 + extra).max(0.0), t.field.1, params) < 0.5 && t.first_blow <= t.ticks;
+        // weaker by what the sides can field over the war's length (`field_odds`, the very
+        // weighing of `forced_to_peace`). `extra` is strength in hand: it takes its place
+        // under the polity's ceiling and its pay out of the war's budget, never on top of
+        // what the polity could field anyway (`Fielding::strength`).
+        let closed = Self::field_odds(t.field_own.strength(extra) + t.field_with, t.field_against, params) < 0.5 && t.first_blow <= t.ticks;
         let gain = if unpaid || t.at_threshold || closed { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
         let (mut lose, mut blow, mut odds, mut taken) = (0.0, 0.0, 1.0, 0.0);
