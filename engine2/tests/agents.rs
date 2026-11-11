@@ -1878,7 +1878,19 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
 fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let p = params();
     let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    // What polity 0 reads of the others: the worth of an alliance and of a war with each (the
+    // rule of the peace foreseen inside it, `WarTerms`), its orders and options — and, since
+    // the rule of the peace weighs what a side can field (plan §30.12), what it reads the
+    // others can field over a war's length and what they have to field it with (`fielding`
+    // by its eyes: the levy's rate and room, the budget of the war), the strengths of the
+    // sides, and the odds that the other takes back what is taken.
+    let ticks = |w: &World, x: ActorId| w.war_ticks(a, x, &p);
+    let seen = |w: &World| {
+        (
+            (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p)),
+            [b, c].map(|x| (w.fielding(x, ticks(w, x), Some(a), &p), w.can_field(x, ticks(w, x), Some(a), &p), w.field_strengths(a, x, ticks(w, x), Some(a), &p), w.retake_odds(a, x, a, ticks(w, x), &p), w.tick_dues(x, true, &p))),
+        )
+    };
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
@@ -1907,6 +1919,19 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     w.post(engine2::Account::Treasury(b), Source::Test, -all).unwrap();
     assert_eq!(w.treasury(b), 0, "polity 1's treasury emptied");
     assert_eq!(seen(&w), before, "another's empty treasury is its own");
+    // The guard has teeth: each of the hidden things injected above moves what the other
+    // can field **by the truth** — the reading the rule of the peace takes and a bot must
+    // not. The dead of the cohort and the treasury move the truth of polity 2, the orders
+    // (the pay of a campaign, out of the war's budget) and the emptied treasury that of
+    // polity 1; polity 0's own reading of them stood still.
+    let fresh = world_of(&carrier_scenario(), 7);
+    for x in [b, c] {
+        let t = ticks(&fresh, x);
+        assert_eq!(fresh.fielding(x, t, Some(a), &p).budget, w.fielding(x, t, Some(a), &p).budget, "as polity 0 sees it, the budget of polity {x:?}'s war did not move");
+        assert_ne!(fresh.fielding(x, t, None, &p), w.fielding(x, t, None, &p), "by the truth the injections moved what polity {x:?} has to field with");
+    }
+    let orders_cost = |w: &World| w.tick_dues(b, false, &p).pay_due - w.tick_dues(b, true, &p).pay_due;
+    assert!(orders_cost(&fresh) == 0 && orders_cost(&w) > 0, "the orders of polity 1's units raise its pay by the rule of the world, not by where they stand");
     // Another house's treasury: the match offered, the proposer's treasury then grows a
     // thousandfold — the house answers the dowry the offer named.
     let s = all_verbs(testworld::five_states_scenario());

@@ -768,6 +768,65 @@ fn a_declaration_states_its_claim_and_the_claimant_has_a_cause_until_it_is_met()
     assert!(reach[&at(0, 0)] < reach[&at(0, 4)], "the province nearest to the enemy's unit falls first: {reach:?}");
 }
 
+/// The length of a war is read off its public facts (plan §30.9 p. 2, §30.12; `war_length`):
+/// a war with a claim — the declarer's march from its capital to the province it claimed and
+/// the siege there, or to the capital of the polity it claimed; a war of obligation — the
+/// length of its principals' war; a war with no claim (the starting facts) — to the enemy's
+/// capital, the longer of the two sides'. The declarer's goals, which are hidden, do not move
+/// it; nor does the other side's own claim; **nor the taking of the claimed province**: the
+/// claim stands, and the march and the siege are the same once the province is the
+/// declarer's — no jump at the first conquest.
+#[test]
+fn the_length_of_a_war_is_read_off_its_claim_and_does_not_jump_when_the_claimed_province_is_taken() {
+    use engine2::{GoalKind, GoalTarget, VerbId, War, WarAim};
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let q = at(1, 2);
+    // A claim on a province that is no capital.
+    let mut w = testworld::world(31);
+    assert_eq!(w.war_length(s0, s1, &p), None, "no war, no length");
+    w.declare_war_for(s0, q).unwrap();
+    let length = w.war_length(s0, s1, &p).expect("at war");
+    assert_eq!(length, w.campaign_ticks(s0, s1, q, &p), "the declarer's march to the province it claimed and the siege there");
+    assert_eq!(w.war_length(s1, s0, &p), Some(length), "the same either way round");
+    assert_eq!(w.siege_ticks(q, &p), 1, "the claimed province is no capital");
+    // The declarer's goals are hidden and do not move it — they move its own `war_ticks`.
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+    assert_eq!(w.war_length(s0, s1, &p), Some(length), "the length is the claim's, not the goals'");
+    // The other side's own claim (A′) does not move it: one length a war.
+    w.apply_verb(&engine2::VerbCall { actor: engine2::ActorRef::Ruler(s1), verb: VerbId::DeclareWar, target: engine2::Target::Province(at(0, 3)) }, &p).unwrap();
+    assert_eq!(w.wars[&(s0, s1)].counter_aim, Some(WarAim::Province(at(0, 3))), "the attacked stated its claim");
+    assert_eq!(w.war_length(s0, s1, &p), Some(length), "a counter-claim bears on the cause, not on the term");
+    // The claimed province taken: the claim stands and the length does not jump.
+    take(&mut w, s0, q, &p);
+    assert!(w.provinces[&q].owner == s0 && w.wars[&(s0, s1)].aim == Some(WarAim::Province(q)), "taken, the claim as stated");
+    assert_eq!(w.war_length(s0, s1, &p), Some(length), "no jump at the first conquest");
+    // A claim on the polity: to its capital, which stands its siege.
+    let mut w = testworld::world(32);
+    w.declare_war(s0, s1).unwrap();
+    let capital = w.actors[&s1].capital;
+    assert_eq!(w.war_length(s0, s1, &p), Some(w.campaign_ticks(s0, s1, capital, &p)));
+    assert!(w.war_length(s0, s1, &p).unwrap() > length, "a capital stands its siege: the war for the polity is the longer");
+    // A war of obligation takes the length of its principals' war, not a march of its own.
+    let mut w = testworld::world(33);
+    w.ally_now(s1, s2, &p).unwrap();
+    w.declare_war_for(s0, q).unwrap();
+    assert_eq!(w.wars[&(s0, s2)].of, Some((s0, s1)), "the ally entered by the obligation");
+    assert_eq!(w.war_length(s0, s2, &p), w.war_length(s0, s1, &p), "one war, one length");
+    assert_ne!(w.war_length(s0, s2, &p), Some(w.campaign_ticks(s0, s2, w.actors[&s2].capital, &p)), "not the march to the entrant's capital");
+    // A war of the starting facts — no declarer, no claim: to the enemy's capital, the longer
+    // of the two sides'.
+    let mut w = testworld::world(34);
+    w.wars.insert((s0, s1), War { since: w.tick, taken: (0, 0), held: (5, 5), of: None, by: None, aim: None, counter_aim: None });
+    let (there, back) = (w.campaign_ticks(s0, s1, w.actors[&s1].capital, &p), w.campaign_ticks(s1, s0, w.actors[&s0].capital, &p));
+    assert_eq!(w.war_length(s0, s1, &p), Some(there.max(back)));
+    // A longer march for one side makes its length the war's: polity 0's seat moved to the
+    // far end of its land.
+    w.actors.get_mut(&s0).unwrap().capital = at(0, 4);
+    let (there, back) = (w.campaign_ticks(s0, s1, w.actors[&s1].capital, &p), w.campaign_ticks(s1, s0, at(0, 4), &p));
+    assert_eq!(w.war_length(s0, s1, &p), Some(there.max(back)), "the longer of the two");
+}
+
 /// (A′) (plan §28.12, owner's decision 2026-10-20): the attacked states its own claim by
 /// `declare_war` on the enemy it already fights — the same verb at the same price, opening
 /// no war — and has a cause to go on until it is met, as the declarer has: it refuses the
