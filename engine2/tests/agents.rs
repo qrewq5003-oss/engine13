@@ -2244,3 +2244,388 @@ fn a_unit_in_being_is_worth_the_take_the_risings_withhold_and_the_first_levy_put
     w.apply_verb(&levy(50), &p).unwrap();
     assert!((w.utility(s0, &levy(50), &p) + w.soldiers_cost(s0, 50, 1.0, &p)).abs() < 1e-9, "a second unit: a tick of pay for nothing more");
 }
+
+// ---- Diagnostics: why the armies are small (plan §30.13) ----
+//
+// Printed, never asserted, and run on demand (`#[ignore]`): the world is not changed, no
+// parameter is fitted (rules 1 and 2 of §24.1). In the commit so that the numbers of §30.13
+// can be read again:
+// `cargo test --release -p engine2 --all-features --test agents diagnosis -- --ignored --nocapture --test-threads=1`.
+
+/// What the diagnosis counts, sums and samples, by name; folded in the order of the seeds.
+#[derive(Default)]
+struct Diagnosis {
+    counts: BTreeMap<String, u64>,
+    sums: BTreeMap<String, f64>,
+    samples: BTreeMap<String, Vec<f64>>,
+}
+
+impl Diagnosis {
+    fn count(&mut self, key: &str, n: u64) {
+        *self.counts.entry(key.to_string()).or_insert(0) += n;
+    }
+
+    fn sum(&mut self, key: &str, x: f64) {
+        *self.sums.entry(key.to_string()).or_insert(0.0) += x;
+    }
+
+    fn sample(&mut self, key: &str, x: f64) {
+        self.samples.entry(key.to_string()).or_default().push(x);
+    }
+
+    fn add(&mut self, o: Diagnosis) {
+        for (k, n) in o.counts {
+            *self.counts.entry(k).or_insert(0) += n;
+        }
+        for (k, x) in o.sums {
+            *self.sums.entry(k).or_insert(0.0) += x;
+        }
+        for (k, v) in o.samples {
+            self.samples.entry(k).or_default().extend(v);
+        }
+    }
+
+    fn n(&self, key: &str) -> u64 {
+        self.counts.get(key).copied().unwrap_or(0)
+    }
+
+    fn total(&self, key: &str) -> f64 {
+        self.sums.get(key).copied().unwrap_or(0.0)
+    }
+
+    /// `n(key)` as a share of `n(of)`.
+    fn share(&self, key: &str, of: &str) -> String {
+        format!("{:.3}", self.n(key) as f64 / self.n(of).max(1) as f64)
+    }
+
+    /// The sample's size and its quantiles q10 / q25 / q50 / q75 / q90.
+    fn q(&self, key: &str) -> String {
+        let mut v = self.samples.get(key).cloned().unwrap_or_default();
+        v.sort_by(f64::total_cmp);
+        if v.is_empty() {
+            return "no sample".into();
+        }
+        format!("{:.3} / {:.3} / {:.3} / {:.3} / {:.3} (n {})", quantile(&v, 0.1), quantile(&v, 0.25), quantile(&v, 0.5), quantile(&v, 0.75), quantile(&v, 0.9), v.len())
+    }
+
+    fn mean(&self, key: &str) -> String {
+        let v = self.samples.get(key).cloned().unwrap_or_default();
+        format!("{:.4}", v.iter().sum::<f64>() / v.len().max(1) as f64)
+    }
+
+    /// The share of the sample above nothing.
+    fn positive(&self, key: &str) -> String {
+        let v = self.samples.get(key).cloned().unwrap_or_default();
+        format!("{:.3}", v.iter().filter(|x| **x > 0.0).count() as f64 / v.len().max(1) as f64)
+    }
+}
+
+/// One generated world with the bots, 300 ticks, read at the start of every tick as the bots
+/// read it (the valuations every fifth tick: they cost a decision each).
+fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    for t in 0..300u32 {
+        let w = g.world();
+        let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+        let mut at_war_now: BTreeMap<ActorId, bool> = BTreeMap::new();
+        for a in living.iter().copied() {
+            let enemies: Vec<ActorId> = w.actors.keys().copied().filter(|b| w.at_war(a, *b) && w.alive(*b)).collect();
+            let at_war = w.actors.keys().any(|b| w.at_war(a, *b));
+            at_war_now.insert(a, at_war);
+            let side = if at_war { "war" } else { "peace" };
+            let key = |name: &str| format!("{side}: {name}");
+            let ceiling = w.recruit_ceiling(a, p).max(1);
+            let (army, treasury) = (w.army_size(a), w.treasury(a));
+            let income = w.yearly_income(a, p).max(1) as f64;
+            let people: i64 = w.actors[&a].provinces.iter().map(|q| w.population(*q)).sum();
+            d.count(&key("polity-ticks"), 1);
+            d.sum(&key("people"), people as f64);
+            d.sum(&key("army"), army as f64);
+            // The army against the ceiling of А1; at war, by who declared.
+            d.sample(&key("army over the ceiling"), army as f64 / ceiling as f64);
+            d.count(&key("no army"), u64::from(army == 0));
+            if at_war {
+                let principal: Vec<&engine2::War> = w.wars.iter().filter(|(k, x)| (k.0 == a || k.1 == a) && x.of.is_none()).map(|(_, x)| x).collect();
+                let role = if principal.iter().any(|x| x.by == Some(a)) {
+                    "declared"
+                } else if principal.iter().any(|x| x.by.is_some()) {
+                    "attacked"
+                } else {
+                    "by its bonds or the starting facts only"
+                };
+                d.sample(&format!("war: army over the ceiling — {role}"), army as f64 / ceiling as f64);
+                d.count(&format!("war: polity-ticks — {role}"), 1);
+                d.count(&format!("war: no army — {role}"), u64::from(army == 0));
+            }
+            // The money.
+            d.sample(&key("treasury, years of income"), treasury as f64 / income);
+            d.sample(&key("ticks of the whole ceiling's pay the treasury covers"), treasury as f64 / engine2::economy::pay_per_tick(ceiling, p).max(1) as f64);
+            d.sum(&format!("window {}: treasury", t / 50), treasury as f64);
+            d.sum(&format!("window {}: income", t / 50), income);
+            d.sample(&format!("window {}: treasury, years of income", t / 50), treasury as f64 / income);
+            if t % 5 != 0 {
+                continue;
+            }
+            // The valuations, as the bot's decision reads them (`World::options`).
+            d.count(&key("sampled"), 1);
+            let unpaid = w.paid_share_seen_ppm(a) < 1_000_000;
+            d.count(&key("unpaid as the bot reads it"), u64::from(unpaid));
+            let options = w.options(a, &VerbId::ALL, p);
+            let levies: Vec<(i64, f64)> = options
+                .iter()
+                .filter_map(|o| match o.call {
+                    Some(VerbCall { verb: VerbId::Recruit, target: Target::Levy(_, men), .. }) => Some((i64::from(men), o.utility)),
+                    _ => None,
+                })
+                .collect();
+            let blow = w.ceded_province_blow(a, &w.risk_prices(a, p), p);
+            let wars: Vec<engine2::worth::WarTerms> = enemies.iter().map(|b| w.war_terms(a, *b, blow, p)).collect();
+            // What the bot charges for soldiers kept: at war for the longest of its fronts, at peace a tick.
+            let kept_for = if at_war { wars.iter().map(|x| x.ticks).fold(0.0, f64::max) } else { 1.0 };
+            if let Some(hire) = options.iter().find(|o| o.call.is_some_and(|c| c.verb == VerbId::HireMercenaries)) {
+                d.count(&key("a hire on offer"), 1);
+                d.count(&key("a hire above nothing"), u64::from(hire.utility > 0.0));
+            }
+            for o in options.iter().filter(|o| o.call.is_some_and(|c| c.verb == VerbId::Disband)) {
+                let Some(VerbCall { target: Target::Unit(u), .. }) = o.call else { continue };
+                let cost = w.soldiers_cost(a, w.soldiers(u), kept_for, p);
+                d.count(&key("units it could disband"), 1);
+                d.count(&key("units whose disbanding is above nothing"), u64::from(o.utility > 0.0));
+                // Disbanding is worth the pay saved less what the strength was worth: so the worth of keeping.
+                d.sample(&key("a unit kept: its worth over its cost"), (cost - o.utility) / cost.max(1e-12));
+            }
+            if levies.is_empty() {
+                let reason = if w.recruit_room(a, p) == 0 {
+                    if w.actors[&a].manpower_deficit > 0.0 && w.recruit_ceiling(a, p) > army {
+                        "the dead of the cohort hold the room"
+                    } else {
+                        "the army is at the ceiling"
+                    }
+                } else if w.recruit_per_tick(a, p) == 0 {
+                    "the rate of a tick rounds to nothing"
+                } else if !w.actors[&a].provinces.iter().any(|q| !w.in_revolt(*q) && w.population(*q) > 0) {
+                    "no province to levy from"
+                } else {
+                    "another reason"
+                };
+                d.count(&key(&format!("no levy on offer — {reason}")), 1);
+                continue;
+            }
+            d.count(&key("a levy on offer"), 1);
+            // The tick's levy (the first, the largest) and the best of the sizes the bot weighs.
+            let (men, net) = levies[0];
+            let cost = w.soldiers_cost(a, men, kept_for, p);
+            let gain = net + cost;
+            let best = levies.iter().map(|(_, u)| *u).fold(f64::MIN, f64::max);
+            d.sample(&key("the tick's levy: net, years of income"), net);
+            d.sample(&key("the tick's levy: its gain, years of income"), gain);
+            d.sample(&key("the tick's levy: its cost, years of income"), cost);
+            d.sample(&key("the tick's levy: gain over cost"), gain / cost.max(1e-12));
+            d.sample(&key("the best levy: net, years of income"), best);
+            d.sample(&key("the tick's levy: men over the ceiling"), men as f64 / ceiling as f64);
+            let extra = World::new_soldiers_strength(men);
+            if at_war {
+                // The gain by its parts, war by war (`war_worth_of`): the odds, the stake, the flags.
+                for x in &wars {
+                    let (p0, p1) = (w.war_odds(a, x.b, 0.0, p), w.war_odds(a, x.b, extra, p));
+                    let closed = |odds: f64| odds < 0.5 && x.first_blow() <= x.ticks;
+                    let at_threshold = w.relation(a, x.b) >= p.treaty_accept_at_relation;
+                    let stake = w.war_stake(a, x.b, p) * years / income;
+                    let won = |odds: f64| if unpaid || at_threshold || closed(odds) { 0.0 } else { odds * stake };
+                    let moved = w.war_worth_of(a, x, unpaid, extra, p) - w.war_worth_of(a, x, unpaid, 0.0, p);
+                    d.count("war: wars weighed", 1);
+                    d.count("war: wars closed by the rule of the peace as foreseen", u64::from(closed(p0)));
+                    d.count("war: wars the tick's levy opens (closed without it)", u64::from(closed(p0) && !closed(p1)));
+                    d.count("war: wars at the threshold of the relation", u64::from(at_threshold));
+                    d.count("war: wars of an unpaid army", u64::from(unpaid));
+                    d.count("war: wars with no stake", u64::from(stake <= 0.0));
+                    d.count("war: wars that win nothing (closed, at the threshold, unpaid or no stake)", u64::from(unpaid || at_threshold || closed(p0) || stake <= 0.0));
+                    d.sample("war: odds without the levy", p0);
+                    d.sample("war: odds the levy adds", p1 - p0);
+                    d.sample("war: the stake for the horizon, years of income", stake);
+                    d.sample("war: the levy's gain in the war — the stake won", won(p1) - won(p0));
+                    d.sample("war: the levy's gain in the war — the losses spared and the rest", moved - (won(p1) - won(p0)));
+                    d.sample("war: the levy's gain in the war — all", moved);
+                    d.sample("war: the war's length the bot reads, ticks", x.ticks);
+                }
+            } else {
+                // At peace: the threat and the suppression (`strength_gain`).
+                let suppression = if w.army_strength(a) == 0.0 { w.suppression_a_tick(a, p) } else { 0.0 };
+                d.sample("peace: the tick's levy: its gain — the suppression", suppression);
+                d.sample("peace: the tick's levy: its gain — the threat", gain - suppression);
+                let threats = w.threats(a, blow, p);
+                d.sample("peace: neighbours it reads as threats", threats.len() as f64);
+                d.sample("peace: wars a tick its neighbours bring, as it reads them", threats.iter().map(|(x, _)| w.wars_a_tick_from(*x, a, 0.0, p)).sum());
+            }
+        }
+        let r = g.tick(&[]).unwrap();
+        // What each chose (one call a tick, `World::decide`).
+        let chosen: BTreeMap<ActorId, VerbId> = r
+            .events
+            .iter()
+            .filter_map(|e| match e.event {
+                Event::Verb { actor: ActorRef::Ruler(a), verb, .. } => Some((a, verb)),
+                _ => None,
+            })
+            .collect();
+        for (a, at_war) in &at_war_now {
+            let side = if *at_war { "war" } else { "peace" };
+            d.count(&format!("{side}: chose {}", chosen.get(a).map_or("nothing".to_string(), |v| format!("{v:?}"))), 1);
+        }
+        // The budget: every posting on a polity's treasury, by its source, and what the tick left.
+        for q in &r.postings {
+            if let engine2::Account::Treasury(a) = q.account {
+                if let Some(at_war) = at_war_now.get(&a) {
+                    let side = if *at_war { "war" } else { "peace" };
+                    let way = if q.milli >= 0 { "in" } else { "out" };
+                    d.sum(&format!("{side}: flow {:?} {way}", q.source), q.milli as f64 / 1000.0);
+                }
+            }
+        }
+    }
+    d
+}
+
+/// The diagnosis of §30.13, parts А–В: at war and at peace, what army the bots keep against
+/// the ceiling of А1, whether a levy is on offer and what it is worth to them against its
+/// price, what moves that worth, how much money they hold, and where the take goes.
+#[test]
+#[ignore]
+fn diagnosis_why_the_armies_are_small() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for w in engine2::par::map(&seeds, |seed| diagnose_world(*seed, &p)) {
+            d.add(w);
+        }
+        let line = |text: String| eprintln!("{label}: {text}");
+        for side in ["war", "peace"] {
+            let key = |name: &str| format!("{side}: {name}");
+            line(format!("[{side}] polity-ticks {}; army over people {:.4}; army over the ceiling of А1 q10/q25/q50/q75/q90 {}; with no army {}", d.n(&key("polity-ticks")), d.total(&key("army")) / d.total(&key("people")).max(1.0), d.q(&key("army over the ceiling")), d.share(&key("no army"), &key("polity-ticks"))));
+            if side == "war" {
+                for role in ["declared", "attacked", "by its bonds or the starting facts only"] {
+                    line(format!("[war] {role}: polity-ticks {}; army over the ceiling {}; with no army {}", d.n(&format!("war: polity-ticks — {role}")), d.q(&format!("war: army over the ceiling — {role}")), d.share(&format!("war: no army — {role}"), &format!("war: polity-ticks — {role}"))));
+                }
+            }
+            let shut: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(&key("no levy on offer"))).map(|(k, n)| format!("{} {:.3}", k.trim_start_matches(&key("no levy on offer — ")), *n as f64 / d.n(&key("sampled")).max(1) as f64)).collect();
+            line(format!("[{side}] decisions read {} (every fifth tick); a levy on offer {}; none: {shut:?}; unpaid as the bot reads it {}", d.n(&key("sampled")), d.share(&key("a levy on offer"), &key("sampled")), d.share(&key("unpaid as the bot reads it"), &key("sampled"))));
+            line(format!("[{side}] the tick's levy, years of income: men over the ceiling {}; gain {}; cost {}; gain over cost {}; net {} — above nothing in {}", d.q(&key("the tick's levy: men over the ceiling")), d.q(&key("the tick's levy: its gain, years of income")), d.q(&key("the tick's levy: its cost, years of income")), d.q(&key("the tick's levy: gain over cost")), d.q(&key("the tick's levy: net, years of income")), d.positive(&key("the tick's levy: net, years of income"))));
+            line(format!("[{side}] the best of the levy's sizes: net {} — above nothing in {}", d.q(&key("the best levy: net, years of income")), d.positive(&key("the best levy: net, years of income"))));
+            line(format!("[{side}] a hire on offer {} of decisions, above nothing in {} of those; units it could disband {}, disbanding above nothing in {}; a unit kept — its worth over its cost {}", d.share(&key("a hire on offer"), &key("sampled")), d.share(&key("a hire above nothing"), &key("a hire on offer")), d.n(&key("units it could disband")), d.share(&key("units whose disbanding is above nothing"), &key("units it could disband")), d.q(&key("a unit kept: its worth over its cost"))));
+            let chose: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(&key("chose "))).map(|(k, n)| format!("{} {:.3}", k.trim_start_matches(&key("chose ")), *n as f64 / d.n(&key("polity-ticks")).max(1) as f64)).collect();
+            line(format!("[{side}] what it chose, of polity-ticks: {chose:?}"));
+            line(format!("[{side}] the treasury in years of income {}; ticks of the whole ceiling's pay it covers {}", d.q(&key("treasury, years of income")), d.q(&key("ticks of the whole ceiling's pay the treasury covers"))));
+        }
+        line(format!(
+            "[war] wars weighed {}: closed by the rule as foreseen {}, opened by the tick's levy {}, at the threshold {}, of an unpaid army {}, with no stake {}; winning nothing for any of these {}",
+            d.n("war: wars weighed"),
+            d.share("war: wars closed by the rule of the peace as foreseen", "war: wars weighed"),
+            d.share("war: wars the tick's levy opens (closed without it)", "war: wars weighed"),
+            d.share("war: wars at the threshold of the relation", "war: wars weighed"),
+            d.share("war: wars of an unpaid army", "war: wars weighed"),
+            d.share("war: wars with no stake", "war: wars weighed"),
+            d.share("war: wars that win nothing (closed, at the threshold, unpaid or no stake)", "war: wars weighed")
+        ));
+        line(format!("[war] the odds without the levy {}; the odds the tick's levy adds {}; the stake for the horizon, years of income {}; the war's length as the bot reads it {}", d.q("war: odds without the levy"), d.q("war: odds the levy adds"), d.q("war: the stake for the horizon, years of income"), d.q("war: the war's length the bot reads, ticks")));
+        line(format!(
+            "[war] what the tick's levy adds to a war, years of income: all {} (mean {}); the stake won {} (mean {}, above nothing in {}); the losses spared and the rest {} (mean {})",
+            d.q("war: the levy's gain in the war — all"),
+            d.mean("war: the levy's gain in the war — all"),
+            d.q("war: the levy's gain in the war — the stake won"),
+            d.mean("war: the levy's gain in the war — the stake won"),
+            d.positive("war: the levy's gain in the war — the stake won"),
+            d.q("war: the levy's gain in the war — the losses spared and the rest"),
+            d.mean("war: the levy's gain in the war — the losses spared and the rest")
+        ));
+        line(format!(
+            "[peace] the tick's levy's gain by its parts, years of income: the threat {} (mean {}), the suppression {} (mean {}); neighbours read as threats {}; wars a tick they bring {}",
+            d.q("peace: the tick's levy: its gain — the threat"),
+            d.mean("peace: the tick's levy: its gain — the threat"),
+            d.q("peace: the tick's levy: its gain — the suppression"),
+            d.mean("peace: the tick's levy: its gain — the suppression"),
+            d.q("peace: neighbours it reads as threats"),
+            d.q("peace: wars a tick its neighbours bring, as it reads them")
+        ));
+        let windows: Vec<String> = (0..6).map(|i| format!("{:.2} (median {})", d.total(&format!("window {i}: treasury")) / d.total(&format!("window {i}: income")).max(1.0), {
+            let mut v = d.samples.get(&format!("window {i}: treasury, years of income")).cloned().unwrap_or_default();
+            v.sort_by(f64::total_cmp);
+            format!("{:.2}", quantile(&v, 0.5))
+        })).collect();
+        line(format!("the treasuries in years of income by windows of 50 ticks, all polities — the sum over the sum (and the median polity-tick): {windows:?}"));
+        // В: the budget in shares of the take, and the arithmetic of the bands.
+        let rate = engine2::economy::pay_per_tick(1000, &p) as f64 / 1000.0;
+        for side in ["war", "peace"] {
+            let flow = |name: &str| d.total(&format!("{side}: flow {name}"));
+            let take = flow("Tax in").max(1.0);
+            let flows: Vec<String> = d.sums.iter().filter(|(k, _)| k.starts_with(&format!("{side}: flow "))).map(|(k, x)| format!("{} {:+.3}", k.trim_start_matches(&format!("{side}: flow ")), x / take)).collect();
+            let left: f64 = d.sums.iter().filter(|(k, _)| k.starts_with(&format!("{side}: flow "))).map(|(_, x)| x).sum();
+            line(format!("[{side}] the budget in shares of the take, by the postings on the treasuries: {flows:?}; left in the treasury {:+.3}", left / take));
+            let (court, pay, people, army) = (-flow("Court out"), -flow("Upkeep out"), d.total(&format!("{side}: people")), d.total(&format!("{side}: army")));
+            let seats = -flow("Seat out");
+            let at_share = |e: f64, rate: f64| court * e / (1.0 - e) / rate / people.max(1.0);
+            line(format!(
+                "[{side}] Э9 as it is {:.3}; the take a head a tick {:.1} kg, a soldier's pay a tick {:.0} kg (band {:.0}–{:.0}); А11 as it is {:.4}; the army the pay would keep at Э9 = 0,50: {:.4} of the people (pay band {:.4}–{:.4}), taking {:.3} of the take; at Э9 = 0,75: {:.4} (pay band {:.4}–{:.4}), taking {:.3} of the take; the army all the take past the court and the seats would keep {:.4}",
+                pay / (pay + court).max(1.0),
+                take / people.max(1.0),
+                rate,
+                rate * 2.0 / 3.0,
+                rate * 4.0 / 3.0,
+                army / people.max(1.0),
+                at_share(0.5, rate),
+                at_share(0.5, rate * 4.0 / 3.0),
+                at_share(0.5, rate * 2.0 / 3.0),
+                court / take,
+                at_share(0.75, rate),
+                at_share(0.75, rate * 4.0 / 3.0),
+                at_share(0.75, rate * 2.0 / 3.0),
+                3.0 * court / take,
+                (take - court - seats) / rate / people.max(1.0)
+            ));
+        }
+    }
+}
+
+/// The diagnosis of §30.13, part Г: what the army answers to at all — А11 at peace (the mean,
+/// and the level it settles at after the first fifty ticks) and at war on the calibration
+/// seeds with one parameter replaced **in a copy of the parameters**, two points each, А12 and
+/// the revanche beside them for the price. No calibration: nothing is changed by it (rules 1
+/// and 2 of §24.1).
+#[test]
+#[ignore]
+fn diagnosis_what_the_army_answers_to() {
+    let base = params();
+    let seeds: Vec<u64> = (1..=20).collect();
+    type Set = fn(&mut Params);
+    let band = base.entries["army.pay_per_soldier_outputs"].band.unwrap();
+    assert_eq!(band, [2.0, 4.0], "the band of E0 А3 the two points of the pay are read from");
+    let points: [(&str, Set); 7] = [
+        ("as shipped", |_| {}),
+        ("recruit.rate_per_tick (А2) 0,125", |p| p.recruit_rate_ppm_per_tick = 125_000),
+        ("recruit.rate_per_tick (А2) 0,5", |p| p.recruit_rate_ppm_per_tick = 500_000),
+        ("battle.strength_exponent (k) 1,2", |p| p.battle_strength_exponent = 1.2),
+        ("battle.strength_exponent (k) 2,0", |p| p.battle_strength_exponent = 2.0),
+        ("army.pay_per_soldier_outputs (А3) 2,0 — the band's bottom", |p| p.pay_per_soldier_kg_per_year = (2.0 * p.output_per_head_kg as f64).round() as i64),
+        ("army.pay_per_soldier_outputs (А3) 4,0 — the band's top", |p| p.pay_per_soldier_kg_per_year = (4.0 * p.output_per_head_kg as f64).round() as i64),
+    ];
+    for (name, set) in points {
+        let mut p = base.clone();
+        set(&mut p);
+        let m = Measures::over(&seeds, &p);
+        let r = m.rates();
+        let settled = m.a11_peace_windows.iter().skip(1).fold((0i64, 0i64), |acc, (a, n)| (acc.0 + a, acc.1 + n));
+        eprintln!(
+            "{name}: А11 at peace {:.4}, settled after the first 50 ticks {:.4}; А11 at war {:.4}; А12 {:.3}; war declarations {}, the tick after a peace of the same pair {:.3}; Э9 {:.3}; a soldier's pay {} kg a year",
+            r.a11_peace,
+            settled.0 as f64 / settled.1.max(1) as f64,
+            r.a11_war,
+            r.a12,
+            m.declarations,
+            m.declared_after_peace as f64 / m.declarations.max(1) as f64,
+            m.pay as f64 / (m.pay + m.court).max(1) as f64,
+            p.pay_per_soldier_kg_per_year
+        );
+    }
+}
