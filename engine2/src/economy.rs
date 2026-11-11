@@ -71,23 +71,39 @@ use crate::params::Params;
 use crate::verbs::{ActorRef, VerbCall, VerbId};
 use crate::world::{Institution, World, WorldError};
 
-/// A polity's budget of the tick, as the economy computed it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A polity's budget of the tick, as the economy computes it (`World::tick_budget`) and then
+/// posts it (`phase_economy`): every article in the order the phase takes it, each bounded by
+/// what the treasury holds when its turn comes.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Budget {
     /// Production of the tick, kg.
     pub production: i64,
     /// Tax taken, kg.
     pub income: i64,
-    /// Court and administration, kg.
+    /// The lord the tribute goes to (E0 Д2): none for a polity with no lord, at war with
+    /// its lord — a rebel pays nothing — or whose lord has fallen.
+    pub lord: Option<ActorId>,
+    /// Tribute due to the lord, kg, and what the treasury held of it.
+    pub tribute_due: i64,
+    pub tribute: i64,
+    /// The houses' seats as paid, kg (E0 Х1): each house's, in the order of `seat_incomes`.
+    pub seats: Vec<(crate::ids::HouseId, i64)>,
+    /// Court and administration, kg: what is due, and what the treasury held of it.
     pub court: i64,
+    pub court_paid: i64,
+    /// Interest of the tick, kg: `interest_paid` of it from the treasury, the rest onto the
+    /// debt.
+    pub interest: i64,
+    pub interest_paid: i64,
+    /// The interest carried the debt past its ceiling: the polity defaults this tick — the
+    /// debt is written off and the credit closed before the army is paid.
+    pub defaults: bool,
     /// Pay the army asked for, kg.
     pub pay_due: i64,
-    /// Pay actually given, kg.
-    pub paid: i64,
     /// Borrowed this tick to meet the pay, kg (bank only).
     pub borrowed: i64,
-    /// Interest of the tick, kg: paid from the treasury or added to the debt.
-    pub interest: i64,
+    /// Pay actually given, kg.
+    pub paid: i64,
     /// Debt paid down from the surplus, kg.
     pub repaid: i64,
 }
@@ -164,12 +180,19 @@ impl World {
         }
     }
 
+    /// Whether a unit stands on land not its owner's: the half of `on_campaign` anyone sees
+    /// (plan §30.9 p. 1, owner's decision 2026-11-11 — positions are open, orders are not).
+    pub fn off_own_land(&self, u: crate::ids::UnitId) -> bool {
+        let unit = &self.units[&u];
+        self.provinces[&unit.position].owner != unit.owner
+    }
+
     /// Whether a unit is on campaign (plan §27.2, owner's correction on #297): standing on
-    /// land not its owner's, or ordered toward land not its owner's. A garrison at home is
-    /// not, at war or not.
+    /// land not its owner's (`off_own_land`), or ordered toward land not its owner's. A
+    /// garrison at home is not, at war or not.
     pub fn on_campaign(&self, u: crate::ids::UnitId) -> bool {
         let unit = &self.units[&u];
-        self.provinces[&unit.position].owner != unit.owner || unit.destination.is_some_and(|d| self.provinces[&d].owner != unit.owner)
+        self.off_own_land(u) || unit.destination.is_some_and(|d| self.provinces[&d].owner != unit.owner)
     }
 
     /// A unit's pay for a tick, kg: the pay of its soldiers, on campaign
@@ -194,10 +217,17 @@ impl World {
     /// How much more a polity may borrow: the ceiling less the debt it carries; nothing
     /// while the credit is closed after a default.
     pub fn loan_room(&self, a: ActorId, params: &Params) -> i64 {
-        if self.credit_closed(a) {
+        self.loan_room_at(a, self.debt(a), self.credit_closed(a), params)
+    }
+
+    /// The room to borrow at a debt of `debt` with the credit `closed` or not: the one rule
+    /// `loan_room` reads on the state and `tick_budget` on the debt as the tick's interest
+    /// leaves it.
+    fn loan_room_at(&self, a: ActorId, debt: i64, closed: bool, params: &Params) -> i64 {
+        if closed {
             return 0;
         }
-        (self.debt_ceiling(a, params) - self.debt(a)).max(0)
+        (self.debt_ceiling(a, params) - debt).max(0)
     }
 
     /// The interest this polity pays per tick: the band's top ever after a default.
@@ -293,8 +323,84 @@ impl World {
         Ok(())
     }
 
-    /// The economy phase of a tick. Returns each polity's budget; the paid share is stored
-    /// on the actor for the supply phase.
+    /// The budget of a polity's tick on the state as it stands, **nothing posted** (plan §30.9
+    /// p. 1, §30.11): the articles `phase_economy` posts, in its order, each bounded by what
+    /// the treasury holds when its turn comes — the take; the tribute to the lord; the
+    /// houses' seats; the court; the interest on the debt carried in, from the treasury as
+    /// far as it reaches and the rest onto the debt, with the default past the ceiling; the
+    /// pay of the polity's own men and the ruling house's retinue, with the loan that meets
+    /// a shortfall within the room; the surplus against the debt. The retinues of the houses
+    /// that do not rule are their houses' charge, not the polity's.
+    ///
+    /// **The phase calls this very function and posts what it returns**, a polity at a time
+    /// in the order of the ids: a vassal's tribute is in its lord's treasury by the lord's
+    /// turn only when the vassal's id is the lower. Read at another moment it is the budget
+    /// the polity would have were its turn now.
+    pub fn tick_budget(&self, a: ActorId, params: &Params) -> Budget {
+        let production = self.production_per_tick(a, params);
+        let rate = self.actors[&a].tax_rate_ppm;
+        let share = self.collection_share_ppm(a, params);
+        let income = production * rate / 1_000_000 * share / 1_000_000;
+        // The treasury and the debt as the postings would leave them, article by article.
+        let (mut treasury, mut debt) = (self.treasury(a) + income.max(0), self.debt(a));
+        // Tribute (E0 Д2, E2 step 7): a vassal sends its lord a share of the take, what
+        // the treasury holds of it; not while it is at war with the lord — a rebel pays
+        // nothing — and not to a lord that has fallen.
+        let lord = self.actors[&a].vassal_of.filter(|lord| self.alive(*lord) && !self.at_war(a, *lord));
+        let tribute_due = if lord.is_some() { tribute_due(income, params) } else { 0 };
+        let tribute = tribute_due.min(treasury).max(0);
+        treasury -= tribute;
+        // The houses' seats: the throne's share of the tax, a governorship's share of
+        // its province's tax.
+        let seats: Vec<(crate::ids::HouseId, i64)> = self
+            .seat_incomes(a, income, rate, share, params)
+            .into_iter()
+            .map(|(house, kg)| {
+                let kg = kg.min(treasury).max(0);
+                treasury -= kg;
+                (house, kg)
+            })
+            .collect();
+        // The court takes what there is: a posting past the treasury stops at zero (the
+        // ledger's bound).
+        let court = income * params.court_share_ppm / 1_000_000;
+        let court_paid = court.min(treasury).max(0);
+        treasury -= court_paid;
+        // Interest on the debt carried in: from the treasury as far as it reaches, the
+        // rest onto the debt. Past the ceiling and unable to serve the debt: default — the
+        // debt written off, the credit closed.
+        let interest = debt * self.interest_ppm_per_tick(a, params) / 1_000_000;
+        let interest_paid = interest.min(treasury).max(0);
+        treasury -= interest_paid;
+        let mut closed = self.credit_closed(a);
+        let mut defaults = false;
+        if interest > interest_paid {
+            debt += interest - interest_paid;
+            if debt > self.debt_ceiling(a, params) {
+                // The debt is written off and the credit closed for the term
+                // (`default.years_without_credit`, ticks ahead): no loan this tick.
+                defaults = true;
+                debt = 0;
+                closed = true;
+            }
+        }
+        // The polity pays its own men and the ruling house's retinue; a house that does
+        // not rule pays its own (E0 Х2, owner's rule on §21).
+        let pay_due: i64 = self.units_of(a).iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_per_tick(*u, params)).sum();
+        let shortfall = (pay_due - treasury).max(0);
+        let borrowed = shortfall.min(self.loan_room_at(a, debt, closed, params));
+        treasury += borrowed;
+        debt += borrowed;
+        let paid = pay_due.min(treasury);
+        treasury -= paid;
+        // The surplus goes against the debt.
+        let repaid = treasury.min(debt);
+        Budget { production, income, lord, tribute_due, tribute, seats, court, court_paid, interest, interest_paid, defaults, pay_due, borrowed, paid, repaid }
+    }
+
+    /// The economy phase of a tick: every living polity's budget (`tick_budget`) posted, a
+    /// polity at a time in the order of the ids. Returns each polity's budget; the paid
+    /// share is stored on the actor for the supply phase.
     pub(crate) fn phase_economy(&mut self, params: &Params) -> Result<Vec<(ActorId, Budget)>, WorldError> {
         let ids: Vec<ActorId> = self.actors.keys().copied().collect();
         let mut out = Vec::with_capacity(ids.len());
@@ -308,56 +414,48 @@ impl World {
                 self.actors.get_mut(&a).unwrap().credit_closed_until = None;
                 self.emit(Event::CreditRestored { actor: a });
             }
+            // The budget of the tick, computed on the state as the polities before this one
+            // left it, and posted article by article in its order.
             let treasury = Account::Treasury(a);
-            let production = self.production_per_tick(a, params);
-            let rate = self.actors[&a].tax_rate_ppm;
-            let share = self.collection_share_ppm(a, params);
-            let income = production * rate / 1_000_000 * share / 1_000_000;
+            let budget = self.tick_budget(a, params);
+            let (treasury_before, debt_before) = (self.treasury(a), self.debt(a));
+            let Budget { income, lord, tribute_due: due, tribute, court, interest, interest_paid, defaults, pay_due, borrowed, paid, repaid, .. } = budget;
             if income > 0 {
                 self.post(treasury, Source::Tax, income * 1000)?;
             }
-            // Tribute (E0 Д2, E2 step 7): a vassal sends its lord a share of the take, what
-            // the treasury holds of it; not while it is at war with the lord — a rebel pays
-            // nothing — and not to a lord that has fallen.
-            if let Some(lord) = self.actors[&a].vassal_of {
-                if self.alive(lord) && !self.at_war(a, lord) {
-                    let due = tribute_due(income, params);
-                    let paid = due.min(self.treasury(a));
-                    if paid > 0 {
-                        self.post(treasury, Source::Tribute, -paid * 1000)?;
-                        self.post(Account::Treasury(lord), Source::Tribute, paid * 1000)?;
-                    }
-                    if paid < due {
-                        self.emit(Event::TributeShort { vassal: a, lord, unpaid_kg: (due - paid) as u64 });
-                    }
+            // Tribute (E0 Д2, E2 step 7): what the treasury holds of the lord's share.
+            if let Some(lord) = lord {
+                if tribute > 0 {
+                    self.post(treasury, Source::Tribute, -tribute * 1000)?;
+                    self.post(Account::Treasury(lord), Source::Tribute, tribute * 1000)?;
+                }
+                if tribute < due {
+                    self.emit(Event::TributeShort { vassal: a, lord, unpaid_kg: (due - tribute) as u64 });
                 }
             }
             // The houses' seats: the throne's share of the tax, a governorship's share of
             // its province's tax.
-            let seats = self.seat_incomes(a, income, rate, share, params);
-            for (house, kg) in seats {
-                let kg = kg.min(self.treasury(a));
-                if kg > 0 {
+            for (house, kg) in &budget.seats {
+                if *kg > 0 {
                     self.post(treasury, Source::Seat, -kg * 1000)?;
-                    self.post(Account::HouseTreasury(house), Source::Seat, kg * 1000)?;
+                    self.post(Account::HouseTreasury(*house), Source::Seat, kg * 1000)?;
                 }
             }
-            let court = income * params.court_share_ppm / 1_000_000;
+            // The court is posted whole: past the treasury the ledger stops at zero and the
+            // world records the bound (`BoundHit`).
             if court > 0 {
                 self.post(treasury, Source::Court, -court * 1000)?;
             }
             // Interest on the debt carried in: from the treasury as far as it reaches, the
             // rest onto the debt.
-            let interest = self.debt(a) * self.interest_ppm_per_tick(a, params) / 1_000_000;
             if interest > 0 {
-                let from_treasury = interest.min(self.treasury(a));
-                if from_treasury > 0 {
-                    self.post(treasury, Source::Interest, -from_treasury * 1000)?;
+                if interest_paid > 0 {
+                    self.post(treasury, Source::Interest, -interest_paid * 1000)?;
                 }
-                if interest > from_treasury {
-                    self.post(Account::Debt(a), Source::Interest, (interest - from_treasury) * 1000)?;
+                if interest > interest_paid {
+                    self.post(Account::Debt(a), Source::Interest, (interest - interest_paid) * 1000)?;
                     // Past the ceiling and unable to serve the debt: default.
-                    if self.debt(a) > self.debt_ceiling(a, params) {
+                    if defaults {
                         self.default(a, params)?;
                     }
                 }
@@ -365,13 +463,9 @@ impl World {
             // The polity pays its own men and the ruling house's retinue; a house that does
             // not rule pays its own below (E0 Х2, owner's rule on §21).
             let units = self.units_of(a);
-            let pay_due: i64 = units.iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_per_tick(*u, params)).sum();
-            let shortfall = (pay_due - self.treasury(a)).max(0);
-            let borrowed = shortfall.min(self.loan_room(a, params));
             if borrowed > 0 {
                 self.borrow(a, borrowed)?;
             }
-            let paid = pay_due.min(self.treasury(a));
             if paid > 0 {
                 self.post(treasury, Source::Upkeep, -paid * 1000)?;
             }
@@ -387,11 +481,18 @@ impl World {
                 self.emit(Event::PayShortfall { actor: a, unpaid_kg: (pay_due - paid) as u64 });
             }
             // The surplus goes against the debt.
-            let repaid = self.treasury(a).min(self.debt(a));
             if repaid > 0 {
                 self.post(treasury, Source::Repayment, -repaid * 1000)?;
                 self.post(Account::Debt(a), Source::Repayment, -repaid * 1000)?;
             }
+            // The budget is what was posted: the treasury and the debt stand where its
+            // articles leave them.
+            debug_assert_eq!(
+                self.treasury(a),
+                treasury_before + income.max(0) - tribute - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court_paid - interest_paid + borrowed - paid - repaid,
+                "the budget of {a:?} parts with the treasury's postings"
+            );
+            debug_assert_eq!(self.debt(a), if defaults { 0 } else { debt_before + interest - interest_paid } + borrowed - repaid, "the budget of {a:?} parts with the debt's postings");
             // The retinues of the houses that do not rule (E0 Х2): each house pays its own
             // men from its treasury, what it holds of the pay; the unpaid share melts at
             // home by А7 (`movement.rs`) — the house's budget is its limit, as the polity's
@@ -407,7 +508,7 @@ impl World {
                     self.emit(Event::HousePayShortfall { house: h, unpaid_kg: (due - paid) as u64 });
                 }
             }
-            out.push((a, Budget { production, income, court, pay_due, paid, borrowed, interest, repaid }));
+            out.push((a, budget));
         }
         Ok(out)
     }

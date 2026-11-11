@@ -1869,7 +1869,11 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
 /// alliance with it was worth to polity 0, and the proposer's treasury moved the house's
 /// worth of the match (checked when the guard was written). The registry of the hidden:
 /// `Actor.goals`, `Actor.manpower_deficit`, `Actor.paid_share_history_ppm` (the bot's own
-/// memory), `House.treasury` (not one's own), `Unit.destination` (not one's own).
+/// memory), `House.treasury` (not one's own), `Unit.destination` (not one's own), and the
+/// treasury of another polity, `Account::Treasury` (owner's decision 2026-11-11, plan §30.9
+/// p. 1: the view shows a polity its own only; the debt stays open). On main the bots read
+/// no treasury but their own, so that injection holds before the fix too: it guards the
+/// rule of the peace by what a side can field ((д1), step Б).
 #[test]
 fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let p = params();
@@ -1893,6 +1897,16 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
         w.units.get_mut(&u).unwrap().destination = Some(capital);
     }
     assert_eq!(seen(&w), before, "another's orders are its own");
+    // Another's treasury: the neighbours' grow a thousandfold, and one is emptied.
+    for x in [b, c] {
+        let more = 1000 * w.treasury(x).max(1000) * 1000;
+        w.post(engine2::Account::Treasury(x), Source::Test, more).unwrap();
+    }
+    assert_eq!(seen(&w), before, "another's treasury is its own");
+    let all = w.treasury(b) * 1000;
+    w.post(engine2::Account::Treasury(b), Source::Test, -all).unwrap();
+    assert_eq!(w.treasury(b), 0, "polity 1's treasury emptied");
+    assert_eq!(seen(&w), before, "another's empty treasury is its own");
     // Another house's treasury: the match offered, the proposer's treasury then grows a
     // thousandfold — the house answers the dowry the offer named.
     let s = all_verbs(testworld::five_states_scenario());

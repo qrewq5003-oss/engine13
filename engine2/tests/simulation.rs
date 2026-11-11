@@ -96,7 +96,47 @@ fn view_shows_names_and_display_currency_and_no_ids() {
     let first = &v.actors[0];
     assert_eq!(first.name, "State 0");
     assert_eq!(first.provinces.len(), 5);
-    assert!((first.treasury_display - first.treasury_kg as f64 / 100.0).abs() < 1e-9);
+    assert!((first.debt_display - first.debt_kg as f64 / 100.0).abs() < 1e-9);
+}
+
+/// The view shows a polity its own treasury only (plan §30.9 p. 1, owner's decision
+/// 2026-11-11): the player's polity's — for a player who plays a house, the polity the house
+/// lives in (plan §30.11, an assumption until E5) — and nobody's in a run without a player.
+/// The debt is shown for all: loans and defaults are public events.
+#[test]
+fn the_view_shows_the_treasury_of_the_viewers_polity_only_and_the_debt_of_all() {
+    let mut g = game(2);
+    let world_treasury = |g: &Game, i: usize| g.world().treasury(ActorId(i as u32));
+    let world_debt = |g: &Game, i: usize| g.world().debt(ActorId(i as u32));
+    // No player: nobody's treasury.
+    let v = g.view();
+    assert!(v.actors.len() >= 3, "the test world has polities to hide from one another");
+    assert!(v.actors.iter().all(|a| a.treasury_kg.is_none() && a.treasury_display.is_none()), "with no player nobody's treasury is shown");
+    assert!(v.actors.iter().enumerate().all(|(i, a)| a.debt_kg == world_debt(&g, i)), "the debt is shown for all");
+    // The player rules polity 1: its treasury and nobody else's.
+    g.set_player(Some(ActorRef::Ruler(ActorId(1))));
+    let v = g.view();
+    for (i, a) in v.actors.iter().enumerate() {
+        if i == 1 {
+            assert_eq!(a.treasury_kg, Some(world_treasury(&g, i)), "the player's own treasury");
+            assert!((a.treasury_display.unwrap() - world_treasury(&g, i) as f64 / 100.0).abs() < 1e-9, "in the display currency");
+        } else {
+            assert_eq!((a.treasury_kg, a.treasury_display), (None, None), "polity {i}'s treasury is hidden from the player of polity 1");
+        }
+        assert_eq!(a.debt_kg, world_debt(&g, i), "the debt of polity {i} is shown");
+        assert!((a.debt_display - a.debt_kg as f64 / 100.0).abs() < 1e-9);
+    }
+    // The player plays a house: the treasury of the polity the house lives in.
+    let (house, home) = g.world().houses.iter().map(|(h, x)| (*h, x.polity)).find(|(_, polity)| *polity != ActorId(1)).expect("a house of another polity");
+    g.set_player(Some(ActorRef::House(house)));
+    let v = g.view();
+    for (i, a) in v.actors.iter().enumerate() {
+        assert_eq!(a.treasury_kg.is_some(), i == home.index(), "a house's player sees the treasury of its polity only");
+    }
+    // The hidden treasury is not the same as an empty one, and the shown one moves with the world.
+    assert!(world_treasury(&g, 1) > 0, "polity 1 has a treasury to hide");
+    g.tick(&[]).unwrap();
+    assert_eq!(g.view().actors[home.index()].treasury_kg, Some(world_treasury(&g, home.index())));
 }
 
 #[test]

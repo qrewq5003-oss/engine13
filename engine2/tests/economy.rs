@@ -377,3 +377,143 @@ fn at_war_the_garrisons_at_home_are_paid_as_at_peace_and_a_campaign_twice() {
     assert_eq!(upkeep(&r), due, "the campaign is paid at the campaign's pay");
     assert_eq!(engine2::economy::campaign_pay_per_tick(1000, &p), 2 * engine2::economy::pay_per_tick(1000, &p), "twice the pay at the shipped factor");
 }
+
+/// The half of the campaign's rule anyone sees, and the rule itself (plan §30.9 p. 1, §30.11):
+/// a unit is off its owner's land by where it stands (`off_own_land`); it is on campaign
+/// there, or ordered onto land not its owner's (`on_campaign`) — the rule as it was before
+/// the visible half was named, on a unit at home, a unit on another's land and a unit under
+/// orders.
+#[test]
+fn a_unit_is_on_campaign_off_its_owners_land_or_ordered_onto_anothers() {
+    let mut w = testworld::world(8);
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    // The rule as `on_campaign` stood before `off_own_land` was taken out of it.
+    let as_before = |w: &World, u: UnitId| {
+        let unit = &w.units[&u];
+        w.provinces[&unit.position].owner != unit.owner || unit.destination.is_some_and(|d| w.provinces[&d].owner != unit.owner)
+    };
+    let u = w.units_of(s0)[0];
+    let home = w.units[&u].position;
+    let own_other = w.actors[&s0].provinces.iter().copied().find(|q| *q != home).expect("another province of its own");
+    let foreign = w.actors[&s1].capital;
+    // At home, no orders.
+    assert!(!w.off_own_land(u) && !w.on_campaign(u), "a garrison at home is not on campaign");
+    // Ordered to another province of its own.
+    w.units.get_mut(&u).unwrap().destination = Some(own_other);
+    assert!(!w.off_own_land(u) && !w.on_campaign(u), "a march over its own land is no campaign");
+    // Ordered onto another's land, still at home: on campaign by the order alone — the half
+    // that is hidden from another.
+    w.units.get_mut(&u).unwrap().destination = Some(foreign);
+    assert!(!w.off_own_land(u) && w.on_campaign(u), "ordered onto another's land: on campaign before it leaves");
+    assert_eq!(w.on_campaign(u), as_before(&w, u));
+    // Standing on another's land, no orders.
+    w.units.get_mut(&u).unwrap().position = foreign;
+    w.units.get_mut(&u).unwrap().destination = None;
+    assert!(w.off_own_land(u) && w.on_campaign(u), "on another's land: on campaign");
+    // Standing on another's land, ordered home.
+    w.units.get_mut(&u).unwrap().destination = Some(home);
+    assert!(w.off_own_land(u) && w.on_campaign(u), "on another's land and ordered home: still on campaign");
+    // Every unit of the world, as the rule read before.
+    for v in w.units.keys().copied().collect::<Vec<UnitId>>() {
+        assert_eq!(w.on_campaign(v), as_before(&w, v), "unit {v:?}");
+    }
+}
+
+/// The budget of the tick is what the economy posts (plan §30.9 p. 1, §30.11): `tick_budget`
+/// computes the articles and posts nothing, the phase posts what it returns. Read here at the
+/// tick's start, in a world at peace — nothing moves before the economy, and no lord's vassal
+/// has a lower id than its lord, so every polity's turn finds the state the tick began with —
+/// every article equals the tick's postings of its source: the take, the tribute and the lord's
+/// receipt of it, each house's seat, the court as the treasury held it, the interest from the
+/// treasury and onto the debt, the default, the loan, the pay, the repayment. A tick that
+/// opens by settling an opportunity of the tick before (a usurpation moves legitimacy, and
+/// with it the take) is played and not compared: its economy does not find the state the
+/// tick began with.
+#[test]
+fn the_budget_of_the_tick_is_what_the_economy_posts_article_by_article() {
+    let p = params();
+    let mut w = testworld::world(4);
+    let (s0, s1, s2, s3) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3));
+    // Polity 0: a bank, three armies' worth of men and an empty treasury — it borrows to
+    // the ceiling and its army goes short of its pay.
+    w.actors.get_mut(&s0).unwrap().institutions.insert(Institution::Bank);
+    let unit = w.units_of(s0)[0];
+    let limit = w.sustainable_soldiers(s0, &p);
+    w.post(Account::Soldiers(unit), Source::Recruit, (limit * 3 - w.soldiers(unit)) * 1000).unwrap();
+    let all = w.treasury(s0);
+    w.post(Account::Treasury(s0), Source::Verb, -all * 1000).unwrap();
+    // Polity 2 pays tribute to polity 1 (the lord's id the lower: its turn comes first).
+    w.actors.get_mut(&s2).unwrap().vassal_of = Some(s1);
+    // Polity 3: a bank and a debt it can serve — interest from the treasury, the surplus
+    // against the debt.
+    w.actors.get_mut(&s3).unwrap().institutions.insert(Institution::Bank);
+    w.post(Account::Debt(s3), Source::Test, 50_000 * 1000).unwrap();
+    // Polity 4: a bank and a debt far past what it can serve — the interest takes the
+    // treasury, the rest goes onto the debt, past the ceiling: it defaults.
+    let s4 = ActorId(4);
+    w.actors.get_mut(&s4).unwrap().institutions.insert(Institution::Bank);
+    let hopeless = (w.treasury(s4) + w.yearly_income(s4, &p)) * 1000;
+    w.post(Account::Debt(s4), Source::Test, hopeless * 1000).unwrap();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut compared = 0;
+    for tick in 0..60 {
+        if !w.opportunities.is_empty() {
+            w.tick(&p).unwrap();
+            continue;
+        }
+        compared += 1;
+        let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+        let budgets: Vec<(ActorId, engine2::economy::Budget)> = living.iter().map(|a| (*a, w.tick_budget(*a, &p))).collect();
+        let r = w.tick(&p).unwrap();
+        let posted = |account: Account, source: Source| r.postings.iter().filter(|q| q.account == account && q.source == source).map(|q| q.milli).sum::<i64>();
+        for (a, b) in &budgets {
+            let (a, treasury, debt) = (*a, Account::Treasury(*a), Account::Debt(*a));
+            let at = format!("tick {tick}, polity {a:?}: {b:?}");
+            assert_eq!(posted(treasury, Source::Tax), b.income * 1000, "the take — {at}");
+            // The tribute: out of the vassal's treasury, into its lord's.
+            let received: i64 = budgets.iter().filter(|(_, x)| x.lord == Some(a)).map(|(_, x)| x.tribute).sum();
+            assert_eq!(posted(treasury, Source::Tribute), (received - b.tribute) * 1000, "the tribute — {at}");
+            assert!(b.tribute <= b.tribute_due && (b.lord.is_some() || b.tribute_due == 0), "{at}");
+            // A house holds the throne's seat and its governors' alike: by house.
+            let mut by_house: std::collections::BTreeMap<engine2::HouseId, i64> = std::collections::BTreeMap::new();
+            for (house, kg) in &b.seats {
+                *by_house.entry(*house).or_insert(0) += kg;
+            }
+            for (house, kg) in by_house {
+                assert_eq!(posted(Account::HouseTreasury(house), Source::Seat), kg * 1000, "the seats of {house:?} — {at}");
+            }
+            assert_eq!(posted(treasury, Source::Seat), -b.seats.iter().map(|(_, kg)| kg).sum::<i64>() * 1000, "the seats — {at}");
+            assert_eq!(posted(treasury, Source::Court), -b.court_paid * 1000, "the court — {at}");
+            assert!(b.court_paid <= b.court, "{at}");
+            assert_eq!(posted(treasury, Source::Interest), -b.interest_paid * 1000, "the interest from the treasury — {at}");
+            assert_eq!(posted(debt, Source::Interest), (b.interest - b.interest_paid) * 1000, "the interest onto the debt — {at}");
+            assert_eq!(r.events.iter().any(|e| matches!(e.event, Event::Default { actor, .. } if actor == a)), b.defaults, "the default — {at}");
+            assert_eq!(posted(treasury, Source::Loan), b.borrowed * 1000, "the loan — {at}");
+            assert_eq!(posted(debt, Source::Loan), b.borrowed * 1000, "the loan on the debt — {at}");
+            assert_eq!(posted(treasury, Source::Upkeep), -b.paid * 1000, "the pay — {at}");
+            assert_eq!(r.events.iter().any(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == a)), b.paid < b.pay_due, "the shortfall — {at}");
+            assert_eq!(posted(treasury, Source::Repayment), -b.repaid * 1000, "the repayment — {at}");
+            assert_eq!(posted(debt, Source::Repayment), -b.repaid * 1000, "the repayment on the debt — {at}");
+            for (name, happened) in [
+                ("a tribute paid", b.tribute > 0),
+                ("a seat paid", b.seats.iter().any(|(_, kg)| *kg > 0)),
+                ("a court paid", b.court_paid > 0),
+                ("interest from the treasury", b.interest_paid > 0),
+                ("interest onto the debt", b.interest > b.interest_paid),
+                ("a default", b.defaults),
+                ("a loan", b.borrowed > 0),
+                ("a pay short", b.paid < b.pay_due),
+                ("a repayment", b.repaid > 0),
+            ] {
+                if happened {
+                    seen.insert(name);
+                }
+            }
+        }
+    }
+    // The test is not empty-handed: most ticks were compared, and every article took part.
+    assert!(compared >= 40, "only {compared} ticks of sixty compared");
+    for name in ["a tribute paid", "a seat paid", "a court paid", "interest from the treasury", "interest onto the debt", "a default", "a loan", "a pay short", "a repayment"] {
+        assert!(seen.contains(name), "no {name} in sixty ticks: {seen:?}");
+    }
+}
