@@ -401,15 +401,24 @@ fn a_unit_is_on_campaign_off_its_owners_land_or_ordered_onto_anothers() {
     // Ordered to another province of its own.
     w.units.get_mut(&u).unwrap().destination = Some(own_other);
     assert!(!w.off_own_land(u) && !w.on_campaign(u), "a march over its own land is no campaign");
+    // The pay due in the two readings of the campaign (`tick_dues`): the rule of the world,
+    // and by where the units stand — the reading of another's army.
+    let p = params();
+    let pay = |w: &World, by_position: bool| w.tick_dues(s0, by_position, &p).pay_due;
+    let at_home = pay(&w, false);
+    assert_eq!(pay(&w, true), at_home, "at home the two readings are one");
     // Ordered onto another's land, still at home: on campaign by the order alone — the half
     // that is hidden from another.
     w.units.get_mut(&u).unwrap().destination = Some(foreign);
     assert!(!w.off_own_land(u) && w.on_campaign(u), "ordered onto another's land: on campaign before it leaves");
     assert_eq!(w.on_campaign(u), as_before(&w, u));
+    assert!(pay(&w, false) > at_home, "the world pays the campaign from the order");
+    assert_eq!(pay(&w, true), at_home, "by position the unit is still at home: the order is hidden");
     // Standing on another's land, no orders.
     w.units.get_mut(&u).unwrap().position = foreign;
     w.units.get_mut(&u).unwrap().destination = None;
     assert!(w.off_own_land(u) && w.on_campaign(u), "on another's land: on campaign");
+    assert!(pay(&w, true) > at_home && pay(&w, true) == pay(&w, false), "on another's land the two readings are one again");
     // Standing on another's land, ordered home.
     w.units.get_mut(&u).unwrap().destination = Some(home);
     assert!(w.off_own_land(u) && w.on_campaign(u), "on another's land and ordered home: still on campaign");
@@ -464,11 +473,21 @@ fn the_budget_of_the_tick_is_what_the_economy_posts_article_by_article() {
         compared += 1;
         let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
         let budgets: Vec<(ActorId, engine2::economy::Budget)> = living.iter().map(|a| (*a, w.tick_budget(*a, &p))).collect();
+        let dues: std::collections::BTreeMap<ActorId, engine2::economy::Dues> = living.iter().map(|a| (*a, w.tick_dues(*a, false, &p))).collect();
         let r = w.tick(&p).unwrap();
         let posted = |account: Account, source: Source| r.postings.iter().filter(|q| q.account == account && q.source == source).map(|q| q.milli).sum::<i64>();
         for (a, b) in &budgets {
             let (a, treasury, debt) = (*a, Account::Treasury(*a), Account::Debt(*a));
             let at = format!("tick {tick}, polity {a:?}: {b:?}");
+            // What the tick was due (`tick_dues`, no treasury read): the budget's articles
+            // before the treasury bounds them, and the tribute the vassals owe.
+            let due = &dues[&a];
+            assert_eq!((b.production, b.income, b.lord, b.tribute_due, b.court, b.interest, b.pay_due), (due.production, due.income, due.lord, due.tribute_due, due.court, due.interest, due.pay_due), "what is due — {at}");
+            assert!(b.seats.len() == due.seats.len() && b.seats.iter().zip(&due.seats).all(|((h, paid), (g, owed))| h == g && paid <= owed), "the seats due — {at}");
+            assert_eq!(due.tribute_in, budgets.iter().filter(|(_, x)| x.lord == Some(a)).map(|(_, x)| x.tribute_due).sum::<i64>(), "the tribute its vassals owe — {at}");
+            if due.tribute_in > 0 {
+                seen.insert("a tribute owed by a vassal");
+            }
             assert_eq!(posted(treasury, Source::Tax), b.income * 1000, "the take — {at}");
             // The tribute: out of the vassal's treasury, into its lord's.
             let received: i64 = budgets.iter().filter(|(_, x)| x.lord == Some(a)).map(|(_, x)| x.tribute).sum();
@@ -513,7 +532,7 @@ fn the_budget_of_the_tick_is_what_the_economy_posts_article_by_article() {
     }
     // The test is not empty-handed: most ticks were compared, and every article took part.
     assert!(compared >= 40, "only {compared} ticks of sixty compared");
-    for name in ["a tribute paid", "a seat paid", "a court paid", "interest from the treasury", "interest onto the debt", "a default", "a loan", "a pay short", "a repayment"] {
+    for name in ["a tribute owed by a vassal", "a tribute paid", "a seat paid", "a court paid", "interest from the treasury", "interest onto the debt", "a default", "a loan", "a pay short", "a repayment"] {
         assert!(seen.contains(name), "no {name} in sixty ticks: {seen:?}");
     }
 }

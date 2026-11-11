@@ -71,6 +71,38 @@ use crate::params::Params;
 use crate::verbs::{ActorRef, VerbCall, VerbId};
 use crate::world::{Institution, World, WorldError};
 
+/// What a polity's tick is due, article by article, **with no treasury read** (plan §30.9
+/// p. 1, §30.12; `World::tick_dues`): the take, the tribute to its lord and from its vassals,
+/// the houses' seats, the court, the interest on its debt, the pay of its men. Every input is
+/// open to anyone — people, the tax rate and legitimacy, vassalage, governors, the debt and
+/// its default, the armies — but the pay of a campaign, which reads the units' orders: read
+/// by where the units stand (`by_position`), that too is open. The budget of the tick
+/// (`World::tick_budget`) is these articles bounded by what the treasury holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dues {
+    /// Production of the tick, kg.
+    pub production: i64,
+    /// The tax rate and the share collected, parts per million, and the take they give, kg.
+    pub rate: i64,
+    pub share: i64,
+    pub income: i64,
+    /// The lord the tribute is due to (E0 Д2): none for a polity with no lord, at war with
+    /// its lord — a rebel pays nothing — or whose lord has fallen. And the tribute, kg.
+    pub lord: Option<ActorId>,
+    pub tribute_due: i64,
+    /// The tribute its vassals owe it, kg: each living vassal's not at war with it, by the
+    /// vassal's take.
+    pub tribute_in: i64,
+    /// The houses' seats, kg (E0 Х1): each house's, in the order of `seat_incomes`.
+    pub seats: Vec<(crate::ids::HouseId, i64)>,
+    /// Court and administration, kg.
+    pub court: i64,
+    /// Interest on the debt carried in, kg.
+    pub interest: i64,
+    /// The pay of the polity's own men and the ruling house's retinue, kg.
+    pub pay_due: i64,
+}
+
 /// A polity's budget of the tick, as the economy computes it (`World::tick_budget`) and then
 /// posts it (`phase_economy`): every article in the order the phase takes it, each bounded by
 /// what the treasury holds when its turn comes.
@@ -198,8 +230,18 @@ impl World {
     /// A unit's pay for a tick, kg: the pay of its soldiers, on campaign
     /// `army.campaign_pay_factor` times as much (plan §27.2).
     pub fn unit_pay_per_tick(&self, u: crate::ids::UnitId, params: &Params) -> i64 {
+        self.unit_pay_read(u, false, params)
+    }
+
+    /// A unit's pay for a tick in one of the two readings of the campaign: the rule of the
+    /// world (`on_campaign` — the unit's own polity and the economy), or `by_position`, the
+    /// half anyone sees (`off_own_land` — another's unit, whose orders are hidden; plan §30.9
+    /// p. 1, owner's decision 2026-11-11). They part only for a unit ordered onto another's
+    /// land and still standing on its own.
+    fn unit_pay_read(&self, u: crate::ids::UnitId, by_position: bool, params: &Params) -> i64 {
         let soldiers = self.soldiers(u);
-        if self.on_campaign(u) {
+        let on_campaign = if by_position { self.off_own_land(u) } else { self.on_campaign(u) };
+        if on_campaign {
             campaign_pay_per_tick(soldiers, params)
         } else {
             pay_per_tick(soldiers, params)
@@ -323,6 +365,44 @@ impl World {
         Ok(())
     }
 
+    /// The take of a polity's tick: its production, the tax rate, the share collected, and
+    /// the tax they give, kg — the one formula the economy collects by.
+    fn take_per_tick(&self, a: ActorId, params: &Params) -> (i64, i64, i64, i64) {
+        let production = self.production_per_tick(a, params);
+        let rate = self.actors[&a].tax_rate_ppm;
+        let share = self.collection_share_ppm(a, params);
+        (production, rate, share, production * rate / 1_000_000 * share / 1_000_000)
+    }
+
+    /// The lord a polity's tribute is due to (E0 Д2, E2 step 7): its lord, while the lord
+    /// lives and the two are not at war — a rebel pays nothing.
+    fn tribute_lord(&self, a: ActorId) -> Option<ActorId> {
+        self.actors[&a].vassal_of.filter(|lord| self.alive(*lord) && !self.at_war(a, *lord))
+    }
+
+    /// What a polity's tick is due, with no treasury read (`Dues`; plan §30.9 p. 1, §30.12):
+    /// the articles `tick_budget` bounds by the treasury and `phase_economy` posts, and the
+    /// tribute its vassals owe it. The pay of its men in one of two readings of the campaign
+    /// (`unit_pay_read`): the rule of the world, or `by_position` — the reading of another's
+    /// army, whose orders are hidden.
+    pub fn tick_dues(&self, a: ActorId, by_position: bool, params: &Params) -> Dues {
+        let (production, rate, share, income) = self.take_per_tick(a, params);
+        // Tribute: a vassal sends its lord a share of the take; the lord's vassals send it
+        // theirs.
+        let lord = self.tribute_lord(a);
+        let tribute_in: i64 = self.actors.keys().copied().filter(|v| self.alive(*v) && self.tribute_lord(*v) == Some(a)).map(|v| tribute_due(self.take_per_tick(v, params).3, params)).sum();
+        let tribute_due = if lord.is_some() { tribute_due(income, params) } else { 0 };
+        // The houses' seats: the throne's share of the tax, a governorship's share of its
+        // province's tax.
+        let seats = self.seat_incomes(a, income, rate, share, params);
+        let court = income * params.court_share_ppm / 1_000_000;
+        let interest = self.debt(a) * self.interest_ppm_per_tick(a, params) / 1_000_000;
+        // The polity pays its own men and the ruling house's retinue; a house that does
+        // not rule pays its own (E0 Х2, owner's rule on §21).
+        let pay_due: i64 = self.units_of(a).iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_read(*u, by_position, params)).sum();
+        Dues { production, rate, share, income, lord, tribute_due, tribute_in, seats, court, interest, pay_due }
+    }
+
     /// The budget of a polity's tick on the state as it stands, **nothing posted** (plan §30.9
     /// p. 1, §30.11): the articles `phase_economy` posts, in its order, each bounded by what
     /// the treasury holds when its turn comes — the take; the tribute to the lord; the
@@ -334,26 +414,19 @@ impl World {
     ///
     /// **The phase calls this very function and posts what it returns**, a polity at a time
     /// in the order of the ids: a vassal's tribute is in its lord's treasury by the lord's
-    /// turn only when the vassal's id is the lower. Read at another moment it is the budget
-    /// the polity would have were its turn now.
+    /// turn only when the vassal's id is the lower (so `Dues::tribute_in` is no article of
+    /// this budget: it comes in at the vassals' turns). Read at another moment it is the
+    /// budget the polity would have were its turn now.
     pub fn tick_budget(&self, a: ActorId, params: &Params) -> Budget {
-        let production = self.production_per_tick(a, params);
-        let rate = self.actors[&a].tax_rate_ppm;
-        let share = self.collection_share_ppm(a, params);
-        let income = production * rate / 1_000_000 * share / 1_000_000;
-        // The treasury and the debt as the postings would leave them, article by article.
+        // What the tick is due (`tick_dues`, the pay by the rule of the world), then each
+        // article bounded by the treasury as the postings before it would leave it.
+        let Dues { production, income, lord, tribute_due, tribute_in: _, seats, court, interest, pay_due, .. } = self.tick_dues(a, false, params);
         let (mut treasury, mut debt) = (self.treasury(a) + income.max(0), self.debt(a));
-        // Tribute (E0 Д2, E2 step 7): a vassal sends its lord a share of the take, what
-        // the treasury holds of it; not while it is at war with the lord — a rebel pays
-        // nothing — and not to a lord that has fallen.
-        let lord = self.actors[&a].vassal_of.filter(|lord| self.alive(*lord) && !self.at_war(a, *lord));
-        let tribute_due = if lord.is_some() { tribute_due(income, params) } else { 0 };
+        // Tribute: what the treasury holds of the lord's share.
         let tribute = tribute_due.min(treasury).max(0);
         treasury -= tribute;
-        // The houses' seats: the throne's share of the tax, a governorship's share of
-        // its province's tax.
-        let seats: Vec<(crate::ids::HouseId, i64)> = self
-            .seat_incomes(a, income, rate, share, params)
+        // The houses' seats, each what the treasury still holds of it.
+        let seats: Vec<(crate::ids::HouseId, i64)> = seats
             .into_iter()
             .map(|(house, kg)| {
                 let kg = kg.min(treasury).max(0);
@@ -363,13 +436,11 @@ impl World {
             .collect();
         // The court takes what there is: a posting past the treasury stops at zero (the
         // ledger's bound).
-        let court = income * params.court_share_ppm / 1_000_000;
         let court_paid = court.min(treasury).max(0);
         treasury -= court_paid;
         // Interest on the debt carried in: from the treasury as far as it reaches, the
         // rest onto the debt. Past the ceiling and unable to serve the debt: default — the
         // debt written off, the credit closed.
-        let interest = debt * self.interest_ppm_per_tick(a, params) / 1_000_000;
         let interest_paid = interest.min(treasury).max(0);
         treasury -= interest_paid;
         let mut closed = self.credit_closed(a);
@@ -384,9 +455,7 @@ impl World {
                 closed = true;
             }
         }
-        // The polity pays its own men and the ruling house's retinue; a house that does
-        // not rule pays its own (E0 Х2, owner's rule on §21).
-        let pay_due: i64 = self.units_of(a).iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_per_tick(*u, params)).sum();
+        // The pay of the polity's men, with the loan that meets a shortfall within the room.
         let shortfall = (pay_due - treasury).max(0);
         let borrowed = shortfall.min(self.loan_room_at(a, debt, closed, params));
         treasury += borrowed;
