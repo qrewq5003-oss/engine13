@@ -695,18 +695,21 @@ impl World {
     /// `treasury − debt + what a tick leaves × the horizon's ticks`.
     ///
     /// What a tick leaves is read off the budget of the tick (`tick_budget`, called, not
-    /// copied): the take less everything the tick pays — the tribute to the lord, the houses'
-    /// seats, the court, the interest on the debt and the pay of **the army it has now**. The
-    /// loan and the repayment are not in it: each moves the treasury and the debt alike, and
-    /// the free money counts the two together (`treasury − debt`). The tribute its vassals
-    /// send is not in it either: it is no article of the polity's own budget (it comes in at
-    /// the vassals' turns), and its size is bounded by a vassal's treasury, which is hidden —
-    /// received, it is in the treasury the next tick.
+    /// copied): the take less everything the tick **owes** — the tribute due to the lord, the
+    /// houses' seats, the court, the interest on the debt and the pay due to **the army it
+    /// has now**. What is due, not what the treasury managed to pay (owner's decision
+    /// 2026-11-12 on the first stop of (ц1)): a polity short of its pay would otherwise read
+    /// the richer for it. The seats are as the budget has them — it carries no seats due.
+    /// The loan and the repayment are not in it: each moves the treasury and the debt alike,
+    /// and the free money counts the two together (`treasury − debt`). The tribute its
+    /// vassals send is not in it either: it is no article of the polity's own budget (it
+    /// comes in at the vassals' turns), and its size is bounded by a vassal's treasury, which
+    /// is hidden — received, it is in the treasury the next tick.
     ///
     /// **The polity's own state only** — nothing of another is read.
     pub fn free_money(&self, a: ActorId, params: &Params) -> f64 {
         let budget = self.tick_budget(a, params);
-        let left = budget.income - budget.tribute - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court_paid - budget.interest - budget.paid;
+        let left = budget.income - budget.tribute_due - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court - budget.interest - budget.pay_due;
         (self.treasury(a) - self.debt(a)) as f64 + left as f64 * f64::from(params.goal_horizon_ticks)
     }
 
