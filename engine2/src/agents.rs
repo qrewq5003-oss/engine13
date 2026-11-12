@@ -116,13 +116,13 @@ pub struct GoalFact {
 pub struct Context {
     at_war: bool,
     income: f64,
-    /// The polity's money over the span its soldiers are kept for, kg (`World::money_over`,
-    /// plan §31.3, §31.10): what their pay is priced against (`World::spending_price`). At
-    /// war the length of its longest war; at peace the horizon — the free money itself
-    /// (`World::free_money`), the standing army being a commitment over the horizon.
+    /// The polity's free money over the horizon, kg (`World::free_money`, plan §31.3): what
+    /// the pay of its soldiers is priced against (`World::spending_price`), at peace and at
+    /// war alike — a soldier's pay stands as long as he is under arms, a commitment over the
+    /// horizon ((ц1б), plan §31.11).
     free: f64,
-    /// Its money for a spending made once — a hire's advance (`World::money_over`): at peace
-    /// over a tick; at war the advance is a part of the one spending of the war (`free`).
+    /// Its money for a spending made once — a hire's advance (`World::money_over`): the
+    /// money at hand over a tick at peace, over the length of its longest war at war.
     at_once: f64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
@@ -626,44 +626,43 @@ impl World {
         }
     }
 
-    /// Over how many ticks the money stands against the pay charged for soldiers kept
-    /// (`kept_ticks`) — **a spending over a span is weighed against the money of the same
-    /// span** (owner's decisions 2026-11-12 on the first stop and on step II of (ц1), plan
-    /// §31.10). At war the spending is finite — the pay of the war's length, against the money
-    /// over that length whole (`Context.free`): one. At peace the army stands: the tick of pay
-    /// charged is one of the horizon's ticks, against the free money a tick of the horizon —
-    /// the same as the pay of the whole horizon against the free money whole. A tick's pay
-    /// against the money of twenty-five years made a levy free that the polity could not keep.
-    fn pay_span(ctx: &Context, params: &Params) -> f64 {
-        if ctx.at_war {
-            1.0
-        } else {
-            f64::from(params.goal_horizon_ticks).max(1.0)
-        }
+    /// The share of the free money that stands against the pay charged for soldiers kept
+    /// (`kept_ticks`), kg — **a soldier's pay is a standing spending**, at peace and at war
+    /// ((ц1б), plan §31.11, owner's decision 2026-11-12: the span of a spending is by its
+    /// nature, not by whether a war is on). The army is a commitment over the horizon, so each
+    /// tick of pay charged is one of the horizon's ticks and stands against a tick's share of
+    /// the free money, `M / H`: the ticks charged — one at peace, the war's length at war —
+    /// against as many shares. With `advance` taken out of the free money first.
+    ///
+    /// A hire priced as a spending of the war's length, against the money of that length,
+    /// was within the money and left the free money of the horizon below nothing — the hired
+    /// men stand in every tick's budget for the horizon — and they were sent home the tick
+    /// after, the advance lost (plan §31.10, the deviation (б) of (ц1)).
+    fn pay_money(ctx: &Context, advance: f64, params: &Params) -> f64 {
+        (ctx.free - advance) * Self::kept_ticks(ctx) / f64::from(params.goal_horizon_ticks).max(1.0)
     }
 
     /// What `n` soldiers kept cost `a` in its state (`kept_ticks`), with an `advance` paid
     /// for them at once (a hire's; nothing for a levy), in years of its income. **The money**
     /// at the price of the polity's money (`World::spending_price`, plan §31.3: nothing
     /// within it, the face value past it): the advance, a spending made once, against the
-    /// money it has for one (`Context.at_once`); then the pay against what the advance leaves
-    /// of the money over the span the pay is a commitment for (`Context.free`, `pay_span`) —
-    /// at war that is the one spending of advance and pay together, against the money over
-    /// the war's length. **The heads** away from the land at the take they would have paid
-    /// (`heads_cost`): a loss of the take, not of money.
+    /// money it has for one (`Context.at_once`); then the pay against the share of the free
+    /// money the advance leaves for the ticks charged (`pay_money`). **The heads** away from
+    /// the land at the take they would have paid (`heads_cost`): a loss of the take, not of
+    /// money.
     fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, advance: i64, params: &Params) -> f64 {
         let ticks = Self::kept_ticks(ctx);
         let advance = advance as f64;
-        World::spending_price(advance, ctx.at_once, ctx.income) + World::spending_price(World::soldiers_pay(n, ticks, params), (ctx.free - advance) / Self::pay_span(ctx, params), ctx.income) + self.heads_cost(a, n, ticks, params)
+        World::spending_price(advance, ctx.at_once, ctx.income) + World::spending_price(World::soldiers_pay(n, ticks, params), Self::pay_money(ctx, advance, params), ctx.income) + self.heads_cost(a, n, ticks, params)
     }
 
     /// What sending `n` soldiers home saves `a` in its state (`kept_ticks`), in years of its
     /// income: their pay at what a spending not made is worth (`World::saving_worth`, plan
-    /// §31.3 — nothing while the money is free anyway), against the money over the same span
-    /// as the pay of soldiers kept (`Context.free`, `pay_span`), and the heads back on the land.
+    /// §31.3 — nothing while the money is free anyway), against the same share of the free
+    /// money as the pay of soldiers kept (`pay_money`), and the heads back on the land.
     fn sent_home_saving(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
         let ticks = Self::kept_ticks(ctx);
-        World::saving_worth(World::soldiers_pay(n, ticks, params), ctx.free / Self::pay_span(ctx, params), ctx.income) + self.heads_cost(a, n, ticks, params)
+        World::saving_worth(World::soldiers_pay(n, ticks, params), Self::pay_money(ctx, 0.0, params), ctx.income) + self.heads_cost(a, n, ticks, params)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
@@ -759,18 +758,12 @@ impl World {
         let blow_per_province = self.ceded_province_blow(a, &risk, params);
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
         let wars: Vec<crate::worth::WarTerms> = self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect();
-        // The money over the span the soldiers are kept for, and for a spending made once.
-        let (free, at_once) = if at_war {
-            let war = self.money_over(a, wars.iter().map(|t| t.ticks).fold(0.0, f64::max), params);
-            (war, war)
-        } else {
-            (self.money_over(a, f64::from(params.goal_horizon_ticks), params), self.money_over(a, 1.0, params))
-        };
         Context {
             at_war,
             income: self.yearly_income(a, params).max(1) as f64,
-            free,
-            at_once,
+            free: self.free_money(a, params),
+            // The money at hand for a spending made once: over a tick, at war over its longest war.
+            at_once: self.money_over(a, if at_war { wars.iter().map(|t| t.ticks).fold(0.0, f64::max) } else { 1.0 }, params),
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars,
             threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },

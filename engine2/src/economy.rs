@@ -100,6 +100,12 @@ pub struct Budget {
     pub defaults: bool,
     /// Pay the army asked for, kg.
     pub pay_due: i64,
+    /// The pay of the same men at the rate of home, kg (`pay_per_tick`): `pay_due` less what
+    /// the campaign adds for the units on one (`unit_pay_per_tick`). The world charges
+    /// `pay_due`; this is the standing part of it, read by a bot's free money over the
+    /// horizon (plan §31.11: the pay of the campaign is a spending of the war, not of the
+    /// horizon).
+    pub pay_home: i64,
     /// Borrowed this tick to meet the pay, kg (bank only).
     pub borrowed: i64,
     /// Pay actually given, kg.
@@ -386,7 +392,9 @@ impl World {
         }
         // The polity pays its own men and the ruling house's retinue; a house that does
         // not rule pays its own (E0 Х2, owner's rule on §21).
-        let pay_due: i64 = self.units_of(a).iter().filter(|u| self.house_pays(**u).is_none()).map(|u| self.unit_pay_per_tick(*u, params)).sum();
+        let paid_units: Vec<crate::ids::UnitId> = self.units_of(a).into_iter().filter(|u| self.house_pays(*u).is_none()).collect();
+        let pay_due: i64 = paid_units.iter().map(|u| self.unit_pay_per_tick(*u, params)).sum();
+        let pay_home: i64 = paid_units.iter().map(|u| pay_per_tick(self.soldiers(*u), params)).sum();
         let shortfall = (pay_due - treasury).max(0);
         let borrowed = shortfall.min(self.loan_room_at(a, debt, closed, params));
         treasury += borrowed;
@@ -395,7 +403,7 @@ impl World {
         treasury -= paid;
         // The surplus goes against the debt.
         let repaid = treasury.min(debt);
-        Budget { production, income, lord, tribute_due, tribute, seats, court, court_paid, interest, interest_paid, defaults, pay_due, borrowed, paid, repaid }
+        Budget { production, income, lord, tribute_due, tribute, seats, court, court_paid, interest, interest_paid, defaults, pay_due, pay_home, borrowed, paid, repaid }
     }
 
     /// The economy phase of a tick: every living polity's budget (`tick_budget`) posted, a
