@@ -2513,8 +2513,10 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             d.sum(&format!("window {}: treasury", t / 50), treasury as f64);
             d.sum(&format!("window {}: income", t / 50), income);
             d.sample(&format!("window {}: treasury, years of income", t / 50), treasury as f64 / income);
-            // The free money over the horizon the bot prices its spendings against (plan §31.3).
-            let free = w.free_money(a, p);
+            // The money the bot prices its soldiers' pay against (plan §31.3, §31.10,
+            // `World::money_over`): at peace the free money over the horizon, at war the money
+            // over the length of its longest war.
+            let free = if at_war { w.money_over(a, enemies.iter().map(|b| w.war_ticks(a, *b, p)).fold(0.0, f64::max), p) } else { w.free_money(a, p) };
             d.sample(&key("free money, years of income"), free / income);
             d.count(&key("free money above nothing"), u64::from(free > 0.0));
             // The army's turnover: men gained or lost since the tick before, by the same state.
@@ -2544,8 +2546,8 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             let wars: Vec<engine2::worth::WarTerms> = enemies.iter().map(|b| w.war_terms(a, *b, blow, p)).collect();
             // What the bot charges for soldiers kept: at war for the longest of its fronts, at peace a tick.
             let kept_for = if at_war { wars.iter().map(|x| x.ticks).fold(0.0, f64::max) } else { 1.0 };
-            // … and what its pay is priced against (`pay_span`): at war the free money whole, at
-            // peace a tick's share of the free money over the horizon.
+            // … and what its pay is priced against (`pay_span`): at war the money over the war's
+            // length whole, at peace a tick's share of the free money over the horizon.
             let free = if at_war { free } else { free / f64::from(p.goal_horizon_ticks) };
             if let Some(hire) = options.iter().find(|o| o.call.is_some_and(|c| c.verb == VerbId::HireMercenaries)) {
                 d.count(&key("a hire on offer"), 1);
