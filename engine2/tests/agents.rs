@@ -2327,6 +2327,7 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
     let s = worldgen::generate(seed, p);
     let mut g = Game::new(&s, p.clone(), seed).unwrap();
     let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    let mut army_before: BTreeMap<ActorId, (i64, bool)> = BTreeMap::new();
     for t in 0..300u32 {
         let w = g.world();
         let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
@@ -2366,6 +2367,18 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             d.sum(&format!("window {}: treasury", t / 50), treasury as f64);
             d.sum(&format!("window {}: income", t / 50), income);
             d.sample(&format!("window {}: treasury, years of income", t / 50), treasury as f64 / income);
+            // The free money over the horizon the bot prices its spendings against (plan §31.3).
+            let free = w.free_money(a, p);
+            d.sample(&key("free money, years of income"), free / income);
+            d.count(&key("free money above nothing"), u64::from(free > 0.0));
+            // The army's turnover: men gained or lost since the tick before, by the same state.
+            if let Some((before, was_at_war)) = army_before.get(&a) {
+                if *was_at_war == at_war {
+                    d.sum(&key("men moved since the tick before"), (army - before).abs() as f64);
+                    d.sum(&key("men under arms, tick after tick"), army as f64);
+                }
+            }
+            army_before.insert(a, (army, at_war));
             if t % 5 != 0 {
                 continue;
             }
@@ -2391,11 +2404,15 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             }
             for o in options.iter().filter(|o| o.call.is_some_and(|c| c.verb == VerbId::Disband)) {
                 let Some(VerbCall { target: Target::Unit(u), .. }) = o.call else { continue };
+                // Disbanding is worth what it saves (the pay at what a spending not made is worth,
+                // `saving_worth`, and the heads) less what the strength was worth: so the worth of
+                // keeping — read against the unit's cost at the face value of its pay.
+                let saved = World::saving_worth(World::soldiers_pay(w.soldiers(u), kept_for, p), free, income) + w.heads_cost(a, w.soldiers(u), kept_for, p);
                 let cost = w.soldiers_cost(a, w.soldiers(u), kept_for, p);
                 d.count(&key("units it could disband"), 1);
                 d.count(&key("units whose disbanding is above nothing"), u64::from(o.utility > 0.0));
-                // Disbanding is worth the pay saved less what the strength was worth: so the worth of keeping.
-                d.sample(&key("a unit kept: its worth over its cost"), (cost - o.utility) / cost.max(1e-12));
+                d.count(&key("units whose pay saved is worth nothing (the money is free)"), u64::from(World::saving_worth(World::soldiers_pay(w.soldiers(u), kept_for, p), free, income) <= 0.0));
+                d.sample(&key("a unit kept: its worth over its cost"), (saved - o.utility) / cost.max(1e-12));
             }
             if levies.is_empty() {
                 let reason = if w.recruit_room(a, p) == 0 {
@@ -2417,8 +2434,12 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             d.count(&key("a levy on offer"), 1);
             // The tick's levy (the first, the largest) and the best of the sizes the bot weighs.
             let (men, net) = levies[0];
-            let cost = w.soldiers_cost(a, men, kept_for, p);
+            // The cost as the bot prices it (`kept_soldiers_cost`): the pay by the free money
+            // (`spending_price`, plan §31.3) and the heads; beside it, the cost at the face value.
+            let cost = World::spending_price(World::soldiers_pay(men, kept_for, p), free, income) + w.heads_cost(a, men, kept_for, p);
             let gain = net + cost;
+            d.sample(&key("the tick's levy: its cost at the face value of the pay, years of income"), w.soldiers_cost(a, men, kept_for, p));
+            d.count(&key("the tick's levy: its pay within the free money"), u64::from(World::soldiers_pay(men, kept_for, p) <= free.max(0.0)));
             let best = levies.iter().map(|(_, u)| *u).fold(f64::MIN, f64::max);
             d.sample(&key("the tick's levy: net, years of income"), net);
             d.sample(&key("the tick's levy: its gain, years of income"), gain);
@@ -2474,6 +2495,7 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
         for (a, at_war) in &at_war_now {
             let side = if *at_war { "war" } else { "peace" };
             d.count(&format!("{side}: chose {}", chosen.get(a).map_or("nothing".to_string(), |v| format!("{v:?}"))), 1);
+            d.count(&format!("{side}: short of its pay this tick"), u64::from(r.events.iter().any(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == *a))));
         }
         // The budget: every posting on a polity's treasury, by its source, and what the tick left.
         for q in &r.postings {
@@ -2514,6 +2536,16 @@ fn diagnosis_why_the_armies_are_small() {
             line(format!("[{side}] decisions read {} (every fifth tick); a levy on offer {}; none: {shut:?}; unpaid as the bot reads it {}", d.n(&key("sampled")), d.share(&key("a levy on offer"), &key("sampled")), d.share(&key("unpaid as the bot reads it"), &key("sampled"))));
             line(format!("[{side}] the tick's levy, years of income: men over the ceiling {}; gain {}; cost {}; gain over cost {}; net {} — above nothing in {}", d.q(&key("the tick's levy: men over the ceiling")), d.q(&key("the tick's levy: its gain, years of income")), d.q(&key("the tick's levy: its cost, years of income")), d.q(&key("the tick's levy: gain over cost")), d.q(&key("the tick's levy: net, years of income")), d.positive(&key("the tick's levy: net, years of income"))));
             line(format!("[{side}] the best of the levy's sizes: net {} — above nothing in {}", d.q(&key("the best levy: net, years of income")), d.positive(&key("the best levy: net, years of income"))));
+            line(format!(
+                "[{side}] the money (plan §31.3): free money in years of income {}; above nothing in {} of polity-ticks; the tick's levy's pay within it in {} of the levies on offer; its cost at the face value {}; the pay saved by a disbanding worth nothing in {} of the units; short of its pay in {} of polity-ticks; the army's turnover a tick {:.4}",
+                d.q(&key("free money, years of income")),
+                d.share(&key("free money above nothing"), &key("polity-ticks")),
+                d.share(&key("the tick's levy: its pay within the free money"), &key("a levy on offer")),
+                d.q(&key("the tick's levy: its cost at the face value of the pay, years of income")),
+                d.share(&key("units whose pay saved is worth nothing (the money is free)"), &key("units it could disband")),
+                d.share(&key("short of its pay this tick"), &key("polity-ticks")),
+                d.total(&key("men moved since the tick before")) / d.total(&key("men under arms, tick after tick")).max(1.0)
+            ));
             line(format!("[{side}] a hire on offer {} of decisions, above nothing in {} of those; units it could disband {}, disbanding above nothing in {}; a unit kept — its worth over its cost {}", d.share(&key("a hire on offer"), &key("sampled")), d.share(&key("a hire above nothing"), &key("a hire on offer")), d.n(&key("units it could disband")), d.share(&key("units whose disbanding is above nothing"), &key("units it could disband")), d.q(&key("a unit kept: its worth over its cost"))));
             let chose: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(&key("chose "))).map(|(k, n)| format!("{} {:.3}", k.trim_start_matches(&key("chose ")), *n as f64 / d.n(&key("polity-ticks")).max(1) as f64)).collect();
             line(format!("[{side}] what it chose, of polity-ticks: {chose:?}"));

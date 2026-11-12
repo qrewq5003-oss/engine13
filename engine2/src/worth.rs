@@ -666,13 +666,65 @@ impl World {
         (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
     }
 
-    /// What `n` soldiers kept under arms for `ticks` cost a polity, in years of its income:
-    /// their pay (`pay_per_tick`) and the take of the heads they are away from the land.
+    /// What `n` soldiers kept under arms for `ticks` cost a polity **at the face value of
+    /// their pay**, in years of its income: their pay (`soldiers_pay`) and the take of the
+    /// heads they are away from the land (`heads_cost`). A bot's decision prices the pay by
+    /// its free money (`spending_price`, plan §31.3); this is the price with none.
     pub fn soldiers_cost(&self, a: ActorId, n: i64, ticks: f64, params: &Params) -> f64 {
+        Self::soldiers_pay(n, ticks, params) / self.yearly_income(a, params).max(1) as f64 + self.heads_cost(a, n, ticks, params)
+    }
+
+    /// The pay of `n` soldiers for `ticks`, kg — the money half of what soldiers cost
+    /// (`pay_per_tick`, the pay at home).
+    pub fn soldiers_pay(n: i64, ticks: f64, params: &Params) -> f64 {
+        pay_per_tick(n, params) as f64 * ticks
+    }
+
+    /// The take of the heads `n` soldiers are away from the land for `ticks`, in years of the
+    /// polity's income — the half of what soldiers cost that is no money: a loss of the take,
+    /// whatever the treasury holds (plan §31.3).
+    pub fn heads_cost(&self, a: ActorId, n: i64, ticks: f64, params: &Params) -> f64 {
         let income = self.yearly_income(a, params).max(1) as f64;
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let head = if people > 0 { income / people as f64 } else { 0.0 };
-        (pay_per_tick(n, params) as f64 * ticks + n as f64 * head * ticks / 2.0) / income
+        n as f64 * head * ticks / 2.0 / income
+    }
+
+    /// **The free money of a polity over the horizon**, kg (plan §31.3, §31.10; owner's
+    /// decision 2026-11-12): what would be left unspent on its present course —
+    /// `treasury − debt + what a tick leaves × the horizon's ticks`.
+    ///
+    /// What a tick leaves is read off the budget of the tick (`tick_budget`, called, not
+    /// copied): the take less everything the tick pays — the tribute to the lord, the houses'
+    /// seats, the court, the interest on the debt and the pay of **the army it has now**. The
+    /// loan and the repayment are not in it: each moves the treasury and the debt alike, and
+    /// the free money counts the two together (`treasury − debt`). The tribute its vassals
+    /// send is not in it either: it is no article of the polity's own budget (it comes in at
+    /// the vassals' turns), and its size is bounded by a vassal's treasury, which is hidden —
+    /// received, it is in the treasury the next tick.
+    ///
+    /// **The polity's own state only** — nothing of another is read.
+    pub fn free_money(&self, a: ActorId, params: &Params) -> f64 {
+        let budget = self.tick_budget(a, params);
+        let left = budget.income - budget.tribute - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court_paid - budget.interest - budget.paid;
+        (self.treasury(a) - self.debt(a)) as f64 + left as f64 * f64::from(params.goal_horizon_ticks)
+    }
+
+    /// **The price of spending `kg` of wheat** for a polity with `free` money and a yearly
+    /// `income`, in years of that income (plan §31.3, owner's decision 2026-11-12): only the
+    /// part the free money does not cover — within it a spending costs nothing, past it the
+    /// face value. The budget's bound: a resource that covers everything the polity can buy
+    /// with it over the horizon is worth nothing to it.
+    pub fn spending_price(kg: f64, free: f64, income: f64) -> f64 {
+        (kg - free.max(0.0)).max(0.0) / income
+    }
+
+    /// **What a spending of `kg` not made is worth** — the pay of a unit sent home: the price
+    /// of spending it back once it is saved (`spending_price` at the free money with the
+    /// saving in it). Nothing while the money is free anyway; the face value while the polity
+    /// is short by more than the saving; in between, the shortage it closes.
+    pub fn saving_worth(kg: f64, free: f64, income: f64) -> f64 {
+        Self::spending_price(kg, free + kg, income)
     }
 
     // ---- the houses ----

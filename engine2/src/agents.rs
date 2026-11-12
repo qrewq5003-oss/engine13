@@ -116,6 +116,9 @@ pub struct GoalFact {
 pub struct Context {
     at_war: bool,
     income: f64,
+    /// The polity's free money over the horizon, kg (`World::free_money`, plan §31.3): what
+    /// its spendings are priced against (`World::spending_price`).
+    free: f64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
     /// The legitimacy a ceded province would cost, years of income (`ceded_province_blow`).
@@ -584,19 +587,22 @@ impl World {
         wars.iter().map(|t| self.war_worth_of(a, t, unpaid, extra, params) - self.war_worth_of(a, t, unpaid, 0.0, params)).sum()
     }
 
-    /// What `n` soldiers kept for `a`'s wars (their terms `wars`) cost it, in years of its
-    /// income: their pay at home and the heads away from the land for the wars' expected
-    /// length — the longest of its fronts. The pay of the campaign beyond it is the war's
-    /// (`war_worth_of`, with the strength sent — plan §28.10), counted once.
-    fn war_soldiers_cost(&self, a: ActorId, wars: &[crate::worth::WarTerms], n: i64, params: &Params) -> f64 {
-        let ticks = wars.iter().map(|t| t.ticks).fold(0.0, f64::max);
-        self.soldiers_cost(a, n, ticks, params)
+    /// The ticks soldiers kept are charged for in `a`'s state: at war the wars' expected
+    /// length — the longest of its fronts (the pay of the campaign beyond the pay at home is
+    /// the war's, `war_worth_of`, with the strength sent — plan §28.10, counted once); at
+    /// peace a tick — the decision is retaken every tick.
+    fn kept_ticks(ctx: &Context) -> f64 {
+        if ctx.at_war {
+            ctx.wars.iter().map(|t| t.ticks).fold(0.0, f64::max)
+        } else {
+            1.0
+        }
     }
 
     /// What `extra` strength is worth to `a` in its state: at war, to its wars
     /// (`at_war_gain`); at peace (E3 (г), plan §29.3 and owner's decisions on §29.9), **a
     /// tick of it** — the army at peace is a decision retaken every tick, and it stands while
-    /// a tick of it pays its tick of pay (`kept_soldiers_cost`): the wars its neighbours bring
+    /// a tick of it pays its tick of cost (`kept_soldiers_cost`): the wars its neighbours bring
     /// a tick (`wars_a_tick_from` — the expected number, by the neighbour's record and the
     /// battle formula on whom; the strength moves both the loss once attacked and, by the
     /// formula, the chance of the attack — the deterrence) times what each would lose `a` by
@@ -615,14 +621,23 @@ impl World {
         }
     }
 
-    /// What `n` soldiers kept cost `a` in its state: at war, for the wars' expected length
-    /// (`war_soldiers_cost`); at peace, a tick — the decision is retaken every tick.
-    fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
-        if ctx.at_war {
-            self.war_soldiers_cost(a, &ctx.wars, n, params)
-        } else {
-            self.soldiers_cost(a, n, 1.0, params)
-        }
+    /// What `n` soldiers kept cost `a` in its state (`kept_ticks`), with an `advance` paid
+    /// for them at once (a hire's; nothing for a levy), in years of its income. **The money**
+    /// — their pay and the advance, one spending — at the price of the polity's free money
+    /// (`World::spending_price`, plan §31.3: nothing within it, the face value past it);
+    /// **the heads** away from the land at the take they would have paid (`heads_cost`): a
+    /// loss of the take, not of money.
+    fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, advance: i64, params: &Params) -> f64 {
+        let ticks = Self::kept_ticks(ctx);
+        World::spending_price(World::soldiers_pay(n, ticks, params) + advance as f64, ctx.free, ctx.income) + self.heads_cost(a, n, ticks, params)
+    }
+
+    /// What sending `n` soldiers home saves `a` in its state (`kept_ticks`), in years of its
+    /// income: their pay at what a spending not made is worth (`World::saving_worth`, plan
+    /// §31.3 — nothing while the money is free anyway) and the heads back on the land.
+    fn sent_home_saving(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
+        let ticks = Self::kept_ticks(ctx);
+        World::saving_worth(World::soldiers_pay(n, ticks, params), ctx.free, ctx.income) + self.heads_cost(a, n, ticks, params)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
@@ -720,6 +735,7 @@ impl World {
         Context {
             at_war,
             income: self.yearly_income(a, params).max(1) as f64,
+            free: self.free_money(a, params),
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars: self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect(),
             threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },
@@ -737,7 +753,9 @@ impl World {
     /// The utility of a call in a context read once.
     fn utility_in(&self, a: ActorId, call: &VerbCall, params: &Params, ctx: &Context) -> f64 {
         let (at_war, income, unpaid) = (ctx.at_war, ctx.income, ctx.unpaid);
-        // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price.
+        // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price. The
+        // prices here are at the face value until (ц2) (plan §31.5); the pay and the advance of
+        // the army are priced by the free money ((ц1): `kept_soldiers_cost`).
         let price_kg = |kg: i64| kg as f64 / income;
         match (call.verb, call.target) {
             // The war in wheat (E3 (е2), plan §26): what it wins by its goals and loses by the
@@ -760,14 +778,15 @@ impl World {
                     Target::Levy(_, men) => i64::from(men).min(tick),
                     _ => tick,
                 };
-                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - self.kept_soldiers_cost(a, ctx, n, params)
+                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - self.kept_soldiers_cost(a, ctx, n, 0, params)
             }
+            // The advance and the pay of the hired are one spending, priced once.
             (VerbId::HireMercenaries, _) => {
                 let n = self.hire_count(a, params);
-                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - price_kg(self.hire_advance(a, params)) - self.kept_soldiers_cost(a, ctx, n, params)
+                self.strength_gain(a, ctx, World::new_soldiers_strength(n), params) - self.kept_soldiers_cost(a, ctx, n, self.hire_advance(a, params), params)
             }
             // A unit sent home: the pay saved against what the wars, or the threat, lose by it.
-            (VerbId::Disband, Target::Unit(u)) => self.kept_soldiers_cost(a, ctx, self.soldiers(u), params) + self.strength_gain(a, ctx, -self.unit_strength(u), params),
+            (VerbId::Disband, Target::Unit(u)) => self.sent_home_saving(a, ctx, self.soldiers(u), params) + self.strength_gain(a, ctx, -self.unit_strength(u), params),
             // At peace the loan waits for the rule of the default (plan §29.3, owner's answer 3).
             (VerbId::TakeLoan, _) => {
                 if unpaid && at_war {
