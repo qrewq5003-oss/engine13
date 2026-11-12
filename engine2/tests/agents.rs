@@ -1173,10 +1173,10 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     // 2026-10-20): a bot that stops levying at war would fall below it. It stood at 0,007 —
     // the measure was 0,0080 on #305 (0,0078–0,0095 over the stops of (3), plan
     // §28.9–28.13) — and is raised to the level after (ц1б) (owner's decision 4 on §31.11,
-    // 2026-11-12): the measure on these seeds, 0,0183, rounded down to the thousandth. It
-    // guards what was reached; the band of the source [0,02; 0,03] stays a known deviation
-    // until the war chest (after (ц3)).
-    assert!(a11_war >= 0.018, "А11 at war {a11_war:.4} below the regression floor 0,018 (plan §31.11)");
+    // 2026-11-12): the measure on these seeds in the state merged, 0,0178, rounded down to
+    // the thousandth. It guards what was reached; the band of the source [0,02; 0,03] stays a
+    // known deviation until the war chest (after (ц3)).
+    assert!(a11_war >= 0.017, "А11 at war {a11_war:.4} below the regression floor 0,017 (plan §31.11)");
     // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals and А13 on
     // the bots' battles — printed, no bands (rule 1 of §24.1: no source gives one).
     for line in war_lines {
@@ -1488,7 +1488,7 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     assert!(w.war_worth(s0, s1, false, 0.0, &p) <= 0.0, "at equal strength a war for one province risks as much as it wins");
     // The same war with money (plan §31.10, owner's decisions 2026-11-12): the pay of the
     // campaign is a spending over the war's length and is priced against the money of that
-    // length (`money_over`) — nothing within it, the face value past it.
+    // length (`campaign_money`) — nothing within it, the face value past it.
     let mut rich = world_of(&testworld::five_states_scenario(), 63);
     rich.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
     rich.declare_war(s0, s1).unwrap();
@@ -1498,14 +1498,14 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     let campaign = rich.campaign_extra_per_strength(s0, ticks, &p) * rich.army_strength(s0);
     // As the world stands the polity can afford the campaign over the horizon and has not
     // the money for it at hand over the war's length: the war is worth what it has more.
-    let at_hand = rich.money_over(s0, ticks, &p);
+    let at_hand = rich.campaign_money(s0, ticks, &p);
     assert!(campaign > 0.0 && campaign * income <= rich.free_money(s0, &p), "the campaign's pay is within the free money of the horizon");
     assert!(at_hand > 0.0 && at_hand < campaign * income, "and past the money over the war's length: {at_hand} against {}", campaign * income);
     assert!((rich.war_worth(s0, s1, false, 0.0, &p) - w.war_worth(s0, s1, false, 0.0, &p) - at_hand / income).abs() < 1e-9, "the war is worth the money over its length more: {} against {}", rich.war_worth(s0, s1, false, 0.0, &p), w.war_worth(s0, s1, false, 0.0, &p));
     // With the campaign's pay in the treasury it costs nothing: the war is worth exactly
     // that pay more than at the face value.
     rich.post(engine2::Account::Treasury(s0), Source::Test, (campaign * income).ceil() as i64 * 1000).unwrap();
-    assert!(campaign * income <= rich.money_over(s0, ticks, &p), "the campaign's pay is within the money over the war's length");
+    assert!(campaign * income <= rich.campaign_money(s0, ticks, &p), "the campaign's pay is within the money over the war's length");
     assert!((rich.war_worth(s0, s1, false, 0.0, &p) - w.war_worth(s0, s1, false, 0.0, &p) - campaign).abs() < 1e-9, "with the money at hand the war is worth the campaign's pay more: {} against {} and {campaign}", rich.war_worth(s0, s1, false, 0.0, &p), w.war_worth(s0, s1, false, 0.0, &p));
     assert!(rich.war_worth(s0, s1, false, 0.0, &p) > 0.0, "and at equal strength it is worth going on with");
     w.post(engine2::Account::Soldiers(u0), Source::Test, 1200 * 1000).unwrap();
@@ -1942,7 +1942,7 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     // — over the horizon (`free_money`) and over a span (`money_over`: a tick, a war's
     // length) — is its own state alone; it is in what is seen, and so is every price read off
     // it (`options` carries the levy, the hire and the disbanding; `war_worth` the campaign).
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p), w.free_money(a, &p), w.money_over(a, 1.0, &p), w.money_over(a, 8.0, &p));
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p), w.free_money(a, &p), w.money_over(a, 1.0, &p), w.money_over(a, 8.0, &p), w.campaign_money(a, 8.0, &p));
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
@@ -2534,6 +2534,8 @@ fn a_spending_over_a_span_is_weighed_against_the_money_of_the_same_span() {
 /// by sending the hired men home the next tick is worth nothing. The pay of a campaign ends
 /// with the march and is no part of the free money of the horizon: a polity with its unit on
 /// campaign has the free money it has with the unit at home, and less at hand over the war.
+/// And it is priced once: against the money with the pay at the rate of home, so that a war
+/// is worth the same to a polity whose unit already marches and to one whose unit is at home.
 ///
 /// Under step III of (ц1) the hire stood against the money of the war's length, was within
 /// it, and left the free money of the horizon below nothing — the hired men stand in every
@@ -2610,6 +2612,27 @@ fn a_soldiers_pay_stands_for_the_horizon_at_war_as_at_peace() {
     assert!(marching.on_campaign(unit) && !kept.on_campaign(unit) && budget.pay_due > budget.pay_home && budget.pay_home == kept.tick_budget(s0, &p).pay_due, "the unit on campaign is charged the campaign's pay");
     assert_eq!(marching.free_money(s0, &p), kept.free_money(s0, &p), "the free money of the horizon counts the pay at the rate of home");
     assert!((kept.money_over(s0, ticks, &p) - marching.money_over(s0, ticks, &p) - (budget.pay_due - budget.pay_home) as f64 * ticks).abs() < 1e-6, "the money at hand over the war's length is less by the campaign's pay for it");
+    // The pay of a campaign is priced once (owner's rule: no spending is counted twice; the
+    // correction of (ц1б), plan §31.12). A war polity 0 wants, its campaign's pay past the
+    // money of the war's length: with the unit already marching the campaign's pay is in what
+    // the ticks are charged, and were the money it is priced against read off those ticks,
+    // the same pay would be taken off twice. It is priced against the money with the pay at
+    // the rate of home (`campaign_money`): marching or at home, the same war is worth the same.
+    let mut home = world_of(&testworld::five_states_scenario(), 63);
+    home.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
+    home.declare_war(s0, s1).unwrap();
+    home.rise_now(at(0, 2), &p).unwrap();
+    let mut marching = home.clone();
+    let unit = marching.units_of(s0)[0];
+    marching.units.get_mut(&unit).unwrap().destination = Some(at(1, 2));
+    let ticks = home.war_ticks(s0, s1, &p);
+    let campaign = home.campaign_extra_per_strength(s0, ticks, &p) * home.army_strength(s0) * home.yearly_income(s0, &p) as f64;
+    assert!(marching.on_campaign(unit) && !home.on_campaign(unit) && marching.war_ticks(s0, s1, &p) == ticks);
+    assert!(home.campaign_money(s0, ticks, &p) > 0.0 && home.campaign_money(s0, ticks, &p) < campaign, "the campaign's pay is priced in part: past the money of the war's length");
+    assert!(marching.money_over(s0, ticks, &p) < home.money_over(s0, ticks, &p), "marching, the polity has less at hand: the world charges the campaign's pay");
+    assert_eq!(marching.campaign_money(s0, ticks, &p), home.campaign_money(s0, ticks, &p), "the money the campaign is priced against is the same");
+    assert_eq!(home.campaign_money(s0, ticks, &p), home.money_over(s0, ticks, &p), "and with every unit at home it is the money over the span itself");
+    assert_eq!(marching.war_worth(s0, s1, false, 0.0, &p), home.war_worth(s0, s1, false, 0.0, &p), "the same war is worth the same with the unit marching and at home");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----
