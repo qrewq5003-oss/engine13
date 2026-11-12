@@ -8,6 +8,7 @@
 use serde::Serialize;
 
 use crate::event::Stamped;
+use crate::ids::ActorId;
 use crate::scenario::Display;
 use crate::time::HalfYear;
 use crate::world::{Names, World};
@@ -19,9 +20,13 @@ pub struct ActorView {
     pub name: String,
     pub provinces: Vec<String>,
     pub population: i64,
-    pub treasury_kg: i64,
-    /// Treasury in the scenario's display currency, for showing only.
-    pub treasury_display: f64,
+    /// The treasury — **the viewer's own polity's only** (plan §30.9 p. 1, owner's decision
+    /// 2026-11-11): another's treasury is hidden, as its inner stocks are (answer 3 of
+    /// §28.7), and with no viewer nobody's is shown. The debt below stays open to all: loans
+    /// and defaults are public events.
+    pub treasury_kg: Option<i64>,
+    /// Treasury in the scenario's display currency, for showing only; with `treasury_kg`.
+    pub treasury_display: Option<f64>,
     pub debt_kg: i64,
     /// Debt in the scenario's display currency, for showing only.
     pub debt_display: f64,
@@ -66,14 +71,17 @@ fn half(w: &World) -> u8 {
     }
 }
 
-pub fn world_view(w: &World, display: &Display) -> WorldView {
+/// The world as `viewer` sees it: the polity the player plays, or the polity the player's
+/// house lives in; `None` — a run without a player. Only the viewer's own treasury is shown
+/// (`ActorView::treasury_kg`).
+pub fn world_view(w: &World, display: &Display, viewer: Option<ActorId>) -> WorldView {
     let currency = &display.currency;
     let actors = w
         .actors
         .iter()
         .map(|(id, a)| {
             let (sid, name) = &w.names.actors[id.index()];
-            let treasury_kg = w.treasury(*id);
+            let treasury_kg = (viewer == Some(*id)).then(|| w.treasury(*id));
             let debt_kg = w.debt(*id);
             ActorView {
                 id: sid.clone(),
@@ -81,7 +89,7 @@ pub fn world_view(w: &World, display: &Display) -> WorldView {
                 provinces: a.provinces.iter().map(|p| w.names.provinces[p.index()].1.clone()).collect(),
                 population: a.provinces.iter().map(|p| w.population(*p)).sum(),
                 treasury_kg,
-                treasury_display: treasury_kg as f64 / currency.kg_per_unit,
+                treasury_display: treasury_kg.map(|kg| kg as f64 / currency.kg_per_unit),
                 debt_kg,
                 debt_display: debt_kg as f64 / currency.kg_per_unit,
                 legitimacy: a.legitimacy,

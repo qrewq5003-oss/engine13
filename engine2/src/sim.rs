@@ -408,7 +408,13 @@ impl Simulation for Game {
     }
 
     fn view(&self) -> WorldView {
-        view::world_view(&self.world, &self.display)
+        // The viewer is the player's polity — for a player who plays a house, the polity the
+        // house lives in (plan §30.11: an assumption until E5 settles what a house sees).
+        let viewer = self.player.and_then(|who| match who {
+            ActorRef::Ruler(a) => Some(a),
+            ActorRef::House(h) => self.world.houses.get(&h).map(|house| house.polity),
+        });
+        view::world_view(&self.world, &self.display, viewer)
     }
 
     fn chronicle(&self) -> ChronicleSnapshot {

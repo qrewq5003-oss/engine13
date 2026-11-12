@@ -27,9 +27,11 @@
 //!
 //! **The bot sees what a player would see** (owner's rule 2026-10-17, plan §28.4, §28.7):
 //! positions, owners, wars and who declared them, treaties, and what the view and the
-//! tick's events show — relations, legitimacy, treasuries, population, the tax rate, the
+//! tick's events show — relations, legitimacy, debts, population, the tax rate, the
 //! dowry an offer names, the pay shortfalls and the battles. **Not** another's goals, its
-//! house's treasury, its count of the dead (`manpower_deficit`) or its orders — the registry
+//! treasury (owner's decision 2026-11-11, plan §30.9 p. 1: the view shows a polity its own
+//! only; the debt stays open — loans and defaults are public events), its house's treasury,
+//! its count of the dead (`manpower_deficit`) or its orders — the registry
 //! of the hidden. A model of another from visible facts (what the throne is worth to a
 //! candidate's house, `throne_worth`) is allowed: a player reasons so too; calling another's
 //! decision on its hidden state is not. Guarded by injection and by the sources
