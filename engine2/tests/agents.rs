@@ -3099,8 +3099,9 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
     // A polity's last hire at war: the tick, what it read, and what the hire was to leave of
     // its money over the horizon (the advance paid, the hired men's pay in every tick of it).
     let mut hired: BTreeMap<ActorId, (u32, WarRead, bool, f64)> = BTreeMap::new();
-    // The hires at war still followed: polity, tick, a shortfall since, a disbanding since.
-    let mut followed: Vec<(ActorId, u32, bool, bool)> = Vec::new();
+    // The hires at war still followed: polity, tick, a shortfall since, a disbanding since,
+    // whether the hire was within the polity's money, the hired unit, its disbanding since.
+    let mut followed: Vec<(ActorId, u32, bool, bool, bool, Option<engine2::UnitId>, bool)> = Vec::new();
     for t in 0..300u32 {
         let before = g.world().clone();
         let r = g.tick(&[]).unwrap();
@@ -3112,6 +3113,7 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
         for h in followed.iter_mut().filter(|h| t > h.1) {
             h.2 |= r.events.iter().any(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == h.0));
             h.3 |= r.events.iter().any(|e| matches!(e.event, Event::Verb { actor: ActorRef::Ruler(x), verb: VerbId::Disband, .. } if x == h.0));
+            h.6 |= r.events.iter().any(|e| matches!(e.event, Event::Verb { verb: VerbId::Disband, target: Target::Unit(u), .. } if Some(u) == h.5));
         }
         followed.retain(|h| {
             if t < h.1 + WITHIN {
@@ -3120,9 +3122,19 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
             d.count("hires followed", 1);
             d.count("hire: a shortfall within", u64::from(h.2));
             d.count("hire: a disbanding within", u64::from(h.3));
+            // The same by whether the hire was within the polity's money (cost it nothing).
+            let means = if h.4 { "within its means" } else { "past its means" };
+            d.count(&format!("hires {means}"), 1);
+            d.count(&format!("hires {means}: a disbanding within"), u64::from(h.3));
+            d.count(&format!("hires {means}: the hired men disbanded within"), u64::from(h.6));
             false
         });
+        // The unit of a hire: its `Hired` comes right before the `Verb` of the call that made it.
+        let mut last_hired = None;
         for e in &r.events {
+            if let Event::Hired { unit, .. } = e.event {
+                last_hired = Some(unit);
+            }
             let Event::Verb { actor: ActorRef::Ruler(a), verb, target } = e.event else { continue };
             if !before.actors.keys().any(|b| before.at_war(a, *b)) {
                 continue;
@@ -3141,7 +3153,7 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
                     d.sample("hire: left over the horizon, years of income", left_of_the_horizon / x.income);
                     d.sample("hire: left at hand over the war, years of income", left_at_hand / x.income);
                     hired.insert(a, (t, x, within, left_of_the_horizon));
-                    followed.push((a, t, false, false));
+                    followed.push((a, t, false, false, within, last_hired, false));
                 }
                 (VerbId::Disband, Target::Unit(u)) => {
                     let x = WarRead::of(&before, a, p);
@@ -3202,7 +3214,7 @@ fn diagnosis_why_the_hired_men_are_sent_home() {
             d.add(part);
         }
         eprintln!(
-            "{label}: hires at war {}: a disbanding by the same polity within 4 ticks {}, a shortfall of pay within 4 ticks {}; made unpaid as the bot reads it {}, with nothing to win in any war {}, the advance and the pay of the war's length within the money {}; what the hire leaves, years of income q10/q25/q50/q75/q90 — over the horizon {}, at hand over the war {}",
+            "{label}: hires at war {}: a disbanding by the same polity within 4 ticks {}, a shortfall of pay within 4 ticks {}; made unpaid as the bot reads it {}, with nothing to win in any war {}, within its means — the advance within the money at hand, the pay within its share of the free money — {}; what the hire leaves, years of income q10/q25/q50/q75/q90 — over the horizon {}, at hand over the war {}",
             d.n("hires"),
             d.share("hire: a disbanding within", "hires followed"),
             d.share("hire: a shortfall within", "hires followed"),
@@ -3211,6 +3223,15 @@ fn diagnosis_why_the_hired_men_are_sent_home() {
             d.share("hire: within the money", "hires"),
             d.q("hire: left over the horizon, years of income"),
             d.q("hire: left at hand over the war, years of income")
+        );
+        eprintln!(
+            "{label}: of the hires at war within the polity's means (free) {}: a disbanding by the same polity within 4 ticks {}, of the hired men themselves {}; of the hires past its means (priced) {}: {} and {}",
+            d.n("hires within its means"),
+            d.share("hires within its means: a disbanding within", "hires within its means"),
+            d.share("hires within its means: the hired men disbanded within", "hires within its means"),
+            d.n("hires past its means"),
+            d.share("hires past its means: a disbanding within", "hires past its means"),
+            d.share("hires past its means: the hired men disbanded within", "hires past its means")
         );
         let causes: Vec<String> = d.counts.keys().filter(|k| k.starts_with("cause ")).map(|k| format!("{} {}", &k[6..], d.share(k, "disbandings"))).collect();
         eprintln!(
