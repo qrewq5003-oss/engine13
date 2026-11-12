@@ -96,6 +96,9 @@ pub struct WarTerms {
     /// sent for the war's length; the strength the ruler would send (the units it commands).
     campaign_per_strength: f64,
     campaign_strength: f64,
+    /// The polity's free money over the horizon, kg (`World::free_money`): what the pay of
+    /// the campaign is priced against (`World::spending_price`, plan §31.3, §31.10).
+    free: f64,
     income: f64,
     years: f64,
     /// The relation of the pair at the threshold of the treaties: the rule of the peace
@@ -542,6 +545,7 @@ impl World {
             dead_years: self.regrowth_shortfall_ticks(a, params) / 2.0,
             campaign_per_strength: if self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
             campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
+            free: self.free_money(a, params),
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
             at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
@@ -622,7 +626,13 @@ impl World {
         }
         lose += q.powi(t.to_submit as i32) * t.tribute * t.years;
         let lost = t.soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
-        let campaign = t.campaign_per_strength * (t.campaign_strength + extra).max(0.0);
+        // The pay of the campaign is pay too, and goes by the price of money (owner's decision
+        // 2026-11-12 on the first stop of (ц1), plan §31.10): a finite spending — the war's
+        // length — against the polity's free money. The men `extra` stands for are paid at home
+        // for the same war out of the same money (`kept_soldiers_cost`), so the campaign is
+        // priced against what their pay leaves of it: the free money covers nothing twice.
+        let home_pay = Self::soldiers_pay(1000, t.ticks, params) / 1000.0 * extra / World::new_soldiers_strength(1);
+        let campaign = Self::spending_price(t.campaign_per_strength * (t.campaign_strength + extra).max(0.0) * t.income, t.free - home_pay, t.income);
         (gain - lose - lost * t.head * t.dead_years) / t.income - campaign - blow
     }
 
