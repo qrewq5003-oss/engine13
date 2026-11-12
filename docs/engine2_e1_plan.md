@@ -6737,3 +6737,12 @@ III ниже, чем на шаге II; оборот остался выше ба
   наймов. Причина не разобрана.
 - **Объявлений войны** — 344 / 569 при базе 688 / 782.
 - **Д3 и В9** — печать, полосы по памяти: Д3 0,797 / 0,870, В9 0,003 / 0,005.
+
+**Проверка** (локально, цепочка job `rust` из `ci.yml`, на коде 1c7f704):
+
+- `cargo test --workspace` — зелёный;
+- `cargo test -p engine2 --all-features` — зелёный; тест агентов 29 passed, 4 ignored, 191 с
+  (до (ц1б) — 28 passed, 4 ignored, 198 с); гарды 6 passed;
+- `cargo test --release -p engine2 --all-features --test worldgen -- --ignored` — зелёный,
+  200 сидов;
+- три `cargo clippy --workspace … -- -D warnings` — зелёные.
