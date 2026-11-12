@@ -96,8 +96,9 @@ pub struct WarTerms {
     /// sent for the war's length; the strength the ruler would send (the units it commands).
     campaign_per_strength: f64,
     campaign_strength: f64,
-    /// The polity's money over the war's length, kg (`World::money_over`): what the pay of
-    /// the campaign is priced against (`World::spending_price`, plan §31.3, §31.10).
+    /// The polity's money over the war's length with the pay at the rate of home, kg
+    /// (`World::campaign_money`): what the pay of the campaign is priced against
+    /// (`World::spending_price`, plan §31.3, §31.10, §31.12).
     free: f64,
     income: f64,
     years: f64,
@@ -545,7 +546,7 @@ impl World {
             dead_years: self.regrowth_shortfall_ticks(a, params) / 2.0,
             campaign_per_strength: if self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
             campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
-            free: self.money_over(a, ticks, params),
+            free: self.campaign_money(a, ticks, params),
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
             at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
@@ -628,7 +629,7 @@ impl World {
         let lost = t.soldiers * (p * battle_losses_ppm(true, params) as f64 + (1.0 - p) * battle_losses_ppm(false, params) as f64) / 1e6;
         // The pay of the campaign is pay too, and goes by the price of money (owner's decision
         // 2026-11-12 on the first stop of (ц1), plan §31.10): a finite spending — the war's
-        // length — against the polity's money over that length (`money_over`). The men `extra`
+        // length — against the polity's money over that length (`campaign_money`). The men `extra`
         // stands for are paid at home for the same war out of the same money
         // (`kept_soldiers_cost`), so the campaign is priced against what their pay leaves of
         // it: the money covers nothing twice.
@@ -707,8 +708,8 @@ impl World {
     ///
     /// What a tick leaves is read off the budget of the tick (`tick_budget`, called, not
     /// copied): the take less everything the tick **owes** — the tribute due to the lord, the
-    /// houses' seats, the court, the interest on the debt and the pay due to **the army it
-    /// has now**. What is due, not what the treasury managed to pay (owner's decision
+    /// houses' seats, the court, the interest on the debt and the pay of **the army it has
+    /// now**. What is due, not what the treasury managed to pay (owner's decision
     /// 2026-11-12 on the first stop of (ц1)): a polity short of its pay would otherwise read
     /// the richer for it. The seats are as the budget has them — it carries no seats due.
     /// The loan and the repayment are not in it: each moves the treasury and the debt alike,
@@ -717,16 +718,24 @@ impl World {
     /// comes in at the vassals' turns), and its size is bounded by a vassal's treasury, which
     /// is hidden — received, it is in the treasury the next tick.
     ///
+    /// **The pay is at the rate of home** (`Budget::pay_home`; (ц1б), plan §31.11, owner's
+    /// decision 2026-11-12 — the span of a spending is by its nature): a soldier's pay stands
+    /// as long as he is under arms, the pay of the campaign only while the unit marches. The
+    /// campaign is a spending of the war and has no place in the money of the horizon.
+    ///
     /// **The polity's own state only** — nothing of another is read.
     pub fn free_money(&self, a: ActorId, params: &Params) -> f64 {
-        (self.treasury(a) - self.debt(a)) as f64 + self.tick_left(a, params) * f64::from(params.goal_horizon_ticks)
+        (self.treasury(a) - self.debt(a)) as f64 + self.tick_left(a, params).0 * f64::from(params.goal_horizon_ticks)
     }
 
-    /// What a tick leaves a polity once everything it **owes** is counted, kg (`free_money`):
-    /// the take less the tribute due, the seats, the court, the interest and the pay due.
-    fn tick_left(&self, a: ActorId, params: &Params) -> f64 {
+    /// What a tick leaves a polity once everything it **owes** is counted, kg: the take less
+    /// the tribute due, the seats, the court, the interest and the pay — first with the pay
+    /// at the rate of home (the standing budget, `free_money`), then with the pay as the
+    /// world charges it this tick, the campaign's in it (`money_over`).
+    fn tick_left(&self, a: ActorId, params: &Params) -> (f64, f64) {
         let budget = self.tick_budget(a, params);
-        (budget.income - budget.tribute_due - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court - budget.interest - budget.pay_due) as f64
+        let before_pay = budget.income - budget.tribute_due - budget.seats.iter().map(|(_, kg)| kg).sum::<i64>() - budget.court - budget.interest;
+        ((before_pay - budget.pay_home) as f64, (before_pay - budget.pay_due) as f64)
     }
 
     /// **The money a polity has for a spending made over `span` ticks**, kg (owner's decision
@@ -735,21 +744,45 @@ impl World {
     ///
     /// - what it can afford over the horizon — its free money (`free_money`);
     /// - what it will have at hand within the span — the treasury, what the ticks of the span
-    ///   leave (`tick_left`, by what is due) and the room to borrow (`loan_room`: nothing
-    ///   without a bank or with the credit closed; the world lends by itself for the pay a
-    ///   treasury is short of, `tick_budget`).
+    ///   leave by what is due, the pay as the world charges it now (`tick_left`: with the
+    ///   units on campaign at the campaign's rate — what the world will take over the span),
+    ///   and the room to borrow (`loan_room`: nothing without a bank or with the credit
+    ///   closed; the world lends by itself for the pay a treasury is short of, `tick_budget`).
     ///
-    /// Over the horizon the second is no less than the first (it lacks the debt taken off and
-    /// has the room added), so the money of the horizon is the free money itself. Over a
-    /// war's length it is the less: free money of twenty-five years made a hire free for a
-    /// polity with an empty treasury, which then could not pay it — short of its pay it wins
-    /// nothing by the rule of the world, and sends the men home.
+    /// With no unit on campaign the second over the horizon is no less than the first (it
+    /// lacks the debt taken off and has the room added), so the money of the horizon is the
+    /// free money itself. Over a war's length it is the less.
+    ///
+    /// What it prices since (ц1б) (plan §31.11): a hire's advance, a spending made once. The
+    /// pay of a campaign over the war's length stands against the same money with the pay at
+    /// the rate of home (`campaign_money`). A soldier's pay does not end with the war's
+    /// expected length and is priced against the free money of the horizon
+    /// (`agents::kept_soldiers_cost`).
     ///
     /// **The polity's own state only**, as `free_money`.
     pub fn money_over(&self, a: ActorId, span: f64, params: &Params) -> f64 {
-        let left = self.tick_left(a, params);
-        let afford = (self.treasury(a) - self.debt(a)) as f64 + left * f64::from(params.goal_horizon_ticks);
-        let at_hand = self.treasury(a) as f64 + left * span + self.loan_room(a, params) as f64;
+        self.money_within(a, span, true, params)
+    }
+
+    /// **The money the pay of a campaign over `span` ticks is priced against**, kg
+    /// (`war_worth_of`): the money over the span (`money_over`) with the ticks' remainder
+    /// counted **at the rate of home**. The campaign's pay is the spending being priced; were
+    /// it also in what the ticks leave, a polity whose units already march would be charged
+    /// for it twice — once in the money, once as the price — and one still weighing the same
+    /// war once (owner's rule: no spending is counted twice, plan §30.12, §31.10; the
+    /// correction of (ц1б), plan §31.12). An advance is paid out of what the world will
+    /// really leave, and stands against `money_over`.
+    pub fn campaign_money(&self, a: ActorId, span: f64, params: &Params) -> f64 {
+        self.money_within(a, span, false, params)
+    }
+
+    /// The lesser of the free money of the horizon and the money at hand within `span` ticks,
+    /// the ticks' remainder with the pay as the world charges it (`charged`) or at the rate
+    /// of home (`money_over`, `campaign_money`).
+    fn money_within(&self, a: ActorId, span: f64, charged: bool, params: &Params) -> f64 {
+        let (standing, as_charged) = self.tick_left(a, params);
+        let afford = (self.treasury(a) - self.debt(a)) as f64 + standing * f64::from(params.goal_horizon_ticks);
+        let at_hand = self.treasury(a) as f64 + if charged { as_charged } else { standing } * span + self.loan_room(a, params) as f64;
         afford.min(at_hand)
     }
 
