@@ -6422,3 +6422,12 @@ III ниже, чем на шаге II; оборот остался выше ба
   памяти). На сидах 1–20 — 0,267.
 - **(д) Д3 и В9** — печать, полосы по памяти: Д3 0,793 / 0,818, В9 0,003 / 0,004.
 - **(е) Объявлений войны** — 420 / 664 при базе 688 / 782.
+
+**Проверка** (локально, цепочка job `rust` из `ci.yml`, на состоянии f30e20b):
+
+- `cargo test --workspace` — зелёный;
+- `cargo test -p engine2 --all-features` — зелёный; тест агентов 28 passed, 4 ignored, 198 с
+  (на шаге II — 27 passed, 3 ignored, 198 с; до (ц1) — 172 с); гарды 6 passed;
+- `cargo test --release -p engine2 --all-features --test worldgen -- --ignored` — зелёный,
+  200 сидов;
+- три `cargo clippy --workspace … -- -D warnings` — зелёные.
