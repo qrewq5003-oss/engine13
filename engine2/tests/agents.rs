@@ -66,6 +66,15 @@ fn world_of(s: &ScenarioData, seed: u64) -> World {
     World::from_facts(&c.facts, c.names, &params(), seed).unwrap()
 }
 
+/// Leave polity `a` no free money (plan §31.3): a debt past everything it would have left
+/// over the horizon, and a hundred years of its income beyond — every spending of its
+/// decisions is then priced at the face value, as before the price of money.
+fn leave_no_free_money(w: &mut World, a: ActorId, p: &Params) {
+    let debt = w.free_money(a, p).max(0.0) as i64 + 100 * w.yearly_income(a, p);
+    w.post(engine2::Account::Debt(a), Source::Test, debt * 1000).unwrap();
+    assert!(w.free_money(a, p) < 0.0, "no free money left");
+}
+
 #[test]
 fn aspirations_and_regions_are_facts_and_the_generator_draws_them_by_a_weighted_lot_over_reachable_targets() {
     let p = params();
@@ -1118,16 +1127,20 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
     // from 0,5 %), so under it is a deviation, not a warning (owner's decision 4 on §29.10).
-    // Printed, not asserted: a known deviation until (д), with the same cause as А11 at war —
-    // the world's wars are short and cheap, so the army at peace pays for itself only by the
-    // wars a tick times the loss of one's first tick. Not to be tuned (rule 1 of §24.1).
+    // It stood under the band until the price of money ((ц1), plan §31): the bots hoarded what
+    // they collected and priced every kilogram of pay at its face value. Not to be tuned
+    // (rule 1 of §24.1).
     let a11_band = band("army.observed_share_of_population");
-    eprintln!("А11 at peace {a11_peace:.4} (E0: {a11_band:?}) — printed: a known deviation until (д), plan §29.11");
-    // A floor against a regression of the known deviation, not a band (owner's decision 4 on
-    // §29.10): the measure stood at 0,0042 on the third stop of (г1), its plateau after the
-    // starting armies about 0,0025–0,0035 a window of fifty ticks; a bot that disbands at peace
-    // would fall below it. Removed with (д), when the band of the source comes back.
-    assert!(a11_peace >= 0.0025, "А11 at peace {a11_peace:.4} below the regression floor 0,0025 (plan §29.11)");
+    let settled = a11_peace_windows.iter().skip(1).fold((0i64, 0i64), |acc, (army, people)| (acc.0 + army, acc.1 + people));
+    let a11_settled = settled.0 as f64 / settled.1.max(1) as f64;
+    eprintln!("А11 at peace {a11_peace:.4}, after the first 50 ticks {a11_settled:.4} (the file's band {a11_band:?})");
+    // With the price of money (E3 (ц1), plan §31.3, §31.10) the army at peace is inside the
+    // band of the source: the band is the assertion again, and the floor against the
+    // regression of the known deviation is gone (plan §29.7 p. 4; owner's decisions 5 and 6 on
+    // §31.8 — the file's band judges). The level after the first fifty ticks — the plateau,
+    // which the mean hid behind the starting armies — is held to the same band.
+    assert!((a11_band[0]..=a11_band[1]).contains(&a11_peace), "А11 at peace {a11_peace:.4} outside {a11_band:?}");
+    assert!((a11_band[0]..=a11_band[1]).contains(&a11_settled), "А11 at peace after the first 50 ticks {a11_settled:.4} outside {a11_band:?}");
     let b7_band = band("revolt.observed_per_century");
     assert!((b7_band[0]..=b7_band[1]).contains(&b7), "В7 {b7:.2} outside {b7_band:?}");
     // In war 2–3 % of the people under arms (E0 А11, Jones, Mallett–Hale — the source's band;
@@ -1439,7 +1452,11 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     // At war with a goal and equal armies: the war is worth going on with, the unit marches
     // on the wanted province, the revolt waits (its take for the war's length is worth less
     // than what the front loses without the only unit).
+    // (The prices here are at the face value: polity 0 has no free money — plan §31.3. With
+    // free money the pay of the campaign costs nothing, and the same war is worth going on
+    // with at equal strength: read at the end.)
     let mut w = world_of(&testworld::five_states_scenario(), 63);
+    leave_no_free_money(&mut w, s0, &p);
     w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
     // The bot's declaration claims the province its goal wants (plan §28.9); on a polity its
     // goals want nothing of, the polity's submission.
@@ -1448,6 +1465,16 @@ fn a_bot_puts_a_revolt_down_at_peace_and_at_war_weighs_the_campaign_the_defence_
     w.declare_war(s0, s1).unwrap();
     w.rise_now(at(0, 2), &p).unwrap();
     assert!(w.war_worth(s0, s1, false, 0.0, &p) <= 0.0, "at equal strength a war for one province risks as much as it wins");
+    // The same war with free money: the pay of the campaign is within it and costs nothing
+    // (plan §31.10, owner's decision 2026-11-12) — the war is worth exactly that pay more.
+    let mut rich = world_of(&testworld::five_states_scenario(), 63);
+    rich.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 2))).unwrap();
+    rich.declare_war(s0, s1).unwrap();
+    rich.rise_now(at(0, 2), &p).unwrap();
+    let campaign = rich.campaign_extra_per_strength(s0, rich.war_ticks(s0, s1, &p), &p) * rich.army_strength(s0);
+    assert!(campaign > 0.0 && campaign * rich.yearly_income(s0, &p) as f64 <= rich.free_money(s0, &p), "the campaign's pay is within the free money");
+    assert!((rich.war_worth(s0, s1, false, 0.0, &p) - w.war_worth(s0, s1, false, 0.0, &p) - campaign).abs() < 1e-9, "with free money the war is worth the campaign's pay more: {} against {} and {campaign}", rich.war_worth(s0, s1, false, 0.0, &p), w.war_worth(s0, s1, false, 0.0, &p));
+    assert!(rich.war_worth(s0, s1, false, 0.0, &p) > 0.0, "and at equal strength it is worth going on with");
     w.post(engine2::Account::Soldiers(u0), Source::Test, 1200 * 1000).unwrap();
     assert!(w.war_worth(s0, s1, false, 0.0, &p) > 0.0, "three to one, the war is worth going on with");
     assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit: u0, to: at(1, 2) }], "the stronger army with a goal: the campaign; the revolt waits");
@@ -1878,7 +1905,10 @@ fn the_bots_code_reads_no_parameter_of_the_worlds_formulas() {
 fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let p = params();
     let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p));
+    // With the price of money (plan §31.3): the free money polity 0 prices its spendings
+    // against is its own state alone — it is in what is seen, and so is every price read off
+    // it (`options` carries the levy, the hire and the disbanding; `war_worth` the campaign).
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p), w.free_money(a, &p));
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
@@ -1907,6 +1937,13 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     w.post(engine2::Account::Treasury(b), Source::Test, -all).unwrap();
     assert_eq!(w.treasury(b), 0, "polity 1's treasury emptied");
     assert_eq!(seen(&w), before, "another's empty treasury is its own");
+    // Another's debt: polity 2 owes a hundred years of its income.
+    let owed = 100 * w.yearly_income(c, &p);
+    w.post(engine2::Account::Debt(c), Source::Test, owed * 1000).unwrap();
+    assert_eq!(seen(&w), before, "another's debt moves nothing polity 0 prices");
+    // The injections have teeth: the same things moved the free money of the others.
+    let fresh = world_of(&carrier_scenario(), 7);
+    assert!(w.free_money(b, &p) != fresh.free_money(b, &p) && w.free_money(c, &p) != fresh.free_money(c, &p), "the neighbours' own free money moved with their treasuries and debts");
     // Another house's treasury: the match offered, the proposer's treasury then grows a
     // thousandfold — the house answers the dowry the offer named.
     let s = all_verbs(testworld::five_states_scenario());
@@ -2050,9 +2087,24 @@ fn at_peace_a_levy_is_worth_the_threat_it_answers_and_nothing_but_its_pay_withou
     let levy = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(w.actors[&s0].capital) };
     let unit = w.units.iter().find(|(_, u)| u.owner == s0).map(|(u, _)| *u).expect("a unit of polity 0");
     let disband = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(unit) };
-    let pay = w.soldiers_cost(s0, w.recruit_per_tick(s0, &p), 1.0, &p);
+    let men = w.recruit_per_tick(s0, &p);
+    let (pay, heads) = (w.soldiers_cost(s0, men, 1.0, &p), w.heads_cost(s0, men, 1.0, &p));
     assert!(w.army_size(s0) > 0, "with units in being the levy adds nothing to the suppression");
-    assert!(pay > 0.0 && (w.utility(s0, &levy, &p) + pay).abs() < 1e-9, "no threat: the levy costs a tick of its pay (the decision is retaken every tick) and answers nothing");
+    // The price of money (plan §31.3): polity 0 has free money, and the levy's pay costs it
+    // nothing — the heads off the land are all a levy that answers nothing costs.
+    assert!(w.free_money(s0, &p) > 0.0 && heads > 0.0 && pay > heads);
+    assert!((w.utility(s0, &levy, &p) + heads).abs() < 1e-9, "no threat, free money: the levy costs the heads off the land for a tick and answers nothing");
+    // With no free money: a tick of its pay at the face value (the decision is retaken every tick).
+    let mut poor = world_of(&testworld::five_states_scenario(), 33);
+    leave_no_free_money(&mut poor, s0, &p);
+    assert!((poor.utility(s0, &levy, &p) + pay).abs() < 1e-9, "no threat, no free money: the levy costs a tick of its pay and answers nothing");
+    // **The same threat, and the polity with free money takes the levy the other does not.**
+    poor.actors.get_mut(&s1).unwrap().wars_entered = 3;
+    let mut rich = world_of(&testworld::five_states_scenario(), 33);
+    rich.actors.get_mut(&s1).unwrap().wars_entered = 3;
+    let (taken, left) = (rich.utility(s0, &levy, &p), poor.utility(s0, &levy, &p));
+    assert!(taken > 0.0 && left < 0.0, "at the same threat the polity with free money takes the levy ({taken}), the one with none does not ({left})");
+    assert!((taken - left - (pay - heads)).abs() < 1e-9, "and the difference is the pay at its face value");
     let (levy_without, disband_without) = (w.utility(s0, &levy, &p), w.utility(s0, &disband, &p));
     w.actors.get_mut(&s1).unwrap().wars_entered = 3;
     let (levy_some, disband_some) = (w.utility(s0, &levy, &p), w.utility(s0, &disband, &p));
@@ -2234,7 +2286,9 @@ fn a_unit_in_being_is_worth_the_take_the_risings_withhold_and_the_first_levy_put
     assert!((expected - by_hand).abs() < 1e-12, "{expected} vs {by_hand}");
     let levy = |men: u32| VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Levy(at(0, 1), men) };
     let first = w.utility(s0, &levy(50), &p);
-    assert!((first - (expected - w.soldiers_cost(s0, 50, 1.0, &p))).abs() < 1e-9, "the first unit: the take brought back less a tick of pay, no threat read: {first}");
+    // Polity 0 has free money: the levy's pay costs it nothing (plan §31.3), the heads do.
+    assert!(w.free_money(s0, &p) > 0.0);
+    assert!((first - (expected - w.heads_cost(s0, 50, 1.0, &p))).abs() < 1e-9, "the first unit: the take brought back less the heads off the land for a tick, no threat read: {first}");
     // A province in revolt: its whole take a tick is the first levy's; the levy pays.
     w.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(w.tick);
     assert!(w.in_revolt(at(0, 3)));
@@ -2242,7 +2296,99 @@ fn a_unit_in_being_is_worth_the_take_the_risings_withhold_and_the_first_levy_put
     assert!(w.utility(s0, &levy(50), &p) > 0.0, "the levy that puts the revolt down pays");
     // With a unit in being a second adds nothing to the suppression.
     w.apply_verb(&levy(50), &p).unwrap();
-    assert!((w.utility(s0, &levy(50), &p) + w.soldiers_cost(s0, 50, 1.0, &p)).abs() < 1e-9, "a second unit: a tick of pay for nothing more");
+    assert!((w.utility(s0, &levy(50), &p) + w.heads_cost(s0, 50, 1.0, &p)).abs() < 1e-9, "a second unit: the heads off the land for nothing more");
+    // Without free money the second unit is a tick of pay at the face value for nothing more.
+    leave_no_free_money(&mut w, s0, &p);
+    assert!((w.utility(s0, &levy(50), &p) + w.soldiers_cost(s0, 50, 1.0, &p)).abs() < 1e-9, "a second unit, no free money: a tick of pay for nothing more");
+}
+
+/// **The price of money** (plan §31.3, §31.10; owner's decisions 2026-11-12): a spending
+/// within the polity's free money over the horizon costs it nothing, past it the face value
+/// (`spending_price`); a spending not made is worth the same price read backwards
+/// (`saving_worth`). The free money is the polity's own: its treasury less its debt and what
+/// a tick leaves once everything **due** is counted, over the horizon (`free_money`). A
+/// standing army is a commitment over the horizon and is weighed against the money of the
+/// horizon — a tick of pay against a tick's share of it; a war's pay is finite and stands
+/// against the free money whole; a hire's advance is taken out of it first.
+#[test]
+fn a_spending_within_the_free_money_costs_nothing_and_past_it_the_face_value() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let horizon = f64::from(p.goal_horizon_ticks);
+    // The price itself.
+    assert_eq!(World::spending_price(10.0, 100.0, 2.0), 0.0, "within the free money: nothing");
+    assert_eq!(World::spending_price(10.0, 4.0, 2.0), 3.0, "past it: the part it does not cover, in years of income");
+    assert_eq!(World::spending_price(10.0, -5.0, 2.0), 5.0, "with none: the face value");
+    assert_eq!(World::saving_worth(10.0, 100.0, 2.0), 0.0, "money free anyway: a saving is worth nothing");
+    assert_eq!(World::saving_worth(10.0, -3.0, 2.0), 1.5, "short by less than the saving: the shortage it closes");
+    assert_eq!(World::saving_worth(10.0, -50.0, 2.0), 5.0, "short by more: the face value");
+    // The free money by its parts — what is due, not what was paid.
+    let free_by_hand = |w: &World| {
+        let b = w.tick_budget(s0, &p);
+        let left = b.income - b.tribute_due - b.seats.iter().map(|(_, kg)| kg).sum::<i64>() - b.court - b.interest - b.pay_due;
+        (w.treasury(s0) - w.debt(s0)) as f64 + left as f64 * horizon
+    };
+    let mut w = world_of(&testworld::five_states_scenario(), 51);
+    assert!((w.free_money(s0, &p) - free_by_hand(&w)).abs() < 1e-6 && w.free_money(s0, &p) > 0.0);
+    // A polity short of its pay: the pay due counts whole, though the treasury cannot meet it.
+    let unit = w.units_of(s0)[0];
+    w.post(engine2::Account::Soldiers(unit), Source::Test, 20_000 * 1000).unwrap();
+    let all = w.treasury(s0);
+    w.post(engine2::Account::Treasury(s0), Source::Test, -all * 1000).unwrap();
+    let b = w.tick_budget(s0, &p);
+    assert!(b.paid < b.pay_due, "the tick cannot pay its army");
+    assert!((w.free_money(s0, &p) - free_by_hand(&w)).abs() < 1e-6 && w.free_money(s0, &p) < 0.0, "a polity short of its pay has no free money: what is due is counted, not what was paid");
+    // A standing army: a tick of pay against a tick's share of the free money.
+    let levy = |w: &World| VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(w.actors[&s0].capital) };
+    let mut w = world_of(&testworld::five_states_scenario(), 52);
+    let men = w.recruit_per_tick(s0, &p);
+    let income = w.yearly_income(s0, &p) as f64;
+    let (pay, heads) = (World::soldiers_pay(men, 1.0, &p), w.heads_cost(s0, men, 1.0, &p));
+    // A debt that leaves about `left` of the free money: the debt itself and its interest
+    // over the horizon come out of it.
+    let owe_down_to = |w: &mut World, left: f64| {
+        let debt = (w.free_money(s0, &p) - left) / (1.0 + p.loan_interest_ppm_per_tick as f64 / 1e6 * horizon);
+        w.post(engine2::Account::Debt(s0), Source::Test, debt as i64 * 1000).unwrap();
+    };
+    // Free money for about half the levy's pay over the horizon.
+    owe_down_to(&mut w, pay * horizon / 2.0);
+    let free = w.free_money(s0, &p);
+    assert!(free > pay && free < pay * horizon, "the free money covers many ticks of the levy's pay and not the horizon of it: {free} against {pay} a tick");
+    let price = World::spending_price(pay, free / horizon, income);
+    assert!(price > 0.0 && price < pay / income, "so the tick of pay is priced in part: {price}");
+    assert!((w.utility(s0, &levy(&w), &p) + price + heads).abs() < 1e-9, "no threat: the levy costs the part of its pay the free money does not cover over the horizon, and the heads");
+    // A hire at peace: the advance out of the free money first, the pay against what it leaves.
+    let hire = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::HireMercenaries, target: Target::None };
+    let hired = |w: &World| (w.hire_count(s0, &p), w.hire_advance(s0, &p) as f64);
+    let hire_cost = |w: &World| {
+        let (n, advance) = hired(w);
+        let free = w.free_money(s0, &p);
+        World::spending_price(advance, free, income) + World::spending_price(World::soldiers_pay(n, 1.0, &p), (free - advance) / horizon, income) + w.heads_cost(s0, n, 1.0, &p)
+    };
+    let mut w = world_of(&testworld::five_states_scenario(), 53);
+    let (n, advance) = hired(&w);
+    assert!(n > 0 && w.free_money(s0, &p) > advance + World::soldiers_pay(n, 1.0, &p) * horizon);
+    assert!((w.utility(s0, &hire, &p) + w.heads_cost(s0, n, 1.0, &p)).abs() < 1e-9, "a hire within the free money: the heads only");
+    owe_down_to(&mut w, advance / 2.0);
+    let free = w.free_money(s0, &p);
+    assert!(free > 0.0 && free < advance, "free money for a part of the advance: {free} of {advance}");
+    let expected = (advance - free) / income + World::soldiers_pay(n, 1.0, &p) / income + w.heads_cost(s0, n, 1.0, &p);
+    assert!((hire_cost(&w) - expected).abs() < 1e-9 && (w.utility(s0, &hire, &p) + expected).abs() < 1e-9, "the advance takes the free money first; nothing is left for the pay, at its face value");
+    // At war the pay is finite — the war's length — against the free money whole: the polity
+    // with free money levies for nothing but the heads, the one with none at the face value.
+    let at_war = |poor: bool| {
+        let mut w = world_of(&testworld::five_states_scenario(), 54);
+        if poor {
+            leave_no_free_money(&mut w, s0, &p);
+        }
+        w.declare_war(s1, s0).unwrap();
+        w
+    };
+    let (rich, poor) = (at_war(false), at_war(true));
+    let ticks = rich.war_ticks(s0, s1, &p);
+    let war_pay = World::soldiers_pay(men, ticks, &p);
+    assert!(ticks > 1.0 && war_pay <= rich.free_money(s0, &p), "the pay of the war's length is within the free money");
+    assert!((rich.utility(s0, &levy(&rich), &p) - poor.utility(s0, &levy(&poor), &p) - war_pay / income).abs() < 1e-9, "at war the levy of the polity with free money is worth the war's pay more");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----
@@ -2398,6 +2544,9 @@ fn diagnose_world(seed: u64, p: &Params) -> Diagnosis {
             let wars: Vec<engine2::worth::WarTerms> = enemies.iter().map(|b| w.war_terms(a, *b, blow, p)).collect();
             // What the bot charges for soldiers kept: at war for the longest of its fronts, at peace a tick.
             let kept_for = if at_war { wars.iter().map(|x| x.ticks).fold(0.0, f64::max) } else { 1.0 };
+            // … and what its pay is priced against (`pay_span`): at war the free money whole, at
+            // peace a tick's share of the free money over the horizon.
+            let free = if at_war { free } else { free / f64::from(p.goal_horizon_ticks) };
             if let Some(hire) = options.iter().find(|o| o.call.is_some_and(|c| c.verb == VerbId::HireMercenaries)) {
                 d.count(&key("a hire on offer"), 1);
                 d.count(&key("a hire above nothing"), u64::from(hire.utility > 0.0));
