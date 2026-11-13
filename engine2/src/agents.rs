@@ -121,8 +121,9 @@ pub struct Context {
     /// war alike — a soldier's pay stands as long as he is under arms, a commitment over the
     /// horizon ((ц1б), plan §31.11).
     free: f64,
-    /// Its money for a spending made once — a hire's advance (`World::money_over`): the
-    /// money at hand over a tick at peace, over the length of its longest war at war.
+    /// Its money for a spending made once — a hire's advance, an embassy, an alliance's gifts,
+    /// a bribe (`World::money_over`): the money at hand over a tick at peace, over the length of
+    /// its longest war at war. (The order bought back is read at its face value: `utility_in`.)
     at_once: f64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
@@ -781,10 +782,21 @@ impl World {
     /// The utility of a call in a context read once.
     fn utility_in(&self, a: ActorId, call: &VerbCall, params: &Params, ctx: &Context) -> f64 {
         let (at_war, income, unpaid) = (ctx.at_war, ctx.income, ctx.unpaid);
-        // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price. The
-        // prices here are at the face value until (ц2) (plan §31.5); the pay and the advance of
-        // the army are priced by the free money ((ц1): `kept_soldiers_cost`).
-        let price_kg = |kg: i64| kg as f64 / income;
+        // Wheat in years of the polity's revenue (E3 (е1)): the currency of every price. A
+        // spending of the treasury is priced by the polity's money (plan §31.3): the pay and the
+        // advance of the army by `kept_soldiers_cost` ((ц1), (ц1б)); an embassy, an alliance's
+        // gifts and a bribe are spendings made once ((ц2), plan §31.13 — the span of a spending
+        // is by its nature, §31.11) and stand, as a hire's advance, against the money at hand for
+        // one (`Context.at_once`): nothing within it, the face value past it.
+        let once = |kg: i64| World::spending_price(kg as f64, ctx.at_once, income);
+        // The order bought back is read at its face value, whatever the treasury holds: its price
+        // is no spending from a source but the world's rule against turning money into legitimacy
+        // (`order.cost_share_of_revenue`, derived by the guard `prices_leave_no_arbitrage`; at a
+        // tenth of a year's revenue the order was a machine — the tax to the top, the order every
+        // tick). A bot that saw it free within its money would lift that guard for itself; with
+        // the tax priced by the same money in (ц3) the machine would open whole (owner's decision
+        // 2026-11-13 on the stop of (ц2), plan §31.13: a departure from one rule for all spendings).
+        let rule_of_the_world = |kg: i64| kg as f64 / income;
         match (call.verb, call.target) {
             // The war in wheat (E3 (е2), plan §26): what it wins by its goals and loses by the
             // province the enemy would reach first, at the odds of the battle formula against
@@ -825,10 +837,10 @@ impl World {
             }
             (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility_at(a, call.verb, &ctx.risk, params),
             // Order bought back: the gain of legitimacy at what the world turns it into.
-            (VerbId::EnforceOrder, _) => self.blow_worth(a, -params.order_gain, &ctx.risk, params) - price_kg(self.order_cost(a, params)),
-            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth(a, b, params) - price_kg(self.embassy_cost(a, params)),
-            (VerbId::SendEmbassy, Target::Actor(b)) => self.relation_push_worth(a, b, params.embassy_gain, params) - price_kg(self.embassy_cost(a, params)),
-            (VerbId::Bribe, Target::Actor(b)) => self.relation_push_worth(a, b, self.gift_push(a, b, params), params) - price_kg(self.gift_size(a, params)),
+            (VerbId::EnforceOrder, _) => self.blow_worth(a, -params.order_gain, &ctx.risk, params) - rule_of_the_world(self.order_cost(a, params)),
+            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth(a, b, params) - once(self.embassy_cost(a, params)),
+            (VerbId::SendEmbassy, Target::Actor(b)) => self.relation_push_worth(a, b, params.embassy_gain, params) - once(self.embassy_cost(a, params)),
+            (VerbId::Bribe, Target::Actor(b)) => self.relation_push_worth(a, b, self.gift_push(a, b, params), params) - once(self.gift_size(a, params)),
             // A match is the ruling house's: the bond against the dowry, in its own wheat.
             (VerbId::ProposeMarriage, Target::House(g)) => self.proposal_worth(self.ruling_house(a), g, params),
             _ => 0.0,
