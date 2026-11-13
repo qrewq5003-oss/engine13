@@ -77,6 +77,27 @@ struct MoneyParts {
     war_ticks: f64,
 }
 
+/// What `World::wars_a_tick_from` reads of a neighbour `t` that no strength of the polity
+/// it threatens moves (`World::threat_rate`): whether `t` touches it, `t`'s rate of war, and
+/// `t`'s odds against each of its living neighbours in id order (the polity's own slot is
+/// read at the decision's strength).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThreatRate {
+    touches: bool,
+    rate: f64,
+    against: Vec<(ActorId, f64)>,
+}
+
+/// What `World::defence_worth` reads of a threatened province that no strength moves
+/// (`World::defence_stake`): its take, its hold by the enemy, the years and the income.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefenceStake {
+    take: f64,
+    held: f64,
+    years: f64,
+    income: f64,
+}
+
 /// in ticks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WarTerms {
@@ -119,9 +140,20 @@ pub struct WarTerms {
     /// (`diplomacy::peace_rule`) grants either side's peace at the first offer, so the war
     /// wins nothing — as with an unpaid army (plan §28.12, owner's decision 2026-10-20).
     at_threshold: bool,
+    /// The strengths of the two sides by the battle's measure (`World::war_sides_strength`),
+    /// read with the terms: the odds of the war at any strength `a` adds (`war_odds_of`)
+    /// without counting every army of both sides again for each.
+    sides: (f64, f64),
 }
 
 impl WarTerms {
+    /// The odds of the war at `extra` strength added to the polity's side — `war_odds` on
+    /// the sides read with the terms.
+    pub fn odds(&self, extra: f64, params: &Params) -> f64 {
+        World::war_odds_of(self.sides, extra, params)
+    }
+
+
     /// Whether the terms end in the polity's fall: the enemy's chain of conquests covers all
     /// its land.
     pub fn fall(&self) -> bool {
@@ -473,6 +505,11 @@ impl World {
     /// enemy it already fights, one army for every front; with `a` its allies, lord and
     /// vassals already at war with `b`.
     pub fn war_odds(&self, a: ActorId, b: ActorId, extra: f64, params: &Params) -> f64 {
+        Self::war_odds_of(self.war_sides_strength(a, b), extra, params)
+    }
+
+    /// The strengths `war_odds` weighs: of `a`'s side without `extra`, and of the other.
+    pub fn war_sides_strength(&self, a: ActorId, b: ActorId) -> (f64, f64) {
         use std::collections::BTreeSet;
         let (side_a, side_b) = self.war_sides(a, b);
         let mut theirs: BTreeSet<ActorId> = side_b.into_iter().collect();
@@ -483,8 +520,16 @@ impl World {
         friends.extend(self.vassals_of(a));
         mine.extend(friends.into_iter().filter(|x| self.alive(*x) && self.at_war(*x, b)));
         mine.retain(|x| !theirs.contains(x));
-        let mine = (mine.iter().map(|x| self.army_strength(*x)).sum::<f64>() + extra).max(0.0);
+        let mine = mine.iter().map(|x| self.army_strength(*x)).sum::<f64>();
         let theirs: f64 = theirs.iter().map(|x| self.army_strength(*x)).sum();
+        (mine, theirs)
+    }
+
+    /// The odds by the battle formula of the sides' strengths (`war_sides_strength`) with
+    /// `extra` added to the first.
+    pub fn war_odds_of(sides: (f64, f64), extra: f64, params: &Params) -> f64 {
+        let (mine, theirs) = sides;
+        let mine = (mine + extra).max(0.0);
         if theirs <= 0.0 {
             return if mine > 0.0 { 1.0 } else { 0.5 };
         }
@@ -563,6 +608,7 @@ impl World {
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
             at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
+            sides: self.war_sides_strength(a, b),
         }
     }
 
@@ -622,8 +668,10 @@ impl World {
     /// counted on leaving a lost war for nothing never left it, since the same valuation told
     /// it to fight on while the enemy took its land (on the test world a war at five to one
     /// stayed worth fighting).
-    pub fn war_worth_of(&self, a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
-        let p = self.war_odds(a, t.b, extra, params);
+    /// The odds are read off the sides' strengths the terms carry (`WarTerms::odds`): the
+    /// terms are `a`'s, read on the same state (`war_terms`).
+    pub fn war_worth_of(&self, _a: ActorId, t: &WarTerms, unpaid: bool, extra: f64, params: &Params) -> f64 {
+        let p = t.odds(extra, params);
         let closed = p < 0.5 && t.first_blow <= t.ticks;
         let gain = if unpaid || t.at_threshold || closed { 0.0 } else { p * t.stake * t.years };
         let q = 1.0 - p;
@@ -667,10 +715,26 @@ impl World {
         if defenders <= 0.0 || threat <= 0.0 {
             return 0.0;
         }
+        Self::defence_worth_in(&self.defence_stake(a, p, by, params), defenders, threat, params)
+    }
+
+    /// What `defence_worth` reads that no strength of the defenders or of the threat moves —
+    /// the take of the province, its hold by `by`, the years and the income — read once per
+    /// threatened province (`agents::bot_orders` asks the worth for every unit and every
+    /// duty).
+    pub fn defence_stake(&self, a: ActorId, p: ProvinceId, by: ActorId, params: &Params) -> DefenceStake {
         let income = self.yearly_income(a, params).max(1) as f64;
         let years = f64::from(params.goal_horizon_ticks) / 2.0;
         let held = (1.0 - self.retake_odds(by, a, a, self.war_ticks(a, by, params), params)) * (1.0 - self.revolt_share(by, p, params));
-        win_chance(defenders, threat, params) * self.take_of(a, p, params) * held * years / income
+        DefenceStake { take: self.take_of(a, p, params), held, years, income }
+    }
+
+    /// `defence_worth` on the stake read once (`defence_stake`).
+    pub fn defence_worth_in(s: &DefenceStake, defenders: f64, threat: f64, params: &Params) -> f64 {
+        if defenders <= 0.0 || threat <= 0.0 {
+            return 0.0;
+        }
+        win_chance(defenders, threat, params) * s.take * s.held * s.years / s.income
     }
 
     /// What a unit of strength on campaign for `ticks` costs a polity beyond its pay at home,
@@ -955,15 +1019,32 @@ impl World {
     /// so an army at peace lowers the chance of the attack, not only the loss. Nothing for an
     /// `a` that `t` does not touch.
     pub fn wars_a_tick_from(&self, t: ActorId, a: ActorId, extra: f64, params: &Params) -> f64 {
+        Self::wars_a_tick_in(&self.threat_rate(t, a, params), a, self.war_odds(a, t, extra, params))
+    }
+
+    /// What `wars_a_tick_from(t, a, ..)` reads that no strength of `a` moves, read once per
+    /// decision (`agents::Context`): whether `t` touches `a`, `t`'s rate of war and its odds
+    /// against each of its other neighbours — facts of the world, not of the decision.
+    pub fn threat_rate(&self, t: ActorId, a: ActorId, params: &Params) -> ThreatRate {
         if !self.borders(t, a) {
+            return ThreatRate { touches: false, rate: 0.0, against: Vec::new() };
+        }
+        let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, if x == a { 0.0 } else { self.war_odds(t, x, 0.0, params) })).collect();
+        ThreatRate { touches: true, rate: self.war_rate(t, params), against }
+    }
+
+    /// `wars_a_tick_from` on its parts read once (`threat_rate`), `odds` being `a`'s odds in
+    /// its war with `t` at the strength the decision adds (`war_odds`).
+    pub fn wars_a_tick_in(r: &ThreatRate, a: ActorId, odds: f64) -> f64 {
+        if !r.touches {
             return 0.0;
         }
-        let against = |x: ActorId| if x == a { 1.0 - self.war_odds(a, t, extra, params) } else { self.war_odds(t, x, 0.0, params) };
-        let total: f64 = self.actors.keys().filter(|x| self.alive(**x) && self.borders(t, **x)).map(|x| against(*x)).sum();
+        let against = |x: ActorId, o: f64| if x == a { 1.0 - odds } else { o };
+        let total: f64 = r.against.iter().map(|(x, o)| against(*x, *o)).sum();
         if total <= 0.0 {
             return 0.0;
         }
-        self.war_rate(t, params) * against(a) / total
+        r.rate * against(a, 0.0) / total
     }
 
     /// The take a tick that units of `a` bring back by putting risings down (E3 (г), owner's

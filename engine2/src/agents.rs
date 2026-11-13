@@ -140,6 +140,10 @@ pub struct Context {
     /// declares over the horizon and the terms of that war, read once; empty at war, where
     /// the wars are the measure of the army.
     threats: Vec<(ActorId, crate::worth::WarTerms)>,
+    /// Each threat's rate of war and odds against its other neighbours
+    /// (`World::threat_rate`), in the order of `threats`, read once: facts of the world no
+    /// strength of the decision moves.
+    rates: Vec<crate::worth::ThreatRate>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -510,6 +514,8 @@ impl World {
                 threats.push((p, by.values().sum(), strongest));
             }
         }
+        // What each threatened province's defence is worth at any strength, read once.
+        let stakes: Vec<crate::worth::DefenceStake> = threats.iter().map(|(p, _, by)| self.defence_stake(a, *p, *by, params)).collect();
         // The units, the smallest first, each with what the wars lose without it at the front.
         units.sort_by_key(|u| (self.soldiers(*u), *u));
         let mut pool: Vec<(crate::ids::UnitId, f64)> = units
@@ -538,8 +544,8 @@ impl World {
                         best = Some((gain, i, j));
                     }
                 };
-                for (j, (p, threat, by)) in threats.iter().enumerate() {
-                    offer(self.defence_worth(a, *p, *by, defenders[j] + s, *threat, params) - self.defence_worth(a, *p, *by, defenders[j], *threat, params) - *loss, j);
+                for (j, ((_, threat, _), stake)) in threats.iter().zip(&stakes).enumerate() {
+                    offer(World::defence_worth_in(stake, defenders[j] + s, *threat, params) - World::defence_worth_in(stake, defenders[j], *threat, params) - *loss, j);
                 }
                 for (k, r) in revolts.iter().enumerate() {
                     if !manned[k] {
@@ -572,7 +578,17 @@ impl World {
     /// What declaring war on `b` is worth to `a` in a context read once: the war on the terms
     /// of a war not yet open (`war_terms`) and the price of the declaration.
     fn declaration_worth(&self, a: ActorId, b: ActorId, unpaid: bool, ctx: &Context, params: &Params) -> f64 {
-        self.war_worth_of(a, &self.war_terms(a, b, ctx.blow_per_province, params), unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
+        // The same terms the context read for a threat or a war of `b`, if it did.
+        let read = ctx.threats.iter().map(|(_, t)| t).chain(&ctx.wars).find(|t| t.b == b);
+        let fresh;
+        let terms = match read {
+            Some(t) => t,
+            None => {
+                fresh = self.war_terms(a, b, ctx.blow_per_province, params);
+                &fresh
+            }
+        };
+        self.war_worth_of(a, terms, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
     }
 
     /// The claim a bot's declaration on `b` states (plan §28.9): the province of `b` its
@@ -623,8 +639,8 @@ impl World {
         if ctx.at_war {
             self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
         } else {
-            let expected = |t: ActorId, terms: &crate::worth::WarTerms, extra: f64| self.wars_a_tick_from(t, a, extra, params) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
-            let wars: f64 = ctx.threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum();
+            let expected = |r: &crate::worth::ThreatRate, terms: &crate::worth::WarTerms, extra: f64| World::wars_a_tick_in(r, a, terms.odds(extra, params)) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
+            let wars: f64 = ctx.threats.iter().zip(&ctx.rates).map(|((_, terms), r)| expected(r, terms, extra) - expected(r, terms, 0.0)).sum();
             let units = |strength: f64| f64::from(u8::from(strength > 0.0));
             let now = self.army_strength(a);
             wars + (units(now + extra) - units(now)) * self.suppression_a_tick(a, params)
@@ -791,6 +807,8 @@ impl World {
         let blow_per_province = self.ceded_province_blow(a, &risk, params);
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
         let wars: Vec<crate::worth::WarTerms> = self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms(a, b, blow_per_province, params)).collect();
+        let threats = if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) };
+        let rates = threats.iter().map(|(t, _)| self.threat_rate(*t, a, params)).collect();
         Context {
             at_war,
             income: self.yearly_income(a, params).max(1) as f64,
@@ -801,7 +819,8 @@ impl World {
             peace_army: self.peace_army(a, params),
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars,
-            threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },
+            threats,
+            rates,
             risk,
             blow_per_province,
         }
