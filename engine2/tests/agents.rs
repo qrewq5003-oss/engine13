@@ -1119,9 +1119,15 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!(reached > 0 && dropped > 0, "goals are reached and put aside");
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");
     // With the orders of step (б) a war has its means: А12 is a check, not print (owner's
-    // rule on #291).
+    // rule on #291) — but **its bottom is a warning, not an assertion** (owner's decision
+    // 2026-11-13, plan §31.14, §31.17.5): the edge is written in E0 by memory, and a band by
+    // memory is print, not a stop (rule 1 of §24.1). The top and «always at war» below stay
+    // assertions.
     let a12_band = band("war.observed_share_of_years");
-    assert!((a12_band[0]..=a12_band[1]).contains(&a12), "А12 {a12:.3} outside {a12_band:?}");
+    if a12 < a12_band[0] {
+        eprintln!("А12 {a12:.3} below the bottom of {a12_band:?} — printed: the bottom is by memory (plan §31.14)");
+    }
+    assert!(a12 <= a12_band[1], "А12 {a12:.3} above the top of {a12_band:?}");
     assert!(always * 10 < per_polity_war_share.len(), "«always at war»: {always} of {} polities over nine tenths of their ticks", per_polity_war_share.len());
     assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
     // Д3's band is by memory (rule 1 of §24.1: a band without a source is a warning, not a
@@ -1640,13 +1646,14 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
 
 /// The player's strategies of the paired run: the bot in the player's seat, a player who
 /// does nothing, a conqueror who goes to war on its weakest neighbour and marches on its
-/// capital — through the contract, with only what is on offer. The conqueror levies within
-/// its budget: while the pay of its whole army on campaign fits the tick's income (the
-/// world's pay functions). A probe that levied every tick could not pay the double pay of
-/// the campaign, was exhausted by the rule of the peace, accepted the enemy's peace and
-/// declared again — 121 wars of a tick on the test world's seed 3, its outcome the idle
-/// player's (plan §28.12): a foolish probe, not a degeneration of the engine. The change is
-/// to the probe player, not to the measures.
+/// capital — through the contract, with only what is on offer, one call a tick as a bot
+/// (B42, parity (а), plan §31.18): the declaration first, the levy in the ticks with none.
+/// The conqueror levies within its budget: while the pay of its whole army on campaign fits
+/// the tick's income (the world's pay functions). A probe that levied every tick could not
+/// pay the double pay of the campaign, was exhausted by the rule of the peace, accepted the
+/// enemy's peace and declared again — 121 wars of a tick on the test world's seed 3, its
+/// outcome the idle player's (plan §28.12): a foolish probe, not a degeneration of the
+/// engine. The change is to the probe player, not to the measures.
 fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
     let p = params();
     let me = ActorId(0);
@@ -1668,7 +1675,9 @@ fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sen
                 }
                 weakest
             });
-            if g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
+            // One call a tick, as a bot (B42, parity (а), plan §31.18): the levy only in a tick
+            // with no declaration.
+            if calls.is_empty() && g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
                 let capital = w.actors[&me].capital;
                 let within_budget = engine2::economy::campaign_pay_per_tick(w.army_size(me) + w.recruit_per_tick(me, &p), &p) <= w.yearly_income(me, &p) / 2;
                 if within_budget && !w.in_revolt(capital) && w.population(capital) > 0 {
@@ -2850,6 +2859,28 @@ fn a_soldier_beyond_the_army_the_peace_keeps_is_priced_against_the_money_of_the_
     peace.apply_verb(&levy(&peace), &p).unwrap();
     let (own, left) = parts(&peace);
     assert!(peace.paid_soldiers(s0, &p) > peace.peace_army(s0, &p) && (peace.free_money(s0, &p) - (own + left * horizon)).abs() < 1e-6, "at peace: every man for the horizon");
+}
+
+/// **A player makes one call a tick, as a bot** (B42 — the player and the bot by one rule;
+/// parity (а), owner's decision 2026-11-13 on the stop of plan §31.18). Two calls of one
+/// caller in a tick are an error before the world is touched — the save byte for byte the
+/// same; one call goes through.
+#[test]
+fn a_player_makes_one_call_a_tick_as_a_bot_does() {
+    let s = all_verbs(testworld::five_states_scenario());
+    let mut g = Game::new(&s, params(), 5).unwrap();
+    let me = ActorRef::Ruler(ActorId(0));
+    g.set_player(Some(me));
+    let embassy = VerbCall { actor: me, verb: VerbId::SendEmbassy, target: Target::Actor(ActorId(1)) };
+    let levy = VerbCall { actor: me, verb: VerbId::Recruit, target: Target::Province(g.world().actors[&ActorId(0)].capital) };
+    let before = g.to_save().unwrap();
+    let err = g.tick(&[embassy, levy]).unwrap_err();
+    assert!(matches!(err, engine2::sim::SimError::OneCallATick(a) if a == me), "{err}");
+    assert_eq!(g.to_save().unwrap(), before, "refused before the world is touched");
+    let err = g.tick(&[embassy, embassy]).unwrap_err();
+    assert!(matches!(err, engine2::sim::SimError::OneCallATick(_)), "the same call twice too: {err}");
+    let r = g.tick(&[levy]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Verb { actor, verb: VerbId::Recruit, .. } if actor == me)), "one call goes through");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----

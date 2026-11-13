@@ -38,6 +38,10 @@ pub enum SimError {
     Order(#[from] crate::movement::OrderError),
     #[error("{0}")]
     Answer(#[from] AnswerError),
+    /// More than one call of one caller in a tick (B42, plan §31.18, owner's decision
+    /// 2026-11-13, parity (а)): a player, as a bot, makes one call a tick.
+    #[error("{0:?} makes more than one call in one tick: one call a tick, as a bot")]
+    OneCallATick(ActorRef),
 }
 
 /// What the player brings to a tick (E3): calls of verbs, orders to units, answers to the
@@ -322,6 +326,12 @@ impl Simulation for Game {
         // not an error — the same rule as a bot's.
         if let Some(bad) = player.iter().find(|c| !self.enabled(c.verb)) {
             return Err(SimError::VerbNotEnabled(bad.verb));
+        }
+        // One call a tick, as a bot (B42: the player and the bot by one rule; parity (а),
+        // owner's decision 2026-11-13 on the stop of plan §31.18).
+        let mut callers: std::collections::BTreeSet<ActorRef> = std::collections::BTreeSet::new();
+        if let Some(twice) = player.iter().find(|c| !callers.insert(c.actor)) {
+            return Err(SimError::OneCallATick(twice.actor));
         }
         if !player.is_empty() {
             let mut probe = self.world.clone();
