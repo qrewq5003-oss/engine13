@@ -3695,3 +3695,82 @@ fn diagnosis_why_the_hired_men_are_sent_home() {
         );
     }
 }
+
+// ---- Diagnostics: the threat by the sides of the neighbour's declaration (plan §31.20) ----
+
+/// One seed of `diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration`: every tick,
+/// every living polity at peace — the wars a tick its neighbours bring on it as it reads them
+/// (`wars_a_tick_from`), apart for the polities with an ally or a lord and for those with none;
+/// and the threats whose sides differ between the neighbour's declaration (`war_sides(t, a)`)
+/// and the polity's own (`war_sides(a, t)`) — by the public sides alone, so that the same
+/// reading runs on the code before the rule.
+fn diagnose_threat_sides(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let sorted = |mut v: Vec<ActorId>| {
+        v.sort();
+        v
+    };
+    for _ in 0..300 {
+        let w = g.world();
+        for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
+            if w.actors.keys().any(|b| w.at_war(a, *b)) {
+                continue;
+            }
+            let threats: Vec<ActorId> = w.actors.keys().copied().filter(|t| *t != a && w.alive(*t) && w.borders(a, *t)).collect();
+            let bound = w.allies_of(a).into_iter().chain(w.lord_of(a)).any(|x| w.alive(x));
+            let key = if bound { "with an ally or a lord" } else { "with neither" };
+            let moved = threats
+                .iter()
+                .filter(|t| {
+                    let ((own_a, own_t), (their_t, their_a)) = (w.war_sides(a, **t), w.war_sides(**t, a));
+                    sorted(own_a) != sorted(their_a) || sorted(own_t) != sorted(their_t)
+                })
+                .count();
+            d.count("polity-ticks at peace", 1);
+            d.count(&format!("polity-ticks at peace {key}"), 1);
+            d.count("polity-ticks at peace with a threat", u64::from(!threats.is_empty()));
+            d.count("polity-ticks at peace where a threat's sides differ", u64::from(moved > 0));
+            d.count("threats", threats.len() as u64);
+            d.count("threats whose sides differ", moved as u64);
+            d.sample(&format!("wars a tick {key}"), threats.iter().map(|t| w.wars_a_tick_from(*t, a, 0.0, p)).sum());
+        }
+        g.tick(&[]).unwrap();
+    }
+    d
+}
+
+/// The measures of plan §31.20.4 the measures' test does not print: the expected wars a tick
+/// on a polity at peace, with an ally or a lord and with neither, and how many threats the
+/// rule moves the sides of. Printed, never asserted, run on demand.
+#[test]
+#[ignore]
+fn diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for part in engine2::par::map(&seeds, |seed| diagnose_threat_sides(*seed, &p)) {
+            d.add(part);
+        }
+        eprintln!(
+            "{label}: polity-ticks at peace {} — with an ally or a lord {}, with neither {}; the wars a tick the neighbours bring, q10/q25/q50/q75/q90 — with an ally or a lord {}, mean {}; with neither {}, mean {}",
+            d.n("polity-ticks at peace"),
+            d.share("polity-ticks at peace with an ally or a lord", "polity-ticks at peace"),
+            d.share("polity-ticks at peace with neither", "polity-ticks at peace"),
+            d.q("wars a tick with an ally or a lord"),
+            d.mean("wars a tick with an ally or a lord"),
+            d.q("wars a tick with neither"),
+            d.mean("wars a tick with neither")
+        );
+        eprintln!(
+            "{label}: threats (a neighbour not at war, a polity-tick each) {}: the sides of the neighbour's declaration differ from those of the polity's own in {} ({}); polity-ticks at peace with such a threat {} of {} with a threat ({})",
+            d.n("threats"),
+            d.n("threats whose sides differ"),
+            d.share("threats whose sides differ", "threats"),
+            d.n("polity-ticks at peace where a threat's sides differ"),
+            d.n("polity-ticks at peace with a threat"),
+            d.share("polity-ticks at peace where a threat's sides differ", "polity-ticks at peace with a threat")
+        );
+    }
+}
