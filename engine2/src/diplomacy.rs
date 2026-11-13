@@ -184,6 +184,19 @@ impl World {
             })
     }
 
+    /// The polities a living marriage binds to a house of `a` — `married_across(a, b)` for
+    /// every `b` at once, in one pass over the persons (`a` itself among them when two of its
+    /// own houses are married; `married_across` excludes it).
+    pub fn married_to(&self, a: ActorId) -> std::collections::BTreeSet<ActorId> {
+        self.persons
+            .values()
+            .filter(|p| p.died.is_none() && self.houses[&p.house].polity == a)
+            .filter_map(|p| p.spouse.map(|s| &self.persons[&s]))
+            .filter(|sp| sp.died.is_none())
+            .map(|sp| self.houses[&sp.house].polity)
+            .collect()
+    }
+
     /// Is a living marriage binding a house of `a` to a house of `b`?
     pub fn married_across(&self, a: ActorId, b: ActorId) -> bool {
         a != b
@@ -199,6 +212,11 @@ impl World {
 
     /// The norm of a pair's relation from the state of the pair (plan §19.2).
     pub fn relation_norm(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        self.relation_norm_as(a, b, self.married_across(a, b), params)
+    }
+
+    /// `relation_norm` with whether a marriage binds the pair read already (`married_to`).
+    pub(crate) fn relation_norm_as(&self, a: ActorId, b: ActorId, married: bool, params: &Params) -> f64 {
         let mut norm = params.relation_base;
         if self.at_war(a, b) {
             norm -= params.relation_norm_war;
@@ -206,7 +224,7 @@ impl World {
         if self.allied(a, b) {
             norm += params.relation_norm_alliance;
         }
-        if self.married_across(a, b) {
+        if married {
             norm += params.relation_norm_marriage;
         }
         if self.bound_by_vassalage(a, b) {
