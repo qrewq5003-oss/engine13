@@ -3851,6 +3851,9 @@ fn diagnose_threat_sides(seed: u64, p: &Params) -> Diagnosis {
                 d.sample("threat length by the neighbour's march", theirs);
                 d.count("threats whose length differs", u64::from(own != theirs));
                 d.count("threats whose neighbour is at war with another", u64::from(w.actors.keys().any(|c| *c != a && w.alive(*c) && w.at_war(*t, *c))));
+                // No way from capital to capital: the march reads as a tick, as `war_ticks`
+                // reads a march with no way — a length that understates the enemy's reach.
+                d.count("threats with no way from the neighbour's capital", u64::from(w.path_at_war(*t, a, w.actors[t].capital, w.actors[&a].capital).is_none()));
             }
             d.sample(&format!("wars a tick {key}"), threats.iter().map(|t| w.wars_a_tick_from(*t, a, 0.0, p)).sum());
         }
@@ -3903,11 +3906,13 @@ fn diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration() {
             format!("q50 {:.0} / q90 {:.0} / mean {}", quantile(&v, 0.5), quantile(&v, 0.9), d.mean(key))
         };
         eprintln!(
-            "{label}: the length of a threat's war, ticks: by the polity's own march on what it wants of the neighbour {}; by the neighbour's march on the polity's capital {}; the two differ in {} of the threats; threats whose neighbour is at war with another {}",
+            "{label}: the length of a threat's war, ticks: by the polity's own march on what it wants of the neighbour {}; by the neighbour's march on the polity's capital {}; the two differ in {} of the threats; threats whose neighbour is at war with another {}; threats with no way from the neighbour's capital to the polity's {} ({})",
             length("threat length by the polity's own march"),
             length("threat length by the neighbour's march"),
             d.share("threats whose length differs", "threats"),
-            d.share("threats whose neighbour is at war with another", "threats")
+            d.share("threats whose neighbour is at war with another", "threats"),
+            d.n("threats with no way from the neighbour's capital"),
+            d.share("threats with no way from the neighbour's capital", "threats")
         );
     }
 }
