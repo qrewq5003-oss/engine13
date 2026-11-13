@@ -336,7 +336,7 @@ fn the_levy_moves_people_into_soldiers_within_a1_and_a2_and_back_when_disbanded(
 }
 
 #[test]
-fn mercenaries_come_from_outside_against_the_advance_leave_when_disbanded_and_a_loan_pays_the_advance_in_the_same_tick() {
+fn mercenaries_come_from_outside_against_the_advance_and_leave_when_disbanded() {
     let p = params();
     let mut s = testworld::five_states_scenario();
     for (k, v) in [("hire_mercenaries", "Hire mercenaries"), ("disband", "Disband"), ("take_loan", "Take a loan")] {
@@ -350,12 +350,19 @@ fn mercenaries_come_from_outside_against_the_advance_leave_when_disbanded_and_a_
     g.world_mut().post(Account::Treasury(s0), Source::Test, -t * 1000).unwrap();
     let hire = g.verbs(who).into_iter().find(|o| o.verb == VerbId::HireMercenaries).unwrap();
     assert!(!hire.available && hire.why.as_deref() == Some("cannot pay an advance"));
-    // With a bank: borrow and hire in the same tick — the advance leaves before the sweep.
+    // With a bank, a loan and a hire in one tick are two calls: a player makes one a tick, as
+    // a bot (B42, parity (а), plan §31.18) — refused before the world is touched. (Before, the
+    // loan paid the advance in the same tick, ahead of the sweep that pays the debt down.)
     g.world_mut().actors.get_mut(&s0).unwrap().institutions.insert(Institution::Bank);
+    let before = g.world().clone();
+    let err = g.tick(&[VerbCall { actor: who, verb: VerbId::TakeLoan, target: Target::None }, VerbCall { actor: who, verb: VerbId::HireMercenaries, target: Target::None }]).unwrap_err();
+    assert!(matches!(err, engine2::sim::SimError::OneCallATick(a) if a == who), "{err}");
+    assert_eq!(*g.world(), before, "the world untouched");
+    // With the advance in the treasury: the hire.
+    let room = g.world().recruit_ceiling(s0, &p) - g.world().army_size(s0);
+    g.world_mut().post(Account::Treasury(s0), Source::Test, room * p.mercenary_advance_kg * 1000).unwrap();
     let people_before = 0;
-    let r = g
-        .tick(&[VerbCall { actor: who, verb: VerbId::TakeLoan, target: Target::None }, VerbCall { actor: who, verb: VerbId::HireMercenaries, target: Target::None }])
-        .unwrap();
+    let r = g.tick(&[VerbCall { actor: who, verb: VerbId::HireMercenaries, target: Target::None }]).unwrap();
     let hired = r.events.iter().find_map(|e| match e.event {
         Event::Hired { unit, soldiers, advance_kg } => Some((unit, soldiers as i64, advance_kg as i64)),
         _ => None,
@@ -369,7 +376,6 @@ fn mercenaries_come_from_outside_against_the_advance_leave_when_disbanded_and_a_
     assert_eq!(on(Account::Treasury(s0), Source::Hire), -advance * 1000);
     assert_eq!(on(Account::Soldiers(unit), Source::Hire), n * 1000);
     assert!(r.postings.iter().all(|q| !(q.source == Source::Hire && matches!(q.account, Account::Population(_)))), "mercenaries come from outside the world");
-    assert!(g.world().debt(s0) >= advance, "the advance was borrowed, not conjured");
     // Disbanded, they leave the world: no people appear anywhere.
     let r = g.tick(&[VerbCall { actor: who, verb: VerbId::Disband, target: Target::Unit(unit) }]).unwrap();
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Disbanded { unit: u, .. } if u == unit)));

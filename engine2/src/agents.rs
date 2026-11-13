@@ -928,12 +928,6 @@ impl World {
     /// targets, by the same rules the offers use, each with its utility; doing nothing at
     /// nothing. Canonical order of verbs and targets.
     pub fn options(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
-        self.options_in(a, enabled, params, &self.context(a, params))
-    }
-
-    /// The options in a context read once — or left by the calls the ruler's earlier
-    /// ministries chose this tick (`decide`, `spent_in`).
-    fn options_in(&self, a: ActorId, enabled: &[VerbId], params: &Params, ctx: &Context) -> Vec<Option_> {
         let who = ActorRef::Ruler(a);
         let mut out = vec![Option_ { call: None, utility: 0.0 }];
         if !self.alive(a) {
@@ -1022,8 +1016,9 @@ impl World {
                 }
             }
         }
+        let ctx = self.context(a, params);
         for call in calls {
-            let utility = self.utility_in(a, &call, params, ctx);
+            let utility = self.utility_in(a, &call, params, &ctx);
             out.push(Option_ { call: Some(call), utility });
         }
         out
@@ -1053,13 +1048,8 @@ impl World {
     /// its best target (ties: the canonical first); and **what is no better than doing
     /// nothing is not chosen** — a price paid for nothing is not a choice but noise.
     pub fn choices(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
-        self.choices_in(a, enabled, params, &self.context(a, params))
-    }
-
-    /// The choices in a given context (`options_in`).
-    fn choices_in(&self, a: ActorId, enabled: &[VerbId], params: &Params, ctx: &Context) -> Vec<Option_> {
         let mut best: Vec<Option_> = Vec::new();
-        for o in self.options_in(a, enabled, params, ctx).into_iter().skip(1) {
+        for o in self.options(a, enabled, params).into_iter().skip(1) {
             let verb = o.call.map(|c| c.verb);
             match best.iter_mut().find(|b| b.call.map(|c| c.verb) == verb) {
                 Some(b) if o.utility > b.utility => *b = o,
@@ -1072,35 +1062,13 @@ impl World {
         out
     }
 
-    /// One bot's decisions — **one call in each ministry** (plan §31.17, owner's decision
-    /// 2026-11-13): the army, the diplomacy, the treasury and the order, in their one order
-    /// (`Ministry::in_order`). In each the rule of §23b: a softmax at the temperature over
-    /// «nothing» and the best target of each verb of the ministry that beats it, by one keyed
-    /// draw (`Draw::Decision`) — drawn in every ministry, its menu empty or not, so the keys do
-    /// not hang on what is above nothing.
-    ///
-    /// **No money is counted twice** (path (а) of §31.17.3): each later ministry prices its
-    /// spendings against the money the calls already chosen this tick by the earlier ones
-    /// leave (`spent_in`). Everyone decides on the state as it stands; nothing is applied here.
-    pub fn decide(&mut self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<VerbCall> {
-        let mut ctx = self.context(a, params);
-        let mut out = Vec::new();
-        for ministry in crate::verbs::Ministry::in_order() {
-            let verbs: Vec<VerbId> = enabled.iter().copied().filter(|v| v.ministry() == ministry).collect();
-            let options = self.choices_in(a, &verbs, params, &ctx);
-            let d = Draw { point: DrawPoint::Decision, tick: self.tick, id: a.0, n: self.draw_ordinal(DrawPoint::Decision, a.0) };
-            let value = crate::rng::draw(self.seed, d);
-            self.journal_draw(d, value);
-            if let Some(call) = Self::soft_pick(&options, unit(value), params) {
-                self.spent_in(a, &mut ctx, &call, params);
-                out.push(call);
-            }
-        }
-        out
-    }
-
-    /// The softmax pick of §23b: the choice the draw `u` lands on at the temperature.
-    fn soft_pick(options: &[Option_], u: f64, params: &Params) -> Option<VerbCall> {
+    /// One bot's decision: softmax over its choices at the temperature, by one keyed draw.
+    pub fn decide(&mut self, a: ActorId, enabled: &[VerbId], params: &Params) -> Option<VerbCall> {
+        let options = self.choices(a, enabled, params);
+        let d = Draw { point: DrawPoint::Decision, tick: self.tick, id: a.0, n: self.draw_ordinal(DrawPoint::Decision, a.0) };
+        let value = crate::rng::draw(self.seed, d);
+        self.journal_draw(d, value);
+        let u = unit(value);
         let t = params.agent_temperature.max(1e-6);
         let top = options.iter().map(|o| o.utility).fold(f64::MIN, f64::max);
         let weights: Vec<f64> = options.iter().map(|o| ((o.utility - top) / t).exp()).collect();
@@ -1115,53 +1083,6 @@ impl World {
         options.last().and_then(|o| o.call)
     }
 
-    /// The money a call chosen this tick takes from the context of the ruler's later
-    /// ministries (path (а) of §31.17.3, owner's decision 2026-11-13) — by the same terms
-    /// the call itself is priced by:
-    ///
-    /// - a spending made once — a hire's advance, an embassy, an alliance's gifts, a bribe,
-    ///   the order bought back — leaves the money at hand (`Context.at_once`) and the free
-    ///   money (`Context.free`);
-    /// - the pay of men within the army the peace keeps stands for the horizon: the free money;
-    /// - the pay of soldiers of war (plan §31.15) for the war's length: the money at hand over
-    ///   it and the free money, once — and the men raised join the army the split reads.
-    ///
-    /// What a call saves — a disbanding, a loan — gives nothing back: a later ministry does not
-    /// spend money an earlier one has not yet freed. Only the ruler's own state and own choice
-    /// are read (plan §28.4).
-    fn spent_in(&self, a: ActorId, ctx: &mut Context, call: &VerbCall, params: &Params) {
-        let horizon = f64::from(params.goal_horizon_ticks);
-        let raised = |ctx: &mut Context, n: i64| {
-            let (peace, war) = Self::split_at_peace_army(ctx, n, true);
-            let war_pay = World::soldiers_pay(war, Self::kept_ticks(ctx), params);
-            ctx.free -= World::soldiers_pay(peace, horizon, params) + war_pay;
-            ctx.at_once -= war_pay;
-            ctx.army += n;
-        };
-        let once = |ctx: &mut Context, kg: i64| {
-            ctx.free -= kg as f64;
-            ctx.at_once -= kg as f64;
-        };
-        match call.verb {
-            VerbId::Recruit => {
-                let tick = self.recruit_per_tick(a, params);
-                let n = match call.target {
-                    Target::Levy(_, men) => i64::from(men).min(tick),
-                    _ => tick,
-                };
-                raised(ctx, n);
-            }
-            VerbId::HireMercenaries => {
-                once(ctx, self.hire_advance(a, params));
-                raised(ctx, self.hire_count(a, params));
-            }
-            VerbId::SendEmbassy | VerbId::ProposeAlliance => once(ctx, self.embassy_cost(a, params)),
-            VerbId::Bribe => once(ctx, self.gift_size(a, params)),
-            VerbId::EnforceOrder => once(ctx, self.order_cost(a, params)),
-            VerbId::Disband | VerbId::DeclareWar | VerbId::MakePeace | VerbId::ProposeMarriage | VerbId::TakeLoan | VerbId::RaiseTax | VerbId::LowerTax => {}
-        }
-    }
-
     /// Every bot decides on the state as it stands — the player's actor excepted — in
     /// canonical order; nothing is applied here (brief §3: first all decide, then all is
     /// applied).
@@ -1169,7 +1090,9 @@ impl World {
         let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).collect();
         let mut out = Vec::new();
         for a in ids {
-            out.extend(self.decide(a, enabled, params));
+            if let Some(call) = self.decide(a, enabled, params) {
+                out.push(call);
+            }
         }
         out
     }

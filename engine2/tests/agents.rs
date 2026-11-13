@@ -330,11 +330,8 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
         let living = g.world().actors.keys().filter(|a| g.world().alive(**a) && **a != s0).count();
         let r = g.tick(&[]).unwrap();
         let decisions: Vec<&engine2::RngDraw> = r.draws.iter().filter(|d| d.draw.point == engine2::DrawPoint::Decision).collect();
-        // One keyed draw per ministry of each deciding actor (plan §31.17), drawn in every
-        // ministry, its menu empty or not: the ordinals 0, 1, 2 of the actor's tick.
-        let ministries = engine2::Ministry::in_order().len();
-        assert_eq!(decisions.len(), living * ministries, "one keyed draw per ministry of each deciding actor");
-        assert!(decisions.iter().all(|d| (d.draw.n as usize) < ministries && d.draw.id != s0.0), "once in each ministry, never for the player's actor");
+        assert_eq!(decisions.len(), living, "one keyed draw per deciding actor");
+        assert!(decisions.iter().all(|d| d.draw.n == 0 && d.draw.id != s0.0), "once, never for the player's actor");
         for e in &r.events {
             if let Event::Verb { actor, .. } = e.event {
                 assert_ne!(actor, ActorRef::Ruler(s0), "the bots left the player's actor alone");
@@ -357,27 +354,21 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     };
     assert_eq!(play(44, 30), play(44, 30));
     assert_ne!(play(44, 30), play(45, 30));
-    // A cold temperature is the best option of each ministry (plan §31.17: one call in
-    // each); a hot one wanders, nothing included. Read on one ministry at a time — the
-    // diplomacy, whose menu is the widest — with its verbs alone enabled, so the other
-    // ministries choose nothing and spend nothing before it.
+    // A cold temperature is the best option; a hot one wanders, nothing included.
     let mut cold = params();
     cold.agent_temperature = 1e-6;
     let mut w = g.world().clone();
-    let diplomacy: Vec<VerbId> = VerbId::ALL.into_iter().filter(|v| v.ministry() == engine2::Ministry::Diplomacy).collect();
-    let best = w.choices(ActorId(1), &diplomacy, &cold).into_iter().max_by(|x, y| x.utility.partial_cmp(&y.utility).unwrap()).unwrap();
-    let chosen = w.decide(ActorId(1), &diplomacy, &cold);
-    assert!(chosen.len() <= 1, "one call in the ministry: {chosen:?}");
-    let chosen = chosen.first().copied();
-    let chosen_u = w.choices(ActorId(1), &diplomacy, &cold).into_iter().find(|o| o.call == chosen).unwrap().utility;
+    let best = w.choices(ActorId(1), &VerbId::ALL, &cold).into_iter().max_by(|x, y| x.utility.partial_cmp(&y.utility).unwrap()).unwrap();
+    let chosen = w.decide(ActorId(1), &VerbId::ALL, &cold);
+    let chosen_u = w.choices(ActorId(1), &VerbId::ALL, &cold).into_iter().find(|o| o.call == chosen).unwrap().utility;
     assert!((chosen_u - best.utility).abs() < 1e-9, "cold: the best option, {chosen:?}");
     let mut hot = params();
     hot.agent_temperature = 100.0;
     let mut kinds: std::collections::BTreeSet<Option<VerbId>> = std::collections::BTreeSet::new();
     for _ in 0..40 {
-        kinds.insert(w.decide(ActorId(1), &diplomacy, &hot).first().map(|c| c.verb));
+        kinds.insert(w.decide(ActorId(1), &VerbId::ALL, &hot).map(|c| c.verb));
     }
-    let n_choices = w.choices(ActorId(1), &diplomacy, &hot).len();
+    let n_choices = w.choices(ActorId(1), &VerbId::ALL, &hot).len();
     assert!(kinds.contains(&None) && kinds.len() >= n_choices.min(3), "hot: the choices spread, doing nothing among them: {kinds:?} of {n_choices}");
 }
 
@@ -1655,13 +1646,14 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
 
 /// The player's strategies of the paired run: the bot in the player's seat, a player who
 /// does nothing, a conqueror who goes to war on its weakest neighbour and marches on its
-/// capital — through the contract, with only what is on offer. The conqueror levies within
-/// its budget: while the pay of its whole army on campaign fits the tick's income (the
-/// world's pay functions). A probe that levied every tick could not pay the double pay of
-/// the campaign, was exhausted by the rule of the peace, accepted the enemy's peace and
-/// declared again — 121 wars of a tick on the test world's seed 3, its outcome the idle
-/// player's (plan §28.12): a foolish probe, not a degeneration of the engine. The change is
-/// to the probe player, not to the measures.
+/// capital — through the contract, with only what is on offer, one call a tick as a bot
+/// (B42, parity (а), plan §31.18): the declaration first, the levy in the ticks with none.
+/// The conqueror levies within its budget: while the pay of its whole army on campaign fits
+/// the tick's income (the world's pay functions). A probe that levied every tick could not
+/// pay the double pay of the campaign, was exhausted by the rule of the peace, accepted the
+/// enemy's peace and declared again — 121 wars of a tick on the test world's seed 3, its
+/// outcome the idle player's (plan §28.12): a foolish probe, not a degeneration of the
+/// engine. The change is to the probe player, not to the measures.
 fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
     let p = params();
     let me = ActorId(0);
@@ -1683,7 +1675,9 @@ fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sen
                 }
                 weakest
             });
-            if g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
+            // One call a tick, as a bot (B42, parity (а), plan §31.18): the levy only in a tick
+            // with no declaration.
+            if calls.is_empty() && g.verbs(ActorRef::Ruler(me)).iter().any(|o| o.verb == VerbId::Recruit && o.available) {
                 let capital = w.actors[&me].capital;
                 let within_budget = engine2::economy::campaign_pay_per_tick(w.army_size(me) + w.recruit_per_tick(me, &p), &p) <= w.yearly_income(me, &p) / 2;
                 if within_budget && !w.in_revolt(capital) && w.population(capital) > 0 {
@@ -2865,6 +2859,28 @@ fn a_soldier_beyond_the_army_the_peace_keeps_is_priced_against_the_money_of_the_
     peace.apply_verb(&levy(&peace), &p).unwrap();
     let (own, left) = parts(&peace);
     assert!(peace.paid_soldiers(s0, &p) > peace.peace_army(s0, &p) && (peace.free_money(s0, &p) - (own + left * horizon)).abs() < 1e-6, "at peace: every man for the horizon");
+}
+
+/// **A player makes one call a tick, as a bot** (B42 — the player and the bot by one rule;
+/// parity (а), owner's decision 2026-11-13 on the stop of plan §31.18). Two calls of one
+/// caller in a tick are an error before the world is touched — the save byte for byte the
+/// same; one call goes through.
+#[test]
+fn a_player_makes_one_call_a_tick_as_a_bot_does() {
+    let s = all_verbs(testworld::five_states_scenario());
+    let mut g = Game::new(&s, params(), 5).unwrap();
+    let me = ActorRef::Ruler(ActorId(0));
+    g.set_player(Some(me));
+    let embassy = VerbCall { actor: me, verb: VerbId::SendEmbassy, target: Target::Actor(ActorId(1)) };
+    let levy = VerbCall { actor: me, verb: VerbId::Recruit, target: Target::Province(g.world().actors[&ActorId(0)].capital) };
+    let before = g.to_save().unwrap();
+    let err = g.tick(&[embassy, levy]).unwrap_err();
+    assert!(matches!(err, engine2::sim::SimError::OneCallATick(a) if a == me), "{err}");
+    assert_eq!(g.to_save().unwrap(), before, "refused before the world is touched");
+    let err = g.tick(&[embassy, embassy]).unwrap_err();
+    assert!(matches!(err, engine2::sim::SimError::OneCallATick(_)), "the same call twice too: {err}");
+    let r = g.tick(&[levy]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Verb { actor, verb: VerbId::Recruit, .. } if actor == me)), "one call goes through");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----
