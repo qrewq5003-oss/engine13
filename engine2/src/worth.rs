@@ -65,6 +65,7 @@ use crate::world::{Standing, WarAim, World};
 /// the tribute a submission would cost (kg a year) and the provinces still to lose before
 /// it; the soldiers and what a head pays; the pay of the campaign; the war's expected length
 /// The parts of a polity's money read off one budget of the tick (`World::money_parts`).
+#[derive(Debug, Clone)]
 struct MoneyParts {
     treasury: i64,
     debt: i64,
@@ -86,6 +87,23 @@ pub struct ThreatRate {
     touches: bool,
     rate: f64,
     against: Vec<(ActorId, f64)>,
+}
+
+/// What the money of a polity over a span reads that no span moves (`World::own_money`):
+/// the parts of its money, its free money and its room for a loan — read once per decision,
+/// where every war's terms ask the money over that war's length (`campaign_money`).
+#[derive(Debug, Clone)]
+pub struct OwnMoney {
+    parts: MoneyParts,
+    free: f64,
+    loan_room: i64,
+}
+
+impl OwnMoney {
+    /// The free money over the horizon (`World::free_money`).
+    pub fn free(&self) -> f64 {
+        self.free
+    }
 }
 
 /// What `World::defence_worth` reads of a threatened province that no strength moves
@@ -498,9 +516,14 @@ impl World {
     /// `a`'s legitimacy (`collapse::rising_hazard`) each tick, each rising lasting until `a`'s
     /// men reach it from the capital (`path`, `march_steps_per_tick`).
     pub fn revolt_share(&self, a: ActorId, q: ProvinceId, params: &Params) -> f64 {
+        let steps = self.path(a, self.actors[&a].capital, q).map(|p| p.len()).unwrap_or(0);
+        self.revolt_share_at(a, q, steps, params)
+    }
+
+    /// `revolt_share` with the steps from `a`'s capital read already (`steps_from`).
+    fn revolt_share_at(&self, a: ActorId, q: ProvinceId, steps: usize, params: &Params) -> f64 {
         let pr = &self.provinces[&q];
         let marks = u32::from(pr.religion != self.polity_religion(a)) + u32::from(pr.culture != self.actors[&a].core_culture);
-        let steps = self.path(a, self.actors[&a].capital, q).map(|p| p.len()).unwrap_or(0);
         let lasting = (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1)) as f64;
         (rising_hazard(marks, self.actors[&a].legitimacy, params) * lasting).min(1.0)
     }
@@ -560,6 +583,12 @@ impl World {
     /// soldiers the battle would cost and what a head pays; the pay of the campaign when `a`'s
     /// goals want the war (plan §27.2); the war's expected length (`war_ticks`).
     pub fn war_terms(&self, a: ActorId, b: ActorId, blow_per_province: f64, params: &Params) -> WarTerms {
+        self.war_terms_with(a, b, blow_per_province, &self.own_money(a, params), params)
+    }
+
+    /// `war_terms` with `a`'s money read once (`own_money`): a decision reads the terms of a
+    /// war with every polity.
+    pub fn war_terms_with(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> WarTerms {
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let income = self.yearly_income(a, params).max(1) as f64;
         let ticks = self.war_ticks(a, b, params);
@@ -586,7 +615,9 @@ impl World {
         // All its land within the chain: the fall of the polity (owner's decision 2 on §29.8).
         let fall = !at_risk.is_empty() && at_risk.len() == self.actors[&a].provinces.len();
         let back = 1.0 - self.retake_odds(b, a, a, ticks, params);
-        let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share(b, *q, params))).collect();
+        // The march of `b`'s men from its capital to each, by one search (`revolt_share`).
+        let from_capital = if at_risk.is_empty() { std::collections::BTreeMap::new() } else { self.steps_from(b, self.actors[&b].capital) };
+        let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share_at(b, *q, from_capital.get(q).copied().unwrap_or(0), params))).collect();
         // A claim on the polity: the tribute of Д2 once `a` is down to half the land it held
         // when the war began (`make_peace_between`) — the provinces still to lose until then.
         let (tribute, to_submit) = match claim {
@@ -611,7 +642,7 @@ impl World {
             dead_years: self.regrowth_shortfall_ticks(a, params) / 2.0,
             campaign_per_strength: if self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
             campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
-            free: self.campaign_money(a, ticks, params),
+            free: Self::money_within_of(own, ticks, false),
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
             at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
@@ -890,10 +921,25 @@ impl World {
     /// the ticks' remainder with the pay as the world charges it (`charged`) or at the rate
     /// of home (`money_over`, `campaign_money`).
     fn money_within(&self, a: ActorId, span: f64, charged: bool, params: &Params) -> f64 {
-        let m = self.money_parts(a, params);
+        Self::money_within_of(&self.own_money(a, params), span, charged)
+    }
+
+    /// What `money_within` reads of `a` that no span moves, read once (`OwnMoney`).
+    pub fn own_money(&self, a: ActorId, params: &Params) -> OwnMoney {
+        OwnMoney { parts: self.money_parts(a, params), free: self.free_money(a, params), loan_room: self.loan_room(a, params) }
+    }
+
+    /// `money_within` on the money read once (`own_money`).
+    fn money_within_of(own: &OwnMoney, span: f64, charged: bool) -> f64 {
+        let m = &own.parts;
         let left = m.before_pay - if charged { m.pay_due } else { m.pay_home };
-        let at_hand = m.treasury as f64 + left as f64 * span + self.loan_room(a, params) as f64;
-        self.free_money(a, params).min(at_hand)
+        let at_hand = m.treasury as f64 + left as f64 * span + own.loan_room as f64;
+        own.free.min(at_hand)
+    }
+
+    /// `money_over` on the money read once (`own_money`).
+    pub fn money_over_of(own: &OwnMoney, span: f64) -> f64 {
+        Self::money_within_of(own, span, true)
     }
 
     /// **The price of spending `kg` of wheat** for a polity with `free` money and a yearly
@@ -1074,7 +1120,12 @@ impl World {
     /// table of §28.10, the same as a war's). Read once per decision (`agents::Context`); the
     /// wars each brings a tick (`wars_a_tick_from`) are read with the strength a decision adds.
     pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(ActorId, WarTerms)> {
-        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms(a, t, blow_per_province, params))).collect()
+        self.threats_with(a, blow_per_province, &self.own_money(a, params), params)
+    }
+
+    /// `threats` with `a`'s money read once (`own_money`).
+    pub fn threats_with(&self, a: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> Vec<(ActorId, WarTerms)> {
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_with(a, t, blow_per_province, own, params))).collect()
     }
 
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at
@@ -1133,10 +1184,15 @@ impl World {
     /// worth to the polity. Nothing within one polity, between polities already bound, or
     /// for a house that does not rule.
     fn bond(&self, h: HouseId, mine: ActorId, theirs: ActorId, params: &Params) -> f64 {
-        if mine == theirs || !self.alive(mine) || !self.alive(theirs) || self.ruling_house(mine) != h || self.married_across(mine, theirs) {
+        self.bond_as(h, mine, theirs, self.married_across(mine, theirs), params)
+    }
+
+    /// `bond` with whether a marriage binds the two polities read already (`married_to`).
+    fn bond_as(&self, h: HouseId, mine: ActorId, theirs: ActorId, married: bool, params: &Params) -> f64 {
+        if mine == theirs || !self.alive(mine) || !self.alive(theirs) || self.ruling_house(mine) != h || married {
             return 0.0;
         }
-        let norm = self.relation_norm(mine, theirs, params);
+        let norm = self.relation_norm_as(mine, theirs, married, params);
         if norm >= params.treaty_accept_at_relation || norm + params.relation_norm_marriage < params.treaty_accept_at_relation {
             return 0.0;
         }
@@ -1155,6 +1211,13 @@ impl World {
     /// the bond, less the dowry it would pay.
     pub fn proposal_worth(&self, h: HouseId, g: HouseId, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
-        self.bond(h, mine, theirs, params) - self.dowry(h, params) as f64 / self.house_income(h, params)
+        self.proposal_worth_as(h, g, self.married_across(mine, theirs), params)
+    }
+
+    /// `proposal_worth` with whether a marriage binds the two houses' polities read already
+    /// (`married_to`).
+    pub(crate) fn proposal_worth_as(&self, h: HouseId, g: HouseId, married: bool, params: &Params) -> f64 {
+        let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
+        self.bond_as(h, mine, theirs, married, params) - self.dowry(h, params) as f64 / self.house_income(h, params)
     }
 }

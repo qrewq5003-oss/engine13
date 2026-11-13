@@ -171,6 +171,26 @@ impl World {
         None
     }
 
+    /// The steps of `owner`'s men from `from` to every province they can reach — the length
+    /// of `path` to each, by one breadth-first search over the same passable land (`from`
+    /// itself at none).
+    pub fn steps_from(&self, owner: ActorId, from: ProvinceId) -> BTreeMap<ProvinceId, usize> {
+        let mut out: BTreeMap<ProvinceId, usize> = BTreeMap::from([(from, 0)]);
+        let mut queue = VecDeque::from([from]);
+        while let Some(c) = queue.pop_front() {
+            let d = out[&c];
+            let pr = &self.provinces[&c];
+            for n in pr.neighbours.iter().chain(pr.sea_neighbours.iter()).copied() {
+                if out.contains_key(&n) || !self.passable(owner, n) {
+                    continue;
+                }
+                out.insert(n, d + 1);
+                queue.push_back(n);
+            }
+        }
+        out
+    }
+
     /// The path `owner`'s men would march from `from` to `to` in a war with `enemy`, whether
     /// or not the war is on: through what is passable to them and the enemy's land (E3 (е2):
     /// the worth of a war measures its march the same before the declaration and after).
