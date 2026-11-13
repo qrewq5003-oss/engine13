@@ -541,7 +541,7 @@ impl World {
     /// The strengths `war_odds` weighs: of `a`'s side without `extra`, and of the other.
     pub fn war_sides_strength(&self, a: ActorId, b: ActorId) -> (f64, f64) {
         let (side_a, side_b) = self.war_sides(a, b);
-        self.sides_strength(a, b, side_a, side_b)
+        self.sides_strength(a, b, side_a, side_b, &[])
     }
 
     /// The strengths of the sides of **the war `t` would declare on `a`** — a neighbour's
@@ -552,16 +552,26 @@ impl World {
     /// allies out of its defence and put the neighbour's into the attack. The same strengths
     /// besides (`sides_strength`), from `a`'s view: the odds of `a` in that war are
     /// `war_odds_of` of them.
+    ///
+    /// **With `a` stand also those `t` already fights** (plan §31.22 (Б), owner's decision
+    /// 2026-11-13) — the same that stand against `t` in its odds against any other neighbour
+    /// (`war_odds(t, x)`: against the one who declares, every enemy it already has, one army
+    /// for every front). Left out, a neighbour already at war with another threatened `a`
+    /// more than its other neighbours by the same army. With a neighbour at war with nobody
+    /// the strengths are what they were, bit for bit.
     pub fn threat_sides_strength(&self, a: ActorId, t: ActorId) -> (f64, f64) {
         let (side_t, side_a) = self.war_sides(t, a);
-        self.sides_strength(a, t, side_a, side_t)
+        let fought: Vec<ActorId> = self.actors.keys().copied().filter(|c| *c != a && self.alive(*c) && self.at_war(t, *c)).collect();
+        self.sides_strength(a, t, side_a, side_t, &fought)
     }
 
     /// The strengths of `a`'s side `side_a` and of `b`'s `side_b`, each polity counted once:
     /// against `a` besides `side_b` every other enemy it already fights; with `a` its allies,
     /// lord and vassals already at war with `b` (the body of `war_sides_strength` and
-    /// `threat_sides_strength`).
-    fn sides_strength(&self, a: ActorId, b: ActorId, side_a: Vec<ActorId>, side_b: Vec<ActorId>) -> (f64, f64) {
+    /// `threat_sides_strength`). `against_b`: polities that stand with `a` besides — for a
+    /// threat, those `b` already fights; one of them that fights `a` too stays against `a`
+    /// (`a`'s view), one counted on `b`'s side (a vassal risen on it) leaves it.
+    fn sides_strength(&self, a: ActorId, b: ActorId, side_a: Vec<ActorId>, side_b: Vec<ActorId>, against_b: &[ActorId]) -> (f64, f64) {
         use std::collections::BTreeSet;
         let mut theirs: BTreeSet<ActorId> = side_b.into_iter().collect();
         theirs.extend(self.actors.keys().copied().filter(|c| self.alive(*c) && self.at_war(a, *c)));
@@ -571,6 +581,10 @@ impl World {
         friends.extend(self.vassals_of(a));
         mine.extend(friends.into_iter().filter(|x| self.alive(*x) && self.at_war(*x, b)));
         mine.retain(|x| !theirs.contains(x));
+        for c in against_b.iter().filter(|c| !self.at_war(a, **c)) {
+            theirs.remove(c);
+            mine.insert(*c);
+        }
         let mine = mine.iter().map(|x| self.army_strength(*x)).sum::<f64>();
         let theirs: f64 = theirs.iter().map(|x| self.army_strength(*x)).sum();
         (mine, theirs)

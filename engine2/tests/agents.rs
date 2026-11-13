@@ -2366,6 +2366,63 @@ fn the_length_of_a_threat_is_the_neighbours_march_to_the_politys_capital() {
     assert_eq!(w.threat_ticks(s1, s0, &p), back);
 }
 
+/// **Those a neighbour already fights stand with the polity in its threat** (plan §31.22 (Б),
+/// owner's decision 2026-11-13): the same that stand against the neighbour in its odds
+/// against any other of its neighbours (`war_odds(t, x)`). Left out, a neighbour at war with
+/// another threatened the polity more than its other neighbours by the same army — and the
+/// shares of its wars over its borders did not add up to its rate. The polity's own
+/// declaration does not count on them; a neighbour at war with nobody is read as before
+/// (`a_neighbours_threat_stands_on_the_sides_of_the_neighbours_declaration`).
+#[test]
+fn those_a_neighbour_already_fights_stand_with_the_polity_in_its_threat() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut w = world_of(&testworld::five_states_scenario(), 49);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 5;
+    assert!(w.borders(s0, s1) && !w.at_war(s0, s1));
+    let threat = |w: &World| {
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        w.threats(s0, blow, &p).into_iter().find(|(t, _)| *t == s1).map(|(_, terms)| terms).expect("polity 1 threatens polity 0")
+    };
+    let (sides, odds) = (w.threat_sides_strength(s0, s1), threat(&w).odds(0.0, &p));
+    assert_eq!(sides, (w.army_strength(s0), w.army_strength(s1)), "at war with nobody: the two armies");
+    // The neighbour goes to war with a third polity.
+    let mut at_war = w.clone();
+    at_war.declare_war(s1, s2).unwrap();
+    assert!(at_war.at_war(s1, s2) && !at_war.at_war(s0, s2) && !at_war.at_war(s0, s1));
+    let third = at_war.army_strength(s2);
+    assert!(third > 0.0);
+    let (mine, theirs) = at_war.threat_sides_strength(s0, s1);
+    assert!((mine - (sides.0 + third)).abs() < 1e-9 && theirs == sides.1, "the neighbour's enemy stands with the polity: {mine} against {theirs}");
+    assert_eq!(at_war.war_sides_strength(s0, s1), sides, "the polity's own declaration does not count on it");
+    assert!(threat(&at_war).odds(0.0, &p) > odds, "the odds of the threat's terms are better");
+    assert_eq!(threat(&at_war).odds(0.0, &p), World::war_odds_of((mine, theirs), 0.0, &p));
+    // The polity's slot is the neighbour's odds against it, as against any other neighbour.
+    assert!((1.0 - threat(&at_war).odds(0.0, &p) - at_war.war_odds(s1, s0, 0.0, &p)).abs() < 1e-12, "the same war from either side: {} and {}", 1.0 - threat(&at_war).odds(0.0, &p), at_war.war_odds(s1, s0, 0.0, &p));
+    let without = World::wars_a_tick_in(&at_war.threat_rate(s1, s0, &p), s0, World::war_odds_of(sides, 0.0, &p));
+    assert!(at_war.wars_a_tick_from(s1, s0, 0.0, &p) < without, "fewer of the neighbour's wars fall on the polity than with its enemy left out");
+    // So the shares over the neighbour's borders at peace with it add up to what its rate
+    // leaves them: each of them reads the others' slots as the others read their own.
+    let at_peace: Vec<ActorId> = at_war.actors.keys().copied().filter(|x| at_war.borders(s1, *x) && !at_war.at_war(s1, *x)).collect();
+    assert!(at_peace.len() > 1, "polity 1 has other neighbours at peace: {at_peace:?}");
+    let slot = |x: ActorId| at_war.wars_a_tick_from(s1, x, 0.0, &p) / at_war.war_odds(s1, x, 0.0, &p);
+    for x in &at_peace {
+        assert!((slot(*x) - slot(s0)).abs() < 1e-12, "one share of the rate for a unit of the odds, whoever reads it: {} and {}", slot(*x), slot(s0));
+    }
+    // A vassal risen on the neighbour is its enemy, not its side.
+    let mut risen = w.clone();
+    risen.make_vassal(s2, s1).unwrap();
+    assert!((risen.threat_sides_strength(s0, s1).1 - (sides.1 + risen.army_strength(s2))).abs() < 1e-9, "a loyal vassal marches with the neighbour");
+    risen.declare_war(s2, s1).unwrap();
+    let (mine, theirs) = risen.threat_sides_strength(s0, s1);
+    assert!((mine - (sides.0 + risen.army_strength(s2))).abs() < 1e-9 && theirs == sides.1, "the risen vassal stands against it: {mine} against {theirs}");
+    // One who fights the polity too stays against the polity: its view, every enemy it has.
+    let mut both = at_war.clone();
+    both.declare_war(s2, s0).unwrap();
+    let (mine, theirs) = both.threat_sides_strength(s0, s1);
+    assert!(mine == sides.0 && (theirs - (sides.1 + both.army_strength(s2))).abs() < 1e-9, "an enemy of both is the polity's enemy: {mine} against {theirs}");
+}
+
 /// **A polity's own declaration is weighed on the terms of its own war** (plan §31.20, the
 /// requirement of §31.20.2; plan §31.22): the terms the bot reads for the neighbour's threat
 /// stand on the sides and the length of the neighbour's declaration — the polity's ally in,
