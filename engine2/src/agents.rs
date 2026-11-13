@@ -583,18 +583,19 @@ impl World {
 
     /// What declaring war on `b` is worth to `a` in a context read once: the war on the terms
     /// of a war not yet open (`war_terms`) and the price of the declaration.
+    ///
+    /// The terms the context read already are reused: an open war's as they are (a claim
+    /// stated in it), and a threat's **on the sides of `a`'s own declaration**
+    /// (`war_sides_strength(a, b)`) — the threat's terms stand on the sides of the war `b`
+    /// would declare (plan §31.20), where `a`'s allies and lord are in and `b`'s are out; a
+    /// declaration weighed on them would count on allies its own war does not bring.
     fn declaration_worth(&self, a: ActorId, b: ActorId, unpaid: bool, ctx: &Context, params: &Params) -> f64 {
-        // The same terms the context read for a threat or a war of `b`, if it did.
-        let read = ctx.threats.iter().map(|(_, t)| t).chain(&ctx.wars).find(|t| t.b == b);
-        let fresh;
-        let terms = match read {
-            Some(t) => t,
-            None => {
-                fresh = self.war_terms_with(a, b, ctx.blow_per_province, &ctx.money, params);
-                &fresh
-            }
+        let terms = match (ctx.wars.iter().find(|t| t.b == b), ctx.threats.iter().find(|(t, _)| *t == b)) {
+            (Some(war), _) => war.clone(),
+            (None, Some((_, threat))) => threat.on_sides(self.war_sides_strength(a, b)),
+            (None, None) => self.war_terms_with(a, b, ctx.blow_per_province, &ctx.money, params),
         };
-        self.war_worth_of(a, terms, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
+        self.war_worth_of(a, &terms, unpaid, 0.0, params) + self.blow_worth(a, self.war_price(a, b, params), &ctx.risk, params)
     }
 
     /// The claim a bot's declaration on `b` states (plan §28.9): the province of `b` its

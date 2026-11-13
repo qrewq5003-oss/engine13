@@ -2254,6 +2254,153 @@ fn an_army_at_peace_lowers_the_neighbours_wars_on_it_by_the_battle_formula() {
     assert!((total - rate).abs() < 1e-12, "{total} vs {rate}");
 }
 
+/// **A neighbour's threat stands on the sides of the neighbour's declaration** (plan §31.20,
+/// owner's decision 2026-11-13): the war a threat is, is the war `t` would declare on `a` —
+/// with `a` its allies, lord and vassals, with `t` its vassals alone (§19, `war_sides(t, a)`).
+/// Read on the sides of the war `a` would declare, the threat left `a`'s allies and lord out
+/// of its defence and put the neighbour's into the attack. Both readers follow: the share of
+/// the neighbour's wars that falls on the polity (`wars_a_tick_from`) and the odds of the
+/// threat's terms (`threats` → `WarTerms::odds`, the price of that war). A polity with no
+/// ally and no lord, against a neighbour with none, reads the threat as before, bit for bit.
+#[test]
+fn a_neighbours_threat_stands_on_the_sides_of_the_neighbours_declaration() {
+    let p = params();
+    let (s0, s1, s2, s3, s4) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
+    let mut w = world_of(&testworld::five_states_scenario(), 41);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 5;
+    assert!(w.borders(s0, s1) && !w.at_war(s0, s1) && w.war_rate(s1, &p) > 0.0);
+    let threat = |w: &World| {
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        w.threats(s0, blow, &p).into_iter().find(|(t, _)| *t == s1).map(|(_, terms)| terms).expect("polity 1 threatens polity 0")
+    };
+    // The share by the sides of the polity's own declaration: the reading before the rule.
+    let by_its_own_declaration = |w: &World| World::wars_a_tick_in(&w.threat_rate(s1, s0, &p), s0, w.war_odds(s0, s1, 0.0, &p));
+    // No bonds on either side: the two wars have the same sides, and nothing moves.
+    let sides = w.threat_sides_strength(s0, s1);
+    assert_eq!(sides, w.war_sides_strength(s0, s1), "no bonds: one war either way");
+    assert_eq!(sides, (w.army_strength(s0), w.army_strength(s1)));
+    let wars = w.wars_a_tick_from(s1, s0, 0.0, &p);
+    assert_eq!(wars, by_its_own_declaration(&w), "without an ally or a lord the threat is what it was, bit for bit");
+    let odds = threat(&w).odds(0.0, &p);
+    assert_eq!(odds, w.war_odds(s0, s1, 0.0, &p), "and so are the odds of its terms");
+    assert!(wars > 0.0 && odds > 0.0 && odds < 1.0);
+    // An ally of the polity stands in its defence: the threat is lower, the odds of its terms
+    // higher — while the war it would declare itself has no ally in it.
+    for (bond, friend) in [("an ally", s3), ("a lord", s4)] {
+        let mut bound = w.clone();
+        if friend == s3 {
+            bound.ally_now(s0, s3, &p).unwrap();
+        } else {
+            bound.make_vassal(s0, s4).unwrap();
+        }
+        let strength = bound.army_strength(friend);
+        assert!(strength > 0.0);
+        let (mine, theirs) = bound.threat_sides_strength(s0, s1);
+        assert!((mine - (sides.0 + strength)).abs() < 1e-9 && theirs == sides.1, "{bond} of the polity is in its defence: {mine} against {theirs}");
+        assert_eq!(bound.war_sides_strength(s0, s1), sides, "{bond} stays out of the war the polity declares");
+        assert!(threat(&bound).odds(0.0, &p) > odds, "{bond}: the odds of the threat's terms are better");
+        assert_eq!(threat(&bound).odds(0.0, &p), World::war_odds_of((mine, theirs), 0.0, &p));
+        assert!(bound.wars_a_tick_from(s1, s0, 0.0, &p) < by_its_own_declaration(&bound), "{bond}: fewer of the neighbour's wars fall on the polity than by the sides of its own declaration");
+        assert!(bound.wars_a_tick_from(s1, s0, 0.0, &p) < wars, "{bond}: and fewer than without it ({} against {wars})", bound.wars_a_tick_from(s1, s0, 0.0, &p));
+        // The shares over the neighbour's borders still sum to its rate: each neighbour's
+        // slot is read on the sides of the same declaration as the others' (`war_odds(t, x)`).
+        let total: f64 = bound.actors.keys().copied().filter(|x| bound.borders(s1, *x)).map(|x| bound.wars_a_tick_from(s1, x, 0.0, &p)).sum();
+        assert!((total - bound.war_rate(s1, &p)).abs() < 1e-12, "{bond}: the wars a tick add up to the rate: {total} vs {}", bound.war_rate(s1, &p));
+    }
+    // The neighbour's ally stays out of the war the neighbour declares — and enters the one
+    // declared on it, the polity's own declaration.
+    let mut their_ally = w.clone();
+    their_ally.ally_now(s1, s2, &p).unwrap();
+    assert!(their_ally.army_strength(s2) > 0.0);
+    assert_eq!(their_ally.threat_sides_strength(s0, s1), sides, "the neighbour's ally adds nothing to the neighbour in the threat");
+    assert_eq!(threat(&their_ally).odds(0.0, &p), odds);
+    assert!(their_ally.war_sides_strength(s0, s1).1 > sides.1, "— it stands against the polity's own declaration");
+    // The neighbour's vassal marches with it.
+    let mut their_vassal = w.clone();
+    their_vassal.make_vassal(s2, s1).unwrap();
+    let (mine, theirs) = their_vassal.threat_sides_strength(s0, s1);
+    assert!(mine == sides.0 && (theirs - (sides.1 + their_vassal.army_strength(s2))).abs() < 1e-9, "the neighbour's vassal adds its strength: {theirs}");
+    assert!(threat(&their_vassal).odds(0.0, &p) < odds, "the odds of the threat's terms are worse");
+    // The strength a decision adds goes to the polity's side.
+    let more = engine2::World::new_soldiers_strength(w.recruit_per_tick(s0, &p));
+    assert!(threat(&w).odds(more, &p) > odds && w.wars_a_tick_from(s1, s0, more, &p) < wars);
+}
+
+/// **A polity's own declaration is weighed on the sides of its own declaration** (plan
+/// §31.20, the requirement of §31.20.2): the bot reuses the terms it read for the neighbour's
+/// threat, and those stand on the sides of the neighbour's declaration — the polity's ally in,
+/// the neighbour's out. A declaration weighed on them would count on an ally its own war does
+/// not bring. The worth of the declaration is what it was before the rule: the war on the
+/// terms of `war_terms` (`war_worth`) and the price of the declaration.
+#[test]
+fn a_declaration_is_weighed_on_the_sides_of_ones_own_declaration_not_of_the_threat() {
+    let p = params();
+    let (s0, s1, s2, s3) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3));
+    let mut w = world_of(&testworld::five_states_scenario(), 43);
+    // Polity 0 has an ally, its neighbour has one too: the two wars differ on both sides.
+    w.ally_now(s0, s3, &p).unwrap();
+    w.ally_now(s1, s2, &p).unwrap();
+    let (threat, own) = (w.threat_sides_strength(s0, s1), w.war_sides_strength(s0, s1));
+    assert!(threat.0 > own.0 && threat.1 < own.1, "the threat's sides {threat:?}, the declaration's {own:?}");
+    let risk = w.risk_prices(s0, &p);
+    let blow = w.ceded_province_blow(s0, &risk, &p);
+    let read = w.threats(s0, blow, &p).into_iter().find(|(t, _)| *t == s1).map(|(_, terms)| terms).expect("the neighbour is a threat the context reads");
+    let unpaid = w.paid_share_seen_ppm(s0) < 1_000_000;
+    let declare = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::DeclareWar, target: Target::Actor(s1) };
+    let expect = w.war_worth(s0, s1, unpaid, 0.0, &p) + w.blow_worth(s0, w.war_price(s0, s1, &p), &risk, &p);
+    assert_eq!(w.utility(s0, &declare, &p), expect, "the declaration on its own sides, as before the rule");
+    // The same through the bot's menu.
+    let offered = w.options(s0, &[VerbId::DeclareWar], &p).into_iter().find(|o| o.call.is_some_and(|c| c.target == Target::Actor(s1) || matches!(c.target, Target::Province(q) if w.provinces[&q].owner == s1))).expect("the declaration is on the menu");
+    assert_eq!(offered.utility, expect);
+    // On the threat's sides it would be another number: the guard has teeth.
+    let on_the_threats_sides = w.war_worth_of(s0, &read, unpaid, 0.0, &p) + w.blow_worth(s0, w.war_price(s0, s1, &p), &risk, &p);
+    assert!((on_the_threats_sides - expect).abs() > 1e-9, "the threat's terms would weigh the declaration otherwise: {on_the_threats_sides} vs {expect}");
+    assert_eq!(read.on_sides(own), w.war_terms(s0, s1, blow, &p), "the threat's terms on the declaration's sides are the declaration's terms");
+}
+
+/// **The sides of a threat read only what is seen** (plan §31.20, §28.7; the guard by
+/// injection): alliances, lordship and the armies are public; the hidden state of the polity's
+/// ally, of the neighbour and of the neighbour's vassal — goals, the count of the dead, the
+/// orders, the treasuries, the debts, the memory of the pay — moves neither the sides nor the
+/// threat nor what the polity chooses from.
+#[test]
+fn the_sides_of_a_threat_read_only_what_is_seen() {
+    let p = params();
+    let (s0, s1, s2, s3) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3));
+    let mut w = world_of(&testworld::five_states_scenario(), 45);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 5;
+    w.ally_now(s0, s3, &p).unwrap();
+    w.make_vassal(s2, s1).unwrap();
+    let more = engine2::World::new_soldiers_strength(w.recruit_per_tick(s0, &p));
+    let seen = |w: &World| {
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        (w.threat_sides_strength(s0, s1), w.wars_a_tick_from(s1, s0, 0.0, &p), w.wars_a_tick_from(s1, s0, more, &p), w.threats(s0, blow, &p), w.options(s0, &VerbId::ALL, &p))
+    };
+    let before = seen(&w);
+    assert!(before.0 .0 > w.army_strength(s0) && before.0 .1 > w.army_strength(s1), "the ally and the vassal are in the sides: {:?}", before.0);
+    let capital = w.actors[&s0].capital;
+    for x in [s1, s2, s3] {
+        w.set_goal(x, GoalKind::Take, GoalTarget::Province(capital)).unwrap();
+        let actor = w.actors.get_mut(&x).unwrap();
+        actor.manpower_deficit = 1.0e6;
+        actor.paid_share_history_ppm = vec![1; 4];
+        let units: Vec<engine2::UnitId> = w.units.iter().filter(|(_, u)| u.owner == x).map(|(u, _)| *u).collect();
+        for u in units {
+            w.units.get_mut(&u).unwrap().destination = Some(capital);
+        }
+        let more = 1000 * w.treasury(x).max(1000) * 1000;
+        w.post(engine2::Account::Treasury(x), Source::Test, more).unwrap();
+        w.post(engine2::Account::Debt(x), Source::Test, 100 * w.yearly_income(x, &p) * 1000).unwrap();
+    }
+    assert_eq!(seen(&w), before, "the hidden state of the ally, the neighbour and its vassal moves nothing");
+    // What is seen does move them: the ally's army sent home.
+    let theirs: Vec<engine2::UnitId> = w.units.iter().filter(|(_, u)| u.owner == s3).map(|(u, _)| *u).collect();
+    for u in theirs {
+        w.apply_verb(&VerbCall { actor: ActorRef::Ruler(s3), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
+    }
+    assert!(seen(&w).0 .0 < before.0 .0 && seen(&w).1 > before.1, "the ally's army is seen: without it the threat is greater");
+}
+
 /// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
 /// chain of conquests covers all the polity's land, the loss is its whole income to the
 /// horizon, not the provinces' takes with their discounts; a polity with land beyond the chain
