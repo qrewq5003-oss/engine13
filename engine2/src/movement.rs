@@ -193,8 +193,12 @@ impl World {
             let d = out.entry(q).or_insert(steps);
             *d = (*d).min(steps);
         };
-        for u in self.units_of(mover) {
-            let from = self.units[&u].position;
+        // Units standing in one province reach the same land: each province searched once
+        // (the fewest steps are the same in any order).
+        let mut froms: Vec<ProvinceId> = self.units_of(mover).iter().map(|u| self.units[u].position).collect();
+        froms.sort();
+        froms.dedup();
+        for from in froms {
             if self.provinces[&from].owner == enemy {
                 reach(from, 0);
             }

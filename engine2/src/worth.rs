@@ -429,6 +429,12 @@ impl World {
     /// once, at `a`'s take, held as long as `b` does not take them back nor they rise (plan
     /// §27.3, (б)); the tribute `b` would pay as a vassal; the tribute `a` pays `b` as its lord.
     pub fn war_stake(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
+        self.war_stake_at(a, b, self.war_ticks(a, b, params), params)
+    }
+
+    /// `war_stake` with the war's expected length read already (`war_ticks`, as `war_terms`
+    /// reads it).
+    fn war_stake_at(&self, a: ActorId, b: ActorId, ticks: f64, params: &Params) -> f64 {
         use crate::agents::{GoalKind as K, GoalTarget as T};
         let mut wanted: std::collections::BTreeSet<ProvinceId> = std::collections::BTreeSet::new();
         let (mut subdue, mut free) = (false, false);
@@ -449,7 +455,8 @@ impl World {
                 _ => {}
             }
         }
-        let back = self.retake_odds(a, b, a, self.war_ticks(a, b, params), params);
+        // The odds of the take back, read only where a province or the submission is at stake.
+        let back = if wanted.is_empty() && !subdue { 0.0 } else { self.retake_odds(a, b, a, ticks, params) };
         let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params) * (1.0 - back) * (1.0 - self.revolt_share(a, *q, params))).sum();
         if subdue {
             kg += tribute_due(self.yearly_income(b, params), params) as f64 * (1.0 - back);
@@ -592,7 +599,7 @@ impl World {
         WarTerms {
             b,
             ticks,
-            stake: self.war_stake(a, b, params),
+            stake: self.war_stake_at(a, b, ticks, params),
             at_risk,
             fall,
             first_blow,
