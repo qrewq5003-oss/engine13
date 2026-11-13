@@ -86,6 +86,25 @@ fn leave_no_free_money(w: &mut World, a: ActorId, p: &Params) {
     assert!(w.free_money(a, p) < 0.0, "no free money left");
 }
 
+/// Leave polity `a` (at peace, no bank) `kg` of money at hand for a spending made once
+/// (`money_over` over a tick, plan §31.11) and more over the horizon: the treasury emptied, men
+/// added to its first unit until a tick leaves no more than `kg`, and the treasury topped up to
+/// `kg`. A spending dearer than `kg` is then priced in part though the free money covers it.
+fn leave_money_at_hand(w: &mut World, a: ActorId, kg: i64, p: &Params) {
+    let all = w.treasury(a);
+    w.post(engine2::Account::Treasury(a), Source::Test, -all * 1000).unwrap();
+    let left = w.money_over(a, 1.0, p) as i64;
+    if left > kg {
+        let per_man = (engine2::economy::pay_per_tick(1000, p) / 1000).max(1);
+        let unit = w.units_of(a)[0];
+        w.post(engine2::Account::Soldiers(unit), Source::Test, ((left - kg) / per_man + 1) * 1000).unwrap();
+    }
+    let left = w.money_over(a, 1.0, p) as i64;
+    assert!(left > 0 && left <= kg, "a tick leaves {left}, no more than {kg}");
+    w.post(engine2::Account::Treasury(a), Source::Test, (kg - left) * 1000).unwrap();
+    assert!((w.money_over(a, 1.0, p) - kg as f64).abs() < 1.0 && w.free_money(a, p) > kg as f64, "{kg} at hand, more over the horizon");
+}
+
 #[test]
 fn aspirations_and_regions_are_facts_and_the_generator_draws_them_by_a_weighted_lot_over_reachable_targets() {
     let p = params();
@@ -1979,6 +1998,27 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let fresh = world_of(&carrier_scenario(), 7);
     assert!(w.free_money(b, &p) != fresh.free_money(b, &p) && w.free_money(c, &p) != fresh.free_money(c, &p), "the neighbours' own free money moved with their treasuries and debts");
     assert!(w.money_over(b, 8.0, &p) != fresh.money_over(b, 8.0, &p) && w.money_over(c, 8.0, &p) != fresh.money_over(c, 8.0, &p), "and their money over a span");
+    // With part of an embassy's price at hand (plan §31.13), so that the money at hand moves
+    // the decision: the neighbours' treasuries and debts still move nothing polity 0 prices.
+    let mut short = world_of(&carrier_scenario(), 7);
+    let at_hand = short.embassy_cost(a, &p) / 2;
+    leave_money_at_hand(&mut short, a, at_hand, &p);
+    // Every other polity starts with nothing, then holds a thousandfold its former treasury.
+    let others: Vec<ActorId> = short.actors.keys().copied().filter(|x| *x != a).collect();
+    let theirs: Vec<i64> = others.iter().map(|x| short.treasury(*x)).collect();
+    for x in others.iter().copied() {
+        let all = short.treasury(x);
+        short.post(engine2::Account::Treasury(x), Source::Test, -all * 1000).unwrap();
+    }
+    // (The embassy is past the treasury and off the menu: its worth is read as the price itself.)
+    let embassy = |w: &World| w.utility(a, &VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::SendEmbassy, target: Target::Actor(b) }, &p);
+    let before = (seen(&short), embassy(&short));
+    for (x, had) in others.into_iter().zip(theirs) {
+        let more = 1000 * had.max(1000) * 1000;
+        short.post(engine2::Account::Treasury(x), Source::Test, more).unwrap();
+        short.post(engine2::Account::Debt(x), Source::Test, 100 * short.yearly_income(x, &p) * 1000).unwrap();
+    }
+    assert_eq!((seen(&short), embassy(&short)), before, "with money at hand for part of an embassy, another's treasury and debt are its own");
     // Another house's treasury: the match offered, the proposer's treasury then grows a
     // thousandfold — the house answers the dowry the offer named.
     let s = all_verbs(testworld::five_states_scenario());
@@ -2633,6 +2673,70 @@ fn a_soldiers_pay_stands_for_the_horizon_at_war_as_at_peace() {
     assert_eq!(marching.campaign_money(s0, ticks, &p), home.campaign_money(s0, ticks, &p), "the money the campaign is priced against is the same");
     assert_eq!(home.campaign_money(s0, ticks, &p), home.money_over(s0, ticks, &p), "and with every unit at home it is the money over the span itself");
     assert_eq!(marching.war_worth(s0, s1, false, 0.0, &p), home.war_worth(s0, s1, false, 0.0, &p), "the same war is worth the same with the unit marching and at home");
+}
+
+/// **An embassy, an alliance's gifts and a bribe are spendings made once; the order bought
+/// back is read at its face value** (E3 (ц2); plan §31.13, owner's decisions 2026-11-12 and
+/// 2026-11-13). The three diplomatic spendings stand, as a hire's advance, against the money at
+/// hand for a spending made once (`money_over` over a tick at peace): within it they cost
+/// nothing, past it the face value. The price of the order is no spending from a source but the
+/// world's rule against turning money into legitimacy (`order.cost_share_of_revenue`, derived
+/// by the guard `prices_leave_no_arbitrage`): the bot reads it as it is, whatever its money —
+/// at the first measurement of (ц2), with the order free within the money, the bots bought it
+/// every twenty ticks, at two thirds of the treasury a time, and the armies fell.
+#[test]
+fn an_embassy_a_gift_and_an_alliance_cost_what_the_money_at_hand_does_not_cover_and_the_order_its_face_value() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let call = |verb: VerbId, target: Target| VerbCall { actor: ActorRef::Ruler(s0), verb, target };
+    // A treasury that covers the dearest of the four, the order, twice over.
+    let mut rich = world_of(&testworld::five_states_scenario(), 71);
+    let more = 2 * rich.order_cost(s0, &p);
+    rich.post(engine2::Account::Treasury(s0), Source::Test, more * 1000).unwrap();
+    let mut poor = rich.clone();
+    leave_no_free_money(&mut poor, s0, &p);
+    let income = rich.yearly_income(s0, &p) as f64;
+    assert_eq!(poor.yearly_income(s0, &p) as f64, income, "the same take");
+    let (embassy, gift, order) = (rich.embassy_cost(s0, &p) as f64, rich.gift_size(s0, &p) as f64, rich.order_cost(s0, &p) as f64);
+    assert!(embassy > 0.0 && gift > 0.0 && order > 0.0 && rich.at_war(s0, s1) == false);
+    assert!(embassy.max(gift).max(order) <= rich.money_over(s0, 1.0, &p), "with money at hand for each: {} of the money at hand of a tick", rich.money_over(s0, 1.0, &p));
+    assert!(poor.money_over(s0, 1.0, &p) < 0.0, "and none");
+    // What each call is worth before its price, read off the same state.
+    let push = |w: &World, kg: f64| w.relation_push_worth(s0, s1, kg, &p);
+    let embassy_push = |w: &World| push(w, p.embassy_gain);
+    let gift_push = |w: &World| push(w, w.gift_push(s0, s1, &p));
+    let order_gain = |w: &World| w.blow_worth(s0, -p.order_gain, &w.risk_prices(s0, &p), &p);
+    for (name, w, money) in [("with money", &rich, true), ("without", &poor, false)] {
+        let price = |kg: f64| if money { 0.0 } else { kg / income };
+        let send = w.utility(s0, &call(VerbId::SendEmbassy, Target::Actor(s1)), &p);
+        assert!((send - (embassy_push(w) - price(embassy))).abs() < 1e-9, "{name}: the embassy costs {} — {send}", price(embassy));
+        let bribe = w.utility(s0, &call(VerbId::Bribe, Target::Actor(s1)), &p);
+        assert!((bribe - (gift_push(w) - price(gift))).abs() < 1e-9, "{name}: the gift costs {} — {bribe}", price(gift));
+        let ally = w.utility(s0, &call(VerbId::ProposeAlliance, Target::Actor(s1)), &p);
+        assert!((ally - (w.alliance_worth(s0, s1, &p) - price(embassy))).abs() < 1e-9, "{name}: the alliance's gifts cost {} — {ally}", price(embassy));
+        // The order: its face value either way.
+        let enforce = w.utility(s0, &call(VerbId::EnforceOrder, Target::None), &p);
+        assert!((enforce - (order_gain(w) - order / income)).abs() < 1e-9, "{name}: the order costs its face value {} — {enforce}", order / income);
+    }
+    // Past the money at hand — though within the free money of the horizon — each costs the
+    // part the money at hand does not cover: a spending made once stands against the money of
+    // a tick, not of the horizon.
+    let mut short = world_of(&testworld::five_states_scenario(), 71);
+    let at_hand = short.embassy_cost(s0, &p).min(short.gift_size(s0, &p)) / 2;
+    leave_money_at_hand(&mut short, s0, at_hand, &p);
+    let (embassy, gift) = (short.embassy_cost(s0, &p) as f64, short.gift_size(s0, &p) as f64);
+    let income = short.yearly_income(s0, &p) as f64;
+    let part = |kg: f64| (kg - at_hand as f64) / income;
+    assert!(short.free_money(s0, &p) > embassy.max(gift), "the free money of the horizon covers both");
+    let send = short.utility(s0, &call(VerbId::SendEmbassy, Target::Actor(s1)), &p);
+    assert!((send - (embassy_push(&short) - part(embassy))).abs() < 1e-9, "past the money at hand the embassy costs the part it does not cover — {send}");
+    let bribe = short.utility(s0, &call(VerbId::Bribe, Target::Actor(s1)), &p);
+    assert!((bribe - (gift_push(&short) - part(gift))).abs() < 1e-9, "and so the gift — {bribe}");
+    // The order's price is read whole even with the treasury many times over it.
+    let mut flush = rich.clone();
+    flush.post(engine2::Account::Treasury(s0), Source::Test, (order * 100.0) as i64 * 1000).unwrap();
+    let enforce = flush.utility(s0, &call(VerbId::EnforceOrder, Target::None), &p);
+    assert!((enforce - (order_gain(&flush) - order / income)).abs() < 1e-9 && order / income >= 1.0, "a hundred orders in the treasury: the order still costs its face value");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----
