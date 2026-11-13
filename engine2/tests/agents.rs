@@ -3169,11 +3169,14 @@ struct WarRead {
     nothing_to_win: bool,
     /// The length of its longest war, ticks (what soldiers kept are charged for).
     kept: f64,
-    /// Its free money over the horizon (`World::free_money`: the pay at the rate of home),
-    /// and its money at hand within the war's length (the pay as the world charges it), kg —
-    /// the two bounds of `World::money_over`.
+    /// Its free money over the horizon (`World::free_money`: the pay at the rate of home, the
+    /// soldiers of war for the war's length), and its money at hand within the war's length
+    /// (the pay as the world charges it), kg — the two bounds of `World::money_over`.
     afford: f64,
     at_hand: f64,
+    /// The soldiers it pays and the army the peace keeps (plan §31.15).
+    army: i64,
+    peace_army: i64,
     /// The ticks of the horizon.
     horizon: f64,
     income: f64,
@@ -3194,7 +3197,9 @@ impl WarRead {
             unpaid: w.paid_share_seen_ppm(a) < 1_000_000,
             nothing_to_win: terms.iter().all(|t| (w.war_worth_of(a, t, false, 0.0, p) - w.war_worth_of(a, t, true, 0.0, p)).abs() < 1e-12),
             kept,
-            afford: (w.treasury(a) - w.debt(a)) as f64 + (before_pay - b.pay_home) as f64 * horizon,
+            afford: w.free_money(a, p),
+            army: w.paid_soldiers(a, p),
+            peace_army: w.peace_army(a, p),
             at_hand: w.treasury(a) as f64 + (before_pay - b.pay_due) as f64 * kept + w.loan_room(a, p) as f64,
             horizon,
             income: w.yearly_income(a, p).max(1) as f64,
@@ -3212,6 +3217,18 @@ impl WarRead {
     /// advance taken out first (`agents::pay_money`).
     fn pay_money(&self, advance: f64) -> f64 {
         (self.afford - advance) * self.kept / self.horizon
+    }
+
+    /// `n` men raised (or sent home) split at the army the peace keeps: `(of the peace, of the
+    /// war)` (`agents::split_at_peace_army`).
+    fn split(&self, n: i64, raised: bool) -> (i64, i64) {
+        let war = if raised { n - n.min((self.peace_army - self.army).max(0)) } else { n.min((self.army - self.peace_army).max(0)) };
+        (n - war, war)
+    }
+
+    /// The money the soldiers of war of a call stand against (`agents::kept_soldiers_cost`).
+    fn war_money(&self, peace: i64, advance: f64, p: &Params) -> f64 {
+        self.money().min(self.afford - World::soldiers_pay(peace, self.horizon, p)) - advance
     }
 }
 
@@ -3270,12 +3287,14 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
                 (VerbId::HireMercenaries, _) => {
                     let x = WarRead::of(&before, a, p);
                     let (n, advance) = (before.hire_count(a, p), before.hire_advance(a, p) as f64);
-                    let within = advance <= x.money().max(0.0) && World::soldiers_pay(n, x.kept, p) <= x.pay_money(advance).max(0.0);
+                    let (peace, war) = x.split(n, true);
+                    let within = advance <= x.money().max(0.0) && World::soldiers_pay(peace, x.kept, p) <= x.pay_money(advance).max(0.0) && World::soldiers_pay(war, x.kept, p) <= x.war_money(peace, advance, p).max(0.0);
                     d.count("hires", 1);
                     d.count("hire: unpaid", u64::from(x.unpaid));
                     d.count("hire: nothing to win", u64::from(x.nothing_to_win));
                     d.count("hire: within the money", u64::from(within));
-                    let left_of_the_horizon = x.afford - advance - World::soldiers_pay(n, f64::from(p.goal_horizon_ticks), p);
+                    let (peace, war) = x.split(n, true);
+                    let left_of_the_horizon = x.afford - advance - World::soldiers_pay(peace, f64::from(p.goal_horizon_ticks), p) - World::soldiers_pay(war, x.kept, p);
                     let left_at_hand = x.at_hand - advance - World::soldiers_pay(n, x.kept, p);
                     d.sample("hire: left over the horizon, years of income", left_of_the_horizon / x.income);
                     d.sample("hire: left at hand over the war, years of income", left_at_hand / x.income);
@@ -3287,7 +3306,8 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
                     let (n, strength) = (before.soldiers(u), before.unit_strength(u));
                     // What keeping the unit is worth to its wars, and what its pay saved is worth.
                     let keep: f64 = x.terms.iter().map(|t| before.war_worth_of(a, t, x.unpaid, 0.0, p) - before.war_worth_of(a, t, x.unpaid, -strength, p)).sum();
-                    let pay = World::saving_worth(World::soldiers_pay(n, x.kept, p), x.pay_money(0.0), x.income);
+                    let (peace, war) = x.split(n, false);
+                    let pay = World::saving_worth(World::soldiers_pay(war, x.kept, p), x.money(), x.income) + World::saving_worth(World::soldiers_pay(peace, x.kept, p), x.pay_money(0.0), x.income);
                     let cause = if x.unpaid {
                         "1 unpaid as the bot reads it"
                     } else if x.nothing_to_win {

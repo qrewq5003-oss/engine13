@@ -106,6 +106,9 @@ pub struct Budget {
     /// horizon (plan §31.11: the pay of the campaign is a spending of the war, not of the
     /// horizon).
     pub pay_home: i64,
+    /// The soldiers of those same units — the men whose pay is `pay_home` (a bot's army at
+    /// peace and at war, plan §31.15).
+    pub paid_soldiers: i64,
     /// Borrowed this tick to meet the pay, kg (bank only).
     pub borrowed: i64,
     /// Pay actually given, kg.
@@ -395,6 +398,7 @@ impl World {
         let paid_units: Vec<crate::ids::UnitId> = self.units_of(a).into_iter().filter(|u| self.house_pays(*u).is_none()).collect();
         let pay_due: i64 = paid_units.iter().map(|u| self.unit_pay_per_tick(*u, params)).sum();
         let pay_home: i64 = paid_units.iter().map(|u| pay_per_tick(self.soldiers(*u), params)).sum();
+        let paid_soldiers: i64 = paid_units.iter().map(|u| self.soldiers(*u)).sum();
         let shortfall = (pay_due - treasury).max(0);
         let borrowed = shortfall.min(self.loan_room_at(a, debt, closed, params));
         treasury += borrowed;
@@ -403,7 +407,7 @@ impl World {
         treasury -= paid;
         // The surplus goes against the debt.
         let repaid = treasury.min(debt);
-        Budget { production, income, lord, tribute_due, tribute, seats, court, court_paid, interest, interest_paid, defaults, pay_due, pay_home, borrowed, paid, repaid }
+        Budget { production, income, lord, tribute_due, tribute, seats, court, court_paid, interest, interest_paid, defaults, pay_due, pay_home, paid_soldiers, borrowed, paid, repaid }
     }
 
     /// The economy phase of a tick: every living polity's budget (`tick_budget`) posted, a
