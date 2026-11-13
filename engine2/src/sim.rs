@@ -321,9 +321,10 @@ impl Simulation for Game {
         }
         // Validate every call before touching the world, so an error leaves nothing
         // half-played: the verb enabled, and every call of the player on offer on the state
-        // as it stands. Tried on a copy in the order of application (a loan and the hire it
-        // pays for); a call refused there but on offer by itself is a conflict of the tick,
-        // not an error — the same rule as a bot's.
+        // as it stands. Tried on a copy in the order of application; a call refused there but
+        // on offer by itself is a conflict of the tick with another caller's call met first,
+        // not an error — the same rule as a bot's. (A caller makes one call a tick, below, so
+        // no call of its own pays for another, as a loan once paid for a hire in one tick.)
         if let Some(bad) = player.iter().find(|c| !self.enabled(c.verb)) {
             return Err(SimError::VerbNotEnabled(bad.verb));
         }
