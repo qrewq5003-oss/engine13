@@ -33,7 +33,41 @@ pub enum VerbId {
     SendEmbassy,
 }
 
+/// The ministries of a ruler (plan §31.17, owner's decision 2026-11-13): a ruler makes at
+/// most one call in each a tick — the army, the diplomacy, the treasury and the order. A
+/// closed list of the engine: every verb has one (`VerbId::ministry`, a `match` with no
+/// catch-all — a new verb does not build without one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Ministry {
+    Army,
+    Diplomacy,
+    Treasury,
+}
+
+impl Ministry {
+    /// The ministries in their one order: by the first of their verbs in the key order of
+    /// `VerbId::ALL` — the army, the diplomacy, the treasury. No convention of its own.
+    pub fn in_order() -> Vec<Ministry> {
+        let mut out: Vec<Ministry> = Vec::new();
+        for v in VerbId::ALL {
+            if !out.contains(&v.ministry()) {
+                out.push(v.ministry());
+            }
+        }
+        out
+    }
+}
+
 impl VerbId {
+    /// The ministry the verb belongs to (`Ministry`).
+    pub const fn ministry(self) -> Ministry {
+        match self {
+            VerbId::Recruit | VerbId::Disband | VerbId::HireMercenaries => Ministry::Army,
+            VerbId::DeclareWar | VerbId::MakePeace | VerbId::ProposeAlliance | VerbId::ProposeMarriage | VerbId::Bribe | VerbId::SendEmbassy => Ministry::Diplomacy,
+            VerbId::TakeLoan | VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => Ministry::Treasury,
+        }
+    }
+
     /// Every verb, in key order.
     pub const ALL: [VerbId; 13] = [
         VerbId::Recruit,

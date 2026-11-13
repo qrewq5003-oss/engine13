@@ -595,8 +595,8 @@ fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accep
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Refused { actor, verb: VerbId::ProposeAlliance, target } if (actor, target) == (s0, s1))));
     assert_eq!(on(&r, engine2::Account::Treasury(s0), engine2::Source::Verb), -cost);
     assert!(!g.world().allied(s0, s1));
-    // Embassies push with saturation: each push smaller than the last; four reach the
-    // threshold from the border norm, and the proposal in the same tick is accepted.
+    // Embassies push with saturation: each push smaller than the last; enough of them reach
+    // the threshold from the border norm, and the proposal is accepted there.
     let before = g.world().relation(s0, s1);
     let cost = g.world().embassy_cost(s0, &p);
     let r = g.tick(&[call(s0, VerbId::SendEmbassy, s1)]).unwrap();
@@ -605,8 +605,16 @@ fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accep
     let pushed = before + p.embassy_gain * (100.0 - before) / 100.0;
     let after_tick = pushed + p.relation_rate_per_tick * (g.world().relation_norm(s0, s1, &p) - pushed);
     assert!((g.world().relation(s0, s1) - after_tick).abs() < 1e-6, "push with saturation, then the tick's drift");
-    let embassies: Vec<engine2::VerbCall> = (0..4).map(|_| call(s0, VerbId::SendEmbassy, s1)).chain([call(s0, VerbId::ProposeAlliance, s1)]).collect();
-    let r = g.tick(&embassies).unwrap();
+    // One call in each ministry a tick (plan §31.17): the embassy and the proposal are both
+    // the diplomacy's, so they go tick by tick — embassies until the relation stands at the
+    // threshold, then the proposal.
+    let mut n = 0;
+    while g.world().relation(s0, s1) < p.treaty_accept_at_relation {
+        g.tick(&[call(s0, VerbId::SendEmbassy, s1)]).unwrap();
+        n += 1;
+        assert!(n < 20, "embassies reach the threshold");
+    }
+    let r = g.tick(&[call(s0, VerbId::ProposeAlliance, s1)]).unwrap();
     let until = r.events.iter().find_map(|e| match e.event {
         Event::Alliance { a, b, until } if (a, b) == (s0, s1) => Some(until),
         _ => None,

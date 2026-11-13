@@ -38,6 +38,10 @@ pub enum SimError {
     Order(#[from] crate::movement::OrderError),
     #[error("{0}")]
     Answer(#[from] AnswerError),
+    /// Two calls of one ministry by one caller in a tick (plan §31.17, owner's decision
+    /// 2026-11-13): a player, as a bot, makes at most one call in each ministry.
+    #[error("{0:?} calls {1:?} twice in one tick: one call in each ministry")]
+    MinistryTwice(ActorRef, crate::verbs::Ministry),
 }
 
 /// What the player brings to a tick (E3): calls of verbs, orders to units, answers to the
@@ -322,6 +326,11 @@ impl Simulation for Game {
         // not an error — the same rule as a bot's.
         if let Some(bad) = player.iter().find(|c| !self.enabled(c.verb)) {
             return Err(SimError::VerbNotEnabled(bad.verb));
+        }
+        // One call in each ministry by each caller (plan §31.17): the same rule as a bot's.
+        let mut seen: std::collections::BTreeSet<(ActorRef, crate::verbs::Ministry)> = std::collections::BTreeSet::new();
+        if let Some(twice) = player.iter().find(|c| !seen.insert((c.actor, c.verb.ministry()))) {
+            return Err(SimError::MinistryTwice(twice.actor, twice.verb.ministry()));
         }
         if !player.is_empty() {
             let mut probe = self.world.clone();

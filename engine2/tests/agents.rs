@@ -330,8 +330,11 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
         let living = g.world().actors.keys().filter(|a| g.world().alive(**a) && **a != s0).count();
         let r = g.tick(&[]).unwrap();
         let decisions: Vec<&engine2::RngDraw> = r.draws.iter().filter(|d| d.draw.point == engine2::DrawPoint::Decision).collect();
-        assert_eq!(decisions.len(), living, "one keyed draw per deciding actor");
-        assert!(decisions.iter().all(|d| d.draw.n == 0 && d.draw.id != s0.0), "once, never for the player's actor");
+        // One keyed draw per ministry of each deciding actor (plan §31.17), drawn in every
+        // ministry, its menu empty or not: the ordinals 0, 1, 2 of the actor's tick.
+        let ministries = engine2::Ministry::in_order().len();
+        assert_eq!(decisions.len(), living * ministries, "one keyed draw per ministry of each deciding actor");
+        assert!(decisions.iter().all(|d| (d.draw.n as usize) < ministries && d.draw.id != s0.0), "once in each ministry, never for the player's actor");
         for e in &r.events {
             if let Event::Verb { actor, .. } = e.event {
                 assert_ne!(actor, ActorRef::Ruler(s0), "the bots left the player's actor alone");
@@ -354,21 +357,27 @@ fn a_bot_calls_only_what_is_on_offer_decides_by_softmax_on_one_keyed_draw_and_le
     };
     assert_eq!(play(44, 30), play(44, 30));
     assert_ne!(play(44, 30), play(45, 30));
-    // A cold temperature is the best option; a hot one wanders, nothing included.
+    // A cold temperature is the best option of each ministry (plan §31.17: one call in
+    // each); a hot one wanders, nothing included. Read on one ministry at a time — the
+    // diplomacy, whose menu is the widest — with its verbs alone enabled, so the other
+    // ministries choose nothing and spend nothing before it.
     let mut cold = params();
     cold.agent_temperature = 1e-6;
     let mut w = g.world().clone();
-    let best = w.choices(ActorId(1), &VerbId::ALL, &cold).into_iter().max_by(|x, y| x.utility.partial_cmp(&y.utility).unwrap()).unwrap();
-    let chosen = w.decide(ActorId(1), &VerbId::ALL, &cold);
-    let chosen_u = w.choices(ActorId(1), &VerbId::ALL, &cold).into_iter().find(|o| o.call == chosen).unwrap().utility;
+    let diplomacy: Vec<VerbId> = VerbId::ALL.into_iter().filter(|v| v.ministry() == engine2::Ministry::Diplomacy).collect();
+    let best = w.choices(ActorId(1), &diplomacy, &cold).into_iter().max_by(|x, y| x.utility.partial_cmp(&y.utility).unwrap()).unwrap();
+    let chosen = w.decide(ActorId(1), &diplomacy, &cold);
+    assert!(chosen.len() <= 1, "one call in the ministry: {chosen:?}");
+    let chosen = chosen.first().copied();
+    let chosen_u = w.choices(ActorId(1), &diplomacy, &cold).into_iter().find(|o| o.call == chosen).unwrap().utility;
     assert!((chosen_u - best.utility).abs() < 1e-9, "cold: the best option, {chosen:?}");
     let mut hot = params();
     hot.agent_temperature = 100.0;
     let mut kinds: std::collections::BTreeSet<Option<VerbId>> = std::collections::BTreeSet::new();
     for _ in 0..40 {
-        kinds.insert(w.decide(ActorId(1), &VerbId::ALL, &hot).map(|c| c.verb));
+        kinds.insert(w.decide(ActorId(1), &diplomacy, &hot).first().map(|c| c.verb));
     }
-    let n_choices = w.choices(ActorId(1), &VerbId::ALL, &hot).len();
+    let n_choices = w.choices(ActorId(1), &diplomacy, &hot).len();
     assert!(kinds.contains(&None) && kinds.len() >= n_choices.min(3), "hot: the choices spread, doing nothing among them: {kinds:?} of {n_choices}");
 }
 
