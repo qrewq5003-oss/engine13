@@ -171,6 +171,14 @@ impl WarTerms {
         World::war_odds_of(self.sides, extra, params)
     }
 
+    /// The same terms on other strengths of the sides: a threat's terms stand on the sides of
+    /// the neighbour's declaration (`World::threat_sides_strength`), and the polity's own
+    /// declaration on the same neighbour is weighed on its own (`World::war_sides_strength`,
+    /// plan §31.20) — nothing else in the terms reads the sides.
+    pub fn on_sides(&self, sides: (f64, f64)) -> WarTerms {
+        WarTerms { sides, ..self.clone() }
+    }
+
 
     /// Whether the terms end in the polity's fall: the enemy's chain of conquests covers all
     /// its land.
@@ -540,8 +548,29 @@ impl World {
 
     /// The strengths `war_odds` weighs: of `a`'s side without `extra`, and of the other.
     pub fn war_sides_strength(&self, a: ActorId, b: ActorId) -> (f64, f64) {
-        use std::collections::BTreeSet;
         let (side_a, side_b) = self.war_sides(a, b);
+        self.sides_strength(a, b, side_a, side_b)
+    }
+
+    /// The strengths of the sides of **the war `t` would declare on `a`** — a neighbour's
+    /// threat (plan §31.20, owner's decision 2026-11-13): `(a's side, t's side)` by the sides
+    /// that declaration makes (`war_sides(t, a)`, §19) — with `a` its allies, lord and vassals,
+    /// with `t` its vassals. `war_sides_strength(a, t)` reads the war `a` would declare, where
+    /// its allies and lord stay out and `t`'s come in: a threat read by it left the polity's
+    /// allies out of its defence and put the neighbour's into the attack. The same strengths
+    /// besides (`sides_strength`), from `a`'s view: the odds of `a` in that war are
+    /// `war_odds_of` of them.
+    pub fn threat_sides_strength(&self, a: ActorId, t: ActorId) -> (f64, f64) {
+        let (side_t, side_a) = self.war_sides(t, a);
+        self.sides_strength(a, t, side_a, side_t)
+    }
+
+    /// The strengths of `a`'s side `side_a` and of `b`'s `side_b`, each polity counted once:
+    /// against `a` besides `side_b` every other enemy it already fights; with `a` its allies,
+    /// lord and vassals already at war with `b` (the body of `war_sides_strength` and
+    /// `threat_sides_strength`).
+    fn sides_strength(&self, a: ActorId, b: ActorId, side_a: Vec<ActorId>, side_b: Vec<ActorId>) -> (f64, f64) {
+        use std::collections::BTreeSet;
         let mut theirs: BTreeSet<ActorId> = side_b.into_iter().collect();
         theirs.extend(self.actors.keys().copied().filter(|c| self.alive(*c) && self.at_war(a, *c)));
         let mut mine: BTreeSet<ActorId> = side_a.into_iter().collect();
@@ -589,6 +618,13 @@ impl World {
     /// `war_terms` with `a`'s money read once (`own_money`): a decision reads the terms of a
     /// war with every polity.
     pub fn war_terms_with(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> WarTerms {
+        self.war_terms_on(a, b, blow_per_province, own, self.war_sides_strength(a, b), params)
+    }
+
+    /// `war_terms_with` on the strengths of the sides given: the war's own
+    /// (`war_sides_strength`), or for a threat those of the neighbour's declaration
+    /// (`threat_sides_strength`, plan §31.20). Nothing else in the terms reads the sides.
+    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, sides: (f64, f64), params: &Params) -> WarTerms {
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let income = self.yearly_income(a, params).max(1) as f64;
         let ticks = self.war_ticks(a, b, params);
@@ -646,7 +682,7 @@ impl World {
             income,
             years: f64::from(params.goal_horizon_ticks) / 2.0,
             at_threshold: self.relation(a, b) >= params.treaty_accept_at_relation,
-            sides: self.war_sides_strength(a, b),
+            sides,
         }
     }
 
@@ -1071,8 +1107,12 @@ impl World {
     /// (with `extra` strength added to `a`'s) over `t`'s odds against each of its neighbours —
     /// so an army at peace lowers the chance of the attack, not only the loss. Nothing for an
     /// `a` that `t` does not touch.
+    ///
+    /// `a`'s own slot is read on the sides of the war `t` would declare on it
+    /// (`threat_sides_strength`, plan §31.20) — as `t`'s odds against its other neighbours
+    /// are (`war_odds(t, x)`): the polity's allies and lord stand in its defence.
     pub fn wars_a_tick_from(&self, t: ActorId, a: ActorId, extra: f64, params: &Params) -> f64 {
-        Self::wars_a_tick_in(&self.threat_rate(t, a, params), a, self.war_odds(a, t, extra, params))
+        Self::wars_a_tick_in(&self.threat_rate(t, a, params), a, Self::war_odds_of(self.threat_sides_strength(a, t), extra, params))
     }
 
     /// What `wars_a_tick_from(t, a, ..)` reads that no strength of `a` moves, read once per
@@ -1087,7 +1127,8 @@ impl World {
     }
 
     /// `wars_a_tick_from` on its parts read once (`threat_rate`), `odds` being `a`'s odds in
-    /// its war with `t` at the strength the decision adds (`war_odds`).
+    /// the war `t` would declare on it at the strength the decision adds (the odds of the
+    /// threat's terms, `WarTerms::odds` on `threat_sides_strength`).
     pub fn wars_a_tick_in(r: &ThreatRate, a: ActorId, odds: f64) -> f64 {
         if !r.touches {
             return 0.0;
@@ -1119,13 +1160,16 @@ impl World {
     /// land within its reach, the chain of its conquests, the discounts and the blow — the
     /// table of §28.10, the same as a war's). Read once per decision (`agents::Context`); the
     /// wars each brings a tick (`wars_a_tick_from`) are read with the strength a decision adds.
+    /// The odds of the terms are those of **the war the neighbour would declare**
+    /// (`threat_sides_strength`, plan §31.20): `a`'s allies, lord and vassals with it, the
+    /// neighbour's vassals with the neighbour.
     pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(ActorId, WarTerms)> {
         self.threats_with(a, blow_per_province, &self.own_money(a, params), params)
     }
 
     /// `threats` with `a`'s money read once (`own_money`).
     pub fn threats_with(&self, a: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> Vec<(ActorId, WarTerms)> {
-        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_with(a, t, blow_per_province, own, params))).collect()
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), params))).collect()
     }
 
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at
