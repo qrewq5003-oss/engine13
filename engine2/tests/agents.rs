@@ -3750,9 +3750,16 @@ fn diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration() {
     let p = params();
     for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
         let mut d = Diagnosis::default();
-        for part in engine2::par::map(&seeds, |seed| diagnose_threat_sides(*seed, &p)) {
+        // The worlds the rule moves no threat's sides in, over the whole run: there the bots
+        // read the threat as before, and the run is the run before the rule, byte for byte.
+        let mut unmoved: Vec<u64> = Vec::new();
+        for (seed, part) in seeds.iter().zip(engine2::par::map(&seeds, |seed| diagnose_threat_sides(*seed, &p))) {
+            if part.n("threats whose sides differ") == 0 {
+                unmoved.push(*seed);
+            }
             d.add(part);
         }
+        eprintln!("{label}: worlds where no threat's sides differ in any tick: {unmoved:?}");
         eprintln!(
             "{label}: polity-ticks at peace {} — with an ally or a lord {}, with neither {}; the wars a tick the neighbours bring, q10/q25/q50/q75/q90 — with an ally or a lord {}, mean {}; with neither {}, mean {}",
             d.n("polity-ticks at peace"),
