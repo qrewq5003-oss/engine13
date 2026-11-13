@@ -2326,12 +2326,53 @@ fn a_neighbours_threat_stands_on_the_sides_of_the_neighbours_declaration() {
     assert!(threat(&w).odds(more, &p) > odds && w.wars_a_tick_from(s1, s0, more, &p) < wars);
 }
 
-/// **A polity's own declaration is weighed on the sides of its own declaration** (plan
-/// §31.20, the requirement of §31.20.2): the bot reuses the terms it read for the neighbour's
-/// threat, and those stand on the sides of the neighbour's declaration — the polity's ally in,
-/// the neighbour's out. A declaration weighed on them would count on an ally its own war does
-/// not bring. The worth of the declaration is what it was before the rule: the war on the
-/// terms of `war_terms` (`war_worth`) and the price of the declaration.
+/// **The length of a neighbour's threat is the neighbour's march to the polity's capital**
+/// (plan §31.22 (А), owner's decision 2026-11-13): the war a threat is, is the war `t` would
+/// declare — its length `t`'s march from its capital to `a`'s capital and the siege there
+/// (`threat_ticks`), not `a`'s own march to what it wants of `t` (`war_ticks(a, t)`, the length
+/// of the war `a` would declare). The threat's terms carry it; the terms of the polity's own
+/// war keep their own.
+#[test]
+fn the_length_of_a_threat_is_the_neighbours_march_to_the_politys_capital() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&testworld::five_states_scenario(), 47);
+    assert!(w.borders(s0, s1) && !w.at_war(s0, s1));
+    let (mine, theirs) = (w.actors[&s0].capital, w.actors[&s1].capital);
+    let per_tick = w.march_steps_per_tick(&p).max(1);
+    let march = |steps: usize| steps.div_ceil(per_tick).max(1) as f64;
+    let threat = |w: &World| {
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        w.threats(s0, blow, &p).into_iter().find(|(t, _)| *t == s1).map(|(_, terms)| terms).expect("polity 1 threatens polity 0")
+    };
+    let own = |w: &World| w.war_terms(s0, s1, w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p), &p);
+    // The neighbour's march on the polity's capital, and the siege of a capital.
+    let steps = w.path_at_war(s1, s0, theirs, mine).expect("a way from capital to capital").len();
+    let length = march(steps) + f64::from(w.siege_ticks(mine, &p));
+    assert_eq!(w.threat_ticks(s0, s1, &p), length);
+    assert_eq!(threat(&w).ticks, length, "the threat's terms carry the neighbour's march");
+    assert_eq!(own(&w).ticks, w.war_ticks(s0, s1, &p), "the polity's own war keeps its own length");
+    // Polity 0 comes to want a province of its neighbour beside the capital: its own war is a
+    // march there with no siege of a capital — and the threat is the march it was.
+    let wanted = *w.actors[&s1].provinces.iter().find(|q| **q != theirs).expect("a province of polity 1 beside its capital");
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(wanted)).unwrap();
+    let its_own = march(w.path_at_war(s0, s1, mine, wanted).expect("a way to the province wanted").len()) + f64::from(w.siege_ticks(wanted, &p));
+    assert_eq!(w.war_ticks(s0, s1, &p), its_own);
+    assert!(its_own != length, "two wars, two lengths: {its_own} and {length}");
+    assert_eq!(own(&w).ticks, its_own);
+    assert_eq!((w.threat_ticks(s0, s1, &p), threat(&w).ticks), (length, length), "the threat does not follow the polity's own aim");
+    // The other way round, as the neighbour reads polity 0: the march on its capital.
+    let back = march(w.path_at_war(s0, s1, mine, theirs).expect("a way back").len()) + f64::from(w.siege_ticks(theirs, &p));
+    assert_eq!(w.threat_ticks(s1, s0, &p), back);
+}
+
+/// **A polity's own declaration is weighed on the terms of its own war** (plan §31.20, the
+/// requirement of §31.20.2; plan §31.22): the terms the bot reads for the neighbour's threat
+/// stand on the sides and the length of the neighbour's declaration — the polity's ally in,
+/// the neighbour's out, the neighbour's march to the polity's capital. A declaration weighed
+/// on them would count on an ally its own war does not bring, over a war that is not its
+/// own. The worth of the declaration is what it was before either rule: the war on the terms
+/// of `war_terms` (`war_worth`) and the price of the declaration.
 #[test]
 fn a_declaration_is_weighed_on_the_sides_of_ones_own_declaration_not_of_the_threat() {
     let p = params();
@@ -2342,6 +2383,11 @@ fn a_declaration_is_weighed_on_the_sides_of_ones_own_declaration_not_of_the_thre
     w.ally_now(s1, s2, &p).unwrap();
     let (threat, own) = (w.threat_sides_strength(s0, s1), w.war_sides_strength(s0, s1));
     assert!(threat.0 > own.0 && threat.1 < own.1, "the threat's sides {threat:?}, the declaration's {own:?}");
+    // And polity 0 wants a province of its neighbour that is not its capital: its own war is
+    // a march there, the threat a march on its own capital — two lengths.
+    let wanted = *w.actors[&s1].provinces.iter().find(|q| **q != w.actors[&s1].capital).expect("a province of polity 1 beside its capital");
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Province(wanted)).unwrap();
+    assert!(w.war_ticks(s0, s1, &p) != w.threat_ticks(s0, s1, &p), "the declaration's length {} and the threat's {}", w.war_ticks(s0, s1, &p), w.threat_ticks(s0, s1, &p));
     let risk = w.risk_prices(s0, &p);
     let blow = w.ceded_province_blow(s0, &risk, &p);
     let read = w.threats(s0, blow, &p).into_iter().find(|(t, _)| *t == s1).map(|(_, terms)| terms).expect("the neighbour is a threat the context reads");
@@ -2355,11 +2401,12 @@ fn a_declaration_is_weighed_on_the_sides_of_ones_own_declaration_not_of_the_thre
     // On the threat's sides it would be another number: the guard has teeth.
     let on_the_threats_sides = w.war_worth_of(s0, &read, unpaid, 0.0, &p) + w.blow_worth(s0, w.war_price(s0, s1, &p), &risk, &p);
     assert!((on_the_threats_sides - expect).abs() > 1e-9, "the threat's terms would weigh the declaration otherwise: {on_the_threats_sides} vs {expect}");
-    assert_eq!(read.on_sides(own), w.war_terms(s0, s1, blow, &p), "the threat's terms on the declaration's sides are the declaration's terms");
+    assert!(read.ticks != w.war_terms(s0, s1, blow, &p).ticks, "and they are the terms of another war: its length is the neighbour's march");
 }
 
-/// **The sides of a threat read only what is seen** (plan §31.20, §28.7; the guard by
-/// injection): alliances, lordship and the armies are public; the hidden state of the polity's
+/// **The sides and the length of a threat read only what is seen** (plan §31.20, §31.22,
+/// §28.7; the guard by injection): alliances, lordship, the armies and the capitals are
+/// public; the hidden state of the polity's
 /// ally, of the neighbour and of the neighbour's vassal — goals, the count of the dead, the
 /// orders, the treasuries, the debts, the memory of the pay — moves neither the sides nor the
 /// threat nor what the polity chooses from.
@@ -2374,13 +2421,17 @@ fn the_sides_of_a_threat_read_only_what_is_seen() {
     let more = engine2::World::new_soldiers_strength(w.recruit_per_tick(s0, &p));
     let seen = |w: &World| {
         let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
-        (w.threat_sides_strength(s0, s1), w.wars_a_tick_from(s1, s0, 0.0, &p), w.wars_a_tick_from(s1, s0, more, &p), w.threats(s0, blow, &p), w.options(s0, &VerbId::ALL, &p))
+        (w.threat_sides_strength(s0, s1), w.threat_ticks(s0, s1, &p), w.wars_a_tick_from(s1, s0, 0.0, &p), w.wars_a_tick_from(s1, s0, more, &p), w.threats(s0, blow, &p), w.options(s0, &VerbId::ALL, &p))
     };
     let before = seen(&w);
     assert!(before.0 .0 > w.army_strength(s0) && before.0 .1 > w.army_strength(s1), "the ally and the vassal are in the sides: {:?}", before.0);
+    // The neighbour's goal: a province of polity 0 that is not its capital — the threat's
+    // length is the march on the capital whatever the neighbour wants (plan §31.22: another's
+    // goals are hidden; read by `war_target(t, a)`, the length would follow the goal).
     let capital = w.actors[&s0].capital;
+    let beside = *w.actors[&s0].provinces.iter().find(|q| **q != capital).expect("a province of polity 0 beside its capital");
     for x in [s1, s2, s3] {
-        w.set_goal(x, GoalKind::Take, GoalTarget::Province(capital)).unwrap();
+        w.set_goal(x, GoalKind::Take, GoalTarget::Province(beside)).unwrap();
         let actor = w.actors.get_mut(&x).unwrap();
         actor.manpower_deficit = 1.0e6;
         actor.paid_share_history_ppm = vec![1; 4];
@@ -2398,7 +2449,7 @@ fn the_sides_of_a_threat_read_only_what_is_seen() {
     for u in theirs {
         w.apply_verb(&VerbCall { actor: ActorRef::Ruler(s3), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
     }
-    assert!(seen(&w).0 .0 < before.0 .0 && seen(&w).1 > before.1, "the ally's army is seen: without it the threat is greater");
+    assert!(seen(&w).0 .0 < before.0 .0 && seen(&w).2 > before.2, "the ally's army is seen: without it the threat is greater");
 }
 
 /// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
@@ -3734,6 +3785,16 @@ fn diagnose_threat_sides(seed: u64, p: &Params) -> Diagnosis {
             d.count("polity-ticks at peace where a threat's sides differ", u64::from(moved > 0));
             d.count("threats", threats.len() as u64);
             d.count("threats whose sides differ", moved as u64);
+            // The length of the threat's war (plan §31.22): the polity's own march on what it
+            // wants of the neighbour — the reading before the rule — and the neighbour's march
+            // on its capital; and the neighbours already at war with another.
+            for t in &threats {
+                let (own, theirs) = (w.war_ticks(a, *t, p), w.threat_ticks(a, *t, p));
+                d.sample("threat length by the polity's own march", own);
+                d.sample("threat length by the neighbour's march", theirs);
+                d.count("threats whose length differs", u64::from(own != theirs));
+                d.count("threats whose neighbour is at war with another", u64::from(w.actors.keys().any(|c| *c != a && w.alive(*c) && w.at_war(*t, *c))));
+            }
             d.sample(&format!("wars a tick {key}"), threats.iter().map(|t| w.wars_a_tick_from(*t, a, 0.0, p)).sum());
         }
         g.tick(&[]).unwrap();
@@ -3778,6 +3839,18 @@ fn diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration() {
             d.n("polity-ticks at peace where a threat's sides differ"),
             d.n("polity-ticks at peace with a threat"),
             d.share("polity-ticks at peace where a threat's sides differ", "polity-ticks at peace with a threat")
+        );
+        let length = |key: &str| {
+            let mut v = d.samples.get(key).cloned().unwrap_or_default();
+            v.sort_by(f64::total_cmp);
+            format!("q50 {:.0} / q90 {:.0} / mean {}", quantile(&v, 0.5), quantile(&v, 0.9), d.mean(key))
+        };
+        eprintln!(
+            "{label}: the length of a threat's war, ticks: by the polity's own march on what it wants of the neighbour {}; by the neighbour's march on the polity's capital {}; the two differ in {} of the threats; threats whose neighbour is at war with another {}",
+            length("threat length by the polity's own march"),
+            length("threat length by the neighbour's march"),
+            d.share("threats whose length differs", "threats"),
+            d.share("threats whose neighbour is at war with another", "threats")
         );
     }
 }

@@ -171,14 +171,6 @@ impl WarTerms {
         World::war_odds_of(self.sides, extra, params)
     }
 
-    /// The same terms on other strengths of the sides: a threat's terms stand on the sides of
-    /// the neighbour's declaration (`World::threat_sides_strength`), and the polity's own
-    /// declaration on the same neighbour is weighed on its own (`World::war_sides_strength`,
-    /// plan §31.20) — nothing else in the terms reads the sides.
-    pub fn on_sides(&self, sides: (f64, f64)) -> WarTerms {
-        WarTerms { sides, ..self.clone() }
-    }
-
 
     /// Whether the terms end in the polity's fall: the enemy's chain of conquests covers all
     /// its land.
@@ -618,16 +610,20 @@ impl World {
     /// `war_terms` with `a`'s money read once (`own_money`): a decision reads the terms of a
     /// war with every polity.
     pub fn war_terms_with(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> WarTerms {
-        self.war_terms_on(a, b, blow_per_province, own, self.war_sides_strength(a, b), params)
+        self.war_terms_on(a, b, blow_per_province, own, self.war_sides_strength(a, b), self.war_ticks(a, b, params), params)
     }
 
-    /// `war_terms_with` on the strengths of the sides given: the war's own
-    /// (`war_sides_strength`), or for a threat those of the neighbour's declaration
-    /// (`threat_sides_strength`, plan §31.20). Nothing else in the terms reads the sides.
-    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, sides: (f64, f64), params: &Params) -> WarTerms {
+    /// `war_terms_with` on the strengths of the sides and the length of the war given: the
+    /// war's own (`war_sides_strength`, `war_ticks`), or for a threat those of the war the
+    /// neighbour would declare (`threat_sides_strength`, plan §31.20; `threat_ticks`, plan
+    /// §31.22). Everything in the terms that reads the war's length reads `ticks`: the land
+    /// within the enemy's reach and the chain of its conquests, the odds of the take back, the
+    /// stake, the pay of the campaign, the money over the war — and through `WarTerms::ticks`
+    /// the rule that closes a war as foreseen (`war_worth_of`).
+    #[allow(clippy::too_many_arguments)]
+    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, sides: (f64, f64), ticks: f64, params: &Params) -> WarTerms {
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let income = self.yearly_income(a, params).max(1) as f64;
-        let ticks = self.war_ticks(a, b, params);
         let key = crate::army::pair(a, b);
         let claim = self.claim_of(b, a);
         // What the enemy's units reach in the war's length, the quickest to fall first: the
@@ -826,6 +822,21 @@ impl World {
     pub fn war_ticks(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
         let target = self.war_target(a, b);
         let steps = self.path_at_war(a, b, self.actors[&a].capital, target).map(|p| p.len()).unwrap_or(0);
+        (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
+    }
+
+    /// The ticks **the war `t` would declare on `a`** is expected to take — the length of a
+    /// neighbour's threat (plan §31.22 (А), owner's decision 2026-11-13): `t`'s march from its
+    /// capital to **`a`'s capital** and the siege there, by the same rule of movement as
+    /// `war_ticks` (`path_at_war`, `march_steps_per_tick`, `siege_ticks`). Not the province
+    /// `t`'s goals want (`war_target(t, a)`): another's goals are hidden (§28.7), and a war
+    /// not yet declared has no claim to read; the capital is seen, and a war fought to its
+    /// end ends there. `war_ticks(a, t)` is the length of the war `a` would declare — its own
+    /// march to what it wants of `t`: a threat read by it measured the enemy's reach, the
+    /// money and the stake over the wrong war.
+    pub fn threat_ticks(&self, a: ActorId, t: ActorId, params: &Params) -> f64 {
+        let target = self.actors[&a].capital;
+        let steps = self.path_at_war(t, a, self.actors[&t].capital, target).map(|p| p.len()).unwrap_or(0);
         (steps.div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64) + f64::from(self.siege_ticks(target, params))
     }
 
@@ -1160,16 +1171,17 @@ impl World {
     /// land within its reach, the chain of its conquests, the discounts and the blow — the
     /// table of §28.10, the same as a war's). Read once per decision (`agents::Context`); the
     /// wars each brings a tick (`wars_a_tick_from`) are read with the strength a decision adds.
-    /// The odds of the terms are those of **the war the neighbour would declare**
-    /// (`threat_sides_strength`, plan §31.20): `a`'s allies, lord and vassals with it, the
-    /// neighbour's vassals with the neighbour.
+    /// The terms are those of **the war the neighbour would declare**: its sides
+    /// (`threat_sides_strength`, plan §31.20 — `a`'s allies, lord and vassals with it, the
+    /// neighbour's vassals with the neighbour) and its length (`threat_ticks`, plan §31.22 —
+    /// the neighbour's march to `a`'s capital and the siege there).
     pub fn threats(&self, a: ActorId, blow_per_province: f64, params: &Params) -> Vec<(ActorId, WarTerms)> {
         self.threats_with(a, blow_per_province, &self.own_money(a, params), params)
     }
 
     /// `threats` with `a`'s money read once (`own_money`).
     pub fn threats_with(&self, a: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> Vec<(ActorId, WarTerms)> {
-        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), params))).collect()
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), self.threat_ticks(a, t, params), params))).collect()
     }
 
     /// The take a year of the provinces of `a` that border `t`: what a war with `t` puts at
