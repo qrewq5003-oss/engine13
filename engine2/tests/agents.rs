@@ -1959,9 +1959,10 @@ fn the_bot_reads_nothing_of_another_that_a_player_would_not_see() {
     let (a, b, c) = (ActorId(0), ActorId(1), ActorId(2));
     // With the price of money (plan §31.3): the money polity 0 prices its spendings against
     // — over the horizon (`free_money`) and over a span (`money_over`: a tick, a war's
-    // length) — is its own state alone; it is in what is seen, and so is every price read off
-    // it (`options` carries the levy, the hire and the disbanding; `war_worth` the campaign).
-    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p), w.free_money(a, &p), w.money_over(a, 1.0, &p), w.money_over(a, 8.0, &p), w.campaign_money(a, 8.0, &p));
+    // length) — and the army its peace keeps (`peace_army`, plan §31.15) are its own state
+    // alone; they are in what is seen, and so is every price read off them (`options` carries
+    // the levy, the hire and the disbanding; `war_worth` the campaign).
+    let seen = |w: &World| (w.alliance_worth(a, b, &p), w.alliance_worth(a, c, &p), w.war_worth(a, b, false, 0.0, &p), w.war_worth(a, c, false, 0.0, &p), w.bot_orders(a, &p), w.options(a, &VerbId::ALL, &p), w.free_money(a, &p), w.money_over(a, 1.0, &p), w.money_over(a, 8.0, &p), w.campaign_money(a, 8.0, &p), w.peace_army(a, &p));
     let mut w = world_of(&carrier_scenario(), 7);
     let before = seen(&w);
     // Another's goals: polity 2 wants an ally against polity 1, polity 1 wants polity 0's land.
@@ -2622,10 +2623,29 @@ fn a_soldiers_pay_stands_for_the_horizon_at_war_as_at_peace() {
     // Within its means the hire costs nothing but the heads: its advance and its pay for the
     // war's length less than at the face value.
     assert!((kept.utility(s0, &hire, &p) - at_face(&kept, &hire) - (advance + pay * ticks) / income).abs() < 1e-9, "a hire within the polity's means is free: {} against {} at the face value", kept.utility(s0, &hire, &p), at_face(&kept, &hire));
-    // Beyond them — the part of the pay a tick's share of the free money does not cover, for
-    // every tick charged, though the money of the war's length covers it all.
-    let price = (pay * ticks - (chest.free_money(s0, &p) - advance) * ticks / horizon) / income;
-    assert!(price > 0.0 && (kept.utility(s0, &hire, &p) - chest.utility(s0, &hire, &p) - price).abs() < 1e-9, "a hire the polity cannot keep costs what its free money does not cover over the horizon — {price} years of income: {} against {}", chest.utility(s0, &hire, &p), kept.utility(s0, &hire, &p));
+    // With the war chest (plan §31.15) the hire is free as well: its men within the army the
+    // peace keeps stand within their share of the free money for the war's length, and its
+    // soldiers of war beyond it within the money at hand over the war's length. Under (ц1б),
+    // all of them read as standing for the horizon, it cost the part the free money did not
+    // cover.
+    let army = chest.paid_soldiers(s0, &p);
+    let split = |w: &World| {
+        let room = (w.peace_army(s0, &p) - w.paid_soldiers(s0, &p)).max(0);
+        (n.min(room), n - n.min(room))
+    };
+    let (peace, war) = split(&chest);
+    assert!(peace > 0 && war > 0 && army < chest.peace_army(s0, &p), "the hire crosses the army the peace keeps: {peace} of the peace, {war} of the war");
+    assert!((kept.utility(s0, &hire, &p) - chest.utility(s0, &hire, &p)).abs() < 1e-9, "with the war chest the hire is free: {} against {}", chest.utility(s0, &hire, &p), kept.utility(s0, &hire, &p));
+    // Without it — the bare treasury of the advance — each part is priced by its own money:
+    // the men of the peace by the part of their pay a tick's share of the free money does not
+    // cover, the soldiers of war by the part the money at hand over the war's length, less the
+    // advance and what the men of the peace commit over the horizon, does not cover.
+    let (peace, war) = split(&bare);
+    let peace_price = (World::soldiers_pay(peace, ticks, &p) - (bare.free_money(s0, &p) - advance) * ticks / horizon).max(0.0) / income;
+    let war_money = bare.money_over(s0, ticks, &p).min(bare.free_money(s0, &p) - World::soldiers_pay(peace, horizon, &p)) - advance;
+    let war_price = (World::soldiers_pay(war, ticks, &p) - war_money.max(0.0)).max(0.0) / income;
+    assert!(war_price > 0.0, "the bare treasury does not cover the soldiers of war: {war_price}");
+    assert!((kept.utility(s0, &hire, &p) - bare.utility(s0, &hire, &p) - peace_price - war_price).abs() < 1e-9, "the bare treasury pays {peace_price} for the men of the peace and {war_price} for the soldiers of war: {} against {}", bare.utility(s0, &hire, &p), kept.utility(s0, &hire, &p));
     // The hire made. Within the polity's means it leaves the free money above nothing, and
     // the pay saved by sending the hired men home is worth nothing: the disbanding is worth
     // that pay less than at the face value, and is not worth making.
@@ -2639,8 +2659,12 @@ fn a_soldiers_pay_stands_for_the_horizon_at_war_as_at_peace() {
     assert!(after.free_money(s0, &p) >= 0.0, "the hire within its means leaves the free money above nothing: {}", after.free_money(s0, &p));
     assert!((at_face(&after, &send_home) - after.utility(s0, &send_home, &p) - pay * ticks / income).abs() < 1e-9, "the pay saved by sending the hired men home is worth nothing: {} against {} at the face value", after.utility(s0, &send_home, &p), at_face(&after, &send_home));
     assert!(after.utility(s0, &send_home, &p) < 0.0, "and the disbanding is not worth making the tick after: {}", after.utility(s0, &send_home, &p));
-    // Beyond its means the hire leaves the free money below nothing — the price it paid.
+    // With the chest the hire leaves the free money above nothing too: its soldiers of war
+    // are counted for the war's length (plan §31.15). Beyond its means — the bare treasury —
+    // it leaves none: the price it paid.
     let (after, _) = made(&chest);
+    assert!(after.free_money(s0, &p) >= 0.0, "the hire within the war chest leaves the free money above nothing: {}", after.free_money(s0, &p));
+    let (after, _) = made(&bare);
     assert!(after.free_money(s0, &p) < 0.0, "the hire beyond its means leaves no free money");
     // The pay of the campaign is no part of the free money of the horizon: with the unit
     // ordered onto the enemy's land the polity has the free money it had, and at hand over
@@ -2737,6 +2761,95 @@ fn an_embassy_a_gift_and_an_alliance_cost_what_the_money_at_hand_does_not_cover_
     flush.post(engine2::Account::Treasury(s0), Source::Test, (order * 100.0) as i64 * 1000).unwrap();
     let enforce = flush.utility(s0, &call(VerbId::EnforceOrder, Target::None), &p);
     assert!((enforce - (order_gain(&flush) - order / income)).abs() < 1e-9 && order / income >= 1.0, "a hundred orders in the treasury: the order still costs its face value");
+}
+
+/// **The war chest: a soldier beyond the army the peace keeps is a soldier of the war**
+/// (plan §31.15, owner's decisions 2026-11-13). The army the peace keeps (`peace_army`) is the
+/// soldiers the tick's remainder pays without the treasury — the take less the tribute due,
+/// the seats, the court and the interest, over a soldier's pay at the rate of home. At war the
+/// men beyond it are a spending of the war: their pay for the war's length stands against the
+/// money at hand over that length, and the free money of the horizon counts them for the
+/// war's length too — one reading. So a polity with a chest for the war levies them for
+/// nothing but the heads, one without at the face value; the levy made leaves the free money
+/// above nothing and sending the men home the tick after saves nothing. At peace there are no
+/// soldiers of war: the same men stand for the horizon (`M / H`) and the bot sends them home
+/// when the peace does not keep them.
+#[test]
+fn a_soldier_beyond_the_army_the_peace_keeps_is_priced_against_the_money_of_the_war() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let horizon = f64::from(p.goal_horizon_ticks);
+    // The levy in a province with no unit of polity 0: it raises a unit of its own.
+    let levy = |w: &World| {
+        let held: Vec<ProvinceId> = w.units_of(s0).iter().map(|u| w.units[u].position).collect();
+        let q = *w.actors[&s0].provinces.iter().find(|q| !held.contains(q) && !w.in_revolt(**q) && w.population(**q) > 0).unwrap();
+        VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(q) }
+    };
+    // The army the peace keeps, by the parts of the budget.
+    let base = world_of(&testworld::five_states_scenario(), 54);
+    let b = base.tick_budget(s0, &p);
+    let before_pay = b.income - b.tribute_due - b.seats.iter().map(|(_, kg)| kg).sum::<i64>() - b.court - b.interest;
+    assert_eq!(base.peace_army(s0, &p), before_pay.max(0) / engine2::economy::pay_per_tick(1, &p), "the army the peace keeps: the tick's remainder before the pay over a soldier's pay");
+    assert!(base.paid_soldiers(s0, &p) < base.peace_army(s0, &p));
+    // Polity 0 with its army at the army the peace keeps; at peace and attacked; a treasury of
+    // `treasury` and no bank.
+    let world = |war: bool, treasury: i64| {
+        let mut w = world_of(&testworld::five_states_scenario(), 54);
+        let unit = w.units_of(s0)[0];
+        let more = w.peace_army(s0, &p) - w.paid_soldiers(s0, &p);
+        w.post(engine2::Account::Soldiers(unit), Source::Test, more * 1000).unwrap();
+        if war {
+            w.declare_war(s1, s0).unwrap();
+        }
+        let all = w.treasury(s0);
+        w.post(engine2::Account::Treasury(s0), Source::Test, (treasury - all) * 1000).unwrap();
+        w
+    };
+    let at_face = |w: &World, call: &VerbCall| {
+        let mut w = w.clone();
+        leave_no_free_money(&mut w, s0, &p);
+        w.utility(s0, call, &p)
+    };
+    let probe = world(true, 0);
+    assert_eq!(probe.paid_soldiers(s0, &p), probe.peace_army(s0, &p), "the army at the army the peace keeps");
+    let (n, ticks) = (probe.recruit_per_tick(s0, &p), probe.war_ticks(s0, s1, &p));
+    let income = probe.yearly_income(s0, &p) as f64;
+    let war_pay = World::soldiers_pay(n, ticks, &p);
+    assert!(n > 0 && ticks > 1.0);
+    // A chest for the war — the pay of the levy for twice the war's length — and none.
+    let (chest, empty) = (world(true, (2.0 * war_pay) as i64), world(true, 0));
+    assert!(chest.money_over(s0, ticks, &p) >= war_pay && empty.money_over(s0, ticks, &p) <= 0.0, "money at hand over the war's length: {} and {}", chest.money_over(s0, ticks, &p), empty.money_over(s0, ticks, &p));
+    assert!((chest.utility(s0, &levy(&chest), &p) - at_face(&chest, &levy(&chest)) - war_pay / income).abs() < 1e-9, "with a chest for the war the levy beyond the army the peace keeps costs nothing but the heads");
+    assert!((chest.utility(s0, &levy(&chest), &p) - empty.utility(s0, &levy(&empty), &p) - war_pay / income).abs() < 1e-9, "without one it costs its pay for the war's length at the face value: {} against {}", empty.utility(s0, &levy(&empty), &p), chest.utility(s0, &levy(&chest), &p));
+    // The levy made: the free money stays above nothing, and the men sent home the tick after
+    // save nothing — the disbanding is worth their pay less than at the face value, below nothing.
+    let mut after = chest.clone();
+    after.apply_verb(&levy(&chest), &p).unwrap();
+    let unit = *after.units_of(s0).iter().find(|u| !chest.units.contains_key(u)).unwrap();
+    let send_home = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(unit) };
+    assert!(after.paid_soldiers(s0, &p) > after.peace_army(s0, &p), "the levy made soldiers of war");
+    assert!(after.free_money(s0, &p) >= 0.0, "the levy for the war leaves the free money above nothing: {}", after.free_money(s0, &p));
+    // Worth nothing: more money changes nothing of what sending them home is worth.
+    let mut richer = after.clone();
+    richer.post(engine2::Account::Treasury(s0), Source::Test, (10.0 * war_pay) as i64 * 1000).unwrap();
+    assert!(after.paid_soldiers(s0, &p) - after.peace_army(s0, &p) >= after.soldiers(unit), "the men sent home are all soldiers of war");
+    assert!((after.utility(s0, &send_home, &p) - richer.utility(s0, &send_home, &p)).abs() < 1e-9, "the pay the soldiers of war would save is worth nothing: {} against {} with ten times the chest", after.utility(s0, &send_home, &p), richer.utility(s0, &send_home, &p));
+    assert!(after.utility(s0, &send_home, &p) < 0.0, "and sending them home the tick after is not worth it: {}", after.utility(s0, &send_home, &p));
+    // One reading: at war the free money counts the soldiers of war for the war's length; at
+    // peace the same men stand for the horizon.
+    let parts = |w: &World| {
+        let b = w.tick_budget(s0, &p);
+        let before_pay = b.income - b.tribute_due - b.seats.iter().map(|(_, kg)| kg).sum::<i64>() - b.court - b.interest;
+        ((w.treasury(s0) - w.debt(s0)) as f64, (before_pay - b.pay_home) as f64)
+    };
+    let war_men = after.paid_soldiers(s0, &p) - after.peace_army(s0, &p);
+    let (own, left) = parts(&after);
+    let war_tick = engine2::economy::pay_per_tick(war_men, &p) as f64;
+    assert!((after.free_money(s0, &p) - (own + (left + war_tick) * horizon - war_tick * ticks)).abs() < 1e-6, "at war: the soldiers of war for the war's length");
+    let mut peace = world(false, chest.treasury(s0));
+    peace.apply_verb(&levy(&peace), &p).unwrap();
+    let (own, left) = parts(&peace);
+    assert!(peace.paid_soldiers(s0, &p) > peace.peace_army(s0, &p) && (peace.free_money(s0, &p) - (own + left * horizon)).abs() < 1e-6, "at peace: every man for the horizon");
 }
 
 // ---- Diagnostics: why the armies are small (plan §30.13) ----
@@ -3169,11 +3282,14 @@ struct WarRead {
     nothing_to_win: bool,
     /// The length of its longest war, ticks (what soldiers kept are charged for).
     kept: f64,
-    /// Its free money over the horizon (`World::free_money`: the pay at the rate of home),
-    /// and its money at hand within the war's length (the pay as the world charges it), kg —
-    /// the two bounds of `World::money_over`.
+    /// Its free money over the horizon (`World::free_money`: the pay at the rate of home, the
+    /// soldiers of war for the war's length), and its money at hand within the war's length
+    /// (the pay as the world charges it), kg — the two bounds of `World::money_over`.
     afford: f64,
     at_hand: f64,
+    /// The soldiers it pays and the army the peace keeps (plan §31.15).
+    army: i64,
+    peace_army: i64,
     /// The ticks of the horizon.
     horizon: f64,
     income: f64,
@@ -3194,7 +3310,9 @@ impl WarRead {
             unpaid: w.paid_share_seen_ppm(a) < 1_000_000,
             nothing_to_win: terms.iter().all(|t| (w.war_worth_of(a, t, false, 0.0, p) - w.war_worth_of(a, t, true, 0.0, p)).abs() < 1e-12),
             kept,
-            afford: (w.treasury(a) - w.debt(a)) as f64 + (before_pay - b.pay_home) as f64 * horizon,
+            afford: w.free_money(a, p),
+            army: w.paid_soldiers(a, p),
+            peace_army: w.peace_army(a, p),
             at_hand: w.treasury(a) as f64 + (before_pay - b.pay_due) as f64 * kept + w.loan_room(a, p) as f64,
             horizon,
             income: w.yearly_income(a, p).max(1) as f64,
@@ -3212,6 +3330,18 @@ impl WarRead {
     /// advance taken out first (`agents::pay_money`).
     fn pay_money(&self, advance: f64) -> f64 {
         (self.afford - advance) * self.kept / self.horizon
+    }
+
+    /// `n` men raised (or sent home) split at the army the peace keeps: `(of the peace, of the
+    /// war)` (`agents::split_at_peace_army`).
+    fn split(&self, n: i64, raised: bool) -> (i64, i64) {
+        let war = if raised { n - n.min((self.peace_army - self.army).max(0)) } else { n.min((self.army - self.peace_army).max(0)) };
+        (n - war, war)
+    }
+
+    /// The money the soldiers of war of a call stand against (`agents::kept_soldiers_cost`).
+    fn war_money(&self, peace: i64, advance: f64, p: &Params) -> f64 {
+        self.money().min(self.afford - World::soldiers_pay(peace, self.horizon, p)) - advance
     }
 }
 
@@ -3270,12 +3400,14 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
                 (VerbId::HireMercenaries, _) => {
                     let x = WarRead::of(&before, a, p);
                     let (n, advance) = (before.hire_count(a, p), before.hire_advance(a, p) as f64);
-                    let within = advance <= x.money().max(0.0) && World::soldiers_pay(n, x.kept, p) <= x.pay_money(advance).max(0.0);
+                    let (peace, war) = x.split(n, true);
+                    let within = advance <= x.money().max(0.0) && World::soldiers_pay(peace, x.kept, p) <= x.pay_money(advance).max(0.0) && World::soldiers_pay(war, x.kept, p) <= x.war_money(peace, advance, p).max(0.0);
                     d.count("hires", 1);
                     d.count("hire: unpaid", u64::from(x.unpaid));
                     d.count("hire: nothing to win", u64::from(x.nothing_to_win));
                     d.count("hire: within the money", u64::from(within));
-                    let left_of_the_horizon = x.afford - advance - World::soldiers_pay(n, f64::from(p.goal_horizon_ticks), p);
+                    let (peace, war) = x.split(n, true);
+                    let left_of_the_horizon = x.afford - advance - World::soldiers_pay(peace, f64::from(p.goal_horizon_ticks), p) - World::soldiers_pay(war, x.kept, p);
                     let left_at_hand = x.at_hand - advance - World::soldiers_pay(n, x.kept, p);
                     d.sample("hire: left over the horizon, years of income", left_of_the_horizon / x.income);
                     d.sample("hire: left at hand over the war, years of income", left_at_hand / x.income);
@@ -3287,7 +3419,8 @@ fn diagnose_war_turnover(seed: u64, p: &Params) -> Diagnosis {
                     let (n, strength) = (before.soldiers(u), before.unit_strength(u));
                     // What keeping the unit is worth to its wars, and what its pay saved is worth.
                     let keep: f64 = x.terms.iter().map(|t| before.war_worth_of(a, t, x.unpaid, 0.0, p) - before.war_worth_of(a, t, x.unpaid, -strength, p)).sum();
-                    let pay = World::saving_worth(World::soldiers_pay(n, x.kept, p), x.pay_money(0.0), x.income);
+                    let (peace, war) = x.split(n, false);
+                    let pay = World::saving_worth(World::soldiers_pay(war, x.kept, p), x.money(), x.income) + World::saving_worth(World::soldiers_pay(peace, x.kept, p), x.pay_money(0.0), x.income);
                     let cause = if x.unpaid {
                         "1 unpaid as the bot reads it"
                     } else if x.nothing_to_win {

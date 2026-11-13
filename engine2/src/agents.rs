@@ -125,6 +125,10 @@ pub struct Context {
     /// a bribe (`World::money_over`): the money at hand over a tick at peace, over the length of
     /// its longest war at war. (The order bought back is read at its face value: `utility_in`.)
     at_once: f64,
+    /// The soldiers it pays (`World::paid_soldiers`) and the army the peace keeps
+    /// (`World::peace_army`, plan §31.15): at war the men beyond it are soldiers of war.
+    army: i64,
+    peace_army: i64,
     unpaid: bool,
     risk: crate::worth::RiskPrices,
     /// The legitimacy a ceded province would cost, years of income (`ceded_province_blow`).
@@ -643,27 +647,55 @@ impl World {
         (ctx.free - advance) * Self::kept_ticks(ctx) / f64::from(params.goal_horizon_ticks).max(1.0)
     }
 
+    /// How `n` soldiers more (or, sending home, `n` of those it has) fall on either side of
+    /// the army the peace keeps (`World::peace_army`, plan §31.15, owner's decision
+    /// 2026-11-13): `(of the peace, of the war)`. At war the men beyond it are **soldiers of
+    /// war** — a levy or a hire that crosses the line is split by it, and the last men sent home
+    /// are the war's first. At peace there are none: every man stands for the horizon.
+    fn split_at_peace_army(ctx: &Context, n: i64, raised: bool) -> (i64, i64) {
+        if !ctx.at_war {
+            return (n, 0);
+        }
+        let war = if raised { n - n.min((ctx.peace_army - ctx.army).max(0)) } else { n.min((ctx.army - ctx.peace_army).max(0)) };
+        (n - war, war)
+    }
+
     /// What `n` soldiers kept cost `a` in its state (`kept_ticks`), with an `advance` paid
     /// for them at once (a hire's; nothing for a levy), in years of its income. **The money**
     /// at the price of the polity's money (`World::spending_price`, plan §31.3: nothing
     /// within it, the face value past it): the advance, a spending made once, against the
-    /// money it has for one (`Context.at_once`); then the pay against the share of the free
-    /// money the advance leaves for the ticks charged (`pay_money`). **The heads** away from
-    /// the land at the take they would have paid (`heads_cost`): a loss of the take, not of
-    /// money.
+    /// money it has for one (`Context.at_once`); the pay of the men within the army the peace
+    /// keeps against the share of the free money the advance leaves for the ticks charged
+    /// (`pay_money`) — a standing spending; **the pay of the soldiers of war** for the war's
+    /// length — a spending of the war (plan §31.15) — against the money at hand over that length
+    /// (`Context.at_once`), less the advance and less what the men of the peace commit of the
+    /// free money over the horizon: no money is counted twice, and a soldier of war within his
+    /// money leaves the free money above nothing. **The heads** away from the land at the take
+    /// they would have paid (`heads_cost`): a loss of the take, not of money.
     fn kept_soldiers_cost(&self, a: ActorId, ctx: &Context, n: i64, advance: i64, params: &Params) -> f64 {
         let ticks = Self::kept_ticks(ctx);
         let advance = advance as f64;
-        World::spending_price(advance, ctx.at_once, ctx.income) + World::spending_price(World::soldiers_pay(n, ticks, params), Self::pay_money(ctx, advance, params), ctx.income) + self.heads_cost(a, n, ticks, params)
+        let (peace, war) = Self::split_at_peace_army(ctx, n, true);
+        let horizon = f64::from(params.goal_horizon_ticks);
+        let war_money = ctx.at_once.min(ctx.free - World::soldiers_pay(peace, horizon, params)) - advance;
+        World::spending_price(advance, ctx.at_once, ctx.income)
+            + World::spending_price(World::soldiers_pay(peace, ticks, params), Self::pay_money(ctx, advance, params), ctx.income)
+            + World::spending_price(World::soldiers_pay(war, ticks, params), war_money, ctx.income)
+            + self.heads_cost(a, n, ticks, params)
     }
 
     /// What sending `n` soldiers home saves `a` in its state (`kept_ticks`), in years of its
     /// income: their pay at what a spending not made is worth (`World::saving_worth`, plan
-    /// §31.3 — nothing while the money is free anyway), against the same share of the free
-    /// money as the pay of soldiers kept (`pay_money`), and the heads back on the land.
+    /// §31.3 — nothing while the money is free anyway) — the mirror of `kept_soldiers_cost`:
+    /// the soldiers of war against the money at hand over the war's length, the men of the
+    /// peace against the same share of the free money as the pay of soldiers kept
+    /// (`pay_money`) — and the heads back on the land.
     fn sent_home_saving(&self, a: ActorId, ctx: &Context, n: i64, params: &Params) -> f64 {
         let ticks = Self::kept_ticks(ctx);
-        World::saving_worth(World::soldiers_pay(n, ticks, params), Self::pay_money(ctx, 0.0, params), ctx.income) + self.heads_cost(a, n, ticks, params)
+        let (peace, war) = Self::split_at_peace_army(ctx, n, false);
+        World::saving_worth(World::soldiers_pay(war, ticks, params), ctx.at_once, ctx.income)
+            + World::saving_worth(World::soldiers_pay(peace, ticks, params), Self::pay_money(ctx, 0.0, params), ctx.income)
+            + self.heads_cost(a, n, ticks, params)
     }
 
     /// The orders of every bot, on the state as it stands, the player's actor excepted.
@@ -765,6 +797,8 @@ impl World {
             free: self.free_money(a, params),
             // The money at hand for a spending made once: over a tick, at war over its longest war.
             at_once: self.money_over(a, if at_war { wars.iter().map(|t| t.ticks).fold(0.0, f64::max) } else { 1.0 }, params),
+            army: self.paid_soldiers(a, params),
+            peace_army: self.peace_army(a, params),
             unpaid: self.paid_share_seen_ppm(a) < 1_000_000,
             wars,
             threats: if at_war { Vec::new() } else { self.threats(a, blow_per_province, params) },
