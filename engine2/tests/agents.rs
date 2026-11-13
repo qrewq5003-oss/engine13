@@ -1120,8 +1120,14 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!(verbs.len() >= 6, "the bots use the verbs: {verbs:?}");
     // With the orders of step (б) a war has its means: А12 is a check, not print (owner's
     // rule on #291).
+    // The bottom of the band is a warning, not an assertion (owner's decision 2026-11-13, plan
+    // §31.14): the edge is written in E0 by memory — a band by memory is print, not a stop
+    // (rule 1 of §24.1). The top of the band and «always at war» below stay assertions.
     let a12_band = band("war.observed_share_of_years");
-    assert!((a12_band[0]..=a12_band[1]).contains(&a12), "А12 {a12:.3} outside {a12_band:?}");
+    if a12 < a12_band[0] {
+        eprintln!("А12 {a12:.3} below the bottom of {a12_band:?} — printed: the bottom is by memory (plan §31.14)");
+    }
+    assert!(a12 <= a12_band[1], "А12 {a12:.3} above the top of {a12_band:?}");
     assert!(always * 10 < per_polity_war_share.len(), "«always at war»: {always} of {} polities over nine tenths of their ticks", per_polity_war_share.len());
     assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
     // Д3's band is by memory (rule 1 of §24.1: a band without a source is a warning, not a
@@ -1755,6 +1761,8 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
     for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
         let m = Measures::over(&seeds, &p);
         let r = m.rates();
+        // Printed, never asserted, here; А12's bottom is a warning in the measures' test too
+        // (owner's decision 2026-11-13, plan §31.14: the edge in E0 is by memory).
         let row: Vec<String> = r.against_bands(&p).into_iter().map(|(n, v, b, ok)| format!("{n} {v:.3}{}", if ok { String::new() } else { format!(" OUTSIDE {b:?}") })).collect();
         eprintln!("{label}: {}", row.join("; "));
         // The base of (д1) on main (plan §30.10) on both sets of seeds: the measures with no

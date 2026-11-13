@@ -853,11 +853,18 @@ impl World {
     /// while the rate moves the take every year. **The take:** the rate times the share the
     /// world collects (`collection_share_for`) at the legitimacy the norm settles at — the
     /// pressure, unbounded below the bottom (owner's rules on #292, #293) — before and after
-    /// the step; its change is valued in log over the horizon in years (a step down and the
-    /// step back up cancel — valued as a share of the current take, the bot would cycle a
-    /// step around its equilibrium), and weighs more when the army's pay falls short
-    /// (revenue short of the pay is worth its inverse share, down to a quarter). **The
-    /// legitimacy** (E3 (е1), owner's answer 2 on §24.7: no weight — what the world turns it
+    /// the step. Its change of the yearly take, kg, over the horizon is **a flow of money into
+    /// the treasury, priced by the rule of money** ((ц3), plan §31.14, owner's decision
+    /// 2026-11-13): a step down is a spending of that flow — nothing within the polity's free
+    /// money (`World::free_money`), the face value past it (`World::spending_price`); a step up
+    /// is the spending not made — worth exactly the shortage it closes (`World::saving_worth`),
+    /// nothing while the free money stands above nothing. Between the two lies a dead band one
+    /// step of the tax wide (free money above nothing and short of the step's flow): there
+    /// neither step pays by the money, and a step down draws no step back up. Before (ц3) the
+    /// change was valued in log, weighted by the army's pay falling short (its inverse share,
+    /// down to a quarter); the free money reads that shortage now. **The take of the land, the
+    /// tribute and the price of legitimacy are not money but the polity's base** — read at the
+    /// face value in years of income (plan §31.14.2). **The legitimacy** (E3 (е1), owner's answer 2 on §24.7: no weight — what the world turns it
     /// into): the shifted norm and the step's blow or gain invite usurpations and murders,
     /// each at what it would cost the polity (`World::course_risk`), and the blow costs the
     /// take while the rating comes back to its norm (`World::course_worth`). **The people**
@@ -881,8 +888,10 @@ impl World {
         if now <= 0.0 || next <= 0.0 {
             return -1.0;
         }
-        let need = 1.0 / (self.paid_share_seen_ppm(a) as f64 / 1e6).max(0.25);
-        let take = years * need * (next / now).ln();
+        // The change of the yearly take, kg, over the horizon: a flow of money into the treasury.
+        let flow = (next - now) * (self.production_per_tick(a, params) * 2) as f64 * years;
+        let (free, income) = (self.free_money(a, params), self.yearly_income(a, params).max(1) as f64);
+        let take = if flow < 0.0 { -World::spending_price(-flow, free, income) } else { World::saving_worth(flow, free, income) };
         let from = self.course(a, params);
         let lasting = self.course_after_tax_step(a, up, false, params);
         let after = self.course_after_tax_step(a, up, true, params);
