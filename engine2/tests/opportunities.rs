@@ -482,3 +482,67 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
     let Chance::Marriage { dowry_kg, .. } = g.opportunities(ActorRef::House(o0))[0].what else { panic!("a match offered") };
     assert!(g.world().marriage_worth(o0, h0, dowry_kg, g.params()) > 0.0);
 }
+
+/// E3, stage 5 (plan §31.34, owner's decision 2026-11-16): an alliance is offered to the
+/// other ruler, who weighs it from its own side and answers at the next turn — a player
+/// through the channel of the opportunities, as a house answers a match.
+#[test]
+fn an_alliance_is_offered_to_the_other_ruler_who_takes_or_declines_it_at_the_next_turn() {
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let to = ActorRef::Ruler(s1);
+    let offer = |player: Option<ActorRef>| {
+        let mut s = scenario();
+        s.verbs.insert("propose_alliance".to_string(), "propose alliance".to_string());
+        let mut g = Game::new(&s, params(), 12).unwrap();
+        g.set_bots(false);
+        g.set_player(player);
+        g.world_mut().relations.insert((s0, s1), 100.0);
+        // The gifts of the embassy are paid when the offer is made.
+        let gifts = g.world().embassy_cost(s0, g.params());
+        g.world_mut().post(Account::Treasury(s0), Source::Test, 2 * gifts * 1000).unwrap();
+        let call = engine2::VerbCall { actor: ActorRef::Ruler(s0), verb: engine2::VerbId::ProposeAlliance, target: engine2::Target::Actor(s1) };
+        let r = g.tick(&[call]).unwrap();
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::Alliance { .. })) && !g.world().allied(s0, s1), "nobody is bound before the answer");
+        g
+    };
+    let allied = |r: &engine2::TickReport| r.events.iter().any(|e| matches!(e.event, Event::Alliance { a, b, .. } if (a, b) == (s0, s1)));
+    let answer = |id, reply| Turn { answers: vec![Answer { who: to, opportunity: id, reply }], ..Turn::default() };
+    // The other ruler, played: the offer is its to answer, and names who offers.
+    let mut g = offer(Some(to));
+    let mine = g.opportunities(to);
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].what, Chance::Alliance { from: s0 });
+    assert!(g.opportunities(ActorRef::Ruler(s0)).is_empty(), "the offering ruler answers nothing");
+    // Declined — nothing, and the two may be offered again.
+    let r = g.play(&answer(mine[0].id, engine2::Reply::Decline)).unwrap();
+    assert!(!allied(&r) && !g.world().allied(s0, s1), "declined: nobody is bound");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::OpportunityDeclined { by, .. } if by == to)));
+    assert!(!g.world().alliance_offered(s0, s1));
+    // Taken — bound for the treaty's term.
+    let mut g = offer(Some(to));
+    let id = g.opportunities(to)[0].id;
+    let r = g.play(&answer(id, engine2::Reply::Take)).unwrap();
+    assert!(allied(&r) && g.world().allied(s0, s1), "taken: the two are allied");
+    // A player's silence is a choice: the offer lapses.
+    let mut g = offer(Some(to));
+    let r = g.play(&Turn::default()).unwrap();
+    assert!(!allied(&r) && !g.world().allied(s0, s1) && !g.world().alliance_offered(s0, s1), "unanswered: the offer lapses");
+    // A war of the two since the offer makes it void: the bond is read again at the answer.
+    let mut g = offer(Some(to));
+    let id = g.opportunities(to)[0].id;
+    g.world_mut().declare_war(s0, s1).unwrap();
+    let r = g.play(&answer(id, engine2::Reply::Take)).unwrap();
+    assert!(!allied(&r) && !g.world().allied(s0, s1));
+    assert!(r.events.iter().any(|e| matches!(&e.event, Event::OpportunityVoid { why, .. } if why == "at war")), "a war since the offer makes it void");
+    // The relation gated the offer and is not read again: fallen below the threshold since,
+    // the answer still binds.
+    let mut g = offer(Some(to));
+    let id = g.opportunities(to)[0].id;
+    g.world_mut().relations.insert((s0, s1), 0.0);
+    assert!(allied(&g.play(&answer(id, engine2::Reply::Take)).unwrap()), "the answer is the receiver's, not the relation's");
+    // A bot answers by what the alliance is worth to it, from its own side.
+    let g = offer(None);
+    let o = &g.opportunities(to)[0];
+    let takes = g.world().alliance_worth(s1, s0, g.params()) > 0.0;
+    assert_eq!(g.world().bot_reply(o, g.params()), if takes { engine2::Reply::Take } else { engine2::Reply::Decline });
+}

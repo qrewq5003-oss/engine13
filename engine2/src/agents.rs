@@ -151,6 +151,15 @@ pub struct Context {
     /// The polities a living marriage binds to the polity (`World::married_to`), read once:
     /// a match is weighed with every house.
     married: std::collections::BTreeSet<ActorId>,
+    /// What an alliance with each polity asked about is worth (`World::alliance_worth`), read
+    /// once per polity in a decision: the proposal, the embassy, the gift and the match all
+    /// ask it of the same partner.
+    alliances: std::cell::RefCell<std::collections::BTreeMap<ActorId, f64>>,
+    /// What the cost of every alliance asks of the same neighbours, read once each
+    /// (`World::alliance_cost_by`): the polity's terms as an entrant against a neighbour over
+    /// a war's length (by the neighbour and the length's bits), and a neighbour's rate of war.
+    entrant_terms: std::cell::RefCell<std::collections::BTreeMap<(ActorId, u64), crate::worth::WarTerms>>,
+    neighbour_rates: std::cell::RefCell<std::collections::BTreeMap<ActorId, crate::worth::ThreatRate>>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -797,6 +806,9 @@ impl World {
             (_, Chance::Union { polity, faith }) => self.union_utility(*polity, *faith) > 0.0,
             (_, Chance::Policy { polity, .. }) => self.policy_utility(*polity, params) > 0.0,
             (ActorRef::House(g), Chance::Marriage { from, dowry_kg, .. }) => self.marriage_worth(g, *from, *dowry_kg, params) > 0.0,
+            // The receiver weighs the alliance from its own side (plan §31.34): the same
+            // worth the offering side read, and no gifts to pay.
+            (ActorRef::Ruler(b), Chance::Alliance { from }) => self.alliance_worth(b, *from, params) > 0.0,
             _ => false,
         }
     }
@@ -831,6 +843,32 @@ impl World {
         self.throne_worth(polity, candidate, params) > 0.0
     }
 
+    /// `World::alliance_worth` of `a` with `b` on what the decision has read already — the
+    /// threats, their rates, the money, the prices of the risks — and once per partner.
+    fn alliance_worth_in(&self, a: ActorId, b: ActorId, ctx: &Context, params: &Params) -> f64 {
+        if a == b || !self.alive(a) || !self.alive(b) {
+            return 0.0;
+        }
+        if let Some(w) = ctx.alliances.borrow().get(&b) {
+            return *w;
+        }
+        let terms = |t: ActorId, ticks: f64| ctx.entrant_terms.borrow_mut().entry((t, ticks.to_bits())).or_insert_with(|| self.entrant_terms(a, t, ctx.blow_per_province, &ctx.money, ticks, params)).clone();
+        let rate = |t: ActorId| ctx.neighbour_rates.borrow_mut().entry(t).or_insert_with(|| self.threat_rate_among(t, params)).clone();
+        let w = (self.alliance_gain(a, b, &ctx.threats, &ctx.rates, ctx.unpaid, params) + self.alliance_cost_by(a, b, ctx.unpaid, &terms, &rate, params)) * World::alliance_ticks(params);
+        ctx.alliances.borrow_mut().insert(b, w);
+        w
+    }
+
+    /// `World::relation_push_worth` with the alliance's worth read in the decision's context.
+    fn push_worth_in(&self, a: ActorId, b: ActorId, push: f64, ctx: &Context, params: &Params) -> f64 {
+        let covered = self.relation_push_covered(a, b, push, params);
+        if covered > 0.0 {
+            covered * self.alliance_worth_in(a, b, ctx, params)
+        } else {
+            0.0
+        }
+    }
+
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
         let risk = self.risk_prices(a, params);
@@ -855,6 +893,9 @@ impl World {
             rates,
             money,
             married: self.married_to(a),
+            alliances: Default::default(),
+            entrant_terms: Default::default(),
+            neighbour_rates: Default::default(),
             risk,
             blow_per_province,
         }
@@ -925,15 +966,21 @@ impl World {
             (VerbId::RaiseTax | VerbId::LowerTax, _) => self.tax_utility_at(a, call.verb, &ctx.risk, params),
             // Order bought back: the gain of legitimacy at what the world turns it into.
             (VerbId::EnforceOrder, _) => self.blow_worth(a, -params.order_gain, &ctx.risk, params) - rule_of_the_world(self.order_cost(a, params)),
-            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth(a, b, params) - once(self.embassy_cost(a, params)),
-            (VerbId::SendEmbassy, Target::Actor(b)) => self.relation_push_worth(a, b, params.embassy_gain, params) - once(self.embassy_cost(a, params)),
-            (VerbId::Bribe, Target::Actor(b)) => self.relation_push_worth(a, b, self.gift_push(a, b, params), params) - once(self.gift_size(a, params)),
+            (VerbId::ProposeAlliance, Target::Actor(b)) => self.alliance_worth_in(a, b, ctx, params) - once(self.embassy_cost(a, params)),
+            (VerbId::SendEmbassy, Target::Actor(b)) => self.push_worth_in(a, b, params.embassy_gain, ctx, params) - once(self.embassy_cost(a, params)),
+            (VerbId::Bribe, Target::Actor(b)) => self.push_worth_in(a, b, self.gift_push(a, b, params), ctx, params) - once(self.gift_size(a, params)),
             // A match is the ruling house's: the bond against the dowry, in its own wheat.
             (VerbId::ProposeMarriage, Target::House(g)) => {
                 let h = self.ruling_house(a);
                 let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
                 let married = if mine == a { mine != theirs && ctx.married.contains(&theirs) } else { self.married_across(mine, theirs) };
-                self.proposal_worth_as(h, g, married, params)
+                if mine == a {
+                    let share = self.bond_share_as(h, mine, theirs, married, params);
+                    let bond = if share > 0.0 { share * self.alliance_worth_in(a, theirs, ctx, params) } else { 0.0 };
+                    self.proposal_worth_of_bond(h, bond, params)
+                } else {
+                    self.proposal_worth_as(h, g, married, params)
+                }
             }
             _ => 0.0,
         }

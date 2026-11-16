@@ -467,12 +467,36 @@ impl World {
         self.actors[&a].paid_share_ppm < 1_000_000
     }
 
-    /// Would `b` accept an alliance from `a`?
+    /// May `a` offer an alliance to `b`? What forbids the bond (`alliance_bond_room`), an
+    /// offer between the pair still unanswered, and the relation below the threshold of the
+    /// treaties. The offer goes to `b`'s ruler, who weighs the alliance from its own side and
+    /// answers at the next turn (`Chance::Alliance`, plan §31.34).
     pub fn alliance_room(&self, a: ActorId, b: ActorId, params: &Params) -> Result<(), &'static str> {
+        self.alliance_bond_room(a, b)?;
+        if self.alliance_offered(a, b) {
+            return Err("an offer of alliance is open between the two");
+        }
+        if self.relation(a, b) < params.treaty_accept_at_relation {
+            return Err("the relation is below the threshold");
+        }
+        Ok(())
+    }
+
+    /// An offer of alliance between `a` and `b`, either way, waits for its answer.
+    pub fn alliance_offered(&self, a: ActorId, b: ActorId) -> bool {
+        self.opportunities.iter().any(|o| match (&o.what, o.to) {
+            (crate::opportunity::Chance::Alliance { from }, ActorRef::Ruler(to)) => (*from, to) == (a, b) || (*from, to) == (b, a),
+            _ => false,
+        })
+    }
+
+    /// What forbids an alliance of `a` and `b` whatever their relation — read when the offer
+    /// is made and again when it is answered (the relation gates the offer alone).
+    pub fn alliance_bond_room(&self, a: ActorId, b: ActorId) -> Result<(), &'static str> {
         if a == b {
             return Err("no polity to ally with");
         }
-        if !self.alive(b) {
+        if !self.alive(a) || !self.alive(b) {
             return Err("the polity has fallen");
         }
         if self.at_war(a, b) {
@@ -486,9 +510,6 @@ impl World {
         }
         if self.allies_of(a).iter().any(|x| self.at_war(*x, b)) || self.allies_of(b).iter().any(|x| self.at_war(*x, a)) {
             return Err("at war with the other's ally");
-        }
-        if self.relation(a, b) < params.treaty_accept_at_relation {
-            return Err("the relation is below the threshold");
         }
         Ok(())
     }
@@ -709,12 +730,10 @@ impl World {
                     return Err(not_available("a vassal makes no alliance"));
                 }
                 self.post(Account::Treasury(a), Source::Verb, -cost * 1000).map_err(ledger)?;
+                // The gifts are spent, accepted or not. Where the rule of the state allows the
+                // offer, it goes to `b`'s ruler, who answers at the next turn (plan §31.34).
                 match self.alliance_room(a, b, params) {
-                    Ok(()) => {
-                        let until = self.bind(a, b, TreatyKind::Alliance, params).map_err(ledger)?;
-                        let (x, y) = pair(a, b);
-                        self.emit(Event::Alliance { a: x, b: y, until });
-                    }
+                    Ok(()) => self.open_opportunity(ActorRef::Ruler(b), crate::opportunity::Chance::Alliance { from: a }),
                     Err(_) => self.emit(Event::Refused { actor: a, verb: call.verb, target: b }),
                 }
                 Ok(())

@@ -498,6 +498,10 @@ struct Measures {
     battles: Vec<(u64, u64, bool)>,
     battles_even: u64,
     battles_drawn: u64,
+    /// The offers of alliance (stage 5, plan §31.34): made at the threshold of the relation,
+    /// taken by the receiver, declined by it, void at the answer (a war since), and the
+    /// proposals the rule of the state refused before any offer (the gifts spent all the same).
+    alliances: [u64; 5],
 }
 
 /// The measures of E2/E3 with the bots, read off the worlds' sums.
@@ -648,6 +652,9 @@ impl Measures {
         self.battles.extend(o.battles);
         self.battles_even += o.battles_even;
         self.battles_drawn += o.battles_drawn;
+        for (mine, theirs) in self.alliances.iter_mut().zip(o.alliances) {
+            *mine += theirs;
+        }
     }
 
     /// The base of (д1) on main (plan §30.9 p. 4, §30.10), one line a group — **printed, never
@@ -725,6 +732,16 @@ impl Measures {
                 quantile(&odds, 0.75),
                 quantile(&odds, 0.9)
             ),
+            format!(
+                "offers of alliance (the relation at the threshold): {} — taken {} ({:.3}), declined by the receiver {} ({:.3}), void at the answer {}; proposals the rule of the state refused before an offer {}",
+                self.alliances[0],
+                self.alliances[1],
+                share(self.alliances[1] as usize, self.alliances[0] as usize),
+                self.alliances[2],
+                share(self.alliances[2] as usize, self.alliances[0] as usize),
+                self.alliances[3],
+                self.alliances[4]
+            ),
         ]
     }
 }
@@ -776,6 +793,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
         g.world().wars.iter().filter(|(_, x)| x.of.is_none()).map(|(k, _)| (*k, OpenWar { since: 0, battles: 0, taken: (0, 0), start: (side_of(g.world(), k.0), side_of(g.world(), k.1)) })).collect();
     let (mut principal_wars, mut wars_within_a_tick) = (Vec::<EndedWar>::new(), 0u64);
     let (mut battles, mut battles_even, mut battles_drawn) = (Vec::<(u64, u64, bool)>::new(), 0u64, 0u64);
+    let (mut alliances, mut alliance_offers) = ([0u64; 5], std::collections::BTreeSet::<u32>::new());
     for t in 0..300u32 {
         let w = g.world();
         let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
@@ -967,6 +985,14 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
                         Some(_) => {}
                         None => wars_within_a_tick += 1,
                     },
+                    Event::OpportunityOpened { ref opportunity } if matches!(opportunity.what, engine2::Chance::Alliance { .. }) => {
+                        alliances[0] += 1;
+                        alliance_offers.insert(opportunity.id);
+                    }
+                    Event::OpportunityTaken { id, .. } if alliance_offers.contains(&id) => alliances[1] += 1,
+                    Event::OpportunityDeclined { id, .. } if alliance_offers.contains(&id) => alliances[2] += 1,
+                    Event::OpportunityVoid { id, .. } if alliance_offers.contains(&id) => alliances[3] += 1,
+                    Event::Refused { verb: VerbId::ProposeAlliance, .. } => alliances[4] += 1,
                     Event::Battle { attacker, defender, outcome, soldiers, .. } => {
                         // A battle of a war of obligation is its principals' war's.
                         let k = pair(attacker, defender);
@@ -1039,7 +1065,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1052,7 +1078,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7, a13 } = m.rates();
     let war_lines = m.war_lines();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _ } = m;
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1930,12 +1956,96 @@ fn a_change_of_the_worlds_numbers_alone_changes_the_bots_choices() {
     let (i0, i1) = (w.independence_worth(h, a, province, &p), w.independence_worth(h, a, province, &steep));
     eprintln!("a polity of its own to the carrier house: {i0:.2}, with the battle's exponent doubled {i1:.2}");
     assert!((i1 - i0).abs() > 1e-9, "the battle's exponent moves the worth of independence");
-    // An ally against a goal's enemy: the battle formula with the ally's army and without it.
+    // An ally against a neighbour's threat (plan §31.34): the battle formula with the ally's
+    // army and without it. The neighbour has wars on its record — on an empty chronicle it
+    // brings none, and no ally is worth anything.
     let mut w = world_of(&carrier_scenario(), 7);
-    w.set_goal(a, GoalKind::AllianceAgainst, GoalTarget::Polity(ActorId(1))).unwrap();
+    w.actors.get_mut(&ActorId(1)).unwrap().wars_entered = 4;
     let (al0, al1) = (w.alliance_worth(a, ActorId(2), &p), w.alliance_worth(a, ActorId(2), &steep));
-    eprintln!("an alliance with polity 2 against polity 1: {al0:.3}, with the battle's exponent doubled {al1:.3}");
+    eprintln!("an alliance with polity 2 against the threat of polity 1: {al0:.3}, with the battle's exponent doubled {al1:.3}");
     assert!((al1 - al0).abs() > 1e-9, "the battle's exponent moves the worth of an ally");
+}
+
+/// E3, stage 5 (plan §31.34, owner's decision 2026-11-16): an alliance is worth **through the
+/// threat** — what the ally's army takes off the wars the polity's neighbours bring on it,
+/// less the wars the ally's neighbours would draw the polity into — and the receiver weighs it
+/// from its own side. The test world: state `x` owns column `x`; `s0` touches `s1` (and `s2`
+/// across a bay), `s1` touches `s0`, `s2` and — across a bay — `s3`.
+#[test]
+fn an_alliance_is_worth_the_allys_army_against_the_neighbours_threat_less_the_wars_the_ally_draws_in() {
+    use engine2::world::{Treaty, TreatyKind};
+    let p = params();
+    let (s0, s1, s2, s3) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3));
+    let scenario = all_verbs(testworld::five_states_scenario());
+    // An empty chronicle: no neighbour brings a war, and no ally is worth anything (rule 1
+    // of §24.1: the frequency of wars is read off the record, never made up).
+    let w = world_of(&scenario, 7);
+    for a in w.actors.keys() {
+        for b in w.actors.keys() {
+            assert_eq!(w.alliance_worth(*a, *b, &p), 0.0, "{a:?} with {b:?} on an empty chronicle");
+        }
+    }
+    // `s3` has wars on its record: it is a threat to `s1`, which it touches, and none to
+    // `s0`, which it does not.
+    let mut w = world_of(&scenario, 7);
+    w.actors.get_mut(&s3).unwrap().wars_entered = 4;
+    assert!(w.borders(s1, s3) && !w.borders(s0, s3));
+    let parts = |w: &World, a: ActorId, b: ActorId| {
+        let blow = w.ceded_province_blow(a, &w.risk_prices(a, &p), &p);
+        let own = w.own_money(a, &p);
+        let threats = w.threats(a, blow, &p);
+        let rates: Vec<_> = threats.iter().map(|(t, _)| w.threat_rate(*t, a, &p)).collect();
+        (w.alliance_gain(a, b, &threats, &rates, false, &p), w.alliance_cost(a, b, blow, &own, false, &p))
+    };
+    // To `s1` an alliance with `s0` is a gain: `s0`'s army stands with it against `s3`, and
+    // `s0` has no neighbour that would draw `s1` into a war.
+    let (gain, cost) = parts(&w, s1, s0);
+    assert!(gain > 0.0 && cost == 0.0, "s1 with s0: gain {gain}, cost {cost}");
+    assert!((w.alliance_worth(s1, s0, &p) - (gain + cost) * World::alliance_ticks(&p)).abs() < 1e-12, "a tick of the two, over the treaty's term within the horizon");
+    // The term: the treaty's, within the horizon — whichever is the shorter.
+    let (mut short, mut near) = (p.clone(), p.clone());
+    short.treaty_term_ticks = 10;
+    near.goal_horizon_ticks = 6;
+    assert!(p.treaty_term_ticks > 10 && p.goal_horizon_ticks > 10);
+    assert_eq!(World::alliance_ticks(&p), f64::from(p.treaty_term_ticks.min(p.goal_horizon_ticks)));
+    assert_eq!((World::alliance_ticks(&short), World::alliance_ticks(&near)), (10.0, 6.0));
+    assert!(w.alliance_worth(s1, s0, &p) > 0.0);
+    // To `s0` the same alliance is a cost and nothing else: no neighbour of its own brings a
+    // war, and `s1`'s neighbour would draw it into one. One side wants it, the other does not.
+    let (gain, cost) = parts(&w, s0, s1);
+    assert!(gain == 0.0 && cost < 0.0, "s0 with s1: gain {gain}, cost {cost}");
+    assert!(w.alliance_worth(s0, s1, &p) < 0.0);
+    // The gain is the ally's army's: more of it is worth more, none of it nothing.
+    let (base, _) = parts(&w, s1, s0);
+    let mut more = w.clone();
+    for u in more.units_of(s0) {
+        let men = more.soldiers(u);
+        more.post(engine2::Account::Soldiers(u), Source::Test, 2 * men * 1000).unwrap();
+    }
+    assert!(parts(&more, s1, s0).0 > base, "a larger ally takes more off the threat");
+    let mut none = w.clone();
+    for u in none.units_of(s0) {
+        let men = none.soldiers(u);
+        none.post(engine2::Account::Soldiers(u), Source::Test, -men * 1000).unwrap();
+    }
+    assert_eq!(none.army_strength(s0), 0.0);
+    assert_eq!(parts(&none, s1, s0).0, 0.0, "an ally without an army takes nothing off it");
+    // An ally bound by a peace with the neighbour would not enter the war (`war_entrants`):
+    // against that neighbour it is worth nothing.
+    let mut bound = w.clone();
+    let until = engine2::Tick(bound.tick.0 + 50);
+    bound.treaties.insert((s0, s3), Treaty { kind: TreatyKind::Peace, until, since: Some(bound.tick) });
+    assert!(bound.peace_in_force(s0, s3));
+    assert_eq!(parts(&bound, s1, s0).0, 0.0, "an ally at peace with the threat stands out of its war");
+    // And the cost is of the wars the polity would enter: bound by a peace with the ally's
+    // neighbour it enters none.
+    assert_eq!(parts(&bound, s0, s1).1, 0.0, "a polity at peace with the ally's threat is drawn into nothing");
+    // The receiver weighs the offer from its own side: `s0`'s bot declines what `s1` offers,
+    // `s1`'s takes what `s0` offers.
+    let offer = |from: ActorId, to: ActorId| engine2::Opportunity { id: 0, to: ActorRef::Ruler(to), what: engine2::Chance::Alliance { from }, opened: w.tick };
+    assert_eq!(w.bot_reply(&offer(s1, s0), &p), engine2::Reply::Decline, "the alliance costs s0 more than it brings");
+    assert_eq!(w.bot_reply(&offer(s0, s1), &p), engine2::Reply::Take, "the alliance is worth its while to s1");
+    let _ = s2;
 }
 
 /// The bot calls the world's formulas, never copies them (E3 (е1)): the parameters of the
