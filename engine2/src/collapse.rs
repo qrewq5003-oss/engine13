@@ -230,6 +230,17 @@ impl World {
         self.names.actors.push((format!("{psid}.{}", new.0), format!("{pname} successor {}", new.0)));
         self.houses.get_mut(&house).unwrap().polity = new;
         let ruler: PersonId = self.provinces[&p].governor.expect("a carrier is the governor's house");
+        self.found_polity(parent, new, provinces, house, ruler, people_total, people_gone, params)
+    }
+
+    /// The birth of the polity `new` out of `parent` with `provinces` under `house` and its
+    /// `ruler` — the body a secession carried by a house (`secede`) and a province seceding
+    /// alone (`secede_alone`) share: the record, the accounts, the provinces with their
+    /// people, the treasury's share, the seats, the core and the legitimacy, the militia, the
+    /// edges and the war of secession. The polity's name is in the world already, and the
+    /// house is the polity's.
+    #[allow(clippy::too_many_arguments)]
+    fn found_polity(&mut self, parent: ActorId, new: ActorId, provinces: Vec<ProvinceId>, house: HouseId, ruler: PersonId, people_total: i64, people_gone: i64, params: &Params) -> Result<ActorId, WorldError> {
         let new_capital = provinces.iter().copied().max_by_key(|q| (self.population(*q), std::cmp::Reverse(*q))).expect("a rising has a province");
         let (succession, tax_rate_ppm, mut institutions) = {
             let pa = &self.actors[&parent];
