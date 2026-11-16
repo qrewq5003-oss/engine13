@@ -5005,3 +5005,86 @@ fn diagnosis_what_a_match_is_worth() {
         ));
     }
 }
+
+/// One generated world with the bots, 300 ticks: what buying order is worth to a ruler
+/// against its price, read at the start of every fifth tick as the bot reads it.
+fn diagnose_order(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    for tick in 0..300u32 {
+        let w = g.world();
+        if tick % 5 == 0 {
+            for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
+                let income = w.yearly_income(a, p).max(1) as f64;
+                let legitimacy = w.actors[&a].legitimacy;
+                let band = match legitimacy {
+                    l if l < 30.0 => "legitimacy under 30",
+                    l if l < 50.0 => "legitimacy 30–50",
+                    l if l < 70.0 => "legitimacy 50–70",
+                    _ => "legitimacy 70 and over",
+                };
+                let risk = w.risk_prices(a, p);
+                let gain = w.blow_worth(a, -p.order_gain, &risk, p);
+                let cost = w.order_cost(a, p) as f64 / income;
+                let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::EnforceOrder, target: Target::None };
+                let utility = w.utility(a, &call, p);
+                d.count("decisions", 1);
+                d.count(&format!("decisions — {band}"), 1);
+                d.count("decisions where the treasury covers the price", u64::from(w.treasury(a) >= w.order_cost(a, p)));
+                d.count("decisions where the order is worth its price", u64::from(utility > 0.0));
+                d.sample("the gain, years of income", gain);
+                d.sample(&format!("the gain, years of income — {band}"), gain);
+                d.sample("the price, years of income", cost);
+                d.sample("the gain over the price", gain / cost.max(1e-9));
+                d.sample("legitimacy", legitimacy);
+                // What the gain is made of: the legitimacy it would stand at, and the norm
+                // it drifts back to.
+                d.sample("the norm of legitimacy less the legitimacy", w.legitimacy_norm(a, p) - legitimacy);
+            }
+        }
+        let r = g.tick(&[]).unwrap();
+        d.count("the order bought", r.events.iter().filter(|e| matches!(e.event, Event::Verb { verb: VerbId::EnforceOrder, .. })).count() as u64);
+    }
+    d
+}
+
+/// The probe of stage 8 (plan §31.37 p. 10): the bots never buy order — the one criterion of
+/// the acceptance of E3 (§23.4: every verb used) not met. With nothing of the world changed:
+/// what the gain of legitimacy is worth to a ruler by the bot's own valuation, against the
+/// price the world charges, by the legitimacy it stands at. Printed, never asserted, run on
+/// demand: `cargo test --release -p engine2 --all-features --test agents diagnosis_why_the_order -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn diagnosis_why_the_order_is_never_bought() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for part in engine2::par::map(&seeds, |seed| diagnose_order(*seed, &p)) {
+            d.add(part);
+        }
+        let line = |text: String| eprintln!("{label}: {text}");
+        line(format!(
+            "decisions read {} (every fifth tick): the treasury covers the price in {}; the order is worth its price in {} ({}); bought in the run {}",
+            d.n("decisions"),
+            d.share("decisions where the treasury covers the price", "decisions"),
+            d.n("decisions where the order is worth its price"),
+            d.share("decisions where the order is worth its price", "decisions"),
+            d.n("the order bought")
+        ));
+        let top = |key: &str| d.samples.get(key).map(|v| v.iter().copied().fold(f64::MIN, f64::max)).unwrap_or(0.0);
+        line(format!(
+            "years of income q10/q25/q50/q75/q90: the gain of {} points {} (the most {:.3}); the price {}; the gain over the price {} (the most {:.3})",
+            p.order_gain,
+            d.q("the gain, years of income"),
+            top("the gain, years of income"),
+            d.q("the price, years of income"),
+            d.q("the gain over the price"),
+            top("the gain over the price")
+        ));
+        line(format!("legitimacy {}; its norm less the legitimacy {}", d.q("legitimacy"), d.q("the norm of legitimacy less the legitimacy")));
+        for band in ["legitimacy under 30", "legitimacy 30–50", "legitimacy 50–70", "legitimacy 70 and over"] {
+            line(format!("[{band}] decisions {} ({}); the gain, years of income {} (the most {:.3})", d.n(&format!("decisions — {band}")), d.share(&format!("decisions — {band}"), "decisions"), d.q(&format!("the gain, years of income — {band}")), top(&format!("the gain, years of income — {band}"))));
+        }
+    }
+}
