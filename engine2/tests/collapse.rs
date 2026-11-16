@@ -630,8 +630,9 @@ use sentinel::Observed;
 
 /// В7 on the generated worlds: risings — revolts and secessions — per century per large
 /// polity (five provinces and more), neither never nor always; В8: the polities a century
-/// on, per polity at the start; a polity is born only with a house to carry it, and that
-/// is reachable; every successor whole — no dangling seat, unit, war or name; a rising
+/// on, per polity at the start — printed here, checked with the bots: a polity is born with
+/// a house to carry it, and that is reachable, or of a revolt left standing its term ((д2)),
+/// which without agents is every revolt; every successor whole — no dangling seat, unit, war or name; a rising
 /// kills nobody in E2 (nobody marches without an order); the share of polity-ticks at war
 /// (А12) is reported; the run is deterministic through a save; the sentinel declares the
 /// kinds by the horizon.
@@ -795,7 +796,12 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
     // nobody puts a revolt down, a province rises once and stands, and the rate of risings
     // at the base calibrated with agents (`revolt.per_year`) sits below the band — printed.
     eprintln!("В7 without agents {per_century:.2} (the band {band:?} is checked with the bots)");
-    assert!((band8[0]..=band8[1]).contains(&ratio_century), "В8 {ratio_century:.2} outside {band8:?}");
+    // В8's band is checked with the bots too (`tests/agents.rs`), from (д2) on (plan §31.30,
+    // the executor's decision № 1 by the owner's delegation of 2026-11-16): a revolt left
+    // standing its term secedes, and here, without agents, nobody puts a revolt down — every
+    // province risen alone becomes a polity, and the count measures the absence of agents,
+    // not the world's fragmentation. Printed.
+    eprintln!("В8 without agents {ratio_century:.2} (the band {band8:?} is checked with the bots)");
     assert!(carried > 0 && alone > 0, "both exist: a house with its provinces and a province in revolt");
     assert!(carried as f64 >= expected_carried / 3.0, "the secession of a house is reachable: {carried} against {expected_carried:.1} expected");
     assert!(by_marks[0] > 0 && by_marks[1] + by_marks[2] > 0, "loyal provinces rise too, alienated ones more");
