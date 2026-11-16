@@ -3916,3 +3916,159 @@ fn diagnosis_the_threat_by_the_sides_of_the_neighbours_declaration() {
         );
     }
 }
+
+// ---- Probe: what the army at war is worth beyond its wars (plan §31.24, step 0) ----
+
+/// One seed of `diagnosis_what_the_army_at_war_is_worth_beyond_its_wars`: every tick, every
+/// living polity at war with a living enemy — what a levy is worth to it now (`options`: its
+/// wars alone, `at_war_gain`) and what it would be worth by variant 1 of plan §31.24: besides,
+/// the threats of the neighbours it does not fight (`threats`, `wars_a_tick_in` — the second
+/// front is in their sides, `threat_sides_strength`) and the risings put down
+/// (`suppression_a_tick`), each a tick's worth as at peace, **over the war's length** (the
+/// ticks a soldier kept is charged for at war: the longest of its fronts). Read off the public
+/// functions; the world is not changed.
+fn diagnose_army_at_war(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    for _ in 0..300 {
+        let w = g.world();
+        for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
+            let enemies: Vec<ActorId> = w.actors.keys().copied().filter(|b| w.at_war(a, *b) && w.alive(*b)).collect();
+            if enemies.is_empty() {
+                continue;
+            }
+            // Its part in its wars, as `diagnose_world` reads it: a war of its own it declared;
+            // else one declared on it; else at war by its bonds (or the starting facts) alone.
+            let principal: Vec<&engine2::War> = w.wars.iter().filter(|(k, x)| (k.0 == a || k.1 == a) && x.of.is_none()).map(|(_, x)| x).collect();
+            let role = if principal.iter().any(|x| x.by == Some(a)) {
+                "declared"
+            } else if principal.iter().any(|x| x.by.is_some()) {
+                "attacked"
+            } else {
+                "by its bonds"
+            };
+            let unpaid = w.paid_share_seen_ppm(a) < 1_000_000;
+            let blow = w.ceded_province_blow(a, &w.risk_prices(a, p), p);
+            let wars: Vec<engine2::worth::WarTerms> = enemies.iter().map(|b| w.war_terms(a, *b, blow, p)).collect();
+            let kept = wars.iter().map(|x| x.ticks).fold(0.0, f64::max);
+            // The neighbours it does not fight, and the risings.
+            let threats = w.threats(a, blow, p);
+            let rates: Vec<engine2::worth::ThreatRate> = threats.iter().map(|(t, _)| w.threat_rate(*t, a, p)).collect();
+            let revolt = w.actors[&a].provinces.iter().any(|q| w.in_revolt(*q));
+            let (now, suppression) = (w.army_strength(a), w.suppression_a_tick(a, p));
+            // What `extra` strength is worth in its wars (`at_war_gain`), and a tick of it
+            // against the threats and for the suppression (the rule of the peace, `strength_gain`).
+            let in_its_wars = |extra: f64| -> f64 { wars.iter().map(|x| w.war_worth_of(a, x, unpaid, extra, p) - w.war_worth_of(a, x, unpaid, 0.0, p)).sum() };
+            let against_threats = |extra: f64| -> f64 {
+                let expected = |r: &engine2::worth::ThreatRate, terms: &engine2::worth::WarTerms, extra: f64| World::wars_a_tick_in(r, a, terms.odds(extra, p)) * w.war_worth_of(a, terms, unpaid, extra, p);
+                threats.iter().zip(&rates).map(|((_, terms), r)| expected(r, terms, extra) - expected(r, terms, 0.0)).sum()
+            };
+            let units = |strength: f64| f64::from(u8::from(strength > 0.0));
+            let for_suppression = |extra: f64| (units(now + extra) - units(now)) * suppression;
+            let beyond = |extra: f64| (against_threats(extra) + for_suppression(extra)) * kept;
+            for key in ["all", role] {
+                let k = |name: &str| format!("{key}: {name}");
+                d.count(&k("decisions at war"), 1);
+                d.count(&k("a neighbour it does not fight"), u64::from(!threats.is_empty()));
+                d.count(&k("a neighbour it does not fight with a rate of war"), u64::from(threats.iter().any(|(t, _)| w.war_rate(*t, p) > 0.0)));
+                d.count(&k("a rising in its land"), u64::from(revolt));
+                d.count(&k("no army"), u64::from(now <= 0.0));
+                d.count(&k("unpaid as the bot reads it"), u64::from(unpaid));
+            }
+            // The levies on its menu, the tick's levy first (`options`: the tick's levy and its halves).
+            let mut levies: Vec<(i64, f64)> = w
+                .options(a, &[VerbId::Recruit], p)
+                .iter()
+                .filter_map(|o| match o.call {
+                    Some(VerbCall { verb: VerbId::Recruit, target: Target::Levy(_, men), .. }) => Some((i64::from(men), o.utility)),
+                    _ => None,
+                })
+                .collect();
+            levies.sort_by_key(|(men, _)| std::cmp::Reverse(*men));
+            let Some((men, utility)) = levies.first().copied() else { continue };
+            let extra = World::new_soldiers_strength(men);
+            let (wars_gain, threats_gain, suppression_gain) = (in_its_wars(extra), against_threats(extra) * kept, for_suppression(extra) * kept);
+            let best_now = levies.iter().map(|(_, u)| *u).fold(f64::MIN, f64::max);
+            let best_then = levies.iter().map(|(m, u)| u + beyond(World::new_soldiers_strength(*m))).fold(f64::MIN, f64::max);
+            for key in ["all", role] {
+                let k = |name: &str| format!("{key}: {name}");
+                d.count(&k("a levy on offer"), 1);
+                d.sample(&k("the tick's levy: its worth in its wars"), wars_gain);
+                d.sample(&k("the tick's levy: against the threats over the war's length"), threats_gain);
+                d.sample(&k("the tick's levy: for the suppression over the war's length"), suppression_gain);
+                d.sample(&k("the tick's levy: its utility now"), utility);
+                d.sample(&k("the war's length charged, ticks"), kept);
+                d.count(&k("the tick's levy above nothing now"), u64::from(utility > 0.0));
+                d.count(&k("the tick's levy above nothing by variant 1"), u64::from(utility + threats_gain + suppression_gain > 0.0));
+                d.count(&k("the best levy above nothing now"), u64::from(best_now > 0.0));
+                d.count(&k("the best levy above nothing by variant 1"), u64::from(best_then > 0.0));
+                d.count(&k("the threats add something to the tick's levy"), u64::from(threats_gain > 0.0));
+                d.count(&k("the threats take something from the tick's levy"), u64::from(threats_gain < 0.0));
+                d.count(&k("the suppression adds something to the tick's levy"), u64::from(suppression_gain > 0.0));
+            }
+        }
+        g.tick(&[]).unwrap();
+    }
+    d
+}
+
+/// **Step 0 of plan §31.24** (the fork of §30.13, candidate 3; owner's decision 2026-11-16:
+/// a probe first, on the world as it is): at war the bot's worth of strength is its wars alone
+/// (`strength_gain` → `at_war_gain`) — the threats of its other neighbours and the suppression
+/// are read at peace only. What would variant 1 add — those two over the war's length — and
+/// how often would it move the levy above nothing: for all polities at war, and apart for
+/// those that declared, were attacked, or are at war by their bonds. Printed, never asserted,
+/// run on demand; the rule itself is not made here.
+#[test]
+#[ignore]
+fn diagnosis_what_the_army_at_war_is_worth_beyond_its_wars() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for part in engine2::par::map(&seeds, |seed| diagnose_army_at_war(*seed, &p)) {
+            d.add(part);
+        }
+        let q = |key: &str| {
+            let mut v = d.samples.get(key).cloned().unwrap_or_default();
+            v.sort_by(f64::total_cmp);
+            if v.is_empty() {
+                "no sample".to_string()
+            } else {
+                format!("q50 {:.4} / q90 {:.4} / mean {}", quantile(&v, 0.5), quantile(&v, 0.9), d.mean(key))
+            }
+        };
+        for key in ["all", "attacked", "declared", "by its bonds"] {
+            let k = |name: &str| format!("{key}: {name}");
+            let (decisions, offered) = (k("decisions at war"), k("a levy on offer"));
+            eprintln!(
+                "{label}, {key}: decisions at war {} — with a neighbour it does not fight {} (one with a rate of war {}), with a rising in its land {}, with no army {}, unpaid as the bot reads it {}; a levy on offer {}",
+                d.n(&decisions),
+                d.share(&k("a neighbour it does not fight"), &decisions),
+                d.share(&k("a neighbour it does not fight with a rate of war"), &decisions),
+                d.share(&k("a rising in its land"), &decisions),
+                d.share(&k("no army"), &decisions),
+                d.share(&k("unpaid as the bot reads it"), &decisions),
+                d.share(&offered, &decisions)
+            );
+            eprintln!(
+                "{label}, {key}: the tick's levy, years of income — its worth in its wars {}; against the threats over the war's length {}; for the suppression over the war's length {}; its utility now {}; the war's length charged {}",
+                q(&k("the tick's levy: its worth in its wars")),
+                q(&k("the tick's levy: against the threats over the war's length")),
+                q(&k("the tick's levy: for the suppression over the war's length")),
+                q(&k("the tick's levy: its utility now")),
+                q(&k("the war's length charged, ticks"))
+            );
+            eprintln!(
+                "{label}, {key}: of the levies on offer — the tick's levy above nothing now {}, by variant 1 {}; the best levy above nothing now {}, by variant 1 {}; the threats add to the tick's levy in {}, take from it in {}; the suppression adds in {}",
+                d.share(&k("the tick's levy above nothing now"), &offered),
+                d.share(&k("the tick's levy above nothing by variant 1"), &offered),
+                d.share(&k("the best levy above nothing now"), &offered),
+                d.share(&k("the best levy above nothing by variant 1"), &offered),
+                d.share(&k("the threats add something to the tick's levy"), &offered),
+                d.share(&k("the threats take something from the tick's levy"), &offered),
+                d.share(&k("the suppression adds something to the tick's levy"), &offered)
+            );
+        }
+    }
+}
