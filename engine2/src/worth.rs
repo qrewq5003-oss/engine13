@@ -1184,7 +1184,16 @@ impl World {
     /// wars opened, one or two in a hundred cross such a relation). The relation of a pair is
     /// anyone's to see.
     pub fn threat_rate(&self, t: ActorId, a: ActorId, params: &Params) -> ThreatRate {
-        if !self.borders(t, a) || self.war_wins_nothing(t, a, params) {
+        if self.war_wins_nothing(t, a, params) {
+            return ThreatRate { touches: false, rate: 0.0, against: Vec::new() };
+        }
+        self.threat_rate_below(t, a, params)
+    }
+
+    /// `threat_rate` of `t` on `a` as it would be with the pair's relation under the threshold
+    /// — the threat a bond that holds them at the threshold stands against (`match_peace`).
+    fn threat_rate_below(&self, t: ActorId, a: ActorId, params: &Params) -> ThreatRate {
+        if !self.borders(t, a) {
             return ThreatRate { touches: false, rate: 0.0, against: Vec::new() };
         }
         let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, if x == a { 0.0 } else { self.odds_it_would_fall_on(t, x, params) })).collect();
@@ -1491,6 +1500,41 @@ impl World {
         self.yearly_income(mine, params) as f64 * Self::throne_share(params) / self.house_income(h, params)
     }
 
+    /// **What a match is worth of its own** to house `h` ruling `mine`, with a house `g` of
+    /// `theirs`, in years of `h`'s income (stage 7, plan §31.38, decision № 13): where the
+    /// marriage lifts the norm of the pair's relation to the threshold of the treaties it
+    /// holds them there while the couple lives, and a neighbour at the threshold brings no
+    /// war (`threat_rate`) — so the match takes the neighbour's threat off the polity for its
+    /// term: the wars `theirs` would bring on `mine` a tick with the relation under the
+    /// threshold (`threat_rate_below`) times what such a war loses it — the same price of the
+    /// threat the army reads (`threats`, `war_worth_of`) — over the years the pair may expect
+    /// together within the horizon (`expected_years` of the two who would marry), at the
+    /// throne's seat as the bond is (`bond_share_as`). Nothing between polities that do not
+    /// touch or are at war, where the norm with the marriage stays under the threshold, for a
+    /// house that does not rule, or where the neighbour's war would be no loss.
+    pub fn match_peace(&self, h: HouseId, g: HouseId, params: &Params) -> f64 {
+        let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
+        self.match_peace_as(h, g, self.married_across(mine, theirs), params)
+    }
+
+    /// `match_peace` with whether a marriage binds the two polities read already.
+    pub(crate) fn match_peace_as(&self, h: HouseId, g: HouseId, married: bool, params: &Params) -> f64 {
+        let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
+        let share = self.bond_share_as(h, mine, theirs, married, params);
+        if share <= 0.0 || !self.borders(mine, theirs) || self.at_war(mine, theirs) {
+            return 0.0;
+        }
+        let (Some(p), Some(q)) = (self.unmarried_adult(h, params), self.unmarried_adult(g, params)) else { return 0.0 };
+        let ticks = 2.0 * self.expected_years(p, params).min(self.expected_years(q, params));
+        let blow = self.ceded_province_blow(mine, &self.risk_prices(mine, params), params);
+        let own = self.own_money(mine, params);
+        let terms = self.war_terms_on(mine, theirs, blow, Some(&own), self.threat_sides_strength(mine, theirs), self.threat_ticks(mine, theirs, params), params);
+        let unpaid = self.paid_share_seen_ppm(mine) < 1_000_000;
+        let wars = Self::wars_a_tick_in(&self.threat_rate_below(theirs, mine, params), mine, terms.odds(0.0, params));
+        let loss = (-self.war_worth_of(mine, &terms, unpaid, 0.0, params)).max(0.0);
+        share * wars * loss * ticks
+    }
+
     /// What offering a match is worth to house `h` with the `bond` it brings read already:
     /// the bond less the dowry it would pay (`proposal_worth_as`).
     pub(crate) fn proposal_worth_of_bond(&self, h: HouseId, bond: f64, params: &Params) -> f64 {
@@ -1502,7 +1546,7 @@ impl World {
     /// `g` does not see) and the bond.
     pub fn marriage_worth(&self, g: HouseId, from: HouseId, dowry_kg: i64, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
-        dowry_kg as f64 / self.house_income(g, params) + self.bond(g, mine, theirs, params)
+        dowry_kg as f64 / self.house_income(g, params) + self.bond(g, mine, theirs, params) + self.match_peace(g, from, params)
     }
 
     /// What offering a match to house `g` is worth to house `h`, in years of `h`'s income:
@@ -1516,6 +1560,6 @@ impl World {
     /// (`married_to`).
     pub(crate) fn proposal_worth_as(&self, h: HouseId, g: HouseId, married: bool, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
-        self.proposal_worth_of_bond(h, self.bond_as(h, mine, theirs, married, params), params)
+        self.proposal_worth_of_bond(h, self.bond_as(h, mine, theirs, married, params) + self.match_peace_as(h, g, married, params), params)
     }
 }

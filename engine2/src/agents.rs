@@ -1006,7 +1006,7 @@ impl World {
                 if mine == a {
                     let share = self.bond_share_as(h, mine, theirs, married, params);
                     let bond = if share > 0.0 { share * self.alliance_worth_in(a, theirs, ctx, params) } else { 0.0 };
-                    self.proposal_worth_of_bond(h, bond, params)
+                    self.proposal_worth_of_bond(h, bond + self.match_peace_as(h, g, married, params), params)
                 } else {
                     self.proposal_worth_as(h, g, married, params)
                 }

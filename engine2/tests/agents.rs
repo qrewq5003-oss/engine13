@@ -2132,6 +2132,84 @@ fn a_neighbour_at_the_threshold_of_the_relation_brings_no_war_and_its_wars_fall_
     assert!(all.actors.keys().all(|x| *x == s1 || all.wars_a_tick_from(s1, *x, 0.0, &p) == 0.0));
 }
 
+/// Stage 7, step 2 (plan §31.38, decision № 13): **a match has a worth of its own** — where the
+/// marriage lifts the norm of the pair's relation to the threshold of the treaties it holds
+/// them there while the couple lives, and a neighbour at the threshold brings no war: the
+/// match takes that neighbour's threat off the polity for its term. The test world: `s1` a
+/// vassal of `s0` (the norm of neighbours, 40, with the vassalage 50, with a marriage 65), `s0`
+/// with wars on its record.
+#[test]
+fn a_match_that_holds_a_neighbour_at_the_threshold_is_worth_its_threat_for_the_couples_years() {
+    let p = params();
+    let (s0, s1, s3) = (ActorId(0), ActorId(1), ActorId(3));
+    let base = {
+        let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+        w.actors.get_mut(&s0).unwrap().wars_entered = 4;
+        w
+    };
+    let (h0, h1, h3) = (base.ruling_house(s0), base.ruling_house(s1), base.ruling_house(s3));
+    // Plain neighbours: the norm with a marriage stays under the threshold — the match holds
+    // nobody there and is worth nothing of its own.
+    assert!(base.relation_norm(s0, s1, &p) + p.relation_norm_marriage < p.treaty_accept_at_relation);
+    assert_eq!(base.match_peace(h1, h0, &p), 0.0, "a marriage that does not reach the threshold stands against no war");
+    // The lord and its vassal: the marriage lifts their norm to the threshold.
+    let mut w = base.clone();
+    w.make_vassal(s1, s0).unwrap();
+    let norm = w.relation_norm(s0, s1, &p);
+    assert!(norm < p.treaty_accept_at_relation && norm + p.relation_norm_marriage >= p.treaty_accept_at_relation, "the norm {norm}");
+    let peace = w.match_peace(h1, h0, &p);
+    assert!(peace > 0.0, "the match takes the lord's threat off the vassal: {peace}");
+    // It is the threat with the relation under the threshold that the match stands against:
+    // at the threshold now (where the rule lets the match be offered) the threat reads as
+    // nothing (step 1), and the match is worth what it was.
+    let mut offered = w.clone();
+    offered.relations.insert((s0, s1), 100.0);
+    assert_eq!(offered.wars_a_tick_from(s0, s1, 0.0, &p), 0.0);
+    assert!((offered.match_peace(h1, h0, &p) - peace).abs() < 1e-9, "the same threat, read with the relation under the threshold");
+    // For the couple's years: an older bride or groom — a shorter term, a smaller worth.
+    // Either of the two: the term is the years they may expect together.
+    for house in [h0, h1] {
+        let mut old = w.clone();
+        let spouse = old.unmarried_adult(house, &p).unwrap();
+        old.persons.get_mut(&spouse).unwrap().born -= 30;
+        let shorter = old.match_peace(h1, h0, &p);
+        assert!(shorter > 0.0 && shorter < peace, "fewer years together, less of the threat taken off: {shorter} against {peace}");
+    }
+    // Nothing: with no wars on the neighbour's record; from the side of the house whose
+    // polity the other does not threaten; for a house that does not rule; between polities
+    // that do not touch; at war; and once a marriage binds the two already.
+    let mut quiet = w.clone();
+    quiet.actors.get_mut(&s0).unwrap().wars_entered = 0;
+    assert_eq!(quiet.match_peace(h1, h0, &p), 0.0, "a neighbour that brings no war");
+    assert_eq!(w.match_peace(h0, h1, &p), 0.0, "the vassal has no wars on its record: no threat to the lord");
+    let other = *w.houses.iter().find(|(h, x)| x.polity == s0 && **h != h0).expect("the test world's second house of state 0").0;
+    assert_eq!(w.match_peace(other, h1, &p), 0.0, "a house that does not rule holds no polity at the threshold");
+    assert!(!w.borders(s1, s3) || w.match_peace(h1, h3, &p) == 0.0);
+    // At war the norm of the pair is far under the threshold as it is; the match stands
+    // against no open war even where a world's numbers would leave the norm in reach.
+    let mut war = w.clone();
+    war.declare_war(s0, s1).unwrap();
+    assert_eq!(war.match_peace(h1, h0, &p), 0.0, "at war");
+    let mut mild = p.clone();
+    mild.relation_norm_war = 0.0;
+    assert!(war.relation_norm(s0, s1, &mild) + mild.relation_norm_marriage >= mild.treaty_accept_at_relation);
+    assert_eq!(war.match_peace(h1, h0, &mild), 0.0, "at war, whatever the norm");
+    let mut wed = w.clone();
+    wed.marry_now(wed.unmarried_adult(h0, &p).unwrap(), wed.unmarried_adult(h1, &p).unwrap());
+    assert!(wed.married_across(s0, s1));
+    assert_eq!(wed.match_peace(h1, h0, &p), 0.0, "bound by a marriage already");
+    // Both valuations of a match carry it: the offer's worth (less the dowry) and the worth
+    // to the house that answers (with the dowry) — each from its own side.
+    let income = w.house_income_per_year(h1, &p).max(1) as f64;
+    let bond = w.marriage_worth(h1, h0, 0, &p) - peace;
+    assert!((w.proposal_worth(h1, h0, &p) - (bond + peace - w.dowry(h1, &p) as f64 / income)).abs() < 1e-9, "the offer: the bond and the peace less the dowry");
+    assert!(w.marriage_worth(h1, h0, 0, &p) >= peace, "the answer: the peace is in it");
+    // And the ruler's choice reads the same worth of the offer.
+    let offer = VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(h0) };
+    assert!((w.utility(s1, &offer, &p) - w.proposal_worth(h1, h0, &p)).abs() < 1e-9, "the bot's utility of the offer is the offer's worth");
+    assert!((base.marriage_worth(h1, h0, 0, &p) - (w.marriage_worth(h1, h0, 0, &p) - peace)).abs() < 1e-9 || base.marriage_worth(h1, h0, 0, &p) == 0.0, "without the threshold in reach the match is worth its bond alone");
+}
+
 /// E3, stage 5, decision № 12 (plan §31.35): the offering side reads the receiver's answer **as
 /// anyone can** — the receiver's side of the alliance on what a player would see of it, and
 /// nothing of its goals, its treasury, its missed pay, its orders — and an alliance the other
