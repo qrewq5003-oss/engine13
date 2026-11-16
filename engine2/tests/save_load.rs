@@ -1,5 +1,6 @@
 //! Acceptance of E1a (plan §4): a run interrupted by save → load continues bit for bit.
 
+use engine2::world::Land;
 use engine2::{from_save, testworld, to_save, Params};
 
 #[test]
@@ -43,4 +44,29 @@ fn save_is_json_with_a_format_number_and_floats_round_trip() {
     assert!(s.starts_with(&format!("{{\"format\":{},", engine2::SAVE_FORMAT)));
     let back = from_save(&s).unwrap();
     assert_eq!(back.actors[&engine2::ActorId(0)].legitimacy.to_bits(), (0.1f64 + 0.2).to_bits());
+}
+
+/// A save of format 24 written **before** the land's change (plan §31.33, decision № 7): the
+/// generated world of seed 1 after 50 ticks, saved by the engine with four lands and the
+/// arable at 40 (commit 50cdc6d). A new land in the closed list is an addition, not a change
+/// of the world's shape: the format number stays, and this save must load. When the format
+/// number is next raised, this file goes with the format it is of.
+const SAVE_BEFORE_THE_LAND_CHANGE: &str = include_str!("data/save_24_before_the_land_change.json");
+
+#[test]
+fn a_save_written_before_the_lands_change_loads_and_goes_on() {
+    let params = Params::load().unwrap();
+    let mut w = from_save(SAVE_BEFORE_THE_LAND_CHANGE).expect("a save of format 24 written before the land's change loads");
+    // Nothing is lost or defaulted on the way: the loaded world saves as the file reads.
+    assert_eq!(to_save(&w).unwrap(), SAVE_BEFORE_THE_LAND_CHANGE);
+    // The capacity of a province is derived once, when the world is made, and travels in the
+    // save: an old save goes on with the capacities written into it — the arable at 40 —
+    // not with the file's 50. What is read from the parameters every tick is the file's.
+    let arable: Vec<_> = w.provinces.values().filter(|p| p.land == Land::Arable).collect();
+    assert!(!arable.is_empty());
+    assert!(arable.iter().all(|p| p.capacity == p.area_km2 * 40), "an old save keeps the capacities written into it");
+    assert!(arable.iter().all(|p| p.capacity < params.capacity(p.area_km2, Land::Arable)));
+    for _ in 0..50 {
+        w.tick(&params).unwrap();
+    }
 }

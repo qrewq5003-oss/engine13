@@ -932,8 +932,10 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the union-aspiration version of the generator (E3 (в), owner's rule on #293;
-    /// before: the regions-and-aspirations version of E3 (а), the governors version of E2
+    /// Pinned on the arable-50 version of the generator (the land's change of plan §30.7: the
+    /// people of every arable province are a share of a capacity a quarter larger; before: the
+    /// union-aspiration version of E3 (в), owner's rule on #293;
+    /// before that: the regions-and-aspirations version of E3 (а), the governors version of E2
     /// step 9, the houses version of step 6a, the sea-links version of step 2). If this changes, every seed
     /// plays a different world and "fails on seed N" stops reproducing: bump it only with a
     /// deliberate change of the generator, never with a dependency update.
@@ -943,7 +945,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 8_417_907_754_458_249_782;
+    const PINNED_WORLD_ONE: u64 = 10_674_552_433_772_278_063;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

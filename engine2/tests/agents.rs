@@ -1203,14 +1203,21 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let a11_war_band = band("army.observed_share_at_war");
     eprintln!("А11 at war {a11_war:.4} (the file's band {a11_war_band:?} in war)");
     assert!((a11_war_band[0]..=a11_war_band[1]).contains(&a11_war), "А11 at war {a11_war:.4} outside {a11_war_band:?}");
-    // А13 on the bots' battles (E3 (д3), plan §30.3, §31.31): the band derived from the source
-    // (Rotte & Schmidt) is the assertion; the battle's exponent was calibrated on the scripted
-    // wars of `tests/army.rs` and is checked here on the battles the agents choose to fight.
-    // Outside the band the exponent is recalibrated by the one way of plan §31.31, decision
-    // № 6 — not by picking a value that pleases.
+    // А13 on the bots' battles (E3 (д3), plan §30.3, §31.31) — **printed as a known
+    // deviation, not asserted** (owner's decision 2026-11-16, plan §31.33). It was asserted
+    // against the band derived from the source (Rotte & Schmidt) for one stage: the land's
+    // change, which touches no battle, took it out of the band on these seeds (0,814), and
+    // the sweep showed why an assertion on twenty worlds cannot stand — the measure answers
+    // to the exponent less than it moves between states of the code (up to 0,04 between
+    // neighbouring points of the sweep), the window of the exponent is ragged, and the band's
+    // edge lies within one spread of the mean. What А13 on the bots should read — battles of
+    // comparable strengths, and over how many worlds — is for the report closing E3. The way
+    // of recalibration (decision № 6) stays recorded for the day the assertion returns.
     let a13_band = band("battle.observed_win_share_of_the_stronger");
-    eprintln!("А13 on the bots' battles {a13:.3} (the file's band {a13_band:?})");
-    assert!((a13_band[0]..=a13_band[1]).contains(&a13), "А13 on the bots' battles {a13:.3} outside {a13_band:?}: plan §31.31, decision № 6");
+    eprintln!(
+        "А13 on the bots' battles {a13:.3} (the file's band {a13_band:?}){} — printed, a known deviation: plan §31.33",
+        if (a13_band[0]..=a13_band[1]).contains(&a13) { "" } else { " OUTSIDE" }
+    );
     // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals, and the
     // battles behind А13 — printed, no bands (rule 1 of §24.1: no source gives one).
     for line in war_lines {
