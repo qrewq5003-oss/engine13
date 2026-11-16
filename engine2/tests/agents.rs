@@ -2542,12 +2542,15 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
         let units = |strength: f64| f64::from(u8::from(strength > 0.0));
         let now = w.army_strength(s0);
         let suppression = (units(now + extra) - units(now)) * w.suppression_a_tick(s0, &p);
+        // (д2): the province a revolt standing now would take with it — the first unit's, once.
+        let at_once = (units(now + extra) - units(now)) * w.suppression_at_once(s0, &p);
         let threatening: Vec<ActorId> = threats.iter().map(|(t, _)| *t).collect();
-        (in_its_wars, against_threats, suppression, kept, w.heads_cost(s0, men, kept, &p), threatening)
+        (in_its_wars, against_threats, suppression, at_once, kept, w.heads_cost(s0, men, kept, &p), threatening)
     };
     // Free money: the pay of the levy costs nothing, at peace and for the war's length.
     assert!(w.free_money(s0, &p) > 0.0 && !(w.paid_share_seen_ppm(s0) < 1_000_000));
-    let (in_its_wars, against_threats, suppression, kept, heads, threatening) = parts(&w);
+    let (in_its_wars, against_threats, suppression, at_once, kept, heads, threatening) = parts(&w);
+    assert_eq!(at_once, 0.0, "no revolt stands: nothing to keep at once");
     assert!(kept > 1.0, "a war longer than a tick: {kept}");
     assert!(!threatening.is_empty() && !threatening.contains(&s1), "the neighbours it does not fight, the enemy of its war not among them: {threatening:?}");
     assert!(threatening.iter().all(|t| !w.at_war(s0, *t) && w.borders(s0, *t)));
@@ -2570,11 +2573,18 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
     }
     bare.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(bare.tick);
     assert_eq!(bare.army_strength(s0), 0.0);
-    let (in_its_wars, against_threats, suppression, kept, heads, _) = parts(&bare);
+    let (in_its_wars, against_threats, suppression, at_once, kept, heads, _) = parts(&bare);
     assert!(suppression > 0.0, "a rising in its land and no unit: the first unit puts it down, {suppression}");
+    // (д2): the revolt left standing its term would take the province — the first unit keeps
+    // it, **once**: its take over the horizon is no tick's worth and is not multiplied by the
+    // war's length.
+    let province = bare.take_of(s0, at(0, 3), &p) * f64::from(p.goal_horizon_ticks) / 2.0 / bare.yearly_income(s0, &p).max(1) as f64;
+    assert_eq!(at_once, province, "a unit raised now comes in time: the province, {at_once}");
     let utility = bare.utility(s0, &levy, &p);
-    assert!((utility - (in_its_wars + (against_threats + suppression) * kept - heads)).abs() < 1e-9, "the first unit at war: its wars {in_its_wars}, the threats {against_threats} and the suppression {suppression} a tick over {kept} ticks, the heads {heads}; utility {utility}");
-    assert!((utility - (in_its_wars + against_threats * kept - heads)).abs() > 1e-6, "the suppression is in it");
+    assert!((utility - (in_its_wars + (against_threats + suppression) * kept + at_once - heads)).abs() < 1e-9, "the first unit at war: its wars {in_its_wars}, the threats {against_threats} and the suppression {suppression} a tick over {kept} ticks, the province {at_once} once, the heads {heads}; utility {utility}");
+    assert!((utility - (in_its_wars + (against_threats + suppression + at_once) * kept - heads)).abs() > 1e-6, "the province is counted once, not for every tick of the war");
+    assert!((utility - (in_its_wars + (against_threats + suppression) * kept - heads)).abs() > 1e-6, "and it is in the worth");
+    assert!((utility - (in_its_wars + against_threats * kept + at_once - heads)).abs() > 1e-6, "the suppression of a tick is in it too");
     // At peace the levy is worth the tick it was: the threats and the suppression of a tick.
     let mut peace = world_of(&testworld::five_states_scenario(), 51);
     for x in peace.actors.values_mut() {
@@ -2593,6 +2603,27 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
         })
         .sum();
     assert_eq!(peace.utility(s0, &levy, &p), a_tick - peace.heads_cost(s0, men, 1.0, &p), "at peace: a tick of the threats less the heads, bit for bit");
+    // At peace too the province comes once, whole, into the decision of the tick: a polity
+    // with no unit and a revolt standing.
+    let mine: Vec<engine2::UnitId> = peace.units_of(s0);
+    for u in mine {
+        peace.apply_verb(&VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
+    }
+    peace.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(peace.tick);
+    let (men, income) = (peace.recruit_per_tick(s0, &p), peace.yearly_income(s0, &p).max(1) as f64);
+    let extra = World::new_soldiers_strength(men);
+    let blow = peace.ceded_province_blow(s0, &peace.risk_prices(s0, &p), &p);
+    let a_tick: f64 = peace
+        .threats(s0, blow, &p)
+        .iter()
+        .map(|(t, terms)| {
+            let expected = |extra: f64| World::wars_a_tick_in(&peace.threat_rate(*t, s0, &p), s0, terms.odds(extra, &p)) * peace.war_worth_of(s0, terms, false, extra, &p);
+            expected(extra) - expected(0.0)
+        })
+        .sum();
+    let province = peace.take_of(s0, at(0, 3), &p) * f64::from(p.goal_horizon_ticks) / 2.0 / income;
+    assert_eq!(peace.suppression_at_once(s0, &p), province);
+    assert!((peace.utility(s0, &levy, &p) - (a_tick + peace.suppression_a_tick(s0, &p) + province - peace.heads_cost(s0, men, 1.0, &p))).abs() < 1e-9, "at peace the first unit: a tick of the threats and of the suppression, and the province once");
 }
 
 /// **The bot reads that a revolt left standing its term costs the province** ((д2), plan
@@ -2600,7 +2631,8 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
 /// for `siege.capital_ticks` (`tests/collapse.rs`), and the bot weighs a revolt by the same
 /// rule in both places it weighs one — what a unit sent to it at war saves
 /// (`revolt_put_down_worth`, read by `bot_orders`) and what the first unit is worth
-/// (`suppression_a_tick`, read by the levy at peace and at war). In time, the unit keeps the
+/// (`suppression_at_once`, read by the levy at peace and at war — once, beside the flow of
+/// `suppression_a_tick`, which is a tick's worth as before). In time, the unit keeps the
 /// province — its take over the horizon; too late, nothing; while waiting is in time too, the
 /// ticks of the take as before the rule.
 #[test]
@@ -2632,13 +2664,16 @@ fn the_bot_reads_that_a_revolt_left_standing_its_term_costs_the_province() {
         assert_eq!(w.revolt_put_down_worth(s0, q, left + 1.0, left + 2.0, &p), 0.0, "turn {age}: a unit that cannot come in time saves nothing");
         // The first unit: raised now it marches from the next turn — in time while a turn of
         // the term is to spare, and then worth the province; in the last turn, nothing.
+        // The flow is what it was before the rule: a tick of the take of the revolt, and of
+        // the risings to come. The province comes besides, once (`suppression_at_once`).
         let others: f64 = w.actors[&s0].provinces.iter().filter(|x| **x != q).map(|x| w.revolt_chance_per_tick(*x, &p) * w.take_of(s0, *x, &p) / 2.0).sum();
-        let first = w.suppression_a_tick(s0, &p);
+        assert!((w.suppression_a_tick(s0, &p) - (take / 2.0 + others) / income).abs() < 1e-12, "turn {age}: the flow of a tick");
+        let once = w.suppression_at_once(s0, &p);
         if march < left {
-            assert!((first - (take * years + others) / income).abs() < 1e-12, "turn {age}: the first unit keeps the province: {first}");
+            assert_eq!(once, take * years / income, "turn {age}: the first unit keeps the province");
         } else {
             assert_eq!(age, term, "only in the turn of the term is a unit raised now too late");
-            assert!((first - others / income).abs() < 1e-12, "turn {age}: a unit raised now is too late: {first}");
+            assert_eq!(once, 0.0, "turn {age}: a unit raised now is too late");
         }
         if age < term {
             w.tick(&calm).unwrap();

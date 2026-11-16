@@ -1174,24 +1174,34 @@ impl World {
     /// (`revolt_chance_per_tick`, the hazard of the marks and the legitimacy). Nothing where
     /// there is no unit to send; the same for one unit and for ten.
     ///
-    /// **A revolt standing now threatens the province, not a tick of its take** ((д2), plan
-    /// §30.3, §31.27): left to stand its term it secedes (`revolt_turns_left`), and with no
-    /// unit in being nothing else puts it down. A unit raised now marches from the next turn
-    /// (`revolt_march_ticks` from the capital); in time, it keeps the province — its take over
-    /// the horizon; too late, or with no way there, it keeps nothing. A rising still to come
-    /// is a tick of the take as before: a unit can be raised when it comes.
+    /// This is the flow, a tick's worth. What a revolt standing now threatens besides — the
+    /// province itself ((д2)) — is no flow: `suppression_at_once`.
     pub fn suppression_a_tick(&self, a: ActorId, params: &Params) -> f64 {
         let income = self.yearly_income(a, params).max(1) as f64;
-        let years = f64::from(params.goal_horizon_ticks) / 2.0;
         let a_tick = |q: ProvinceId| self.take_of(a, q, params) / 2.0;
+        let withheld: f64 = self.actors[&a].provinces.iter().map(|q| if self.in_revolt(*q) { a_tick(*q) } else { self.revolt_chance_per_tick(*q, params) * a_tick(*q) }).sum();
+        withheld / income
+    }
+
+    /// **What the first unit of `a` keeps at once**, in years of its income ((д2), plan §30.3,
+    /// §31.27): a revolt standing now, left to stand its term, secedes
+    /// (`revolt_turns_left`), and with no unit in being nothing else puts it down. A unit
+    /// raised now marches from the next turn (`revolt_march_ticks` from the capital); in
+    /// time, it keeps the province — its take over the horizon; too late, or with no way
+    /// there, nothing. **Not a tick's worth**: it comes once, whatever the ticks a soldier is
+    /// kept for — at war it is not multiplied by the war's length (`agents::strength_gain`).
+    /// A rising still to come is in the flow (`suppression_a_tick`): a unit can be raised
+    /// when it comes.
+    pub fn suppression_at_once(&self, a: ActorId, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let years = f64::from(params.goal_horizon_ticks) / 2.0;
         let capital = self.actors[&a].capital;
         let kept = |q: ProvinceId| match (self.revolt_turns_left(q, params), self.revolt_march_ticks(a, capital, q, params)) {
             // Raised this turn, on its march from the next: one turn of the term is gone.
             (Some(left), Some(march)) if march < left => self.take_of(a, q, params) * years,
             _ => 0.0,
         };
-        let withheld: f64 = self.actors[&a].provinces.iter().map(|q| if self.in_revolt(*q) { kept(*q) } else { self.revolt_chance_per_tick(*q, params) * a_tick(*q) }).sum();
-        withheld / income
+        self.actors[&a].provinces.iter().map(|q| kept(*q)).sum::<f64>() / income
     }
 
     /// What a unit of `a` sent now to the revolt of `r` saves, kg, when it comes to stand
