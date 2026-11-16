@@ -1519,6 +1519,13 @@ impl World {
 
     /// `match_peace` with whether a marriage binds the two polities read already.
     pub(crate) fn match_peace_as(&self, h: HouseId, g: HouseId, married: bool, params: &Params) -> f64 {
+        self.match_peace_read(h, g, married, false, params)
+    }
+
+    /// `match_peace` of house `h` **as anyone reads it** (`seen`: plan §28.4 — nothing of the
+    /// polity's goals, its treasury, its count of the dead or the pay it missed; the terms of
+    /// `war_terms_on` with no money), or as the house itself reads it.
+    pub(crate) fn match_peace_read(&self, h: HouseId, g: HouseId, married: bool, seen: bool, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
         let share = self.bond_share_as(h, mine, theirs, married, params);
         if share <= 0.0 || !self.borders(mine, theirs) || self.at_war(mine, theirs) {
@@ -1527,18 +1534,39 @@ impl World {
         let (Some(p), Some(q)) = (self.unmarried_adult(h, params), self.unmarried_adult(g, params)) else { return 0.0 };
         let ticks = 2.0 * self.expected_years(p, params).min(self.expected_years(q, params));
         let blow = self.ceded_province_blow(mine, &self.risk_prices(mine, params), params);
-        let own = self.own_money(mine, params);
-        let terms = self.war_terms_on(mine, theirs, blow, Some(&own), self.threat_sides_strength(mine, theirs), self.threat_ticks(mine, theirs, params), params);
-        let unpaid = self.paid_share_seen_ppm(mine) < 1_000_000;
+        let own = (!seen).then(|| self.own_money(mine, params));
+        let terms = self.war_terms_on(mine, theirs, blow, own.as_ref(), self.threat_sides_strength(mine, theirs), self.threat_ticks(mine, theirs, params), params);
+        let unpaid = !seen && self.paid_share_seen_ppm(mine) < 1_000_000;
         let wars = Self::wars_a_tick_in(&self.threat_rate_below(theirs, mine, params), mine, terms.odds(0.0, params));
         let loss = (-self.war_worth_of(mine, &terms, unpaid, 0.0, params)).max(0.0);
         share * wars * loss * ticks
     }
 
+    /// Whether house `g` would take a match with house `h` — **as anyone reads it**, the
+    /// offering house's model of the answer (plan §31.40, decision № 15; the twin of
+    /// `alliance_worth_seen`): the answering house takes a match for what it brings the house
+    /// itself (`marriage_worth`) — the dowry where it is short of money, which nobody else
+    /// sees (another house's treasury is its own), and its own bond and peace, which anyone
+    /// can read: `g` rules its polity, the marriage lifts the pair's norm to the threshold,
+    /// and there the bond — the alliance at the throne's seat (`alliance`: what one is worth
+    /// to its polity, as anyone reads it, `alliance_worth_seen`) — and the peace together are
+    /// worth something to it, as the house itself adds them.
+    pub(crate) fn match_taken_seen(&self, g: HouseId, h: HouseId, married: bool, alliance: impl FnOnce() -> f64, params: &Params) -> bool {
+        let (theirs, mine) = (self.houses[&g].polity, self.houses[&h].polity);
+        let share = self.bond_share_as(g, theirs, mine, married, params);
+        share > 0.0 && share * alliance() + self.match_peace_read(g, h, married, true, params) > 0.0
+    }
+
     /// What offering a match is worth to house `h` with the `bond` it brings read already:
     /// the bond less the dowry it would pay (`proposal_worth_as`).
+    ///
+    /// **The dowry at the price of money** (stage 7, step 3, plan §31.40; plan §31.3 read for
+    /// a house): only the part of it the house's free money over the horizon does not cover
+    /// (`spending_price`, `house_free_money`) — a house's treasury grows with its seats and
+    /// has next to nothing to be spent on, and half of it priced at its face value made every
+    /// offer a loss of years of the house's income.
     pub(crate) fn proposal_worth_of_bond(&self, h: HouseId, bond: f64, params: &Params) -> f64 {
-        bond - self.dowry(h, params) as f64 / self.house_income(h, params)
+        bond - Self::spending_price(self.dowry(h, params) as f64, self.house_free_money(h, params), self.house_income(h, params))
     }
 
     /// What a match offered by house `from` is worth to house `g`, in years of `g`'s income:
@@ -1546,7 +1574,9 @@ impl World {
     /// `g` does not see) and the bond.
     pub fn marriage_worth(&self, g: HouseId, from: HouseId, dowry_kg: i64, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&g].polity, self.houses[&from].polity);
-        dowry_kg as f64 / self.house_income(g, params) + self.bond(g, mine, theirs, params) + self.match_peace(g, from, params)
+        // The dowry received at the price of money too (plan §31.40): worth to the house what
+        // of its shortage it closes, nothing where its money is free as it is.
+        Self::saving_worth(dowry_kg as f64, self.house_free_money(g, params), self.house_income(g, params)) + self.bond(g, mine, theirs, params) + self.match_peace(g, from, params)
     }
 
     /// What offering a match to house `g` is worth to house `h`, in years of `h`'s income:
@@ -1558,8 +1588,13 @@ impl World {
 
     /// `proposal_worth` with whether a marriage binds the two houses' polities read already
     /// (`married_to`).
+    ///
+    /// A match the other house would decline brings nothing (`match_taken_seen`): asked only
+    /// where the match is worth something to the offering house at all.
     pub(crate) fn proposal_worth_as(&self, h: HouseId, g: HouseId, married: bool, params: &Params) -> f64 {
         let (mine, theirs) = (self.houses[&h].polity, self.houses[&g].polity);
-        self.proposal_worth_of_bond(h, self.bond_as(h, mine, theirs, married, params) + self.match_peace_as(h, g, married, params), params)
+        let own = self.bond_as(h, mine, theirs, married, params) + self.match_peace_as(h, g, married, params);
+        let brings = if own > 0.0 && !self.match_taken_seen(g, h, married, || self.alliance_worth_seen(theirs, mine, params), params) { 0.0 } else { own };
+        self.proposal_worth_of_bond(h, brings, params)
     }
 }

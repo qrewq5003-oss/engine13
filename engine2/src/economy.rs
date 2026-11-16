@@ -324,6 +324,18 @@ impl World {
         2 * self.seat_incomes(a, income, rate, share, params).into_iter().filter(|(x, _)| *x == h).map(|(_, kg)| kg).sum::<i64>()
     }
 
+    /// **A house's free money over the horizon**, kg — the price of money of plan §31.3 read
+    /// for a house (stage 7, step 3, plan §31.40): what it holds and what its seats bring over
+    /// the horizon, less the pay of its own men at the rate of home (a house that does not
+    /// rule pays its retinue; no bank lends to a house, so it owes nothing). A spending within
+    /// it costs the house nothing it could put to another use (`World::spending_price`), and
+    /// money beyond it is worth nothing to the house (`World::saving_worth`). The house's own
+    /// state only.
+    pub fn house_free_money(&self, h: crate::ids::HouseId, params: &Params) -> f64 {
+        let pay: i64 = self.units.keys().filter(|u| self.house_pays(**u) == Some(h)).map(|u| pay_per_tick(self.soldiers(*u), params)).sum();
+        self.house_treasury(h) as f64 + (self.house_income_per_year(h, params) as f64 / 2.0 - pay as f64) * f64::from(params.goal_horizon_ticks)
+    }
+
     /// Borrow `amount` from the bank: the same figure on both accounts.
     fn borrow(&mut self, a: ActorId, amount: i64) -> Result<(), WorldError> {
         self.post(Account::Treasury(a), Source::Loan, amount * 1000)?;
