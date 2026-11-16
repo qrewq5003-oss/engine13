@@ -2595,6 +2595,83 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
     assert_eq!(peace.utility(s0, &levy, &p), a_tick - peace.heads_cost(s0, men, 1.0, &p), "at peace: a tick of the threats less the heads, bit for bit");
 }
 
+/// **The bot reads that a revolt left standing its term costs the province** ((д2), plan
+/// §30.3, §31.27.3 p. 2; owner's decision 2026-11-16): the world secedes a province in revolt
+/// for `siege.capital_ticks` (`tests/collapse.rs`), and the bot weighs a revolt by the same
+/// rule in both places it weighs one — what a unit sent to it at war saves
+/// (`revolt_put_down_worth`, read by `bot_orders`) and what the first unit is worth
+/// (`suppression_a_tick`, read by the levy at peace and at war). In time, the unit keeps the
+/// province — its take over the horizon; too late, nothing; while waiting is in time too, the
+/// ticks of the take as before the rule.
+#[test]
+fn the_bot_reads_that_a_revolt_left_standing_its_term_costs_the_province() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let q = at(0, 3);
+    let term = p.siege_capital_ticks;
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    // A revolt begun this turn, read as the turns pass with nobody coming.
+    let mut w = world_of(&testworld::five_states_scenario(), 53);
+    let mut calm = params();
+    calm.revolt_per_tick = 0.0;
+    assert_eq!(w.rise_now(q, &calm).unwrap(), None, "no house carries it: a revolt");
+    assert_eq!(w.revolt_turns_left(at(0, 2), &p), None, "a province at peace has no term");
+    let capital = w.actors[&s0].capital;
+    let march = w.revolt_march_ticks(s0, capital, q, &p).expect("a way from the capital");
+    assert_eq!(march, 1.0, "a turn's march on the test world");
+    for age in 0..=term {
+        let left = w.revolt_turns_left(q, &p).expect("in revolt");
+        assert_eq!(left, f64::from(term + 1 - age), "turn {age}: so many turns before it secedes, this one among them");
+        let (take, income) = (w.take_of(s0, q, &p), w.yearly_income(s0, &p).max(1) as f64);
+        assert!(take > 0.0);
+        // A unit in being, sent now, a turn's march away: it comes in time in every turn the
+        // revolt stands. Waiting past the term, it keeps the province; waiting within it, it
+        // saves the ticks of the take between; too far to come in time, nothing.
+        assert_eq!(w.revolt_put_down_worth(s0, q, 1.0, left + 1.0, &p), take * years, "turn {age}: waiting would be too late — the province");
+        assert_eq!(w.revolt_put_down_worth(s0, q, 1.0, left, &p), take * (left - 1.0) / 2.0, "turn {age}: waiting is in time too — the ticks of the take");
+        assert_eq!(w.revolt_put_down_worth(s0, q, left + 1.0, left + 2.0, &p), 0.0, "turn {age}: a unit that cannot come in time saves nothing");
+        // The first unit: raised now it marches from the next turn — in time while a turn of
+        // the term is to spare, and then worth the province; in the last turn, nothing.
+        let others: f64 = w.actors[&s0].provinces.iter().filter(|x| **x != q).map(|x| w.revolt_chance_per_tick(*x, &p) * w.take_of(s0, *x, &p) / 2.0).sum();
+        let first = w.suppression_a_tick(s0, &p);
+        if march < left {
+            assert!((first - (take * years + others) / income).abs() < 1e-12, "turn {age}: the first unit keeps the province: {first}");
+        } else {
+            assert_eq!(age, term, "only in the turn of the term is a unit raised now too late");
+            assert!((first - others / income).abs() < 1e-12, "turn {age}: a unit raised now is too late: {first}");
+        }
+        if age < term {
+            w.tick(&calm).unwrap();
+            assert!(w.in_revolt(q), "turn {age}: nobody came, it stands");
+        }
+    }
+    // The world keeps the word: the turn of the term secedes it.
+    w.tick(&calm).unwrap();
+    assert!(w.provinces[&q].owner != s0 && !w.in_revolt(q));
+    // **At war the bot sends the unit the front would have kept.** Polity 0 wants its
+    // neighbour subdued and marches on its capital — a war longer than the term; its one unit
+    // is worth more at the front than the ticks of a province's take, and less than the
+    // province.
+    let mut w = world_of(&testworld::five_states_scenario(), 53);
+    w.set_goal(s0, GoalKind::Subdue, GoalTarget::Polity(s1)).unwrap();
+    for u in w.units_of(s1) {
+        let men = w.soldiers(u);
+        w.post(engine2::Account::Soldiers(u), Source::Test, -men * 1000).unwrap();
+    }
+    w.declare_war(s0, s1).unwrap();
+    let unit = w.units_of(s0)[0];
+    let target = w.actors[&s1].capital;
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit, to: target }], "no revolt: the campaign");
+    w.provinces.get_mut(&q).unwrap().revolt = Some(w.tick);
+    let (income, take) = (w.yearly_income(s0, &p).max(1) as f64, w.take_of(s0, q, &p));
+    let at_the_front = w.war_worth(s0, s1, false, 0.0, &p) - w.war_worth(s0, s1, false, -w.unit_strength(unit), &p);
+    let stands = w.war_ticks(s0, s1, &p) + 1.0;
+    let left = w.revolt_turns_left(q, &p).unwrap();
+    assert!(stands > left, "the war outlasts the term: {stands} turns against {left}");
+    assert!(take * (stands - 1.0) / 2.0 / income < at_the_front && at_the_front < take * years / income, "the unit at the front {at_the_front}: more than the ticks of the take {}, less than the province {}", take * (stands - 1.0) / 2.0 / income, take * years / income);
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit, to: q }], "the revolt would stand its term: the unit goes to keep the province");
+}
+
 /// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
 /// chain of conquests covers all the polity's land, the loss is its whole income to the
 /// horizon, not the provinces' takes with their discounts; a polity with land beyond the chain

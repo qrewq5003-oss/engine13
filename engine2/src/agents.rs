@@ -557,7 +557,8 @@ impl World {
                 for (k, r) in revolts.iter().enumerate() {
                     if !manned[k] {
                         if let Some(now) = march(self.units[u].position, *r) {
-                            offer(self.take_of(a, *r, params) * (stands[k] - now).max(0.0) / 2.0 / income - *loss, threats.len() + k);
+                            let saved = self.revolt_put_down_worth(a, *r, now, stands[k], params);
+                            offer(saved / income - *loss, threats.len() + k);
                         }
                     }
                 }
