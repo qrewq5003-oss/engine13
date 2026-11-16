@@ -4193,3 +4193,217 @@ fn diagnosis_what_the_army_at_war_is_worth_beyond_its_wars() {
         }
     }
 }
+
+// ---- Probe: why a revolt stands (plan §31.27, step 0 of (д2)) ----
+
+/// Why a revolt of `p` is not put down this tick, read on the state the bots decide on: by
+/// what the owner has, where its units stand and go, what `bot_orders` sends now, and whether
+/// any unit its ruler commands has a way there (`World::path`).
+fn why_a_revolt_stands(w: &World, p: ProvinceId, params: &Params) -> (&'static str, Option<(engine2::UnitId, ProvinceId)>) {
+    let a = w.provinces[&p].owner;
+    if !w.alive(a) {
+        return ("the owner has fallen", None);
+    }
+    // A unit sent now, or ordered there before: what becomes of its march is read after the
+    // tick (`what_became_of_the_march`).
+    if let Some(sent) = w.bot_orders(a, params).into_iter().find(|o| o.to == p) {
+        return ("a unit is sent this tick", Some((sent.unit, w.units[&sent.unit].position)));
+    }
+    if let Some((u, unit)) = w.units.iter().find(|(u, unit)| w.commands(ActorRef::Ruler(a), **u) && unit.destination == Some(p) && unit.position != p) {
+        // The bot counts the revolt as kept by this unit and sends no other (`bot_orders`: «a
+        // revolt with a unit there or on its way keeps it»).
+        return ("a unit is ordered there (the bot sends no other)", Some((*u, unit.position)));
+    }
+    (why_no_unit_is_sent(w, p), None)
+}
+
+/// `why_a_revolt_stands` where no unit is sent to `p` this tick.
+fn why_no_unit_is_sent(w: &World, p: ProvinceId) -> &'static str {
+    let a = w.provinces[&p].owner;
+    if !w.alive(a) {
+        return "the owner has fallen";
+    }
+    let its: Vec<engine2::UnitId> = w.units_of(a);
+    let commanded: Vec<engine2::UnitId> = its.iter().copied().filter(|u| w.commands(ActorRef::Ruler(a), *u)).collect();
+    if its.is_empty() {
+        return "the owner has no unit at all";
+    }
+    if its.iter().any(|u| w.units[u].position == p) {
+        return "a unit of the owner stands in it (put down this tick)";
+    }
+    if commanded.is_empty() {
+        return "only its houses have units (the ruler commands none)";
+    }
+    let way = |u: &engine2::UnitId| w.path(a, w.units[u].position, p).is_some();
+    let at_war = w.actors.keys().any(|b| w.at_war(a, *b) && w.alive(*b));
+    if commanded.iter().any(way) {
+        return if at_war { "at war: a unit has a way, none is sent (the front or the defence keeps them)" } else { "at peace: a unit has a way, none is sent" };
+    }
+    // No unit has a way. Is the province joined to any of them by the map at all, were
+    // every land open to the march?
+    let mut seen: std::collections::BTreeSet<ProvinceId> = commanded.iter().map(|u| w.units[u].position).collect();
+    let mut queue: Vec<ProvinceId> = seen.iter().copied().collect();
+    while let Some(c) = queue.pop() {
+        let pr = &w.provinces[&c];
+        for n in pr.neighbours.iter().chain(pr.sea_neighbours.iter()).copied() {
+            if seen.insert(n) {
+                queue.push(n);
+            }
+        }
+    }
+    match (seen.contains(&p), at_war) {
+        (true, true) => "at war: no unit has a way — the way lies through land it may not enter",
+        (true, false) => "at peace: no unit has a way — the way lies through land it may not enter",
+        (false, _) => "no unit has a way — the map joins them by no way at all",
+    }
+}
+
+/// What became within the tick of the march of `unit`, sent or ordered to the revolt of `p`
+/// from `before`, read after the tick: a unit engaged where it stands does not march
+/// (`phase_movement`: the battle or the siege comes first) — and a foreign unit that comes
+/// upon it earlier in the same phase engages it.
+fn what_became_of_the_march(w: &World, events: &[engine2::Stamped], unit: engine2::UnitId, before: ProvinceId, p: ProvinceId) -> &'static str {
+    let Some(u) = w.units.get(&unit) else { return "is gone within the tick" };
+    if u.position == p {
+        return "comes to stand in it (put down this tick)";
+    }
+    if events.iter().any(|e| matches!(e.event, Event::NoPath { unit: x, to } if x == unit && to == p)) {
+        return "finds no way at the march (the order is dropped)";
+    }
+    // Beaten in a battle of the tick — on its way through an enemy's land, or where it stood:
+    // it falls back to the nearest land of its own and the order is lost (`World::retreat`).
+    if events.iter().any(|e| matches!(e.event, Event::Retreat { unit: x, .. } if x == unit)) {
+        return "is beaten in a battle of the tick and falls back, the order lost";
+    }
+    if u.destination != Some(p) {
+        return "has its order dropped (refused at application, or replaced)";
+    }
+    if u.position != before {
+        return if w.contact(u.owner, u.position) { "marches and is stopped on its way by contact with an enemy" } else { "marches and has not come yet" };
+    }
+    // It stands where it stood, the order in force.
+    let came_upon = events.iter().any(|e| matches!(e.event, Event::UnitMoved { unit: x, to, .. } if to == before && w.units.get(&x).is_none_or(|other| other.owner != u.owner)));
+    if came_upon {
+        "does not move: a foreign unit came upon it this tick and engaged it before its march"
+    } else if w.contact(u.owner, before) {
+        "does not move: engaged where it stands (a battle or a siege)"
+    } else {
+        "does not move, the cause unread"
+    }
+}
+
+/// One seed of `diagnosis_why_a_revolt_stands`: every revolt by its province and the tick it
+/// began, the ticks it was seen standing, and for those seen four ticks and longer (the term
+/// of (д2), `siege.capital_ticks`) why it stood — at its fourth tick and over all its ticks
+/// from the fourth on. The lines name each of the long revolts.
+fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let term = p.siege_capital_ticks;
+    // (province, the tick it began) → (ticks seen, owner, the cause at the term, the causes from the term on, a house to carry it at the term)
+    type Seen = (u32, ActorId, Option<String>, BTreeMap<String, u32>, bool);
+    let mut revolts: BTreeMap<(ProvinceId, u32), Seen> = BTreeMap::new();
+    let mut standing: std::collections::BTreeSet<(ProvinceId, u32)> = std::collections::BTreeSet::new();
+    for _ in 0..300 {
+        let w = g.world();
+        standing = w.provinces.iter().filter_map(|(q, pr)| pr.revolt.map(|t| (*q, t.0))).collect();
+        // The causes of the tick, those of a unit sent now resolved after it.
+        let mut read: Vec<((ProvinceId, u32), &'static str, Option<(engine2::UnitId, ProvinceId)>)> = Vec::new();
+        for key in &standing {
+            let q = key.0;
+            let e = revolts.entry(*key).or_insert((0, w.provinces[&q].owner, None, BTreeMap::new(), false));
+            e.0 += 1;
+            if e.0 >= term {
+                let (why, sent) = why_a_revolt_stands(w, q, p);
+                read.push((*key, why, sent));
+                if e.0 == term {
+                    e.4 = w.secession_carrier(q).is_some();
+                }
+            }
+        }
+        let r = g.tick(&[]).unwrap();
+        for (key, why, sent) in read {
+            let why = match sent {
+                Some((unit, before)) => format!("{why} — it {}", what_became_of_the_march(g.world(), &r.events, unit, before, key.0)),
+                None => why.to_string(),
+            };
+            let e = revolts.get_mut(&key).expect("a revolt read this tick");
+            *e.3.entry(why.clone()).or_insert(0) += 1;
+            if e.0 == term {
+                e.2 = Some(why);
+            }
+        }
+    }
+    let mut lines = Vec::new();
+    for ((q, began), (seen, owner, at_term, causes, carrier)) in &revolts {
+        d.count("revolts", 1);
+        d.sample("revolt length, ticks", f64::from(*seen));
+        let Some(at_term) = at_term else { continue };
+        let at_end = standing.contains(&(*q, *began));
+        let (most, _) = causes.iter().max_by_key(|(k, n)| (**n, std::cmp::Reverse((*k).clone()))).expect("a cause from the term on");
+        d.count("long revolts", 1);
+        d.count("long revolts standing at the run's end", u64::from(at_end));
+        d.count("long revolts with a house to carry them at the term", u64::from(*carrier));
+        d.sample("long revolt length, ticks", f64::from(*seen));
+        d.count(&format!("at the term: {at_term}"), 1);
+        d.count(&format!("most of its ticks: {most}"), 1);
+        for (why, n) in causes {
+            d.count(&format!("revolt-ticks from the term on: {why}"), u64::from(*n));
+            d.count("revolt-ticks from the term on", u64::from(*n));
+        }
+        lines.push(format!("seed {seed}: province {} of polity {}, began at tick {began}, stood {seen} ticks{}; at the term — {at_term}; from the term on — {causes:?}", q.0, owner.0, if at_end { " (standing at the run's end)" } else { "" }));
+    }
+    (d, lines)
+}
+
+/// **Step 0 of (д2)** (plan §31.27, owner's decision 2026-11-16): before a revolt left
+/// standing its term becomes a secession — why do the long revolts stand? Nearly every revolt
+/// is put down within a tick; a few stand for scores of ticks under a living army. For each
+/// revolt seen four ticks and longer (`siege.capital_ticks`, the term of §30.9 p. 3): the
+/// cause at its fourth tick and over its ticks from the fourth on — no unit, no way for any
+/// unit, a unit on its march, the front keeping the units at war — whether a house would
+/// carry it, whether it stands at the run's end, and the lengths. Printed, never asserted, run
+/// on demand; the world is not changed and the rule is not made here.
+#[test]
+#[ignore]
+fn diagnosis_why_a_revolt_stands() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        let mut lines = Vec::new();
+        for (part, named) in engine2::par::map(&seeds, |seed| diagnose_long_revolts(*seed, &p)) {
+            d.add(part);
+            lines.extend(named);
+        }
+        let lengths = |key: &str| {
+            let mut v = d.samples.get(key).cloned().unwrap_or_default();
+            v.sort_by(f64::total_cmp);
+            if v.is_empty() {
+                "no sample".to_string()
+            } else {
+                format!("q50 {:.0} / q90 {:.0} / max {:.0}", quantile(&v, 0.5), quantile(&v, 0.9), v[v.len() - 1])
+            }
+        };
+        let mut long: Vec<f64> = d.samples.get("long revolt length, ticks").cloned().unwrap_or_default();
+        long.sort_by(f64::total_cmp);
+        eprintln!(
+            "{label}: revolts {} — length {}; stood {} ticks and longer {} — length {}, each {:?}; of them standing at the run's end {}, with a house to carry them at the term {}",
+            d.n("revolts"),
+            lengths("revolt length, ticks"),
+            p.siege_capital_ticks,
+            d.n("long revolts"),
+            lengths("long revolt length, ticks"),
+            long.iter().map(|x| *x as u32).collect::<Vec<u32>>(),
+            d.n("long revolts standing at the run's end"),
+            d.n("long revolts with a house to carry them at the term")
+        );
+        for (name, of) in [("at the term: ", "long revolts"), ("most of its ticks: ", "long revolts"), ("revolt-ticks from the term on: ", "revolt-ticks from the term on")] {
+            let causes: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(name)).map(|(k, n)| format!("{} — {n}", &k[name.len()..])).collect();
+            eprintln!("{label}: why they stand, {}of {} {of}: {causes:#?}", name, d.n(of));
+        }
+        for line in &lines {
+            eprintln!("{label}: {line}");
+        }
+    }
+}
