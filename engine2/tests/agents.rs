@@ -2198,16 +2198,95 @@ fn a_match_that_holds_a_neighbour_at_the_threshold_is_worth_its_threat_for_the_c
     wed.marry_now(wed.unmarried_adult(h0, &p).unwrap(), wed.unmarried_adult(h1, &p).unwrap());
     assert!(wed.married_across(s0, s1));
     assert_eq!(wed.match_peace(h1, h0, &p), 0.0, "bound by a marriage already");
-    // Both valuations of a match carry it: the offer's worth (less the dowry) and the worth
-    // to the house that answers (with the dowry) — each from its own side.
-    let income = w.house_income_per_year(h1, &p).max(1) as f64;
-    let bond = w.marriage_worth(h1, h0, 0, &p) - peace;
-    assert!((w.proposal_worth(h1, h0, &p) - (bond + peace - w.dowry(h1, &p) as f64 / income)).abs() < 1e-9, "the offer: the bond and the peace less the dowry");
+    // Both valuations of a match carry it: the worth to the house that answers, and the
+    // offer's worth — where the other house would take the match (step 3: a match it would
+    // decline brings nothing; here the lord takes it once its vassal, too, has wars on its
+    // record and is a threat to take off). The houses of the test world hold nothing, so no
+    // dowry stands between the two.
     assert!(w.marriage_worth(h1, h0, 0, &p) >= peace, "the answer: the peace is in it");
+    assert!((base.marriage_worth(h1, h0, 0, &p) - (w.marriage_worth(h1, h0, 0, &p) - peace)).abs() < 1e-9, "without the threshold in reach the match is worth its bond alone");
+    let mut both = w.clone();
+    both.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    assert!(both.match_peace(h0, h1, &p) > 0.0 && both.dowry(h1, &p) == 0);
+    let own = both.marriage_worth(h1, h0, 0, &p);
+    assert!(own >= both.match_peace(h1, h0, &p) && both.match_peace(h1, h0, &p) > 0.0);
+    assert!((both.proposal_worth(h1, h0, &p) - own).abs() < 1e-9, "the offer: the bond and the peace: {} against {own}", both.proposal_worth(h1, h0, &p));
     // And the ruler's choice reads the same worth of the offer.
     let offer = VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(h0) };
-    assert!((w.utility(s1, &offer, &p) - w.proposal_worth(h1, h0, &p)).abs() < 1e-9, "the bot's utility of the offer is the offer's worth");
-    assert!((base.marriage_worth(h1, h0, 0, &p) - (w.marriage_worth(h1, h0, 0, &p) - peace)).abs() < 1e-9 || base.marriage_worth(h1, h0, 0, &p) == 0.0, "without the threshold in reach the match is worth its bond alone");
+    assert!((both.utility(s1, &offer, &p) - both.proposal_worth(h1, h0, &p)).abs() < 1e-9, "the bot's utility of the offer is the offer's worth");
+}
+
+/// Stage 7, step 3 (plan §31.40, decision № 15): **the dowry at the price of money** — the
+/// offering house is charged only what of the dowry its free money over the horizon does not
+/// cover (plan §31.3 read for a house), where half its treasury at the face value made every
+/// offer a loss of years of its income; and **a match the other house would decline brings
+/// nothing** — the offering house reads the answer as anyone can.
+#[test]
+fn the_dowry_costs_a_house_what_its_free_money_does_not_cover_and_a_match_the_other_would_decline_brings_nothing() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    w.make_vassal(s1, s0).unwrap();
+    w.actors.get_mut(&s0).unwrap().wars_entered = 4;
+    let (h0, h1) = (w.ruling_house(s0), w.ruling_house(s1));
+    for h in [h0, h1] {
+        w.post(engine2::Account::HouseTreasury(h), Source::Test, 40_000 * 1000).unwrap();
+    }
+    // The house's free money: what it holds and what its seats bring over the horizon.
+    let income = w.house_income_per_year(h1, &p) as f64;
+    assert!((w.house_free_money(h1, &p) - (w.house_treasury(h1) as f64 + income / 2.0 * f64::from(p.goal_horizon_ticks))).abs() < 1e-6);
+    let dowry = w.dowry(h1, &p);
+    assert!(dowry > 0 && (dowry as f64) < w.house_free_money(h1, &p), "half the treasury is within the house's free money");
+    // The match is worth something to `h1` (the lord's threat taken off, step 2), and `h0`
+    // would decline it — its vassal has no wars on its record and threatens nothing: the
+    // offer brings nothing, and costs nothing the house could put to another use.
+    assert!(w.match_peace(h1, h0, &p) > 0.0 && w.match_peace(h0, h1, &p) == 0.0);
+    assert!(w.marriage_worth(h0, h1, dowry, &p) <= 0.0, "`h0` would decline: {}", w.marriage_worth(h0, h1, dowry, &p));
+    assert_eq!(w.proposal_worth(h1, h0, &p), 0.0, "a match the other would decline brings nothing, and the dowry is within the free money");
+    let offer_to = |g| VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(g) };
+    assert_eq!(w.utility(s1, &offer_to(h0), &p), 0.0, "nor to the ruler who would offer it");
+    assert!(w.match_worth_seen(h0, h1, &p) <= 0.0);
+    // With wars on the vassal's record the lord has a threat of its own to take off: it would
+    // take the match, and the offer is worth to `h1` its bond and its peace — no dowry off.
+    let mut both = w.clone();
+    for x in [s1, ActorId(2)] {
+        both.actors.get_mut(&x).unwrap().wars_entered = 4;
+    }
+    assert!(both.match_peace(h0, h1, &p) > 0.0 && both.marriage_worth(h0, h1, dowry, &p) > 0.0);
+    // The answer as anyone reads it is the answering house's own where nothing of it is
+    // hidden — its bond and its peace together, no dowry in it.
+    let (bond, peace) = (both.marriage_worth(h0, h1, 0, &p) - both.match_peace(h0, h1, &p), both.match_peace(h0, h1, &p));
+    assert!(bond != 0.0, "an alliance with its vassal is worth something to the lord, one way or the other: {bond}");
+    assert!((both.match_worth_seen(h0, h1, &p) - (bond + peace)).abs() < 1e-9, "the bond and the peace together: {} against {bond} + {peace}", both.match_worth_seen(h0, h1, &p));
+    let own = both.marriage_worth(h1, h0, 0, &p);
+    assert!(own > 0.0 && (both.proposal_worth(h1, h0, &p) - own).abs() < 1e-9, "the offer is worth the match, the dowry within the free money: {} against {own}", both.proposal_worth(h1, h0, &p));
+    // A house short of its money pays for the dowry what the free money does not cover: the
+    // other house of `s0` with men of its own to pay (a house that does not rule pays its
+    // retinue) and a treasury that does not reach — the whole dowry at its face value.
+    let mut short = both.clone();
+    let other = *short.houses.iter().find(|(h, x)| x.polity == s0 && **h != h0).expect("the test world's second house of state 0").0;
+    short.post(engine2::Account::HouseTreasury(other), Source::Test, 10_000 * 1000).unwrap();
+    let unit = short.units_of(s0)[0];
+    short.units.get_mut(&unit).unwrap().house = Some(other);
+    assert_eq!(short.house_pays(unit), Some(other));
+    let free = short.house_free_money(other, &p);
+    assert!(free < 0.0, "the house cannot pay its men over the horizon: {free}");
+    let face = short.dowry(other, &p) as f64 / (short.house_income_per_year(other, &p).max(1) as f64);
+    assert!(face > 0.0 && (short.proposal_worth(other, h1, &p) + face).abs() < 1e-9, "past the free money the dowry costs its face value: {} against −{face}", short.proposal_worth(other, h1, &p));
+    // What is the other house's own moves nothing the offering house reads of it: its
+    // treasury (the dowry is worth to it what of its shortage it closes — nobody else sees
+    // that), its polity's goals, its count of the dead, the pay it missed.
+    let seen = |w: &World| (w.proposal_worth(h1, h0, &p), w.utility(s1, &VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(h0) }, &p), w.match_worth_seen(h0, h1, &p));
+    let before = seen(&both);
+    assert!(before.0 > 0.0 && (before.0 - before.1).abs() < 1e-9, "the ruler's choice reads the offer's worth");
+    let mut hidden = both.clone();
+    let theirs = hidden.house_treasury(h0);
+    hidden.post(engine2::Account::HouseTreasury(h0), Source::Test, -theirs * 1000).unwrap();
+    hidden.set_goal(s0, GoalKind::Take, GoalTarget::Province(hidden.actors[&s1].capital)).unwrap();
+    let actor = hidden.actors.get_mut(&s0).unwrap();
+    actor.manpower_deficit = 1.0e6;
+    actor.paid_share_history_ppm = vec![0; 4];
+    assert_eq!(seen(&hidden), before, "the other house's treasury, its polity's goals, dead and missed pay are its own");
 }
 
 /// E3, stage 5, decision № 12 (plan §31.35): the offering side reads the receiver's answer **as

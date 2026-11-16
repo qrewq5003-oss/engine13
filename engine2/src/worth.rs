@@ -1552,9 +1552,28 @@ impl World {
     /// to its polity, as anyone reads it, `alliance_worth_seen`) — and the peace together are
     /// worth something to it, as the house itself adds them.
     pub(crate) fn match_taken_seen(&self, g: HouseId, h: HouseId, married: bool, alliance: impl FnOnce() -> f64, params: &Params) -> bool {
+        self.match_worth_seen_of(g, h, married, alliance, params) > 0.0
+    }
+
+    /// What a match with house `h` is worth to house `g` of its own, as anyone reads it, in
+    /// years of `g`'s income (`match_taken_seen` is this above nothing): the bond and the
+    /// peace of the house that rules its polity, with no dowry — nobody else sees what a
+    /// dowry is worth to it.
+    pub fn match_worth_seen(&self, g: HouseId, h: HouseId, params: &Params) -> f64 {
+        let (theirs, mine) = (self.houses[&g].polity, self.houses[&h].polity);
+        self.match_worth_seen_of(g, h, self.married_across(theirs, mine), || self.alliance_worth_seen(theirs, mine, params), params)
+    }
+
+    /// `match_worth_seen` with the alliance's worth to `g`'s polity, as anyone reads it, read
+    /// by the caller.
+    fn match_worth_seen_of(&self, g: HouseId, h: HouseId, married: bool, alliance: impl FnOnce() -> f64, params: &Params) -> f64 {
         let (theirs, mine) = (self.houses[&g].polity, self.houses[&h].polity);
         let share = self.bond_share_as(g, theirs, mine, married, params);
-        share > 0.0 && share * alliance() + self.match_peace_read(g, h, married, true, params) > 0.0
+        if share > 0.0 {
+            share * alliance() + self.match_peace_read(g, h, married, true, params)
+        } else {
+            0.0
+        }
     }
 
     /// What offering a match is worth to house `h` with the `bond` it brings read already:
