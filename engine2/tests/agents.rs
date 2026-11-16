@@ -4041,6 +4041,9 @@ fn diagnose_army_at_war(seed: u64, p: &Params) -> Diagnosis {
         for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
             let enemies: Vec<ActorId> = w.actors.keys().copied().filter(|b| w.at_war(a, *b) && w.alive(*b)).collect();
             if enemies.is_empty() {
+                // At war by the record with no living enemy: the bot's context reads «at war»
+                // and no front, so the war's length it charges is nothing (`kept_ticks`).
+                d.count("polity-ticks at war by the record with no living enemy", u64::from(w.actors.keys().any(|b| w.at_war(a, *b))));
                 continue;
             }
             // Its part in its wars, as `diagnose_world` reads it: a war of its own it declared;
@@ -4155,6 +4158,7 @@ fn diagnosis_what_the_army_at_war_is_worth_beyond_its_wars() {
         };
         let short = |state: &str| format!("{} of {}", d.share(&format!("pay: short of its pay {state}"), &format!("pay: polity-ticks {state}")), d.n(&format!("pay: polity-ticks {state}")));
         eprintln!("{label}: polity-ticks short of the army's pay — at war {}; within ten ticks of a peace {}; at peace longer {}", short("at war"), short("within ten ticks of a peace"), short("at peace longer"));
+        eprintln!("{label}: polity-ticks at war by the record with no living enemy (the war's length charged is nothing): {}", d.n("polity-ticks at war by the record with no living enemy"));
         for key in ["all", "attacked", "declared", "by its bonds"] {
             let k = |name: &str| format!("{key}: {name}");
             let (decisions, offered) = (k("decisions at war"), k("a levy on offer"));
