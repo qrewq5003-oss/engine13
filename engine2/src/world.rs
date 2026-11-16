@@ -137,13 +137,17 @@ pub struct Shift<T> {
     pub share_ppm: i64,
 }
 
-/// Land of a province: the closed list the capacity density (E0 П1) is keyed by.
+/// Land of a province: the closed list the capacity density (E0 П1) is keyed by. A class of
+/// capacity, not of relief: a province takes the class whose density its land's source gives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Land {
     Arable,
     Hills,
     Steppe,
     Desert,
+    /// An irrigated valley — Egypt: only land whose source gives a density well above the
+    /// arable (plan §30.7, `docs/engine2_map.md` §11e). The generator of worlds draws none.
+    Irrigated,
 }
 
 /// A polity as the engine sees it: its provinces, its capital and a legitimacy rating.

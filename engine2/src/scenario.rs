@@ -697,6 +697,13 @@ raise_tax = "Поднять налог"
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
         let bad = OK.replacen("land = \"Hills\"", "land = \"Swamp\"", 1);
         assert!(matches!(ScenarioData::parse(&bad), Err(SchemaError::Toml(_))));
+        // The irrigated valley is of the closed list (plan §30.7): it parses, and the engine
+        // derives its capacity — 100 km² carry what no arable land of that area could.
+        let valley = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Irrigated\"\ncoastal = false\npopulation = 18400", 1);
+        let c = ScenarioData::parse(&valley).unwrap().compile(&params()).unwrap();
+        assert_eq!(c.facts.provinces[0].land, Land::Irrigated);
+        let over = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Irrigated\"\ncoastal = false\npopulation = 18401", 1);
+        assert!(matches!(ScenarioData::parse(&over).unwrap().compile(&params()), Err(SchemaError::OverCapacity { .. })));
     }
 
     #[test]

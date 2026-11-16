@@ -12,8 +12,9 @@ use crate::scenario::{ActorData, DisplayCurrency, HouseData, PersonData, Provinc
 use crate::world::{ActorFact, Facts, HouseFact, Land, Names, PersonFact, ProvinceFact, RelationFacts, Succession, World};
 
 /// Five states, each a column of the 5×5 grid; all land arable; province `i` has an area
-/// of `250 + 25·i` km², which at the arable density of `params.toml` (40 people per km²,
-/// E0 П1) carries `10_000 + 1_000·i` people; it starts at 60 % of that; treasuries
+/// of `200 + 20·i` km², which at the arable density of `params.toml` (50 people per km²,
+/// E0 П1) carries `10_000 + 1_000·i` people (the areas were `250 + 25·i` while the arable
+/// carried 40: the test world keeps its people and capacities, plan §31.33); it starts at 60 % of that; treasuries
 /// 100 000 kg each. The top row is the coast, and each coastal province faces the coasts
 /// two columns away across a bay (a sea link no land link duplicates). Each state's capital
 /// is its top province, with 600 soldiers (≈ 1 % of its people, E0 А11). Each state has a
@@ -52,7 +53,7 @@ pub fn five_states() -> (Facts, Names) {
                     sea_neighbours.push(ProvinceId(i + 2));
                 }
             }
-            let area_km2 = 250 + 25 * u64::from(i);
+            let area_km2 = 200 + 20 * u64::from(i);
             let capacity = 10_000 + 1_000 * u64::from(i);
             provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours, governor: None, culture: CultureId(0), religion: ReligionId(0) });
             province_names.push((format!("p{i:02}"), format!("Province {i}")));

@@ -10,10 +10,26 @@
 # Units are written out; the engine converts to per-tick and to thousandths itself.
 
 # E0 П1 — land capacity, people per km² (Scheidel 2007 via Frier; Russell; Khazanov).
+# Arable: the density of the densest land with an opened source at the finer split of Italy
+# (engine2_map.md §11c): the Centre-North, 8.0 M in 1330 in its present borders (Malanima
+# 2002, appendix, tab. A.4; 48.1 per km² in 1300, tab. A.6) over the map's 160,093 km² = 50.0.
+# A province takes this class by the calibration of its land (§11a, (А)). Until E3 the value
+# was 40 (band to 42): with the plague the people of a land settle at 0.80 of its capacity,
+# and at 40 the Centre-North started at 0.90 and fell from the first tick (plan §30.7).
 [capacity.arable]
 kind = "a"
-value = 40.0
-band = [26.0, 42.0]
+value = 50.0
+band = [26.0, 50.0]
+unit = "people per km²"
+e0 = "П1"
+
+# E0 П1 — irrigated valley (Egypt): Scheidel 2007, table of 165 (5–6 M on ~30 thousand km²),
+# opened via tabulae-geographicae.de; engine2_map.md §11, §11a п. 2, §11e. A class of
+# capacity, not of relief: only land whose source gives a density well above the arable.
+[capacity.irrigated]
+kind = "a"
+value = 184.0
+band = [167.0, 200.0]
 unit = "people per km²"
 e0 = "П1"
 
@@ -178,16 +194,20 @@ e0 = "А5"
 # factor. Checked through А13: the share of battles the stronger side wins. The value 0.8
 # was calibrated on the scripted wars of tests/army.rs, whose battles are very unequal, and
 # was provisional until E3 (owner's rule on PR #284). At E3 (д3) it is checked on the
-# agents' battles — А13 asserted with the bots, tests/agents.rs — and stands (plan §31.31,
-# decision № 6: recalibrated only when А13 leaves its band, and only by the way recorded
-# there). By the source's own figures: at k = 0.8 a side twice as strong wins 0.635 of
-# battles (the source: 3 in 5) and another 10 % of men add 1.8 points (the source: 2).
+# agents' battles — А13 asserted with the bots, tests/agents.rs (plan §31.31, decision № 6:
+# recalibrated only when А13 leaves its band, and only by the way recorded there). It stood
+# at 0.8 until the land's change (arable 50, plan §31.33) took А13 on the calibration seeds
+# out of the band (0.814); by the recorded way — the grid inside the source's bracket
+# [0.585; 0.93], the point of the window nearest to 0.8, the smaller of two — it is 0.7,
+# checked on the held-out seeds (А13 0.777 / 0.767). By the source's own figures: at k = 0.7
+# a side twice as strong wins 0.619 of battles (the source: 3 in 5) and another 10 % of men
+# add 1.6 points (the source: 2).
 [battle.strength_exponent]
 kind = "c"
-value = 0.8
+value = 0.7
 unit = "exponent"
 checked_by = "А13"
-origin = "подобран по полосе по источнику: А13 (Rotte & Schmidt) на боях сценариев tests/army.rs; проверен на боях агентов в E3 (д3), план §31.31"
+origin = "подобран по полосе по источнику: А13 (Rotte & Schmidt) на боях агентов — способ плана §31.31 (решение № 6), применён в §31.33 после правки земли; до того 0,8 на боях сценариев tests/army.rs"
 
 # E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
 # Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003) = IZA DP
