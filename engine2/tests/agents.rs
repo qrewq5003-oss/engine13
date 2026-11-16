@@ -2085,6 +2085,210 @@ fn an_alliance_is_worth_the_allys_army_against_the_neighbours_threat_less_the_wa
     let _ = s2;
 }
 
+/// Stage 7, step 1 (plan §31.38, decision № 13): **a neighbour at the threshold of the relation
+/// brings no war.** By the rule of the peace a war across a relation at the threshold of the
+/// treaties wins nothing, so the neighbour does not fall on the polity it stands there with —
+/// and its wars fall on the others it touches. The threat read no relation before.
+#[test]
+fn a_neighbour_at_the_threshold_of_the_relation_brings_no_war_and_its_wars_fall_on_the_others() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    assert!(w.borders(s1, s0) && w.borders(s1, s2));
+    let (on_s0, on_s2) = (w.wars_a_tick_from(s1, s0, 0.0, &p), w.wars_a_tick_from(s1, s2, 0.0, &p));
+    assert!(on_s0 > 0.0 && on_s2 > 0.0, "the neighbour with wars on its record threatens both: {on_s0}, {on_s2}");
+    // Just under the threshold nothing is read of the relation.
+    let mut near = w.clone();
+    near.relations.insert((s0, s1), p.treaty_accept_at_relation - 0.001);
+    assert_eq!((near.wars_a_tick_from(s1, s0, 0.0, &p), near.wars_a_tick_from(s1, s2, 0.0, &p)), (on_s0, on_s2), "under the threshold the relation moves no threat");
+    // At it: no war on `s0`, whatever its army; and more of `s1`'s wars on `s2`.
+    let mut at = w.clone();
+    at.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(at.war_wins_nothing(s1, s0, &p) && at.war_wins_nothing(s0, s1, &p) && !at.war_wins_nothing(s1, s2, &p));
+    assert_eq!(at.wars_a_tick_from(s1, s0, 0.0, &p), 0.0, "a neighbour at the threshold brings no war");
+    assert_eq!(at.wars_a_tick_from(s1, s0, -1.0e9, &p), 0.0, "nor on a polity with no army at all");
+    assert!(at.wars_a_tick_from(s1, s2, 0.0, &p) > on_s2, "its wars fall on the others it touches: {} against {on_s2}", at.wars_a_tick_from(s1, s2, 0.0, &p));
+    // So a levy is worth less to `s0` — the threat of `s1` is gone from what its army stands
+    // against — and an ally against that neighbour is worth nothing to it.
+    let blow = |w: &World| w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+    let gain = |w: &World| {
+        let threats = w.threats(s0, blow(w), &p);
+        let rates: Vec<_> = threats.iter().map(|(t, _)| w.threat_rate(*t, s0, &p)).collect();
+        w.alliance_gain(s0, s2, &threats, &rates, false, &p)
+    };
+    assert!(gain(&w) > 0.0 && gain(&at) == 0.0, "an ally against a neighbour at the threshold takes nothing off: {} then {}", gain(&w), gain(&at));
+    // Nor is an ally of `s0` drawn into a war `s1` would not open: to `s2` the cost of an
+    // alliance with `s0` is what `s0`'s neighbours would bring on it, and `s1` brings nothing.
+    let cost = |w: &World| w.alliance_cost(s2, s0, w.ceded_province_blow(s2, &w.risk_prices(s2, &p), &p), &w.own_money(s2, &p), false, &p);
+    assert!(cost(&w) < 0.0 && cost(&at) == 0.0, "an ally is drawn into no war across the threshold: {} then {}", cost(&w), cost(&at));
+    // With every polity it touches at the threshold the neighbour brings no war on anyone.
+    let mut all = w.clone();
+    for x in all.actors.keys().copied().collect::<Vec<_>>() {
+        if x != s1 {
+            all.relations.insert((x.min(s1), x.max(s1)), 100.0);
+        }
+    }
+    assert!(all.actors.keys().all(|x| *x == s1 || all.wars_a_tick_from(s1, *x, 0.0, &p) == 0.0));
+}
+
+/// Stage 7, step 2 (plan §31.38, decision № 13): **a match has a worth of its own** — where the
+/// marriage lifts the norm of the pair's relation to the threshold of the treaties it holds
+/// them there while the couple lives, and a neighbour at the threshold brings no war: the
+/// match takes that neighbour's threat off the polity for its term. The test world: `s1` a
+/// vassal of `s0` (the norm of neighbours, 40, with the vassalage 50, with a marriage 65), `s0`
+/// with wars on its record.
+#[test]
+fn a_match_that_holds_a_neighbour_at_the_threshold_is_worth_its_threat_for_the_couples_years() {
+    let p = params();
+    let (s0, s1, s3) = (ActorId(0), ActorId(1), ActorId(3));
+    let base = {
+        let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+        w.actors.get_mut(&s0).unwrap().wars_entered = 4;
+        w
+    };
+    let (h0, h1, h3) = (base.ruling_house(s0), base.ruling_house(s1), base.ruling_house(s3));
+    // Plain neighbours: the norm with a marriage stays under the threshold — the match holds
+    // nobody there and is worth nothing of its own.
+    assert!(base.relation_norm(s0, s1, &p) + p.relation_norm_marriage < p.treaty_accept_at_relation);
+    assert_eq!(base.match_peace(h1, h0, &p), 0.0, "a marriage that does not reach the threshold stands against no war");
+    // The lord and its vassal: the marriage lifts their norm to the threshold.
+    let mut w = base.clone();
+    w.make_vassal(s1, s0).unwrap();
+    let norm = w.relation_norm(s0, s1, &p);
+    assert!(norm < p.treaty_accept_at_relation && norm + p.relation_norm_marriage >= p.treaty_accept_at_relation, "the norm {norm}");
+    let peace = w.match_peace(h1, h0, &p);
+    assert!(peace > 0.0, "the match takes the lord's threat off the vassal: {peace}");
+    // It is the threat with the relation under the threshold that the match stands against:
+    // at the threshold now (where the rule lets the match be offered) the threat reads as
+    // nothing (step 1), and the match is worth what it was.
+    let mut offered = w.clone();
+    offered.relations.insert((s0, s1), 100.0);
+    assert_eq!(offered.wars_a_tick_from(s0, s1, 0.0, &p), 0.0);
+    assert!((offered.match_peace(h1, h0, &p) - peace).abs() < 1e-9, "the same threat, read with the relation under the threshold");
+    // For the couple's years: an older bride or groom — a shorter term, a smaller worth.
+    // Either of the two: the term is the years they may expect together.
+    for house in [h0, h1] {
+        let mut old = w.clone();
+        let spouse = old.unmarried_adult(house, &p).unwrap();
+        old.persons.get_mut(&spouse).unwrap().born -= 30;
+        let shorter = old.match_peace(h1, h0, &p);
+        assert!(shorter > 0.0 && shorter < peace, "fewer years together, less of the threat taken off: {shorter} against {peace}");
+    }
+    // Nothing: with no wars on the neighbour's record; from the side of the house whose
+    // polity the other does not threaten; for a house that does not rule; between polities
+    // that do not touch; at war; and once a marriage binds the two already.
+    let mut quiet = w.clone();
+    quiet.actors.get_mut(&s0).unwrap().wars_entered = 0;
+    assert_eq!(quiet.match_peace(h1, h0, &p), 0.0, "a neighbour that brings no war");
+    assert_eq!(w.match_peace(h0, h1, &p), 0.0, "the vassal has no wars on its record: no threat to the lord");
+    let other = *w.houses.iter().find(|(h, x)| x.polity == s0 && **h != h0).expect("the test world's second house of state 0").0;
+    assert_eq!(w.match_peace(other, h1, &p), 0.0, "a house that does not rule holds no polity at the threshold");
+    assert!(!w.borders(s1, s3) || w.match_peace(h1, h3, &p) == 0.0);
+    // At war the norm of the pair is far under the threshold as it is; the match stands
+    // against no open war even where a world's numbers would leave the norm in reach.
+    let mut war = w.clone();
+    war.declare_war(s0, s1).unwrap();
+    assert_eq!(war.match_peace(h1, h0, &p), 0.0, "at war");
+    let mut mild = p.clone();
+    mild.relation_norm_war = 0.0;
+    assert!(war.relation_norm(s0, s1, &mild) + mild.relation_norm_marriage >= mild.treaty_accept_at_relation);
+    assert_eq!(war.match_peace(h1, h0, &mild), 0.0, "at war, whatever the norm");
+    let mut wed = w.clone();
+    wed.marry_now(wed.unmarried_adult(h0, &p).unwrap(), wed.unmarried_adult(h1, &p).unwrap());
+    assert!(wed.married_across(s0, s1));
+    assert_eq!(wed.match_peace(h1, h0, &p), 0.0, "bound by a marriage already");
+    // Both valuations of a match carry it: the worth to the house that answers, and the
+    // offer's worth — where the other house would take the match (step 3: a match it would
+    // decline brings nothing; here the lord takes it once its vassal, too, has wars on its
+    // record and is a threat to take off). The houses of the test world hold nothing, so no
+    // dowry stands between the two.
+    assert!(w.marriage_worth(h1, h0, 0, &p) >= peace, "the answer: the peace is in it");
+    assert!((base.marriage_worth(h1, h0, 0, &p) - (w.marriage_worth(h1, h0, 0, &p) - peace)).abs() < 1e-9, "without the threshold in reach the match is worth its bond alone");
+    let mut both = w.clone();
+    both.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    assert!(both.match_peace(h0, h1, &p) > 0.0 && both.dowry(h1, &p) == 0);
+    let own = both.marriage_worth(h1, h0, 0, &p);
+    assert!(own >= both.match_peace(h1, h0, &p) && both.match_peace(h1, h0, &p) > 0.0);
+    assert!((both.proposal_worth(h1, h0, &p) - own).abs() < 1e-9, "the offer: the bond and the peace: {} against {own}", both.proposal_worth(h1, h0, &p));
+    // And the ruler's choice reads the same worth of the offer.
+    let offer = VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(h0) };
+    assert!((both.utility(s1, &offer, &p) - both.proposal_worth(h1, h0, &p)).abs() < 1e-9, "the bot's utility of the offer is the offer's worth");
+}
+
+/// Stage 7, step 3 (plan §31.40, decision № 15): **the dowry at the price of money** — the
+/// offering house is charged only what of the dowry its free money over the horizon does not
+/// cover (plan §31.3 read for a house), where half its treasury at the face value made every
+/// offer a loss of years of its income; and **a match the other house would decline brings
+/// nothing** — the offering house reads the answer as anyone can.
+#[test]
+fn the_dowry_costs_a_house_what_its_free_money_does_not_cover_and_a_match_the_other_would_decline_brings_nothing() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    w.make_vassal(s1, s0).unwrap();
+    w.actors.get_mut(&s0).unwrap().wars_entered = 4;
+    let (h0, h1) = (w.ruling_house(s0), w.ruling_house(s1));
+    for h in [h0, h1] {
+        w.post(engine2::Account::HouseTreasury(h), Source::Test, 40_000 * 1000).unwrap();
+    }
+    // The house's free money: what it holds and what its seats bring over the horizon.
+    let income = w.house_income_per_year(h1, &p) as f64;
+    assert!((w.house_free_money(h1, &p) - (w.house_treasury(h1) as f64 + income / 2.0 * f64::from(p.goal_horizon_ticks))).abs() < 1e-6);
+    let dowry = w.dowry(h1, &p);
+    assert!(dowry > 0 && (dowry as f64) < w.house_free_money(h1, &p), "half the treasury is within the house's free money");
+    // The match is worth something to `h1` (the lord's threat taken off, step 2), and `h0`
+    // would decline it — its vassal has no wars on its record and threatens nothing: the
+    // offer brings nothing, and costs nothing the house could put to another use.
+    assert!(w.match_peace(h1, h0, &p) > 0.0 && w.match_peace(h0, h1, &p) == 0.0);
+    assert!(w.marriage_worth(h0, h1, dowry, &p) <= 0.0, "`h0` would decline: {}", w.marriage_worth(h0, h1, dowry, &p));
+    assert_eq!(w.proposal_worth(h1, h0, &p), 0.0, "a match the other would decline brings nothing, and the dowry is within the free money");
+    let offer_to = |g| VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(g) };
+    assert_eq!(w.utility(s1, &offer_to(h0), &p), 0.0, "nor to the ruler who would offer it");
+    assert!(w.match_worth_seen(h0, h1, &p) <= 0.0);
+    // With wars on the vassal's record the lord has a threat of its own to take off: it would
+    // take the match, and the offer is worth to `h1` its bond and its peace — no dowry off.
+    let mut both = w.clone();
+    for x in [s1, ActorId(2)] {
+        both.actors.get_mut(&x).unwrap().wars_entered = 4;
+    }
+    assert!(both.match_peace(h0, h1, &p) > 0.0 && both.marriage_worth(h0, h1, dowry, &p) > 0.0);
+    // The answer as anyone reads it is the answering house's own where nothing of it is
+    // hidden — its bond and its peace together, no dowry in it.
+    let (bond, peace) = (both.marriage_worth(h0, h1, 0, &p) - both.match_peace(h0, h1, &p), both.match_peace(h0, h1, &p));
+    assert!(bond != 0.0, "an alliance with its vassal is worth something to the lord, one way or the other: {bond}");
+    assert!((both.match_worth_seen(h0, h1, &p) - (bond + peace)).abs() < 1e-9, "the bond and the peace together: {} against {bond} + {peace}", both.match_worth_seen(h0, h1, &p));
+    let own = both.marriage_worth(h1, h0, 0, &p);
+    assert!(own > 0.0 && (both.proposal_worth(h1, h0, &p) - own).abs() < 1e-9, "the offer is worth the match, the dowry within the free money: {} against {own}", both.proposal_worth(h1, h0, &p));
+    // A house short of its money pays for the dowry what the free money does not cover: the
+    // other house of `s0` with men of its own to pay (a house that does not rule pays its
+    // retinue) and a treasury that does not reach — the whole dowry at its face value.
+    let mut short = both.clone();
+    let other = *short.houses.iter().find(|(h, x)| x.polity == s0 && **h != h0).expect("the test world's second house of state 0").0;
+    short.post(engine2::Account::HouseTreasury(other), Source::Test, 10_000 * 1000).unwrap();
+    let unit = short.units_of(s0)[0];
+    short.units.get_mut(&unit).unwrap().house = Some(other);
+    assert_eq!(short.house_pays(unit), Some(other));
+    let free = short.house_free_money(other, &p);
+    assert!(free < 0.0, "the house cannot pay its men over the horizon: {free}");
+    let face = short.dowry(other, &p) as f64 / (short.house_income_per_year(other, &p).max(1) as f64);
+    assert!(face > 0.0 && (short.proposal_worth(other, h1, &p) + face).abs() < 1e-9, "past the free money the dowry costs its face value: {} against −{face}", short.proposal_worth(other, h1, &p));
+    // What is the other house's own moves nothing the offering house reads of it: its
+    // treasury (the dowry is worth to it what of its shortage it closes — nobody else sees
+    // that), its polity's goals, its count of the dead, the pay it missed.
+    let seen = |w: &World| (w.proposal_worth(h1, h0, &p), w.utility(s1, &VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::ProposeMarriage, target: Target::House(h0) }, &p), w.match_worth_seen(h0, h1, &p));
+    let before = seen(&both);
+    assert!(before.0 > 0.0 && (before.0 - before.1).abs() < 1e-9, "the ruler's choice reads the offer's worth");
+    let mut hidden = both.clone();
+    let theirs = hidden.house_treasury(h0);
+    hidden.post(engine2::Account::HouseTreasury(h0), Source::Test, -theirs * 1000).unwrap();
+    hidden.set_goal(s0, GoalKind::Take, GoalTarget::Province(hidden.actors[&s1].capital)).unwrap();
+    let actor = hidden.actors.get_mut(&s0).unwrap();
+    actor.manpower_deficit = 1.0e6;
+    actor.paid_share_history_ppm = vec![0; 4];
+    assert_eq!(seen(&hidden), before, "the other house's treasury, its polity's goals, dead and missed pay are its own");
+}
+
 /// E3, stage 5, decision № 12 (plan §31.35): the offering side reads the receiver's answer **as
 /// anyone can** — the receiver's side of the alliance on what a player would see of it, and
 /// nothing of its goals, its treasury, its missed pay, its orders — and an alliance the other

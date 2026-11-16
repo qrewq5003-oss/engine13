@@ -449,11 +449,13 @@ fn the_price_of_the_policy_is_paid_in_legitimacy_on_taking_it() {
 fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_turn() {
     let s = scenario();
     let (h0, o0) = (house(&s, "h0"), house(&s, "o0"));
-    let offer = |player: Option<ActorRef>| {
+    let offer_with = |player: Option<ActorRef>, men: u64| {
         let mut s = scenario();
         for v in ["propose_marriage"] {
             s.verbs.insert(v.to_string(), v.to_string());
         }
+        // The answering house may have men of its own, whom it pays (E0 Х2).
+        s.houses.get_mut("o0").unwrap().soldiers = men;
         let mut g = Game::new(&s, params(), 12).unwrap();
         g.set_bots(false);
         g.set_player(player);
@@ -465,6 +467,7 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
         assert!(!r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. })), "nobody married before the answer");
         g
     };
+    let offer = |player: Option<ActorRef>| offer_with(player, 0);
     let marriage = |r: &engine2::TickReport| r.events.iter().any(|e| matches!(e.event, Event::Marriage { .. }));
     // The other house of the polity, played: declined — nothing; taken — married.
     let mut g = offer(Some(ActorRef::House(o0)));
@@ -476,11 +479,27 @@ fn a_match_is_offered_to_the_other_house_which_takes_or_declines_it_at_the_next_
     let mut g = offer(Some(ActorRef::House(o0)));
     let id = g.opportunities(ActorRef::House(o0))[0].id;
     assert!(marriage(&g.play(&answer(id, engine2::Reply::Take)).unwrap()), "taken: the two marry");
-    // The bot of a house takes a match with its own polity's ruling house, at the dowry the
-    // offer names.
+    // The bot of a house answers by what the match brings the house itself, the dowry the
+    // offer names at the price of money (stage 7, step 3, plan §31.40): worth to it what of
+    // its shortage it closes. A house whose money is free as it is gains nothing by more of
+    // it, and a match with its own polity's ruling house brings it no bond: it declines.
     let g = offer(None);
     let Chance::Marriage { dowry_kg, .. } = g.opportunities(ActorRef::House(o0))[0].what else { panic!("a match offered") };
-    assert!(g.world().marriage_worth(o0, h0, dowry_kg, g.params()) > 0.0);
+    assert!(dowry_kg > 0 && g.world().house_free_money(o0, g.params()) >= 0.0);
+    assert_eq!(g.world().marriage_worth(o0, h0, dowry_kg, g.params()), 0.0, "money beyond the free money is worth nothing to the house");
+    assert_eq!(g.world().bot_reply(&g.opportunities(ActorRef::House(o0))[0], g.params()), engine2::Reply::Decline);
+    // A house that cannot pay its men over the horizon takes the same match for the dowry:
+    // up to its shortage the dowry is worth its face value.
+    let g = offer_with(None, 500);
+    let (short, p) = (g.world(), g.params());
+    let Chance::Marriage { dowry_kg, .. } = g.opportunities(ActorRef::House(o0))[0].what else { panic!("a match offered") };
+    let free = short.house_free_money(o0, p);
+    assert!(dowry_kg > 0 && free < 0.0, "the house is short of its men's pay over the horizon: {free}");
+    let income = short.house_income_per_year(o0, p).max(1) as f64;
+    let worth = short.marriage_worth(o0, h0, dowry_kg, p);
+    assert!((worth - (dowry_kg as f64).min(-free) / income).abs() < 1e-9, "the dowry closes the shortage, no more: {worth}");
+    assert!(worth > 0.0);
+    assert_eq!(short.bot_reply(&g.opportunities(ActorRef::House(o0))[0], p), engine2::Reply::Take);
 }
 
 /// E3, stage 5 (plan §31.34, owner's decision 2026-11-16): an alliance is offered to the

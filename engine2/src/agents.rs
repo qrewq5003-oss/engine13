@@ -165,9 +165,10 @@ pub struct Context {
     /// once per polity in a decision: the proposal, the embassy, the gift and the match all
     /// ask it of the same partner.
     alliances: std::cell::RefCell<std::collections::BTreeMap<ActorId, f64>>,
-    /// Whether each polity asked about would take the alliance, as anyone reads it
-    /// (`World::alliance_worth_seen`), read once per polity in a decision.
-    would_take: std::cell::RefCell<std::collections::BTreeMap<ActorId, bool>>,
+    /// What the alliance is worth to each polity asked about, as anyone reads it
+    /// (`World::alliance_worth_seen`) — whether it would take it — read once per polity in a
+    /// decision.
+    would_take: std::cell::RefCell<std::collections::BTreeMap<ActorId, f64>>,
     /// What the cost of every alliance asks of the same neighbours, read once each
     /// (`World::alliance_cost_by`): the polity's terms as an entrant against a neighbour over
     /// a war's length (by the neighbour and the length's bits), and a neighbour's rate of war.
@@ -873,13 +874,28 @@ impl World {
         // gift towards it alike (plan §31.35, decision № 12): the receiver answers by what the
         // alliance is worth to it, and the offering side reads that as anyone can
         // (`alliance_worth_seen`). Asked only where the alliance is worth having at all.
-        let would_take = || {
-            let side = ctx.seen.sides.borrow_mut().entry(b).or_insert_with(|| std::rc::Rc::new(self.seen_side(b, params))).clone();
-            self.alliance_worth_seen_of(b, a, &side, &rate, params) > 0.0
-        };
-        let w = if own > 0.0 && !*ctx.would_take.borrow_mut().entry(b).or_insert_with(would_take) { 0.0 } else { own };
+        let w = if own > 0.0 && !self.alliance_taken_in(a, b, ctx, params) { 0.0 } else { own };
         ctx.alliances.borrow_mut().insert(b, w);
         w
+    }
+
+    /// Whether `b` would take an alliance with `a`, as anyone reads it
+    /// (`World::alliance_worth_seen`) — once per partner in a decision, on what the tick's
+    /// decisions have read of `b` already (`TickSeen`).
+    fn alliance_taken_in(&self, a: ActorId, b: ActorId, ctx: &Context, params: &Params) -> bool {
+        self.alliance_seen_in(a, b, ctx, params) > 0.0
+    }
+
+    /// What an alliance with `a` is worth to `b`, as anyone reads it (`alliance_taken_in`).
+    fn alliance_seen_in(&self, a: ActorId, b: ActorId, ctx: &Context, params: &Params) -> f64 {
+        if let Some(worth) = ctx.would_take.borrow().get(&b) {
+            return *worth;
+        }
+        let rate = |t: ActorId| ctx.seen.rates.borrow_mut().entry(t).or_insert_with(|| self.threat_rate_among(t, params)).clone();
+        let side = ctx.seen.sides.borrow_mut().entry(b).or_insert_with(|| std::rc::Rc::new(self.seen_side(b, params))).clone();
+        let worth = self.alliance_worth_seen_of(b, a, &side, &rate, params);
+        ctx.would_take.borrow_mut().insert(b, worth);
+        worth
     }
 
     /// `World::relation_push_worth` with the alliance's worth read in the decision's context.
@@ -1006,7 +1022,11 @@ impl World {
                 if mine == a {
                     let share = self.bond_share_as(h, mine, theirs, married, params);
                     let bond = if share > 0.0 { share * self.alliance_worth_in(a, theirs, ctx, params) } else { 0.0 };
-                    self.proposal_worth_of_bond(h, bond, params)
+                    let own = bond + self.match_peace_as(h, g, married, params);
+                    // A match the other house would decline brings nothing (plan §31.40,
+                    // decision № 15) — its answer read as anyone can.
+                    let brings = if own > 0.0 && !self.match_taken_seen(g, h, married, || self.alliance_seen_in(a, theirs, ctx, params), params) { 0.0 } else { own };
+                    self.proposal_worth_of_bond(h, brings, params)
                 } else {
                     self.proposal_worth_as(h, g, married, params)
                 }
