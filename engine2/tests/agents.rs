@@ -513,6 +513,9 @@ struct Rates {
     e8: f64,
     b9: f64,
     p7: f64,
+    /// А13 on the bots' battles: of the battles of unequal numbers, the share the side with
+    /// more men won (every unit's quality is the same, so more men is the stronger side).
+    a13: f64,
 }
 
 impl Rates {
@@ -530,6 +533,7 @@ impl Rates {
             ("Э8", self.e8, band("tax.observed_share_of_production")),
             ("В9", self.b9, band("revolt.observed_share_of_provinces")),
             ("П7", self.p7, band("population.observed_growth_per_year")),
+            ("А13", self.a13, band("battle.observed_win_share_of_the_stronger")),
         ]
         .into_iter()
         .map(|(n, v, b)| (n, v, b, (b[0]..=b[1]).contains(&v)))
@@ -554,6 +558,7 @@ impl Measures {
             // The growth of all the worlds' people over the first 100 ticks, a year (П7 is
             // read over 100 ticks, `tests/population.rs`).
             p7: (self.people_100 as f64 / self.people_start.max(1) as f64).powf(1.0 / 50.0) - 1.0,
+            a13: self.battles.iter().filter(|(_, _, won)| *won).count() as f64 / self.battles.len().max(1) as f64,
         }
     }
 
@@ -708,7 +713,7 @@ impl Measures {
                 quantile(&incomes, 0.75)
             ),
             format!(
-                "А13 on the bots' battles: the side with more men won {stronger_won} of {} = {:.3} (battles {}, of equal numbers {}, drawn {}); men of the stronger over the weaker q10 {:.2} / q25 {:.2} / q50 {:.2} / q75 {:.1} / q90 {:.0} — printed, the assertion comes with (д3)",
+                "А13 on the bots' battles: the side with more men won {stronger_won} of {} = {:.3} (battles {}, of equal numbers {}, drawn {}); men of the stronger over the weaker q10 {:.2} / q25 {:.2} / q50 {:.2} / q75 {:.1} / q90 {:.0}",
                 self.battles.len(),
                 share(stronger_won, self.battles.len()),
                 self.battles.len() as u64 + self.battles_even,
@@ -1045,7 +1050,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let band = |k: &str| p.entries[k].band.unwrap();
     let seeds: Vec<u64> = (1..=20).collect();
     let m = Measures::over(&seeds, &p);
-    let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7 } = m.rates();
+    let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7, a13 } = m.rates();
     let war_lines = m.war_lines();
     let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
@@ -1198,8 +1203,16 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let a11_war_band = band("army.observed_share_at_war");
     eprintln!("А11 at war {a11_war:.4} (the file's band {a11_war_band:?} in war)");
     assert!((a11_war_band[0]..=a11_war_band[1]).contains(&a11_war), "А11 at war {a11_war:.4} outside {a11_war_band:?}");
-    // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals and А13 on
-    // the bots' battles — printed, no bands (rule 1 of §24.1: no source gives one).
+    // А13 on the bots' battles (E3 (д3), plan §30.3, §31.31): the band derived from the source
+    // (Rotte & Schmidt) is the assertion; the battle's exponent was calibrated on the scripted
+    // wars of `tests/army.rs` and is checked here on the battles the agents choose to fight.
+    // Outside the band the exponent is recalibrated by the one way of plan §31.31, decision
+    // № 6 — not by picking a value that pleases.
+    let a13_band = band("battle.observed_win_share_of_the_stronger");
+    eprintln!("А13 on the bots' battles {a13:.3} (the file's band {a13_band:?})");
+    assert!((a13_band[0]..=a13_band[1]).contains(&a13), "А13 on the bots' battles {a13:.3} outside {a13_band:?}: plan §31.31, decision № 6");
+    // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals, and the
+    // battles behind А13 — printed, no bands (rule 1 of §24.1: no source gives one).
     for line in war_lines {
         eprintln!("{line}");
     }
@@ -1793,7 +1806,7 @@ fn windows_of_the_fitted_values() {
     let base = params();
     let seeds: Vec<u64> = (1..=20).collect();
     type Set = fn(&mut Params, f64);
-    let sweeps: [(&str, &[f64], Set); 4] = [
+    let sweeps: [(&str, &[f64], Set); 5] = [
         ("usurpation.per_year → В6", &[0.02, 0.03, 0.04, 0.05, 0.06, 0.08], |p, v| p.usurpation_per_tick = v / 2.0),
         ("revolt.per_year → В7, В9", &[0.0015, 0.002, 0.0025, 0.003, 0.004, 0.005], |p, v| p.revolt_per_tick = v / 2.0),
         // The horizon of every worth (E3 (е1)): chosen, not fitted, and since the weights of
@@ -1801,6 +1814,9 @@ fn windows_of_the_fitted_values() {
         ("goal.horizon_years → all", &[10.0, 15.0, 20.0, 25.0, 30.0, 40.0], |p, v| p.goal_horizon_ticks = (v * 2.0) as u32),
         // By memory, not fitted (owner's answer 3 on §27.5): its window printed beside it.
         ("army.campaign_pay_factor → all", &[1.0, 1.5, 2.0, 3.0, 4.0], |p, v| p.campaign_pay_ppm = (v * 1e6) as i64),
+        // Fitted to the band of А13 on the scripted wars, checked on the bots' battles (E3
+        // (д3), plan §31.31): the bots read `win_chance`, so another exponent is other battles.
+        ("battle.strength_exponent → А13", &[0.5, 0.6, 0.7, 0.8, 0.9, 1.0], |p, v| p.battle_strength_exponent = v),
     ];
     for (name, values, set) in sweeps {
         let mut inside = Vec::new();

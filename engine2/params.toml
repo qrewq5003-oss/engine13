@@ -175,15 +175,19 @@ unit = "campaign days per tick"
 e0 = "А5"
 
 # (в) The exponent k in P(A wins) = s_A^k / (s_A^k + s_B^k) with s = soldiers × quality
-# factor. Checked through А13: the share of battles the stronger side wins. The value 0.8 is
-# provisional: it was calibrated on the scripted wars of tests/army.rs, whose battles are
-# very unequal; it is recalibrated at E3 on the agents' battles (owner's rule on PR #284).
+# factor. Checked through А13: the share of battles the stronger side wins. The value 0.8
+# was calibrated on the scripted wars of tests/army.rs, whose battles are very unequal, and
+# was provisional until E3 (owner's rule on PR #284). At E3 (д3) it is checked on the
+# agents' battles — А13 asserted with the bots, tests/agents.rs — and stands (plan §31.31,
+# decision № 6: recalibrated only when А13 leaves its band, and only by the way recorded
+# there). By the source's own figures: at k = 0.8 a side twice as strong wins 0.635 of
+# battles (the source: 3 in 5) and another 10 % of men add 1.8 points (the source: 2).
 [battle.strength_exponent]
 kind = "c"
 value = 0.8
 unit = "exponent"
 checked_by = "А13"
-origin = "подобран по полосе по источнику: А13 (Rotte & Schmidt) на боях сценариев tests/army.rs — временно, перекалибровка на боях агентов в (д)"
+origin = "подобран по полосе по источнику: А13 (Rotte & Schmidt) на боях сценариев tests/army.rs; проверен на боях агентов в E3 (д3), план §31.31"
 
 # E0 А13 (row added at E2, army) — how often the stronger side wins a battle. Rotte &
 # Schmidt, «On the Production of Victory», Defence and Peace Economics 14 (2003) = IZA DP
