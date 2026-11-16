@@ -16,7 +16,7 @@
 //! - the outcome depends on the strategy (a player who does nothing against the bot in its
 //!   seat) and on the seed; a run with bots saves and loads bit for bit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use engine2::sim::{Game, Simulation};
 use engine2::{testworld, worldgen, ActorId, ActorRef, Event, GoalKind, GoalTarget, Params, ProvinceId, RegionId, ScenarioData, Source, Target, VerbCall, VerbId, World};
@@ -4780,6 +4780,311 @@ fn diagnosis_why_a_revolt_stands() {
         }
         for line in &lines {
             eprintln!("{label}: {line}");
+        }
+    }
+}
+
+/// One generated world with the bots, 300 ticks: what a match is worth and to whom — read at
+/// the start of every fifth tick as the bots read it — and what the marriages made did.
+fn diagnose_matches(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let pair = |a: ActorId, b: ActorId| (a.min(b), a.max(b));
+    for tick in 0..300u32 {
+        let w = g.world();
+        // The bonds of every pair before the tick: what a war of the tick was declared across.
+        let at_threshold: BTreeSet<(ActorId, ActorId)> = w.relations.iter().filter(|(_, r)| **r >= p.treaty_accept_at_relation).map(|(k, _)| *k).collect();
+        let living: Vec<ActorId> = w.actors.keys().copied().filter(|a| w.alive(*a)).collect();
+        let married: BTreeSet<(ActorId, ActorId)> = living.iter().flat_map(|a| w.married_to(*a).into_iter().map(|b| pair(*a, b)).collect::<Vec<_>>()).collect();
+        let ruling: BTreeSet<engine2::HouseId> = living.iter().map(|a| w.ruling_house(*a)).collect();
+        // The houses married into their polity's ruling house, before the tick.
+        let married_in: BTreeSet<engine2::HouseId> = w
+            .persons
+            .values()
+            .filter(|x| x.died.is_none())
+            .filter_map(|x| x.spouse.filter(|s| w.person_alive(*s)).map(|s| (x.house, w.persons[&s].house)))
+            .filter(|(h, g)| h != g && w.houses[h].polity == w.houses[g].polity && ruling.contains(g))
+            .map(|(h, _)| h)
+            .collect();
+        d.count("polity-ticks", living.len() as u64);
+        d.count("neighbour pair-ticks", living.iter().map(|a| living.iter().filter(|b| *b > a && w.borders(*a, **b)).count() as u64).sum());
+        d.count("neighbour pair-ticks at the threshold of the relation", living.iter().map(|a| living.iter().filter(|b| *b > a && w.borders(*a, **b) && at_threshold.contains(&(*a, **b))).count() as u64).sum());
+        d.count("neighbour pair-ticks bound by a marriage", living.iter().map(|a| living.iter().filter(|b| *b > a && w.borders(*a, **b) && married.contains(&(*a, **b))).count() as u64).sum());
+        d.count("house-ticks of a house that does not rule", w.houses.iter().filter(|(h, x)| w.alive(x.polity) && !ruling.contains(h)).count() as u64);
+        d.count("house-ticks of such a house married into the ruling house", w.houses.iter().filter(|(h, x)| w.alive(x.polity) && !ruling.contains(h) && married_in.contains(h)).count() as u64);
+        if tick % 5 == 0 {
+            let free = w.unmarried_adults(p);
+            for a in &living {
+                let h = w.ruling_house(*a);
+                if !free.contains_key(&h) {
+                    d.count("ruling houses with nobody free to marry (a decision)", 1);
+                    continue;
+                }
+                d.count("ruling houses with one free to marry (a decision)", 1);
+                let blow = w.ceded_province_blow(*a, &w.risk_prices(*a, p), p);
+                let threats = w.threats(*a, blow, p);
+                let income = w.yearly_income(*a, p).max(1) as f64;
+                for (gh, x) in w.houses.iter().filter(|(gh, x)| **gh != h && w.alive(x.polity) && free.contains_key(gh)) {
+                    let b = x.polity;
+                    let role = if b == *a {
+                        "within the polity"
+                    } else if w.borders(*a, b) {
+                        "with a neighbour"
+                    } else {
+                        "with a polity it does not touch"
+                    };
+                    d.count(&format!("free pairs — {role}"), 1);
+                    let on_offer = w.marriage_room(h, *gh, p).is_ok();
+                    d.count(&format!("free pairs the rule lets marry — {role}"), u64::from(on_offer));
+                    if b != *a {
+                        let norm = w.relation_norm(*a, b, p);
+                        d.sample(&format!("norm of the relation — {role}"), norm);
+                        d.count(&format!("free pairs whose norm a marriage lifts to the threshold — {role}"), u64::from(norm < p.treaty_accept_at_relation && norm + p.relation_norm_marriage >= p.treaty_accept_at_relation));
+                        d.count(&format!("free pairs at war — {role}"), u64::from(w.at_war(*a, b)));
+                    }
+                    // What the match is worth now, to the offering house and to the receiving.
+                    let dowry = w.dowry(h, p);
+                    if on_offer {
+                        let (offer, answer) = (w.proposal_worth(h, *gh, p), w.marriage_worth(*gh, h, dowry, p));
+                        d.sample(&format!("the offer's worth to the offering house, years of its income — {role}"), offer);
+                        d.sample(&format!("the offer's worth to the receiving house, years of its income — {role}"), answer);
+                        d.count(&format!("on offer and worth offering — {role}"), u64::from(offer > 0.0));
+                        d.count(&format!("on offer, worth offering and taking — {role}"), u64::from(offer > 0.0 && answer > 0.0));
+                        d.count(&format!("on offer with no dowry to give — {role}"), u64::from(dowry == 0));
+                        d.sample(&format!("the dowry over the polity's yearly income — {role}"), dowry as f64 / income);
+                    }
+                    // Variant 2: the neighbour's threat a marriage would stand against — the
+                    // wars it brings a tick times what such a war loses the polity.
+                    if role == "with a neighbour" && !w.at_war(*a, b) {
+                        if let Some((_, terms)) = threats.iter().find(|(t, _)| *t == b) {
+                            let rate = w.threat_rate(b, *a, p);
+                            let loss = -World::wars_a_tick_in(&rate, *a, terms.odds(0.0, p)) * w.war_worth_of(*a, terms, false, 0.0, p);
+                            d.sample("a neighbour's threat a tick, years of the polity's income — every free pair", loss);
+                            if on_offer {
+                                d.sample("a neighbour's threat a tick, years of the polity's income — pairs on offer", loss);
+                            }
+                            d.sample("an alliance with the neighbour, worth to the polity (the answer read)", if w.alliance_worth_seen(b, *a, p) > 0.0 { w.alliance_worth(*a, b, p) } else { 0.0 });
+                        }
+                    }
+                }
+            }
+        }
+        let before: BTreeMap<u32, engine2::Chance> = w.opportunities.iter().map(|o| (o.id, o.what.clone())).collect();
+        let houses_before: BTreeMap<engine2::PersonId, engine2::HouseId> = w.persons.iter().map(|(id, x)| (*id, x.house)).collect();
+        let polity_of: BTreeMap<engine2::HouseId, ActorId> = w.houses.iter().map(|(h, x)| (*h, x.polity)).collect();
+        let neighbours: BTreeSet<(ActorId, ActorId)> = living.iter().flat_map(|a| living.iter().filter(|b| *b > a && w.borders(*a, **b)).map(|b| (*a, *b)).collect::<Vec<_>>()).collect();
+        let r = g.tick(&[]).unwrap();
+        for e in &r.events {
+            match &e.event {
+                Event::Marriage { a, b, .. } => {
+                    let (pa, pb) = (polity_of[&houses_before[a]], polity_of[&houses_before[b]]);
+                    let role = if pa == pb {
+                        "within a polity"
+                    } else if neighbours.contains(&pair(pa, pb)) {
+                        "between neighbours"
+                    } else {
+                        "between polities that do not touch"
+                    };
+                    d.count(&format!("marriages made — {role}"), 1);
+                }
+                Event::War { a, b } => {
+                    d.count("wars opened", 1);
+                    d.count("wars opened across a relation at the threshold", u64::from(at_threshold.contains(&pair(*a, *b))));
+                    d.count("wars opened across a marriage", u64::from(married.contains(&pair(*a, *b))));
+                }
+                Event::OpportunityTaken { id, .. } => match before.get(id) {
+                    Some(engine2::Chance::Secession { .. }) => {
+                        d.count("secessions taken by a house", 1);
+                        if let Some(o) = g.world().opportunities.iter().find(|o| o.id == *id) {
+                            let _ = o;
+                        }
+                    }
+                    Some(engine2::Chance::Usurpation { .. }) => d.count("usurpations taken", 1),
+                    _ => {}
+                },
+                Event::OpportunityOpened { opportunity } => match (&opportunity.what, opportunity.to) {
+                    (engine2::Chance::Secession { .. }, ActorRef::House(h)) => {
+                        d.count("secessions offered to a house", 1);
+                        d.count("secessions offered to a house married into the ruling house", u64::from(married_in.contains(&h)));
+                    }
+                    (engine2::Chance::Usurpation { candidate, .. }, _) => {
+                        d.count("usurpations offered", 1);
+                        d.count("usurpations offered to a house married into the ruling house", u64::from(houses_before.get(candidate).is_some_and(|h| married_in.contains(h))));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+    d
+}
+
+/// The probe of stage 7 (plan §31.37 p. 2, owner's decision 2026-11-16: a marriage is to have
+/// a worth of its own): on main, with nothing of the world changed — which pairs of houses
+/// are free to marry and which the rule lets, what a match is worth now to either house, what
+/// the relation's norm with a marriage reaches, what a neighbour's threat is that a marriage
+/// could stand against, and what the marriages made, the wars opened and the chances of
+/// secession and usurpation say of the three candidates. Printed, never asserted, run on
+/// demand: `cargo test --release -p engine2 --all-features --test agents diagnosis_what_a_match -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn diagnosis_what_a_match_is_worth() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for part in engine2::par::map(&seeds, |seed| diagnose_matches(*seed, &p)) {
+            d.add(part);
+        }
+        let line = |text: String| eprintln!("{label}: {text}");
+        line(format!(
+            "marriages made: within a polity {}, between neighbours {}, between polities that do not touch {}; neighbour pair-ticks {} — at the threshold of the relation {}, bound by a marriage {}",
+            d.n("marriages made — within a polity"),
+            d.n("marriages made — between neighbours"),
+            d.n("marriages made — between polities that do not touch"),
+            d.n("neighbour pair-ticks"),
+            d.share("neighbour pair-ticks at the threshold of the relation", "neighbour pair-ticks"),
+            d.share("neighbour pair-ticks bound by a marriage", "neighbour pair-ticks")
+        ));
+        line(format!("decisions of a ruling house (every fifth tick): with one free to marry {}, with nobody free {}", d.n("ruling houses with one free to marry (a decision)"), d.n("ruling houses with nobody free to marry (a decision)")));
+        for role in ["within the polity", "with a neighbour", "with a polity it does not touch"] {
+            let k = |name: &str| format!("{name} — {role}");
+            line(format!(
+                "[{role}] free pairs {}: the rule lets marry {} ({}); worth offering {}, worth offering and taking {}; with no dowry to give {} of those on offer",
+                d.n(&k("free pairs")),
+                d.n(&k("free pairs the rule lets marry")),
+                d.share(&k("free pairs the rule lets marry"), &k("free pairs")),
+                d.n(&k("on offer and worth offering")),
+                d.n(&k("on offer, worth offering and taking")),
+                d.share(&k("on offer with no dowry to give"), &k("free pairs the rule lets marry"))
+            ));
+            line(format!(
+                "[{role}] on offer, years of the house's income q10/q25/q50/q75/q90: to the offering house {}; to the receiving {}; the dowry over the polity's yearly income {}",
+                d.q(&k("the offer's worth to the offering house, years of its income")),
+                d.q(&k("the offer's worth to the receiving house, years of its income")),
+                d.q(&k("the dowry over the polity's yearly income"))
+            ));
+            if role != "within the polity" {
+                line(format!(
+                    "[{role}] the norm of the relation {}; free pairs whose norm a marriage lifts to the threshold {} ({}); free pairs at war {}",
+                    d.q(&k("norm of the relation")),
+                    d.n(&k("free pairs whose norm a marriage lifts to the threshold")),
+                    d.share(&k("free pairs whose norm a marriage lifts to the threshold"), &k("free pairs")),
+                    d.share(&k("free pairs at war"), &k("free pairs"))
+                ));
+            }
+        }
+        line(format!(
+            "variant 2 — a neighbour's threat a tick, years of the polity's income: every free pair {} (mean {}); pairs on offer {} (mean {}); an alliance with that neighbour where it would take it {} (above nothing in {})",
+            d.q("a neighbour's threat a tick, years of the polity's income — every free pair"),
+            d.mean("a neighbour's threat a tick, years of the polity's income — every free pair"),
+            d.q("a neighbour's threat a tick, years of the polity's income — pairs on offer"),
+            d.mean("a neighbour's threat a tick, years of the polity's income — pairs on offer"),
+            d.q("an alliance with the neighbour, worth to the polity (the answer read)"),
+            d.positive("an alliance with the neighbour, worth to the polity (the answer read)")
+        ));
+        line(format!(
+            "variant 2, the premise — wars opened {}: across a relation at the threshold {} ({}), across a marriage {} ({})",
+            d.n("wars opened"),
+            d.n("wars opened across a relation at the threshold"),
+            d.share("wars opened across a relation at the threshold", "wars opened"),
+            d.n("wars opened across a marriage"),
+            d.share("wars opened across a marriage", "wars opened")
+        ));
+        line(format!(
+            "variant 3 — house-ticks of a house that does not rule {}, married into the ruling house {}; secessions offered to a house {} (to one married in {}), taken {}; usurpations offered {} (to a house married in {}), taken {}",
+            d.n("house-ticks of a house that does not rule"),
+            d.share("house-ticks of such a house married into the ruling house", "house-ticks of a house that does not rule"),
+            d.n("secessions offered to a house"),
+            d.n("secessions offered to a house married into the ruling house"),
+            d.n("secessions taken by a house"),
+            d.n("usurpations offered"),
+            d.n("usurpations offered to a house married into the ruling house"),
+            d.n("usurpations taken")
+        ));
+    }
+}
+
+/// One generated world with the bots, 300 ticks: what buying order is worth to a ruler
+/// against its price, read at the start of every fifth tick as the bot reads it.
+fn diagnose_order(seed: u64, p: &Params) -> Diagnosis {
+    let mut d = Diagnosis::default();
+    let s = worldgen::generate(seed, p);
+    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    for tick in 0..300u32 {
+        let w = g.world();
+        if tick % 5 == 0 {
+            for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
+                let income = w.yearly_income(a, p).max(1) as f64;
+                let legitimacy = w.actors[&a].legitimacy;
+                let band = match legitimacy {
+                    l if l < 30.0 => "legitimacy under 30",
+                    l if l < 50.0 => "legitimacy 30–50",
+                    l if l < 70.0 => "legitimacy 50–70",
+                    _ => "legitimacy 70 and over",
+                };
+                let risk = w.risk_prices(a, p);
+                let gain = w.blow_worth(a, -p.order_gain, &risk, p);
+                let cost = w.order_cost(a, p) as f64 / income;
+                let call = VerbCall { actor: ActorRef::Ruler(a), verb: VerbId::EnforceOrder, target: Target::None };
+                let utility = w.utility(a, &call, p);
+                d.count("decisions", 1);
+                d.count(&format!("decisions — {band}"), 1);
+                d.count("decisions where the treasury covers the price", u64::from(w.treasury(a) >= w.order_cost(a, p)));
+                d.count("decisions where the order is worth its price", u64::from(utility > 0.0));
+                d.sample("the gain, years of income", gain);
+                d.sample(&format!("the gain, years of income — {band}"), gain);
+                d.sample("the price, years of income", cost);
+                d.sample("the gain over the price", gain / cost.max(1e-9));
+                d.sample("legitimacy", legitimacy);
+                // What the gain is made of: the legitimacy it would stand at, and the norm
+                // it drifts back to.
+                d.sample("the norm of legitimacy less the legitimacy", w.legitimacy_norm(a, p) - legitimacy);
+            }
+        }
+        let r = g.tick(&[]).unwrap();
+        d.count("the order bought", r.events.iter().filter(|e| matches!(e.event, Event::Verb { verb: VerbId::EnforceOrder, .. })).count() as u64);
+    }
+    d
+}
+
+/// The probe of stage 8 (plan §31.37 p. 10): the bots never buy order — the one criterion of
+/// the acceptance of E3 (§23.4: every verb used) not met. With nothing of the world changed:
+/// what the gain of legitimacy is worth to a ruler by the bot's own valuation, against the
+/// price the world charges, by the legitimacy it stands at. Printed, never asserted, run on
+/// demand: `cargo test --release -p engine2 --all-features --test agents diagnosis_why_the_order -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn diagnosis_why_the_order_is_never_bought() {
+    let p = params();
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let mut d = Diagnosis::default();
+        for part in engine2::par::map(&seeds, |seed| diagnose_order(*seed, &p)) {
+            d.add(part);
+        }
+        let line = |text: String| eprintln!("{label}: {text}");
+        line(format!(
+            "decisions read {} (every fifth tick): the treasury covers the price in {}; the order is worth its price in {} ({}); bought in the run {}",
+            d.n("decisions"),
+            d.share("decisions where the treasury covers the price", "decisions"),
+            d.n("decisions where the order is worth its price"),
+            d.share("decisions where the order is worth its price", "decisions"),
+            d.n("the order bought")
+        ));
+        let top = |key: &str| d.samples.get(key).map(|v| v.iter().copied().fold(f64::MIN, f64::max)).unwrap_or(0.0);
+        line(format!(
+            "years of income q10/q25/q50/q75/q90: the gain of {} points {} (the most {:.3}); the price {}; the gain over the price {} (the most {:.3})",
+            p.order_gain,
+            d.q("the gain, years of income"),
+            top("the gain, years of income"),
+            d.q("the price, years of income"),
+            d.q("the gain over the price"),
+            top("the gain over the price")
+        ));
+        line(format!("legitimacy {}; its norm less the legitimacy {}", d.q("legitimacy"), d.q("the norm of legitimacy less the legitimacy")));
+        for band in ["legitimacy under 30", "legitimacy 30–50", "legitimacy 50–70", "legitimacy 70 and over"] {
+            line(format!("[{band}] decisions {} ({}); the gain, years of income {} (the most {:.3})", d.n(&format!("decisions — {band}")), d.share(&format!("decisions — {band}"), "decisions"), d.q(&format!("the gain, years of income — {band}")), top(&format!("the gain, years of income — {band}"))));
         }
     }
 }
