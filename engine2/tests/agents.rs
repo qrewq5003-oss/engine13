@@ -1194,11 +1194,16 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     assert!(always * 10 < per_polity_war_share.len(), "«always at war»: {always} of {} polities over nine tenths of their ticks", per_polity_war_share.len());
     assert!(never * 2 < per_polity_war_share.len(), "«never at war»: {never} of {} polities under a tenth of their ticks", per_polity_war_share.len());
     // Д3's band is by memory (rule 1 of §24.1: a band without a source is a warning, not a
-    // check — owner's decisions 2026-10-20 on §28.12 and 2 on §29.10). Printed: a known
-    // deviation until (г2), the worth of an alliance read by the table of §28.10 — it follows
-    // А12 (more wars, more bonds; §28.12, §29.9), 0,87 with the army at peace of (г1).
+    // check — owner's decisions 2026-10-20 on §28.12 and 2 on §29.10), so it is printed. It
+    // stood above the band — 0,84 to 0,87 — while an alliance was made at the threshold of
+    // the relation with nobody asked: it followed А12 (more wars, more bonds; §28.12, §29.9).
+    // With the alliance worth through the threat and made by the receiver's consent (stage 5,
+    // plan §31.35) it is inside: 0,65 on these seeds.
     let d3_band = band("diplomacy.observed_bound_share");
-    eprintln!("Д3 at a century {d3:.2} (band by memory {d3_band:?}) — printed: a known deviation until (г2), plan §29.11");
+    eprintln!(
+        "Д3 at a century {d3:.2} (band by memory {d3_band:?}){} — printed: the band has no source; inside it since the alliance by the receiver's consent, plan §31.35",
+        if (d3_band[0]..=d3_band[1]).contains(&d3) { "" } else { " OUTSIDE" }
+    );
     revolt_lengths.sort();
     let repeated = revolts_per_province.values().filter(|n| **n > 1).count();
     eprintln!(
