@@ -1173,11 +1173,71 @@ impl World {
     /// revolt's withheld take: of the provinces in revolt now, and of those expected to rise
     /// (`revolt_chance_per_tick`, the hazard of the marks and the legitimacy). Nothing where
     /// there is no unit to send; the same for one unit and for ten.
+    ///
+    /// This is the flow, a tick's worth. What a revolt standing now threatens besides — the
+    /// province itself ((д2)) — is no flow: `suppression_at_once`.
     pub fn suppression_a_tick(&self, a: ActorId, params: &Params) -> f64 {
         let income = self.yearly_income(a, params).max(1) as f64;
         let a_tick = |q: ProvinceId| self.take_of(a, q, params) / 2.0;
         let withheld: f64 = self.actors[&a].provinces.iter().map(|q| if self.in_revolt(*q) { a_tick(*q) } else { self.revolt_chance_per_tick(*q, params) * a_tick(*q) }).sum();
         withheld / income
+    }
+
+    /// **What the first unit of `a` keeps at once**, in years of its income ((д2), plan §30.3,
+    /// §31.27): a revolt standing now, left to stand its term, secedes
+    /// (`revolt_turns_left`), and with no unit in being nothing else puts it down. A unit
+    /// raised now marches from the next turn (`revolt_march_ticks` from the capital); in
+    /// time, it keeps the province — its take over the horizon; too late, or with no way
+    /// there, nothing. **Not a tick's worth**: it comes once, whatever the ticks a soldier is
+    /// kept for — at war it is not multiplied by the war's length (`agents::strength_gain`).
+    /// A rising still to come is in the flow (`suppression_a_tick`): a unit can be raised
+    /// when it comes.
+    pub fn suppression_at_once(&self, a: ActorId, params: &Params) -> f64 {
+        let income = self.yearly_income(a, params).max(1) as f64;
+        let years = f64::from(params.goal_horizon_ticks) / 2.0;
+        let capital = self.actors[&a].capital;
+        let kept = |q: ProvinceId| match (self.revolt_turns_left(q, params), self.revolt_march_ticks(a, capital, q, params)) {
+            // Raised this turn, on its march from the next: one turn of the term is gone.
+            (Some(left), Some(march)) if march < left => self.take_of(a, q, params) * years,
+            _ => 0.0,
+        };
+        self.actors[&a].provinces.iter().map(|q| kept(*q)).sum::<f64>() / income
+    }
+
+    /// What a unit of `a` sent now to the revolt of `r` saves, kg, when it comes to stand
+    /// there in `now` turns and the revolt would else stand `stands` turns — at war, until
+    /// the peace (`agents::bot_orders`). **Left to stand its term the revolt secedes** ((д2),
+    /// plan §30.3, §31.27): when waiting would be too late (`revolt_turns_left`), the unit
+    /// sent now keeps the province — its take over the horizon — if it comes in time, and
+    /// nothing if it cannot. When waiting is in time too, it saves the ticks of the take
+    /// between, as before the rule.
+    pub fn revolt_put_down_worth(&self, a: ActorId, r: ProvinceId, now: f64, stands: f64, params: &Params) -> f64 {
+        let left = self.revolt_turns_left(r, params).unwrap_or(f64::INFINITY);
+        let take = self.take_of(a, r, params);
+        if stands > left {
+            if now <= left {
+                take * f64::from(params.goal_horizon_ticks) / 2.0
+            } else {
+                0.0
+            }
+        } else {
+            take * (stands - now).max(0.0) / 2.0
+        }
+    }
+
+    /// The turns a revolt of `q` has before it secedes, this turn among them ((д2)): it
+    /// began in the collapse of a turn and secedes in the collapse of the turn
+    /// `siege.capital_ticks` later, after the putting down — a unit that comes to stand there
+    /// within so many turns keeps the province. `None` for a province not in revolt.
+    pub fn revolt_turns_left(&self, q: ProvinceId, params: &Params) -> Option<f64> {
+        self.provinces[&q].revolt.map(|began| f64::from((began.0 + params.siege_capital_ticks + 1).saturating_sub(self.tick.0)))
+    }
+
+    /// The turns `a`'s unit at `from` takes to come to stand in `to`, the turn it is ordered
+    /// among them: its march by the rule of movement (`path`, `march_steps_per_tick`), a turn
+    /// at least. `None` with no way.
+    pub fn revolt_march_ticks(&self, a: ActorId, from: ProvinceId, to: ProvinceId, params: &Params) -> Option<f64> {
+        self.path(a, from, to).map(|path| path.len().div_ceil(self.march_steps_per_tick(params).max(1)).max(1) as f64)
     }
 
     /// The threats to `a` at peace (plan §29.2–29.3): every living polity whose land touches

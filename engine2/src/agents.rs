@@ -557,7 +557,8 @@ impl World {
                 for (k, r) in revolts.iter().enumerate() {
                     if !manned[k] {
                         if let Some(now) = march(self.units[u].position, *r) {
-                            offer(self.take_of(a, *r, params) * (stands[k] - now).max(0.0) / 2.0 / income - *loss, threats.len() + k);
+                            let saved = self.revolt_put_down_worth(a, *r, now, stands[k], params);
+                            offer(saved / income - *loss, threats.len() + k);
                         }
                     }
                 }
@@ -654,7 +655,9 @@ impl World {
     /// formula, the chance of the attack — the deterrence) times what each would lose `a` by
     /// the same terms as a war's (`World::threats`), plus the take its units bring back by
     /// putting risings down (`suppression_a_tick` — any unit does; so the first unit's worth,
-    /// nothing for the next).
+    /// nothing for the next). **Besides the ticks, once** ((д2)): the province a revolt
+    /// standing now would take with it at its term (`suppression_at_once`) — the first unit's
+    /// too, and counted once at peace and at war alike.
     fn strength_gain(&self, a: ActorId, ctx: &Context, extra: f64, params: &Params) -> f64 {
         // A tick of the strength beyond the polity's wars: against the neighbours it does not
         // fight, and for the suppression — the whole worth at peace.
@@ -662,11 +665,15 @@ impl World {
         let wars: f64 = ctx.threats.iter().zip(&ctx.rates).map(|((_, terms), r)| expected(r, terms, extra) - expected(r, terms, 0.0)).sum();
         let units = |strength: f64| f64::from(u8::from(strength > 0.0));
         let now = self.army_strength(a);
-        let a_tick = wars + (units(now + extra) - units(now)) * self.suppression_a_tick(a, params);
+        let first = units(now + extra) - units(now);
+        let a_tick = wars + first * self.suppression_a_tick(a, params);
+        // (д2): the province a revolt standing now would take with it — kept by the first
+        // unit once, not a tick's worth: outside the war's length.
+        let at_once = first * self.suppression_at_once(a, params);
         if ctx.at_war {
-            self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params) + a_tick * Self::kept_ticks(ctx)
+            self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params) + a_tick * Self::kept_ticks(ctx) + at_once
         } else {
-            a_tick
+            a_tick + at_once
         }
     }
 

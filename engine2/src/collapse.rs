@@ -230,6 +230,51 @@ impl World {
         self.names.actors.push((format!("{psid}.{}", new.0), format!("{pname} successor {}", new.0)));
         self.houses.get_mut(&house).unwrap().polity = new;
         let ruler: PersonId = self.provinces[&p].governor.expect("a carrier is the governor's house");
+        self.found_polity(parent, new, provinces, house, ruler, people_total, people_gone, params)
+    }
+
+    /// **A revolt left standing its term becomes a secession** ((д2), plan §30.3, §30.6 p. 3,
+    /// §30.9 p. 3, §31.27): the province `p`, risen with no house to carry it and not put
+    /// down, leaves its owner as a polity of its own — one province, under a house raised
+    /// from its people with their tongue and their faith (`raise_house_at`), by the same
+    /// birth as a secession carried by a house (`found_polity`: the treasury's share, the
+    /// militia, the war of secession). `None` when nobody lives there to rise: the revolt
+    /// stands.
+    ///
+    /// The province may be its owner's capital, or its last: a revolt begins in no capital
+    /// (`rise`), but a polity that loses its capital seats its court in the most peopled
+    /// province left, in revolt or not (`transfer`). Seceding, a capital sends the court on
+    /// once more; the last province leaves a polity with no land, and it falls
+    /// (`found_polity` then opens no war with it).
+    pub(crate) fn secede_alone(&mut self, p: ProvinceId, params: &Params) -> Result<Option<ActorId>, WorldError> {
+        let parent = self.provinces[&p].owner;
+        if self.population(p) < 1 {
+            return Ok(None);
+        }
+        let people_total: i64 = self.actors[&parent].provinces.iter().map(|q| self.population(*q)).sum();
+        let people_gone: i64 = self.population(p);
+        let new = ActorId(self.actors.len() as u32);
+        let (psid, pname) = self.names.actors[parent.index()].clone();
+        self.names.actors.push((format!("{psid}.{}", new.0), format!("{pname} successor {}", new.0)));
+        // The seat of the province is the old polity's: its governor loses it.
+        if let Some(g) = self.provinces[&p].governor {
+            self.provinces.get_mut(&p).unwrap().governor = None;
+            self.emit(Event::GovernorChanged { province: p, from: g, to: None });
+        }
+        let (culture, religion) = (self.provinces[&p].culture, self.provinces[&p].religion);
+        let ruler = self.raise_house_at(new, p, culture, religion)?.expect("people live in the province");
+        let house = self.persons[&ruler].house;
+        self.found_polity(parent, new, vec![p], house, ruler, people_total, people_gone, params).map(Some)
+    }
+
+    /// The birth of the polity `new` out of `parent` with `provinces` under `house` and its
+    /// `ruler` — the body a secession carried by a house (`secede`) and a province seceding
+    /// alone (`secede_alone`) share: the record, the accounts, the provinces with their
+    /// people, the treasury's share, the seats, the core and the legitimacy, the militia, the
+    /// edges and the war of secession. The polity's name is in the world already, and the
+    /// house is the polity's.
+    #[allow(clippy::too_many_arguments)]
+    fn found_polity(&mut self, parent: ActorId, new: ActorId, provinces: Vec<ProvinceId>, house: HouseId, ruler: PersonId, people_total: i64, people_gone: i64, params: &Params) -> Result<ActorId, WorldError> {
         let new_capital = provinces.iter().copied().max_by_key(|q| (self.population(*q), std::cmp::Reverse(*q))).expect("a rising has a province");
         let (succession, tax_rate_ppm, mut institutions) = {
             let pa = &self.actors[&parent];
@@ -331,17 +376,23 @@ impl World {
         for b in &others {
             self.relations.insert(crate::army::pair(new, *b), 0.0);
         }
-        self.open_war(new, parent, None)?;
-        // The war of secession is the parent's to end (E3 (б)): the new polity has what it
-        // rose for and accepts a status quo always; the parent — the declarer of record —
-        // wants its provinces back (a goal «take» of the new polity) and accepts only at the
-        // threshold, when the goal is put aside, or exhausted. The parent's allies are in
-        // by §19 all the same.
-        if let Some(w) = self.wars.get_mut(&crate::army::pair(new, parent)) {
-            w.by = Some(parent);
-            w.aim = Some(crate::world::WarAim::Polity(new));
+        // A parent that lost its last province to the secession has fallen in the transfer
+        // (`transfer` → `fall`; a province alone, `secede_alone`, may be its owner's last —
+        // plan §31.30, the executor's decision № 5): there is nobody to fight and nobody to
+        // want the land back. A secession carried by a house leaves the parent its capital.
+        if self.alive(parent) {
+            self.open_war(new, parent, None)?;
+            // The war of secession is the parent's to end (E3 (б)): the new polity has what it
+            // rose for and accepts a status quo always; the parent — the declarer of record —
+            // wants its provinces back (a goal «take» of the new polity) and accepts only at the
+            // threshold, when the goal is put aside, or exhausted. The parent's allies are in
+            // by §19 all the same.
+            if let Some(w) = self.wars.get_mut(&crate::army::pair(new, parent)) {
+                w.by = Some(parent);
+                w.aim = Some(crate::world::WarAim::Polity(new));
+            }
+            self.set_goal(parent, crate::agents::GoalKind::Take, crate::agents::GoalTarget::Polity(new))?;
         }
-        self.set_goal(parent, crate::agents::GoalKind::Take, crate::agents::GoalTarget::Polity(new))?;
         for b in &others {
             let norm = self.relation_norm(new, *b, params);
             self.relations.insert(crate::army::pair(new, *b), norm);
@@ -370,7 +421,8 @@ impl World {
     }
 
     /// The phase of collapse: the cores of the living polities settle; a revolt with a unit
-    /// of the owner standing in the province ends; then every province of a living polity
+    /// of the owner standing in the province ends; a revolt left standing its term secedes
+    /// ((д2)); then every province of a living polity
     /// but its capital draws once for a rising, in canonical order; a province in revolt or
     /// taken into a polity born this tick draws no more.
     pub(crate) fn phase_collapse(&mut self, params: &Params) -> Result<(), WorldError> {
@@ -387,6 +439,18 @@ impl World {
         for (q, owner) in put_down {
             self.provinces.get_mut(&q).unwrap().revolt = None;
             self.emit(Event::RevoltEnded { province: q, actor: owner });
+        }
+        // (д2): a revolt not put down within its term — as long as a capital holds a siege,
+        // `siege.capital_ticks` (plan §30.9 p. 3: no new parameter) — secedes. The putting
+        // down comes first: a unit that came to stand there this tick keeps the province.
+        let seceding: Vec<ProvinceId> = self
+            .provinces
+            .iter()
+            .filter(|(_, pr)| self.alive(pr.owner) && pr.revolt.is_some_and(|began| self.tick.0.saturating_sub(began.0) >= params.siege_capital_ticks))
+            .map(|(q, _)| *q)
+            .collect();
+        for q in seceding {
+            self.secede_alone(q, params)?;
         }
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().filter(|q| self.revolt_chance_per_tick(*q, params) > 0.0 || self.alive(self.provinces[q].owner)).collect();
         // A polity born this tick (a secession taken at the turn) draws no rising yet.

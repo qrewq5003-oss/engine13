@@ -2542,12 +2542,15 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
         let units = |strength: f64| f64::from(u8::from(strength > 0.0));
         let now = w.army_strength(s0);
         let suppression = (units(now + extra) - units(now)) * w.suppression_a_tick(s0, &p);
+        // (д2): the province a revolt standing now would take with it — the first unit's, once.
+        let at_once = (units(now + extra) - units(now)) * w.suppression_at_once(s0, &p);
         let threatening: Vec<ActorId> = threats.iter().map(|(t, _)| *t).collect();
-        (in_its_wars, against_threats, suppression, kept, w.heads_cost(s0, men, kept, &p), threatening)
+        (in_its_wars, against_threats, suppression, at_once, kept, w.heads_cost(s0, men, kept, &p), threatening)
     };
     // Free money: the pay of the levy costs nothing, at peace and for the war's length.
     assert!(w.free_money(s0, &p) > 0.0 && !(w.paid_share_seen_ppm(s0) < 1_000_000));
-    let (in_its_wars, against_threats, suppression, kept, heads, threatening) = parts(&w);
+    let (in_its_wars, against_threats, suppression, at_once, kept, heads, threatening) = parts(&w);
+    assert_eq!(at_once, 0.0, "no revolt stands: nothing to keep at once");
     assert!(kept > 1.0, "a war longer than a tick: {kept}");
     assert!(!threatening.is_empty() && !threatening.contains(&s1), "the neighbours it does not fight, the enemy of its war not among them: {threatening:?}");
     assert!(threatening.iter().all(|t| !w.at_war(s0, *t) && w.borders(s0, *t)));
@@ -2570,11 +2573,18 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
     }
     bare.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(bare.tick);
     assert_eq!(bare.army_strength(s0), 0.0);
-    let (in_its_wars, against_threats, suppression, kept, heads, _) = parts(&bare);
+    let (in_its_wars, against_threats, suppression, at_once, kept, heads, _) = parts(&bare);
     assert!(suppression > 0.0, "a rising in its land and no unit: the first unit puts it down, {suppression}");
+    // (д2): the revolt left standing its term would take the province — the first unit keeps
+    // it, **once**: its take over the horizon is no tick's worth and is not multiplied by the
+    // war's length.
+    let province = bare.take_of(s0, at(0, 3), &p) * f64::from(p.goal_horizon_ticks) / 2.0 / bare.yearly_income(s0, &p).max(1) as f64;
+    assert_eq!(at_once, province, "a unit raised now comes in time: the province, {at_once}");
     let utility = bare.utility(s0, &levy, &p);
-    assert!((utility - (in_its_wars + (against_threats + suppression) * kept - heads)).abs() < 1e-9, "the first unit at war: its wars {in_its_wars}, the threats {against_threats} and the suppression {suppression} a tick over {kept} ticks, the heads {heads}; utility {utility}");
-    assert!((utility - (in_its_wars + against_threats * kept - heads)).abs() > 1e-6, "the suppression is in it");
+    assert!((utility - (in_its_wars + (against_threats + suppression) * kept + at_once - heads)).abs() < 1e-9, "the first unit at war: its wars {in_its_wars}, the threats {against_threats} and the suppression {suppression} a tick over {kept} ticks, the province {at_once} once, the heads {heads}; utility {utility}");
+    assert!((utility - (in_its_wars + (against_threats + suppression + at_once) * kept - heads)).abs() > 1e-6, "the province is counted once, not for every tick of the war");
+    assert!((utility - (in_its_wars + (against_threats + suppression) * kept - heads)).abs() > 1e-6, "and it is in the worth");
+    assert!((utility - (in_its_wars + against_threats * kept + at_once - heads)).abs() > 1e-6, "the suppression of a tick is in it too");
     // At peace the levy is worth the tick it was: the threats and the suppression of a tick.
     let mut peace = world_of(&testworld::five_states_scenario(), 51);
     for x in peace.actors.values_mut() {
@@ -2593,6 +2603,108 @@ fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppressio
         })
         .sum();
     assert_eq!(peace.utility(s0, &levy, &p), a_tick - peace.heads_cost(s0, men, 1.0, &p), "at peace: a tick of the threats less the heads, bit for bit");
+    // At peace too the province comes once, whole, into the decision of the tick: a polity
+    // with no unit and a revolt standing.
+    let mine: Vec<engine2::UnitId> = peace.units_of(s0);
+    for u in mine {
+        peace.apply_verb(&VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
+    }
+    peace.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(peace.tick);
+    let (men, income) = (peace.recruit_per_tick(s0, &p), peace.yearly_income(s0, &p).max(1) as f64);
+    let extra = World::new_soldiers_strength(men);
+    let blow = peace.ceded_province_blow(s0, &peace.risk_prices(s0, &p), &p);
+    let a_tick: f64 = peace
+        .threats(s0, blow, &p)
+        .iter()
+        .map(|(t, terms)| {
+            let expected = |extra: f64| World::wars_a_tick_in(&peace.threat_rate(*t, s0, &p), s0, terms.odds(extra, &p)) * peace.war_worth_of(s0, terms, false, extra, &p);
+            expected(extra) - expected(0.0)
+        })
+        .sum();
+    let province = peace.take_of(s0, at(0, 3), &p) * f64::from(p.goal_horizon_ticks) / 2.0 / income;
+    assert_eq!(peace.suppression_at_once(s0, &p), province);
+    assert!((peace.utility(s0, &levy, &p) - (a_tick + peace.suppression_a_tick(s0, &p) + province - peace.heads_cost(s0, men, 1.0, &p))).abs() < 1e-9, "at peace the first unit: a tick of the threats and of the suppression, and the province once");
+}
+
+/// **The bot reads that a revolt left standing its term costs the province** ((д2), plan
+/// §30.3, §31.27.3 p. 2; owner's decision 2026-11-16): the world secedes a province in revolt
+/// for `siege.capital_ticks` (`tests/collapse.rs`), and the bot weighs a revolt by the same
+/// rule in both places it weighs one — what a unit sent to it at war saves
+/// (`revolt_put_down_worth`, read by `bot_orders`) and what the first unit is worth
+/// (`suppression_at_once`, read by the levy at peace and at war — once, beside the flow of
+/// `suppression_a_tick`, which is a tick's worth as before). In time, the unit keeps the
+/// province — its take over the horizon; too late, nothing; while waiting is in time too, the
+/// ticks of the take as before the rule.
+#[test]
+fn the_bot_reads_that_a_revolt_left_standing_its_term_costs_the_province() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let q = at(0, 3);
+    let term = p.siege_capital_ticks;
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    // A revolt begun this turn, read as the turns pass with nobody coming.
+    let mut w = world_of(&testworld::five_states_scenario(), 53);
+    let mut calm = params();
+    calm.revolt_per_tick = 0.0;
+    assert_eq!(w.rise_now(q, &calm).unwrap(), None, "no house carries it: a revolt");
+    assert_eq!(w.revolt_turns_left(at(0, 2), &p), None, "a province at peace has no term");
+    let capital = w.actors[&s0].capital;
+    let march = w.revolt_march_ticks(s0, capital, q, &p).expect("a way from the capital");
+    assert_eq!(march, 1.0, "a turn's march on the test world");
+    for age in 0..=term {
+        let left = w.revolt_turns_left(q, &p).expect("in revolt");
+        assert_eq!(left, f64::from(term + 1 - age), "turn {age}: so many turns before it secedes, this one among them");
+        let (take, income) = (w.take_of(s0, q, &p), w.yearly_income(s0, &p).max(1) as f64);
+        assert!(take > 0.0);
+        // A unit in being, sent now, a turn's march away: it comes in time in every turn the
+        // revolt stands. Waiting past the term, it keeps the province; waiting within it, it
+        // saves the ticks of the take between; too far to come in time, nothing.
+        assert_eq!(w.revolt_put_down_worth(s0, q, 1.0, left + 1.0, &p), take * years, "turn {age}: waiting would be too late — the province");
+        assert_eq!(w.revolt_put_down_worth(s0, q, 1.0, left, &p), take * (left - 1.0) / 2.0, "turn {age}: waiting is in time too — the ticks of the take");
+        assert_eq!(w.revolt_put_down_worth(s0, q, left + 1.0, left + 2.0, &p), 0.0, "turn {age}: a unit that cannot come in time saves nothing");
+        // The first unit: raised now it marches from the next turn — in time while a turn of
+        // the term is to spare, and then worth the province; in the last turn, nothing.
+        // The flow is what it was before the rule: a tick of the take of the revolt, and of
+        // the risings to come. The province comes besides, once (`suppression_at_once`).
+        let others: f64 = w.actors[&s0].provinces.iter().filter(|x| **x != q).map(|x| w.revolt_chance_per_tick(*x, &p) * w.take_of(s0, *x, &p) / 2.0).sum();
+        assert!((w.suppression_a_tick(s0, &p) - (take / 2.0 + others) / income).abs() < 1e-12, "turn {age}: the flow of a tick");
+        let once = w.suppression_at_once(s0, &p);
+        if march < left {
+            assert_eq!(once, take * years / income, "turn {age}: the first unit keeps the province");
+        } else {
+            assert_eq!(age, term, "only in the turn of the term is a unit raised now too late");
+            assert_eq!(once, 0.0, "turn {age}: a unit raised now is too late");
+        }
+        if age < term {
+            w.tick(&calm).unwrap();
+            assert!(w.in_revolt(q), "turn {age}: nobody came, it stands");
+        }
+    }
+    // The world keeps the word: the turn of the term secedes it.
+    w.tick(&calm).unwrap();
+    assert!(w.provinces[&q].owner != s0 && !w.in_revolt(q));
+    // **At war the bot sends the unit the front would have kept.** Polity 0 wants its
+    // neighbour subdued and marches on its capital — a war longer than the term; its one unit
+    // is worth more at the front than the ticks of a province's take, and less than the
+    // province.
+    let mut w = world_of(&testworld::five_states_scenario(), 53);
+    w.set_goal(s0, GoalKind::Subdue, GoalTarget::Polity(s1)).unwrap();
+    for u in w.units_of(s1) {
+        let men = w.soldiers(u);
+        w.post(engine2::Account::Soldiers(u), Source::Test, -men * 1000).unwrap();
+    }
+    w.declare_war(s0, s1).unwrap();
+    let unit = w.units_of(s0)[0];
+    let target = w.actors[&s1].capital;
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit, to: target }], "no revolt: the campaign");
+    w.provinces.get_mut(&q).unwrap().revolt = Some(w.tick);
+    let (income, take) = (w.yearly_income(s0, &p).max(1) as f64, w.take_of(s0, q, &p));
+    let at_the_front = w.war_worth(s0, s1, false, 0.0, &p) - w.war_worth(s0, s1, false, -w.unit_strength(unit), &p);
+    let stands = w.war_ticks(s0, s1, &p) + 1.0;
+    let left = w.revolt_turns_left(q, &p).unwrap();
+    assert!(stands > left, "the war outlasts the term: {stands} turns against {left}");
+    assert!(take * (stands - 1.0) / 2.0 / income < at_the_front && at_the_front < take * years / income, "the unit at the front {at_the_front}: more than the ticks of the take {}, less than the province {}", take * (stands - 1.0) / 2.0 / income, take * years / income);
+    assert_eq!(w.bot_orders(s0, &p), vec![Order { actor: ActorRef::Ruler(s0), unit, to: q }], "the revolt would stand its term: the unit goes to keep the province");
 }
 
 /// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
@@ -4302,7 +4414,7 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
     let mut g = Game::new(&s, p.clone(), seed).unwrap();
     let term = p.siege_capital_ticks;
     // (province, the tick it began) → (ticks seen, owner, the cause at the term, the causes from the term on, a house to carry it at the term)
-    type Seen = (u32, ActorId, Option<String>, BTreeMap<String, u32>, bool);
+    type Seen = (u32, ActorId, Option<String>, BTreeMap<String, u32>, bool, (bool, bool));
     let mut revolts: BTreeMap<(ProvinceId, u32), Seen> = BTreeMap::new();
     let mut standing: std::collections::BTreeSet<(ProvinceId, u32)> = std::collections::BTreeSet::new();
     for _ in 0..300 {
@@ -4312,13 +4424,16 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         let mut read: Vec<((ProvinceId, u32), &'static str, Option<(engine2::UnitId, ProvinceId)>)> = Vec::new();
         for key in &standing {
             let q = key.0;
-            let e = revolts.entry(*key).or_insert((0, w.provinces[&q].owner, None, BTreeMap::new(), false));
+            let e = revolts.entry(*key).or_insert((0, w.provinces[&q].owner, None, BTreeMap::new(), false, (false, false)));
             e.0 += 1;
             if e.0 >= term {
                 let (why, sent) = why_a_revolt_stands(w, q, p);
                 read.push((*key, why, sent));
                 if e.0 == term {
                     e.4 = w.secession_carrier(q).is_some();
+                    // The owner's capital, or its last province (plan §31.30, decision № 5).
+                    let owner = &w.actors[&w.provinces[&q].owner];
+                    e.5 = (owner.capital == q, owner.provinces.len() == 1);
                 }
             }
         }
@@ -4336,7 +4451,7 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         }
     }
     let mut lines = Vec::new();
-    for ((q, began), (seen, owner, at_term, causes, carrier)) in &revolts {
+    for ((q, began), (seen, owner, at_term, causes, carrier, (capital, last))) in &revolts {
         d.count("revolts", 1);
         d.sample("revolt length, ticks", f64::from(*seen));
         let Some(at_term) = at_term else { continue };
@@ -4345,6 +4460,8 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         d.count("long revolts", 1);
         d.count("long revolts standing at the run's end", u64::from(at_end));
         d.count("long revolts with a house to carry them at the term", u64::from(*carrier));
+        d.count("long revolts in the owner's capital at the term", u64::from(*capital));
+        d.count("long revolts in the owner's last province at the term", u64::from(*last));
         d.sample("long revolt length, ticks", f64::from(*seen));
         d.count(&format!("at the term: {at_term}"), 1);
         d.count(&format!("most of its ticks: {most}"), 1);
@@ -4388,7 +4505,7 @@ fn diagnosis_why_a_revolt_stands() {
         let mut long: Vec<f64> = d.samples.get("long revolt length, ticks").cloned().unwrap_or_default();
         long.sort_by(f64::total_cmp);
         eprintln!(
-            "{label}: revolts {} — length {}; stood {} ticks and longer {} — length {}, each {:?}; of them standing at the run's end {}, with a house to carry them at the term {}",
+            "{label}: revolts {} — length {}; stood {} ticks and longer {} — length {}, each {:?}; of them standing at the run's end {}, with a house to carry them at the term {}, in the owner's capital at the term {}, in its last province {}",
             d.n("revolts"),
             lengths("revolt length, ticks"),
             p.siege_capital_ticks,
@@ -4396,7 +4513,9 @@ fn diagnosis_why_a_revolt_stands() {
             lengths("long revolt length, ticks"),
             long.iter().map(|x| *x as u32).collect::<Vec<u32>>(),
             d.n("long revolts standing at the run's end"),
-            d.n("long revolts with a house to carry them at the term")
+            d.n("long revolts with a house to carry them at the term"),
+            d.n("long revolts in the owner's capital at the term"),
+            d.n("long revolts in the owner's last province at the term")
         );
         for (name, of) in [("at the term: ", "long revolts"), ("most of its ticks: ", "long revolts"), ("revolt-ticks from the term on: ", "revolt-ticks from the term on")] {
             let causes: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(name)).map(|(k, n)| format!("{} — {n}", &k[name.len()..])).collect();
