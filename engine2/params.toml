@@ -202,6 +202,10 @@ e0 = "А5"
 # checked on the held-out seeds (А13 0.777 / 0.767). By the source's own figures: at k = 0.7
 # a side twice as strong wins 0.619 of battles (the source: 3 in 5) and another 10 % of men
 # add 1.6 points (the source: 2).
+# А13 on the agents' battles is **printed, not asserted** (owner's decision 2026-11-16, plan
+# §31.33): on twenty worlds the measure moves more between states of the code than it
+# answers to k, and an assertion would push k about by noise. The assertion on the scripted
+# wars (tests/army.rs) stands. What А13 on the agents should read is for the report closing E3.
 [battle.strength_exponent]
 kind = "c"
 value = 0.7
