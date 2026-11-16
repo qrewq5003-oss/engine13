@@ -568,6 +568,79 @@ fn a_revolt_left_standing_the_term_of_a_capitals_siege_secedes_alone_under_a_hou
     assert!(w.provinces[&p05].owner != s0 && !w.in_revolt(p05), "and secedes in the turn of that term");
 }
 
+/// **A revolt in the owner's capital, or in its last province, stands its term too** ((д2),
+/// plan §31.30, the executor's decision № 5): a revolt begins in no capital (`rise`), but a
+/// polity that loses its capital seats its court in the most peopled province it has left,
+/// in revolt or not (`transfer`) — and that province may be the last. At the term a capital
+/// secedes and the court moves on once more; the last province secedes and the polity, with
+/// no land, falls — **and the new polity opens no war with the fallen one**, which nobody is
+/// left to fight. The world stays whole and the sentinel raises nothing.
+#[test]
+fn a_revolt_in_the_capital_or_in_the_last_province_stands_its_term_and_the_world_stays_whole() {
+    use sentinel::Thresholds;
+    let calm = calm();
+    let s = testworld::five_states_scenario();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let p05 = at(0, 1);
+    let term = calm.siege_capital_ticks;
+    let played = |g: &mut Game| {
+        let (watch, _) = sentinel::run(g, term + 2, 1, "none", Thresholds::default(), |g| {
+            g.tick(&[]).unwrap();
+        });
+        watch.flags()
+    };
+    // **The capital in revolt**: the court sits in a province that had risen.
+    let mut g = bare(&s, calm.clone(), 36).unwrap();
+    {
+        let w = g.world_mut();
+        assert_eq!(w.rise_now(p05, &calm).unwrap(), None);
+        w.actors.get_mut(&s0).unwrap().capital = p05;
+        assert!(w.in_revolt(p05) && w.actors[&s0].provinces.len() == 5);
+    }
+    let actors = g.world().actors.len();
+    let flags = played(&mut g);
+    let w = g.world();
+    let new = ActorId(actors as u32);
+    assert!(w.alive(new) && w.provinces[&p05].owner == new && !w.in_revolt(p05), "the capital seceded at its term");
+    assert!(w.alive(s0) && w.actors[&s0].provinces.len() == 4, "the old polity stands on what it has left");
+    assert!(w.actors[&s0].capital != p05 && w.actors[&s0].provinces.contains(&w.actors[&s0].capital), "its court moved on to a province of its own");
+    assert!(w.at_war(new, s0), "the war of secession");
+    assert_whole(w, "the capital in revolt");
+    assert!(flags.is_empty(), "the sentinel: {flags:?}");
+    // **The last province in revolt**: the polity has nothing else.
+    let mut g = bare(&s, calm.clone(), 37).unwrap();
+    {
+        let w = g.world_mut();
+        for u in w.units_of(s0) {
+            w.apply_verb(&VerbCall { actor: engine2::ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(u) }, &calm).unwrap();
+        }
+        let lost: Vec<ProvinceId> = w.actors[&s0].provinces.iter().copied().filter(|q| *q != p05).collect();
+        for q in &lost {
+            let pr = w.provinces.get_mut(q).unwrap();
+            pr.owner = s1;
+            pr.governor = None;
+        }
+        w.actors.get_mut(&s0).unwrap().provinces = vec![p05];
+        w.actors.get_mut(&s0).unwrap().capital = p05;
+        let theirs = &mut w.actors.get_mut(&s1).unwrap().provinces;
+        theirs.extend(lost);
+        theirs.sort();
+        w.provinces.get_mut(&p05).unwrap().revolt = Some(w.tick);
+        assert!(w.alive(s0) && w.in_revolt(p05) && w.units_of(s0).is_empty());
+    }
+    let (actors, treasury) = (g.world().actors.len(), g.world().treasury(s0));
+    let flags = played(&mut g);
+    let w = g.world();
+    let new = ActorId(actors as u32);
+    assert!(w.alive(new) && w.provinces[&p05].owner == new && !w.in_revolt(p05), "the last province seceded at its term");
+    assert!(!w.alive(s0) && w.actors[&s0].provinces.is_empty(), "the old polity, with no land, has fallen");
+    assert!(!w.at_war(new, s0) && w.wars.keys().all(|(x, y)| *x != s0 && *y != s0), "no war with the fallen");
+    assert!(!w.actors[&s0].goals.iter().any(|goal| goal.target == engine2::agents::GoalTarget::Polity(new)), "and nobody left to want the land back");
+    assert!(treasury > 0 && w.treasury(s0) == 0, "what the treasury held went with the people: the fallen keeps nothing");
+    assert_whole(w, "the last province in revolt");
+    assert!(flags.is_empty(), "the sentinel: {flags:?}");
+}
+
 #[test]
 fn the_draw_has_the_form_of_b3_and_b6_once_per_province_but_the_capital_and_a_province_taken_this_tick_draws_no_more() {
     let p = params();
@@ -717,6 +790,47 @@ use std::collections::BTreeMap;
 
 use sentinel::Observed;
 
+/// Whole: every seat, unit, war, pair and name of the world in place — no ruler, regent,
+/// heir or governor of another polity's house, no unit or war of a fallen polity, every pair
+/// with a relation and every actor, house and person with a name.
+fn assert_whole(w: &World, label: &str) {
+    // Whole: every seat, unit, war, pair and name in place.
+    assert_eq!(w.names.actors.len(), w.actors.len(), "{label}: an actor without a name");
+    assert_eq!(w.names.houses.len(), w.houses.len());
+    assert_eq!(w.names.persons.len(), w.persons.len());
+    let n = w.actors.len();
+    assert_eq!(w.relations.len(), n * (n - 1) / 2, "{label}: a pair without a relation");
+    for (a, actor) in &w.actors {
+        for q in &actor.provinces {
+            assert_eq!(w.provinces[q].owner, *a, "{label}: {q:?} listed by {a:?} but owned by another");
+        }
+        if w.alive(*a) {
+            assert_eq!(w.houses[&w.persons[&actor.ruler].house].polity, *a, "{label}: the ruler of {a:?} is of another polity's house");
+            assert!(actor.regent.is_none_or(|r| w.person_alive(r) && w.houses[&w.persons[&r].house].polity == *a), "{label}: a stray regent");
+            assert!(actor.heir.is_none_or(|h| w.houses[&w.persons[&h].house].polity == *a), "{label}: a stray heir");
+            assert!(actor.provinces.contains(&actor.capital), "{label}: the capital of {a:?} is not its own");
+        } else {
+            assert!(actor.provinces.is_empty() && w.units_of(*a).is_empty(), "{label}: a fallen polity with land or men");
+        }
+    }
+    for (q, pr) in &w.provinces {
+        assert!(w.actors[&pr.owner].provinces.contains(q), "{label}: {q:?} not in its owner's list");
+        if let Some(gov) = pr.governor {
+            assert!(w.person_alive(gov), "{label}: a dead governor of {q:?}");
+            assert_eq!(w.houses[&w.persons[&gov].house].polity, pr.owner, "{label}: governor of {q:?} from another polity");
+        }
+    }
+    for (u, unit) in &w.units {
+        assert!(w.alive(unit.owner), "{label}: unit {u:?} of a fallen polity");
+        if let Some(h) = unit.house {
+            assert_eq!(w.houses[&h].polity, unit.owner, "{label}: the men of house {h:?} serve another polity");
+        }
+    }
+    for (x, y) in w.wars.keys() {
+        assert!(w.alive(*x) && w.alive(*y), "{label}: a war with a fallen polity");
+    }
+}
+
 /// В7 on the generated worlds: risings — revolts and secessions — per century per large
 /// polity (five provinces and more), neither never nor always; В8: the polities a century
 /// on, per polity at the start — printed here, checked with the bots: a polity is born with
@@ -815,42 +929,7 @@ fn on_generated_worlds_risings_per_century_per_large_polity_lie_in_b7_the_politi
         polities_end += g.world().actors.len();
         alienated_end += g.world().provinces.keys().filter(|q| g.world().alienated(**q)).count();
         in_revolt_end += g.world().provinces.keys().filter(|q| g.world().in_revolt(**q)).count();
-        // Whole: every seat, unit, war, pair and name in place.
-        let w = g.world();
-        assert_eq!(w.names.actors.len(), w.actors.len(), "seed {seed}: an actor without a name");
-        assert_eq!(w.names.houses.len(), w.houses.len());
-        assert_eq!(w.names.persons.len(), w.persons.len());
-        let n = w.actors.len();
-        assert_eq!(w.relations.len(), n * (n - 1) / 2, "seed {seed}: a pair without a relation");
-        for (a, actor) in &w.actors {
-            for q in &actor.provinces {
-                assert_eq!(w.provinces[q].owner, *a, "seed {seed}: {q:?} listed by {a:?} but owned by another");
-            }
-            if w.alive(*a) {
-                assert_eq!(w.houses[&w.persons[&actor.ruler].house].polity, *a, "seed {seed}: the ruler of {a:?} is of another polity's house");
-                assert!(actor.regent.is_none_or(|r| w.person_alive(r) && w.houses[&w.persons[&r].house].polity == *a), "seed {seed}: a stray regent");
-                assert!(actor.heir.is_none_or(|h| w.houses[&w.persons[&h].house].polity == *a), "seed {seed}: a stray heir");
-                assert!(actor.provinces.contains(&actor.capital), "seed {seed}: the capital of {a:?} is not its own");
-            } else {
-                assert!(actor.provinces.is_empty() && w.units_of(*a).is_empty(), "seed {seed}: a fallen polity with land or men");
-            }
-        }
-        for (q, pr) in &w.provinces {
-            assert!(w.actors[&pr.owner].provinces.contains(q), "seed {seed}: {q:?} not in its owner's list");
-            if let Some(gov) = pr.governor {
-                assert!(w.person_alive(gov), "seed {seed}: a dead governor of {q:?}");
-                assert_eq!(w.houses[&w.persons[&gov].house].polity, pr.owner, "seed {seed}: governor of {q:?} from another polity");
-            }
-        }
-        for (u, unit) in &w.units {
-            assert!(w.alive(unit.owner), "seed {seed}: unit {u:?} of a fallen polity");
-            if let Some(h) = unit.house {
-                assert_eq!(w.houses[&h].polity, unit.owner, "seed {seed}: the men of house {h:?} serve another polity");
-            }
-        }
-        for (x, y) in w.wars.keys() {
-            assert!(w.alive(*x) && w.alive(*y), "seed {seed}: a war with a fallen polity");
-        }
+        assert_whole(g.world(), &format!("seed {seed}"));
         // Deterministic through a save, risings included: on the first run with a polity
         // born (since E3 (в) a house's chance can be void at the turn — seed 1's governor
         // took the throne by a usurpation settled first — so the seed is not fixed).

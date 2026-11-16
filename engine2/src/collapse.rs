@@ -240,6 +240,12 @@ impl World {
     /// birth as a secession carried by a house (`found_polity`: the treasury's share, the
     /// militia, the war of secession). `None` when nobody lives there to rise: the revolt
     /// stands.
+    ///
+    /// The province may be its owner's capital, or its last: a revolt begins in no capital
+    /// (`rise`), but a polity that loses its capital seats its court in the most peopled
+    /// province left, in revolt or not (`transfer`). Seceding, a capital sends the court on
+    /// once more; the last province leaves a polity with no land, and it falls
+    /// (`found_polity` then opens no war with it).
     pub(crate) fn secede_alone(&mut self, p: ProvinceId, params: &Params) -> Result<Option<ActorId>, WorldError> {
         let parent = self.provinces[&p].owner;
         if self.population(p) < 1 {
@@ -370,17 +376,23 @@ impl World {
         for b in &others {
             self.relations.insert(crate::army::pair(new, *b), 0.0);
         }
-        self.open_war(new, parent, None)?;
-        // The war of secession is the parent's to end (E3 (б)): the new polity has what it
-        // rose for and accepts a status quo always; the parent — the declarer of record —
-        // wants its provinces back (a goal «take» of the new polity) and accepts only at the
-        // threshold, when the goal is put aside, or exhausted. The parent's allies are in
-        // by §19 all the same.
-        if let Some(w) = self.wars.get_mut(&crate::army::pair(new, parent)) {
-            w.by = Some(parent);
-            w.aim = Some(crate::world::WarAim::Polity(new));
+        // A parent that lost its last province to the secession has fallen in the transfer
+        // (`transfer` → `fall`; a province alone, `secede_alone`, may be its owner's last —
+        // plan §31.30, the executor's decision № 5): there is nobody to fight and nobody to
+        // want the land back. A secession carried by a house leaves the parent its capital.
+        if self.alive(parent) {
+            self.open_war(new, parent, None)?;
+            // The war of secession is the parent's to end (E3 (б)): the new polity has what it
+            // rose for and accepts a status quo always; the parent — the declarer of record —
+            // wants its provinces back (a goal «take» of the new polity) and accepts only at the
+            // threshold, when the goal is put aside, or exhausted. The parent's allies are in
+            // by §19 all the same.
+            if let Some(w) = self.wars.get_mut(&crate::army::pair(new, parent)) {
+                w.by = Some(parent);
+                w.aim = Some(crate::world::WarAim::Polity(new));
+            }
+            self.set_goal(parent, crate::agents::GoalKind::Take, crate::agents::GoalTarget::Polity(new))?;
         }
-        self.set_goal(parent, crate::agents::GoalKind::Take, crate::agents::GoalTarget::Polity(new))?;
         for b in &others {
             let norm = self.relation_norm(new, *b, params);
             self.relations.insert(crate::army::pair(new, *b), norm);

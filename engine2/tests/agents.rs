@@ -4414,7 +4414,7 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
     let mut g = Game::new(&s, p.clone(), seed).unwrap();
     let term = p.siege_capital_ticks;
     // (province, the tick it began) → (ticks seen, owner, the cause at the term, the causes from the term on, a house to carry it at the term)
-    type Seen = (u32, ActorId, Option<String>, BTreeMap<String, u32>, bool);
+    type Seen = (u32, ActorId, Option<String>, BTreeMap<String, u32>, bool, (bool, bool));
     let mut revolts: BTreeMap<(ProvinceId, u32), Seen> = BTreeMap::new();
     let mut standing: std::collections::BTreeSet<(ProvinceId, u32)> = std::collections::BTreeSet::new();
     for _ in 0..300 {
@@ -4424,13 +4424,16 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         let mut read: Vec<((ProvinceId, u32), &'static str, Option<(engine2::UnitId, ProvinceId)>)> = Vec::new();
         for key in &standing {
             let q = key.0;
-            let e = revolts.entry(*key).or_insert((0, w.provinces[&q].owner, None, BTreeMap::new(), false));
+            let e = revolts.entry(*key).or_insert((0, w.provinces[&q].owner, None, BTreeMap::new(), false, (false, false)));
             e.0 += 1;
             if e.0 >= term {
                 let (why, sent) = why_a_revolt_stands(w, q, p);
                 read.push((*key, why, sent));
                 if e.0 == term {
                     e.4 = w.secession_carrier(q).is_some();
+                    // The owner's capital, or its last province (plan §31.30, decision № 5).
+                    let owner = &w.actors[&w.provinces[&q].owner];
+                    e.5 = (owner.capital == q, owner.provinces.len() == 1);
                 }
             }
         }
@@ -4448,7 +4451,7 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         }
     }
     let mut lines = Vec::new();
-    for ((q, began), (seen, owner, at_term, causes, carrier)) in &revolts {
+    for ((q, began), (seen, owner, at_term, causes, carrier, (capital, last))) in &revolts {
         d.count("revolts", 1);
         d.sample("revolt length, ticks", f64::from(*seen));
         let Some(at_term) = at_term else { continue };
@@ -4457,6 +4460,8 @@ fn diagnose_long_revolts(seed: u64, p: &Params) -> (Diagnosis, Vec<String>) {
         d.count("long revolts", 1);
         d.count("long revolts standing at the run's end", u64::from(at_end));
         d.count("long revolts with a house to carry them at the term", u64::from(*carrier));
+        d.count("long revolts in the owner's capital at the term", u64::from(*capital));
+        d.count("long revolts in the owner's last province at the term", u64::from(*last));
         d.sample("long revolt length, ticks", f64::from(*seen));
         d.count(&format!("at the term: {at_term}"), 1);
         d.count(&format!("most of its ticks: {most}"), 1);
@@ -4500,7 +4505,7 @@ fn diagnosis_why_a_revolt_stands() {
         let mut long: Vec<f64> = d.samples.get("long revolt length, ticks").cloned().unwrap_or_default();
         long.sort_by(f64::total_cmp);
         eprintln!(
-            "{label}: revolts {} — length {}; stood {} ticks and longer {} — length {}, each {:?}; of them standing at the run's end {}, with a house to carry them at the term {}",
+            "{label}: revolts {} — length {}; stood {} ticks and longer {} — length {}, each {:?}; of them standing at the run's end {}, with a house to carry them at the term {}, in the owner's capital at the term {}, in its last province {}",
             d.n("revolts"),
             lengths("revolt length, ticks"),
             p.siege_capital_ticks,
@@ -4508,7 +4513,9 @@ fn diagnosis_why_a_revolt_stands() {
             lengths("long revolt length, ticks"),
             long.iter().map(|x| *x as u32).collect::<Vec<u32>>(),
             d.n("long revolts standing at the run's end"),
-            d.n("long revolts with a house to carry them at the term")
+            d.n("long revolts with a house to carry them at the term"),
+            d.n("long revolts in the owner's capital at the term"),
+            d.n("long revolts in the owner's last province at the term")
         );
         for (name, of) in [("at the term: ", "long revolts"), ("most of its ticks: ", "long revolts"), ("revolt-ticks from the term on: ", "revolt-ticks from the term on")] {
             let causes: Vec<String> = d.counts.iter().filter(|(k, _)| k.starts_with(name)).map(|(k, n)| format!("{} — {n}", &k[name.len()..])).collect();
