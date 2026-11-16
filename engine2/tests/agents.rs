@@ -1187,21 +1187,17 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let b7_band = band("revolt.observed_per_century");
     assert!((b7_band[0]..=b7_band[1]).contains(&b7), "В7 {b7:.2} outside {b7_band:?}");
     // In war 2–3 % of the people under arms (E0 А11, Jones, Mallett–Hale — the source's band;
-    // owner's rule 2026-10-17, plan §28.9). Printed, not asserted (owner's decision 2026-10-20,
-    // plan §28.12): a known deviation until (д) — the world's war is decided in three ticks
-    // (the median) and costs one province, so a second levy has nothing to pay for; the army at
-    // war is one tick's levy, А2 × А1 ≈ 0,75 % of the people. The limit of the model of war,
-    // not an approximation of the bot — not to be tuned.
+    // owner's rule 2026-10-17, plan §28.9). **Asserted again** (plan §31.24.5, §31.26; §29.7
+    // p. 4). From 2026-10-20 it was printed as a known deviation, behind a floor against its
+    // regression — 0,007, then 0,017 (plan §28.12, §31.11): the bot valued an army at war by
+    // its wars alone, and a war foreseen closed or with nothing to win paid for no levy. With
+    // the army at war worth besides what it is worth at peace — the threats of the neighbours
+    // it does not fight and the suppression, over the war's length (plan §31.24, variant 1) —
+    // the measure entered the band on both sets of seeds (0,0212 on these, 0,0206 on the held
+    // out), and the floor went with the deviation it guarded.
     let a11_war_band = band("army.observed_share_at_war");
-    eprintln!("А11 at war {a11_war:.4} (E0: {a11_war_band:?} in war) — printed: a known deviation until (д), plan §28.12");
-    // A floor against a regression of the known deviation, not a band (owner's rule
-    // 2026-10-20): a bot that stops levying at war would fall below it. It stood at 0,007 —
-    // the measure was 0,0080 on #305 (0,0078–0,0095 over the stops of (3), plan
-    // §28.9–28.13) — and is raised to the level after (ц1б) (owner's decision 4 on §31.11,
-    // 2026-11-12): the measure on these seeds in the state merged, 0,0178, rounded down to
-    // the thousandth. It guards what was reached; the band of the source [0,02; 0,03] stays a
-    // known deviation until the war chest (after (ц3)).
-    assert!(a11_war >= 0.017, "А11 at war {a11_war:.4} below the regression floor 0,017 (plan §31.11)");
+    eprintln!("А11 at war {a11_war:.4} (the file's band {a11_war_band:?} in war)");
+    assert!((a11_war_band[0]..=a11_war_band[1]).contains(&a11_war), "А11 at war {a11_war:.4} outside {a11_war_band:?}");
     // The base of (д1) on main (plan §30.9 p. 4, §30.10): the wars of principals and А13 on
     // the bots' battles — printed, no bands (rule 1 of §24.1: no source gives one).
     for line in war_lines {
@@ -2507,6 +2503,96 @@ fn the_sides_of_a_threat_read_only_what_is_seen() {
         w.apply_verb(&VerbCall { actor: ActorRef::Ruler(s3), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
     }
     assert!(seen(&w).0 .0 < before.0 .0 && seen(&w).2 > before.2, "the ally's army is seen: without it the threat is greater");
+}
+
+/// **At war an army is worth what it is worth at peace besides its wars** (plan §31.24,
+/// variant 1, owner's decision 2026-11-16): the worth of strength at war is three terms — its
+/// wars (`at_war_gain`); the threats of the neighbours it does not fight, by the rule of the
+/// peace (`threats`, `wars_a_tick_in`); the suppression (`suppression_a_tick`, the first
+/// unit's) — the last two **over the war's length**, the ticks a soldier kept at war is
+/// charged for. The enemy of the war is no threat besides; at peace the worth is the tick it
+/// was. Read on a polity with free money, where a levy costs the heads off the land alone
+/// (`heads_cost`): the utility of the levy is the three terms less that, to the last digit
+/// the test can ask.
+#[test]
+fn at_war_an_army_is_worth_also_the_threats_it_does_not_fight_and_the_suppression_over_the_wars_length() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let mut w = world_of(&testworld::five_states_scenario(), 51);
+    // Every neighbour has a record of war: a rate to read.
+    for x in w.actors.values_mut() {
+        x.wars_entered = 3;
+    }
+    w.declare_war(s1, s0).unwrap();
+    assert!(w.at_war(s0, s1));
+    let levy = VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Recruit, target: Target::Province(w.actors[&s0].capital) };
+    // The three terms off the public functions, as the rule states them.
+    let parts = |w: &World| {
+        let unpaid = w.paid_share_seen_ppm(s0) < 1_000_000;
+        let blow = w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+        let enemies: Vec<ActorId> = w.actors.keys().copied().filter(|b| w.at_war(s0, *b) && w.alive(*b)).collect();
+        let wars: Vec<engine2::worth::WarTerms> = enemies.iter().map(|b| w.war_terms(s0, *b, blow, &p)).collect();
+        let kept = wars.iter().map(|x| x.ticks).fold(0.0, f64::max);
+        let threats = w.threats(s0, blow, &p);
+        let men = w.recruit_per_tick(s0, &p);
+        let extra = World::new_soldiers_strength(men);
+        let in_its_wars: f64 = wars.iter().map(|x| w.war_worth_of(s0, x, unpaid, extra, &p) - w.war_worth_of(s0, x, unpaid, 0.0, &p)).sum();
+        let expected = |t: ActorId, terms: &engine2::worth::WarTerms, extra: f64| World::wars_a_tick_in(&w.threat_rate(t, s0, &p), s0, terms.odds(extra, &p)) * w.war_worth_of(s0, terms, unpaid, extra, &p);
+        let against_threats: f64 = threats.iter().map(|(t, terms)| expected(*t, terms, extra) - expected(*t, terms, 0.0)).sum();
+        let units = |strength: f64| f64::from(u8::from(strength > 0.0));
+        let now = w.army_strength(s0);
+        let suppression = (units(now + extra) - units(now)) * w.suppression_a_tick(s0, &p);
+        let threatening: Vec<ActorId> = threats.iter().map(|(t, _)| *t).collect();
+        (in_its_wars, against_threats, suppression, kept, w.heads_cost(s0, men, kept, &p), threatening)
+    };
+    // Free money: the pay of the levy costs nothing, at peace and for the war's length.
+    assert!(w.free_money(s0, &p) > 0.0 && !(w.paid_share_seen_ppm(s0) < 1_000_000));
+    let (in_its_wars, against_threats, suppression, kept, heads, threatening) = parts(&w);
+    assert!(kept > 1.0, "a war longer than a tick: {kept}");
+    assert!(!threatening.is_empty() && !threatening.contains(&s1), "the neighbours it does not fight, the enemy of its war not among them: {threatening:?}");
+    assert!(threatening.iter().all(|t| !w.at_war(s0, *t) && w.borders(s0, *t)));
+    assert!(against_threats > 0.0, "the levy takes something off the threats: {against_threats}");
+    assert_eq!(suppression, 0.0, "with units in being a levy adds nothing to the suppression");
+    let utility = w.utility(s0, &levy, &p);
+    assert!((utility - (in_its_wars + against_threats * kept - heads)).abs() < 1e-9, "the levy at war: its wars {in_its_wars}, the threats {against_threats} a tick over {kept} ticks, the heads {heads}; utility {utility}");
+    assert!((utility - (in_its_wars - heads)).abs() > 1e-6, "more than its wars alone");
+    assert!((utility - (in_its_wars + against_threats - heads)).abs() > 1e-6, "and over the war's length, not a tick");
+    // A neighbour with a longer record threatens more: the levy at war is worth more.
+    let other = threatening[0];
+    let mut more = w.clone();
+    more.actors.get_mut(&other).unwrap().wars_entered = 30;
+    assert!(more.utility(s0, &levy, &p) > utility, "the more a neighbour it does not fight is to be feared, the more the levy at war is worth");
+    // With no unit in being the first is worth the suppression too, over the war's length.
+    let mut bare = w.clone();
+    let mine: Vec<engine2::UnitId> = bare.units_of(s0);
+    for u in mine {
+        bare.apply_verb(&VerbCall { actor: ActorRef::Ruler(s0), verb: VerbId::Disband, target: Target::Unit(u) }, &p).unwrap();
+    }
+    bare.provinces.get_mut(&at(0, 3)).unwrap().revolt = Some(bare.tick);
+    assert_eq!(bare.army_strength(s0), 0.0);
+    let (in_its_wars, against_threats, suppression, kept, heads, _) = parts(&bare);
+    assert!(suppression > 0.0, "a rising in its land and no unit: the first unit puts it down, {suppression}");
+    let utility = bare.utility(s0, &levy, &p);
+    assert!((utility - (in_its_wars + (against_threats + suppression) * kept - heads)).abs() < 1e-9, "the first unit at war: its wars {in_its_wars}, the threats {against_threats} and the suppression {suppression} a tick over {kept} ticks, the heads {heads}; utility {utility}");
+    assert!((utility - (in_its_wars + against_threats * kept - heads)).abs() > 1e-6, "the suppression is in it");
+    // At peace the levy is worth the tick it was: the threats and the suppression of a tick.
+    let mut peace = world_of(&testworld::five_states_scenario(), 51);
+    for x in peace.actors.values_mut() {
+        x.wars_entered = 3;
+    }
+    assert!(!peace.actors.keys().any(|b| peace.at_war(s0, *b)));
+    let men = peace.recruit_per_tick(s0, &p);
+    let extra = World::new_soldiers_strength(men);
+    let blow = peace.ceded_province_blow(s0, &peace.risk_prices(s0, &p), &p);
+    let a_tick: f64 = peace
+        .threats(s0, blow, &p)
+        .iter()
+        .map(|(t, terms)| {
+            let expected = |extra: f64| World::wars_a_tick_in(&peace.threat_rate(*t, s0, &p), s0, terms.odds(extra, &p)) * peace.war_worth_of(s0, terms, false, extra, &p);
+            expected(extra) - expected(0.0)
+        })
+        .sum();
+    assert_eq!(peace.utility(s0, &levy, &p), a_tick - peace.heads_cost(s0, men, 1.0, &p), "at peace: a tick of the threats less the heads, bit for bit");
 }
 
 /// The fall (E3 (г), owner's decision 2 on §29.8, in the polity's currency): when the enemy's
@@ -3931,11 +4017,33 @@ fn diagnose_army_at_war(seed: u64, p: &Params) -> Diagnosis {
     let mut d = Diagnosis::default();
     let s = worldgen::generate(seed, p);
     let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    // The pay after a peace (plan §31.24.5): a polity's state this tick — at war, within ten
+    // ticks of its last war's end, or at peace longer — and the ticks since that end.
+    const AFTER: u32 = 10;
+    let mut since_war: BTreeMap<ActorId, u32> = BTreeMap::new();
     for _ in 0..300 {
         let w = g.world();
+        let mut state: BTreeMap<ActorId, &str> = BTreeMap::new();
+        for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
+            let at_war = w.actors.keys().any(|b| w.at_war(a, *b));
+            let ended = since_war.get(&a).copied();
+            state.insert(a, if at_war { "at war" } else if ended.is_some_and(|n| n < AFTER) { "within ten ticks of a peace" } else { "at peace longer" });
+            match (at_war, ended) {
+                (true, _) => {
+                    since_war.insert(a, 0);
+                }
+                (false, Some(n)) => {
+                    since_war.insert(a, n + 1);
+                }
+                (false, None) => {}
+            }
+        }
         for a in w.actors.keys().copied().filter(|a| w.alive(*a)) {
             let enemies: Vec<ActorId> = w.actors.keys().copied().filter(|b| w.at_war(a, *b) && w.alive(*b)).collect();
             if enemies.is_empty() {
+                // At war by the record with no living enemy: the bot's context reads «at war»
+                // and no front, so the war's length it charges is nothing (`kept_ticks`).
+                d.count("polity-ticks at war by the record with no living enemy", u64::from(w.actors.keys().any(|b| w.at_war(a, *b))));
                 continue;
             }
             // Its part in its wars, as `diagnose_world` reads it: a war of its own it declared;
@@ -4008,7 +4116,11 @@ fn diagnose_army_at_war(seed: u64, p: &Params) -> Diagnosis {
                 d.count(&k("the suppression adds something to the tick's levy"), u64::from(suppression_gain > 0.0));
             }
         }
-        g.tick(&[]).unwrap();
+        let r = g.tick(&[]).unwrap();
+        for (a, state) in state {
+            d.count(&format!("pay: polity-ticks {state}"), 1);
+            d.count(&format!("pay: short of its pay {state}"), u64::from(r.events.iter().any(|e| matches!(e.event, Event::PayShortfall { actor, .. } if actor == a))));
+        }
     }
     d
 }
@@ -4020,6 +4132,12 @@ fn diagnose_army_at_war(seed: u64, p: &Params) -> Diagnosis {
 /// how often would it move the levy above nothing: for all polities at war, and apart for
 /// those that declared, were attacked, or are at war by their bonds. Printed, never asserted,
 /// run on demand; the rule itself is not made here.
+///
+/// **After the rule** (plan §31.26) `options` carries the two terms already: the columns «now»
+/// are then the rule's, and the columns «by variant 1» count the terms twice — of no use any
+/// more; the probe stands as the record of step 0 (plan §31.25). Its other lines — the
+/// neighbours not fought, the risings, the terms by their size, the pay after a peace — read
+/// the same before and after.
 #[test]
 #[ignore]
 fn diagnosis_what_the_army_at_war_is_worth_beyond_its_wars() {
@@ -4038,6 +4156,9 @@ fn diagnosis_what_the_army_at_war_is_worth_beyond_its_wars() {
                 format!("q50 {:.4} / q90 {:.4} / mean {}", quantile(&v, 0.5), quantile(&v, 0.9), d.mean(key))
             }
         };
+        let short = |state: &str| format!("{} of {}", d.share(&format!("pay: short of its pay {state}"), &format!("pay: polity-ticks {state}")), d.n(&format!("pay: polity-ticks {state}")));
+        eprintln!("{label}: polity-ticks short of the army's pay — at war {}; within ten ticks of a peace {}; at peace longer {}", short("at war"), short("within ten ticks of a peace"), short("at peace longer"));
+        eprintln!("{label}: polity-ticks at war by the record with no living enemy (the war's length charged is nothing): {}", d.n("polity-ticks at war by the record with no living enemy"));
         for key in ["all", "attacked", "declared", "by its bonds"] {
             let k = |name: &str| format!("{key}: {name}");
             let (decisions, offered) = (k("decisions at war"), k("a levy on offer"));

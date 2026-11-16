@@ -136,9 +136,10 @@ pub struct Context {
     /// The terms of every war the polity is in (`World::war_terms`), read once: the verbs of
     /// the army ask the worth of each war at several strengths.
     wars: Vec<crate::worth::WarTerms>,
-    /// The threats at peace (`World::threats`, E3 (г), plan §29): the chance each neighbour
-    /// declares over the horizon and the terms of that war, read once; empty at war, where
-    /// the wars are the measure of the army.
+    /// The threats (`World::threats`, E3 (г), plan §29): every neighbour the polity does not
+    /// fight, with the terms of the war it would declare, read once — at peace and at war
+    /// alike (plan §31.24, owner's decision 2026-11-16: a polity at war still borders its
+    /// other neighbours, and they may still fall on it).
     threats: Vec<(ActorId, crate::worth::WarTerms)>,
     /// Each threat's rate of war and odds against its other neighbours
     /// (`World::threat_rate`), in the order of `threats`, read once: facts of the world no
@@ -635,8 +636,17 @@ impl World {
         }
     }
 
-    /// What `extra` strength is worth to `a` in its state: at war, to its wars
-    /// (`at_war_gain`); at peace (E3 (г), plan §29.3 and owner's decisions on §29.9), **a
+    /// What `extra` strength is worth to `a` in its state. **At war — one rule of the army's
+    /// worth for peace and war** (plan §31.24, variant 1, owner's decision 2026-11-16): what it
+    /// is worth to its wars (`at_war_gain`), and besides what it is worth at peace — against
+    /// the neighbours it does not fight and for the suppression — **over the war's length**
+    /// (`kept_ticks`: at war a soldier kept is charged for the longest of its fronts, so a tick
+    /// of his worth stands for as many). The enemies of its wars are no threat counted twice
+    /// (`World::threats` leaves them out), and they stand against it in every threat's sides
+    /// — the second front (`threat_sides_strength`). Read by its wars alone, an army at war
+    /// was worth nothing once its war was foreseen closed or had nothing to win, though the
+    /// same levy at peace was worth the threat. At peace (E3 (г), plan §29.3 and owner's
+    /// decisions on §29.9), **a
     /// tick of it** — the army at peace is a decision retaken every tick, and it stands while
     /// a tick of it pays its tick of cost (`kept_soldiers_cost`): the wars its neighbours bring
     /// a tick (`wars_a_tick_from` — the expected number, by the neighbour's record and the
@@ -646,14 +656,17 @@ impl World {
     /// putting risings down (`suppression_a_tick` — any unit does; so the first unit's worth,
     /// nothing for the next).
     fn strength_gain(&self, a: ActorId, ctx: &Context, extra: f64, params: &Params) -> f64 {
+        // A tick of the strength beyond the polity's wars: against the neighbours it does not
+        // fight, and for the suppression — the whole worth at peace.
+        let expected = |r: &crate::worth::ThreatRate, terms: &crate::worth::WarTerms, extra: f64| World::wars_a_tick_in(r, a, terms.odds(extra, params)) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
+        let wars: f64 = ctx.threats.iter().zip(&ctx.rates).map(|((_, terms), r)| expected(r, terms, extra) - expected(r, terms, 0.0)).sum();
+        let units = |strength: f64| f64::from(u8::from(strength > 0.0));
+        let now = self.army_strength(a);
+        let a_tick = wars + (units(now + extra) - units(now)) * self.suppression_a_tick(a, params);
         if ctx.at_war {
-            self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params)
+            self.at_war_gain(a, &ctx.wars, extra, ctx.unpaid, params) + a_tick * Self::kept_ticks(ctx)
         } else {
-            let expected = |r: &crate::worth::ThreatRate, terms: &crate::worth::WarTerms, extra: f64| World::wars_a_tick_in(r, a, terms.odds(extra, params)) * self.war_worth_of(a, terms, ctx.unpaid, extra, params);
-            let wars: f64 = ctx.threats.iter().zip(&ctx.rates).map(|((_, terms), r)| expected(r, terms, extra) - expected(r, terms, 0.0)).sum();
-            let units = |strength: f64| f64::from(u8::from(strength > 0.0));
-            let now = self.army_strength(a);
-            wars + (units(now + extra) - units(now)) * self.suppression_a_tick(a, params)
+            a_tick
         }
     }
 
@@ -818,7 +831,8 @@ impl World {
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
         let money = self.own_money(a, params);
         let wars: Vec<crate::worth::WarTerms> = self.actors.keys().copied().filter(|b| self.at_war(a, *b) && self.alive(*b)).map(|b| self.war_terms_with(a, b, blow_per_province, &money, params)).collect();
-        let threats = if at_war { Vec::new() } else { self.threats_with(a, blow_per_province, &money, params) };
+        // The neighbours it does not fight, at peace and at war alike (plan §31.24).
+        let threats = self.threats_with(a, blow_per_province, &money, params);
         let rates = threats.iter().map(|(t, _)| self.threat_rate(*t, a, params)).collect();
         Context {
             at_war,
