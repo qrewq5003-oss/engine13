@@ -89,6 +89,10 @@ pub enum Chance {
     /// House `from` offers `a`, its member, to `b` of the house answering, with the dowry
     /// it names (`dowry_kg`: what the house would give when it offered, `World::dowry`).
     Marriage { from: crate::ids::HouseId, a: PersonId, b: PersonId, dowry_kg: i64 },
+    /// Polity `from` offers an alliance to the polity whose ruler answers (E3, plan §31.34:
+    /// the receiver weighs the alliance from its own side; the threshold of the relation
+    /// gated the offer, the answer is the receiver's).
+    Alliance { from: ActorId },
 }
 
 impl Chance {
@@ -101,6 +105,7 @@ impl Chance {
             Chance::Union { .. } => "Union",
             Chance::Policy { .. } => "Policy",
             Chance::Marriage { .. } => "Marriage",
+            Chance::Alliance { .. } => "Alliance",
         }
     }
 }
@@ -180,7 +185,7 @@ impl World {
             match (&o.what, a.reply) {
                 (Chance::Vote { candidates, .. }, Reply::Vote(c)) if !candidates.contains(&c) => return Err(AnswerError::BadReply(a.opportunity, "not a candidate")),
                 (Chance::Vote { .. }, Reply::Take) => return Err(AnswerError::BadReply(a.opportunity, "a vote names its candidate")),
-                (Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Union { .. } | Chance::Policy { .. } | Chance::Marriage { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
+                (Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Union { .. } | Chance::Policy { .. } | Chance::Marriage { .. } | Chance::Alliance { .. }, Reply::Vote(_)) => return Err(AnswerError::BadReply(a.opportunity, "not an election")),
                 _ => {}
             }
         }
@@ -190,10 +195,11 @@ impl World {
     /// The rule of E2 for an opportunity nobody answered in a world without the contract:
     /// a house takes its chance; nobody votes (the interim stays, as E2 elected); a court
     /// keeps its faith and takes no policy (E2 had neither decision); a house takes the
-    /// match it is offered (E2 married by the rule of the state).
+    /// match it is offered and a ruler the alliance (E2 married and allied by the rule of the
+    /// state).
     fn rule_reply(o: &Opportunity) -> Option<Reply> {
         match o.what {
-            Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Marriage { .. } => Some(Reply::Take),
+            Chance::Secession { .. } | Chance::Usurpation { .. } | Chance::Marriage { .. } | Chance::Alliance { .. } => Some(Reply::Take),
             Chance::Vote { .. } => None,
             Chance::Union { .. } | Chance::Policy { .. } => Some(Reply::Decline),
         }
@@ -353,6 +359,18 @@ impl World {
                 self.persons.get_mut(&a).unwrap().spouse = Some(b);
                 self.persons.get_mut(&b).unwrap().spouse = Some(a);
                 self.emit(Event::Marriage { a, b, dowry_kg: dowry as u64 });
+                Ok(Ok(()))
+            }
+            Chance::Alliance { from } => {
+                let ActorRef::Ruler(b) = o.to else { return Ok(Err("an alliance is a ruler's")) };
+                // The threshold of the relation gated the offer; the answer is the receiver's.
+                // What forbids the bond itself is read again on the world as it stands.
+                if let Err(why) = self.alliance_bond_room(from, b) {
+                    return Ok(Err(why));
+                }
+                let until = self.bind(from, b, crate::world::TreatyKind::Alliance, params)?;
+                let (x, y) = crate::army::pair(from, b);
+                self.emit(Event::Alliance { a: x, b: y, until });
                 Ok(Ok(()))
             }
         }

@@ -576,7 +576,7 @@ fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_
 }
 
 #[test]
-fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accepted_at_the_threshold() {
+fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_offered_at_the_threshold() {
     use engine2::VerbId;
     let p = params();
     let mut g = bare(&scenario_with_verbs(), params(), 17).unwrap();
@@ -614,12 +614,24 @@ fn an_alliance_is_proposed_for_the_gifts_of_an_embassy_accepted_or_not_and_accep
         n += 1;
         assert!(n < 20, "embassies reach the threshold");
     }
+    // At the threshold the offer goes to the other ruler, who answers at the next turn (plan
+    // §31.34): nobody is bound before the answer, and no second offer goes between the two.
     let r = g.tick(&[call(s0, VerbId::ProposeAlliance, s1)]).unwrap();
+    let offered = |r: &engine2::TickReport| r.events.iter().any(|e| matches!(&e.event, Event::OpportunityOpened { opportunity } if opportunity.to == engine2::ActorRef::Ruler(s1) && opportunity.what == engine2::Chance::Alliance { from: s0 }));
+    assert!(offered(&r), "offered at the threshold");
+    assert!(!g.world().allied(s0, s1) && !r.events.iter().any(|e| matches!(e.event, Event::Alliance { .. })), "nobody is bound before the answer");
+    assert!(g.world().alliance_offered(s0, s1) && g.world().alliance_offered(s1, s0));
+    assert_eq!(g.world().alliance_room(s0, s1, &p), Err("an offer of alliance is open between the two"));
+    assert_eq!(g.world().alliance_room(s1, s0, &p), Err("an offer of alliance is open between the two"));
+    // In a world without the contract the ruler takes it, as E2 allied by the rule of the
+    // state.
+    let r = g.tick(&[]).unwrap();
     let until = r.events.iter().find_map(|e| match e.event {
         Event::Alliance { a, b, until } if (a, b) == (s0, s1) => Some(until),
         _ => None,
     });
-    assert!(until.is_some(), "accepted at the threshold");
+    assert!(until.is_some(), "taken at the next turn");
+    assert!(!g.world().alliance_offered(s0, s1));
     assert!(g.world().allied(s0, s1));
     assert_eq!(g.world().treaty(s0, s1).unwrap().until, until.unwrap());
     assert!((g.world().relation_norm(s0, s1, &p) - (p.relation_base + p.relation_norm_alliance - p.relation_norm_border)).abs() < 1e-9);
