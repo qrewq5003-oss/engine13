@@ -104,6 +104,26 @@ impl OwnMoney {
     pub fn free(&self) -> f64 {
         self.free
     }
+
+    /// No money read — for the terms of a war as anyone but the polity reads them
+    /// (`World::war_terms_on`): another's treasury is its own (owner's decision 2026-11-11,
+    /// plan §30.9 p. 1), and of the money the terms carry the price of a campaign alone, which
+    /// goes with the goals.
+    fn unseen() -> OwnMoney {
+        OwnMoney { parts: MoneyParts { treasury: 0, debt: 0, before_pay: 0, pay_home: 0, pay_due: 0, paid_soldiers: 0, peace_army: 0, war_soldiers: 0, war_ticks: 0.0 }, free: 0.0, loan_room: 0 }
+    }
+}
+
+/// A polity's side of an alliance as anyone reads it (`World::seen_side`,
+/// `World::alliance_worth_seen`): the legitimacy a ceded province would cost it, its threats
+/// and their rates of war, and its terms as an entrant against a neighbour, read as asked —
+/// the terms as anyone but the polity reads them (`World::war_terms_on` with no money).
+#[derive(Debug, Clone)]
+pub struct SeenSide {
+    blow: f64,
+    threats: Vec<(ActorId, WarTerms)>,
+    rates: Vec<ThreatRate>,
+    entrant: std::cell::RefCell<std::collections::BTreeMap<(ActorId, u64), WarTerms>>,
 }
 
 /// What `World::defence_worth` reads of a threatened province that no strength moves
@@ -509,11 +529,17 @@ impl World {
     /// another's as anyone sees it (`levy_per_tick_seen`, `levy_room_seen`: the ceiling by
     /// its people less its dead by the battles seen, plan §28.7).
     pub fn retake_odds(&self, a: ActorId, b: ActorId, by: ActorId, ticks: f64, params: &Params) -> f64 {
+        self.retake_odds_as(a, b, Some(by), ticks, params)
+    }
+
+    /// `retake_odds` as `by` knows them, or — `None` — as anyone but the two reads them: both
+    /// counts as anyone sees them.
+    fn retake_odds_as(&self, a: ActorId, b: ActorId, by: Option<ActorId>, ticks: f64, params: &Params) -> f64 {
         if !self.alive(b) {
             return 0.0;
         }
         let could = |x: ActorId| {
-            let (per_tick, room) = if x == by { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
+            let (per_tick, room) = if Some(x) == by { (self.recruit_per_tick(x, params), self.recruit_room(x, params)) } else { (self.levy_per_tick_seen(x, params), self.levy_room_seen(x, params)) };
             let raised = ((per_tick as f64 * ticks).floor() as i64).min(room).max(0);
             self.army_strength(x) + World::new_soldiers_strength(raised)
         };
@@ -640,7 +666,7 @@ impl World {
     /// `war_terms` with `a`'s money read once (`own_money`): a decision reads the terms of a
     /// war with every polity.
     pub fn war_terms_with(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> WarTerms {
-        self.war_terms_on(a, b, blow_per_province, own, self.war_sides_strength(a, b), self.war_ticks(a, b, params), params)
+        self.war_terms_on(a, b, blow_per_province, Some(own), self.war_sides_strength(a, b), self.war_ticks(a, b, params), params)
     }
 
     /// `war_terms_with` on the strengths of the sides and the length of the war given: the
@@ -651,7 +677,15 @@ impl World {
     /// stake, the pay of the campaign, the money over the war — and through `WarTerms::ticks`
     /// the rule that closes a war as foreseen (`war_worth_of`).
     #[allow(clippy::too_many_arguments)]
-    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, sides: (f64, f64), ticks: f64, params: &Params) -> WarTerms {
+    ///
+    /// `own`: the polity's money, for its own reading of its war; `None` — the terms **as
+    /// anyone but the polity reads them** (plan §28.4, §31.35): nothing of its goals (no
+    /// stake, no campaign), of its treasury (`OwnMoney::unseen`), of its count of the dead
+    /// (what it can levy to take land back is read as anyone sees it, `retake_odds_as`).
+    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: Option<&OwnMoney>, sides: (f64, f64), ticks: f64, params: &Params) -> WarTerms {
+        let seen = own.is_none();
+        let unseen = OwnMoney::unseen();
+        let own = own.unwrap_or(&unseen);
         let people: i64 = self.actors[&a].provinces.iter().map(|q| self.population(*q)).sum();
         let income = self.yearly_income(a, params).max(1) as f64;
         let key = crate::army::pair(a, b);
@@ -676,7 +710,7 @@ impl World {
         };
         // All its land within the chain: the fall of the polity (owner's decision 2 on §29.8).
         let fall = !at_risk.is_empty() && at_risk.len() == self.actors[&a].provinces.len();
-        let back = 1.0 - self.retake_odds(b, a, a, ticks, params);
+        let back = 1.0 - self.retake_odds_as(b, a, (!seen).then_some(a), ticks, params);
         // The march of `b`'s men from its capital to each, by one search (`revolt_share`).
         let from_capital = if at_risk.is_empty() { std::collections::BTreeMap::new() } else { self.steps_from(b, self.actors[&b].capital) };
         let at_risk: Vec<f64> = at_risk.iter().map(|q| self.take_of(a, *q, params) * back * (1.0 - self.revolt_share_at(b, *q, from_capital.get(q).copied().unwrap_or(0), params))).collect();
@@ -692,7 +726,7 @@ impl World {
         WarTerms {
             b,
             ticks,
-            stake: self.war_stake_at(a, b, ticks, params),
+            stake: if seen { 0.0 } else { self.war_stake_at(a, b, ticks, params) },
             at_risk,
             fall,
             first_blow,
@@ -702,7 +736,7 @@ impl World {
             soldiers: self.army_size(a) as f64,
             head: if people > 0 { self.yearly_income(a, params) as f64 / people as f64 } else { 0.0 },
             dead_years: self.regrowth_shortfall_ticks(a, params) / 2.0,
-            campaign_per_strength: if self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
+            campaign_per_strength: if !seen && self.war_goal_against(a, b) { self.campaign_extra_per_strength(a, ticks, params) } else { 0.0 },
             campaign_strength: self.units.keys().filter(|u| self.commands(crate::verbs::ActorRef::Ruler(a), **u)).map(|u| self.unit_strength(*u)).sum(),
             free: Self::money_within_of(own, ticks, false),
             income,
@@ -1253,6 +1287,12 @@ impl World {
 
     /// `threats` with `a`'s money read once (`own_money`).
     pub fn threats_with(&self, a: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> Vec<(ActorId, WarTerms)> {
+        self.threats_as(a, blow_per_province, Some(own), params)
+    }
+
+    /// `threats_with`, or — with no money, `None` — the threats of `a` as anyone but `a`
+    /// reads them (`war_terms_on`).
+    fn threats_as(&self, a: ActorId, blow_per_province: f64, own: Option<&OwnMoney>, params: &Params) -> Vec<(ActorId, WarTerms)> {
         self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), self.threat_ticks(a, t, params), params))).collect()
     }
 
@@ -1273,6 +1313,37 @@ impl World {
         let rates: Vec<ThreatRate> = threats.iter().map(|(t, _)| self.threat_rate(*t, a, params)).collect();
         let unpaid = self.paid_share_seen_ppm(a) < 1_000_000;
         (self.alliance_gain(a, b, &threats, &rates, unpaid, params) + self.alliance_cost(a, b, blow, &own, unpaid, params)) * Self::alliance_ticks(params)
+    }
+
+    /// What an alliance with `a` is worth to `b` **as anyone reads it** — the offering side's
+    /// model of the receiver's answer (plan §31.35, decision № 12; a model of the neighbour by
+    /// what is seen, allowed by §28.6): `alliance_worth(b, a)` on what a player would see of
+    /// `b` — its land, its people, its armies, its bonds, its legitimacy and its tax, the
+    /// record of the wars — and nothing of what is its own: its goals, its treasury, its count
+    /// of the dead (`war_terms_on` with no money), the pay it missed (taken as paid). Where
+    /// `b` would decline, the offer brings nothing.
+    pub fn alliance_worth_seen(&self, b: ActorId, a: ActorId, params: &Params) -> f64 {
+        self.alliance_worth_seen_of(b, a, &self.seen_side(b, params), &|t| self.threat_rate_among(t, params), params)
+    }
+
+    /// What `alliance_worth_seen(b, ..)` reads of `b` that no partner moves (`SeenSide`):
+    /// the same for every polity that asks about `b` on the same state.
+    pub fn seen_side(&self, b: ActorId, params: &Params) -> SeenSide {
+        let blow = self.ceded_province_blow(b, &self.risk_prices(b, params), params);
+        let threats = self.threats_as(b, blow, None, params);
+        let rates = threats.iter().map(|(t, _)| self.threat_rate(*t, b, params)).collect();
+        SeenSide { blow, threats, rates, entrant: Default::default() }
+    }
+
+    /// `alliance_worth_seen` on `b`'s side read already (`seen_side`) and with a neighbour's
+    /// rate of war read by the caller (`threat_rate_among`).
+    pub fn alliance_worth_seen_of(&self, b: ActorId, a: ActorId, side: &SeenSide, rate: &dyn Fn(ActorId) -> ThreatRate, params: &Params) -> f64 {
+        if a == b || !self.alive(a) || !self.alive(b) {
+            return 0.0;
+        }
+        let terms = |t: ActorId, ticks: f64| side.entrant.borrow_mut().entry((t, ticks.to_bits())).or_insert_with(|| self.war_terms_on(b, t, side.blow, None, (0.0, 0.0), ticks, params)).clone();
+        let cost = self.alliance_cost_by(b, a, false, &terms, rate, params);
+        (self.alliance_gain(b, a, &side.threats, &side.rates, false, params) + cost) * Self::alliance_ticks(params)
     }
 
     /// The ticks an alliance is worth its flow for: the treaty's term within the horizon.
@@ -1306,7 +1377,7 @@ impl World {
     /// The terms of `a`'s war with `t` as an entrant of a war of `ticks` — all of them but
     /// the war's sides (`WarTerms::on_sides`), which are the war's it enters.
     pub(crate) fn entrant_terms(&self, a: ActorId, t: ActorId, blow_per_province: f64, own: &OwnMoney, ticks: f64, params: &Params) -> WarTerms {
-        self.war_terms_on(a, t, blow_per_province, own, (0.0, 0.0), ticks, params)
+        self.war_terms_on(a, t, blow_per_province, Some(own), (0.0, 0.0), ticks, params)
     }
 
     /// `threat_rate(t, x)` for any `x` that touches `t`: `t`'s rate of war and its odds

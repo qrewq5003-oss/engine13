@@ -109,6 +109,16 @@ pub struct GoalFact {
     pub target: GoalTarget,
 }
 
+/// What the bots' decisions of one tick read of the same polities — all decide on the state
+/// as it stands (`World::decide_all`), so what anyone reads of a polity is the same for each
+/// that asks: a polity's side of an alliance as anyone sees it (`World::seen_side`), and a
+/// polity's rate of war against those it touches (`World::threat_rate_among`).
+#[derive(Debug, Default)]
+pub struct TickSeen {
+    sides: std::cell::RefCell<std::collections::BTreeMap<ActorId, std::rc::Rc<crate::worth::SeenSide>>>,
+    rates: std::cell::RefCell<std::collections::BTreeMap<ActorId, crate::worth::ThreatRate>>,
+}
+
 /// What a bot reads once per decision rather than once per target (E3 (б), measured: the
 /// choice of a world's bots took four times the rest of the tick, four fifths of it the
 /// marriages — every pair of houses scanned every person of the world).
@@ -155,11 +165,15 @@ pub struct Context {
     /// once per polity in a decision: the proposal, the embassy, the gift and the match all
     /// ask it of the same partner.
     alliances: std::cell::RefCell<std::collections::BTreeMap<ActorId, f64>>,
+    /// Whether each polity asked about would take the alliance, as anyone reads it
+    /// (`World::alliance_worth_seen`), read once per polity in a decision.
+    would_take: std::cell::RefCell<std::collections::BTreeMap<ActorId, bool>>,
     /// What the cost of every alliance asks of the same neighbours, read once each
     /// (`World::alliance_cost_by`): the polity's terms as an entrant against a neighbour over
     /// a war's length (by the neighbour and the length's bits), and a neighbour's rate of war.
     entrant_terms: std::cell::RefCell<std::collections::BTreeMap<(ActorId, u64), crate::worth::WarTerms>>,
-    neighbour_rates: std::cell::RefCell<std::collections::BTreeMap<ActorId, crate::worth::ThreatRate>>,
+    /// What the decisions of one tick read of the same polities (`TickSeen`).
+    seen: std::rc::Rc<TickSeen>,
 }
 
 /// One scored option of a bot: the call and its utility; `None` is doing nothing.
@@ -853,8 +867,17 @@ impl World {
             return *w;
         }
         let terms = |t: ActorId, ticks: f64| ctx.entrant_terms.borrow_mut().entry((t, ticks.to_bits())).or_insert_with(|| self.entrant_terms(a, t, ctx.blow_per_province, &ctx.money, ticks, params)).clone();
-        let rate = |t: ActorId| ctx.neighbour_rates.borrow_mut().entry(t).or_insert_with(|| self.threat_rate_among(t, params)).clone();
-        let w = (self.alliance_gain(a, b, &ctx.threats, &ctx.rates, ctx.unpaid, params) + self.alliance_cost_by(a, b, ctx.unpaid, &terms, &rate, params)) * World::alliance_ticks(params);
+        let rate = |t: ActorId| ctx.seen.rates.borrow_mut().entry(t).or_insert_with(|| self.threat_rate_among(t, params)).clone();
+        let own = (self.alliance_gain(a, b, &ctx.threats, &ctx.rates, ctx.unpaid, params) + self.alliance_cost_by(a, b, ctx.unpaid, &terms, &rate, params)) * World::alliance_ticks(params);
+        // An alliance the other would decline brings nothing — the offer, the embassy and the
+        // gift towards it alike (plan §31.35, decision № 12): the receiver answers by what the
+        // alliance is worth to it, and the offering side reads that as anyone can
+        // (`alliance_worth_seen`). Asked only where the alliance is worth having at all.
+        let would_take = || {
+            let side = ctx.seen.sides.borrow_mut().entry(b).or_insert_with(|| std::rc::Rc::new(self.seen_side(b, params))).clone();
+            self.alliance_worth_seen_of(b, a, &side, &rate, params) > 0.0
+        };
+        let w = if own > 0.0 && !*ctx.would_take.borrow_mut().entry(b).or_insert_with(would_take) { 0.0 } else { own };
         ctx.alliances.borrow_mut().insert(b, w);
         w
     }
@@ -871,6 +894,11 @@ impl World {
 
     /// The context of a bot's decision, read once.
     pub fn context(&self, a: ActorId, params: &Params) -> Context {
+        self.context_seen(a, params, Default::default())
+    }
+
+    /// `context` with what the tick's other decisions have read of the same polities.
+    fn context_seen(&self, a: ActorId, params: &Params, seen: std::rc::Rc<TickSeen>) -> Context {
         let risk = self.risk_prices(a, params);
         let blow_per_province = self.ceded_province_blow(a, &risk, params);
         let at_war = self.actors.keys().any(|b| self.at_war(a, *b));
@@ -894,8 +922,9 @@ impl World {
             money,
             married: self.married_to(a),
             alliances: Default::default(),
+            would_take: Default::default(),
             entrant_terms: Default::default(),
-            neighbour_rates: Default::default(),
+            seen,
             risk,
             blow_per_province,
         }
@@ -1033,6 +1062,11 @@ impl World {
     /// targets, by the same rules the offers use, each with its utility; doing nothing at
     /// nothing. Canonical order of verbs and targets.
     pub fn options(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
+        self.options_seen(a, enabled, params, &Default::default())
+    }
+
+    /// `options` with what the tick's other decisions have read of the same polities.
+    fn options_seen(&self, a: ActorId, enabled: &[VerbId], params: &Params, seen: &std::rc::Rc<TickSeen>) -> Vec<Option_> {
         let who = ActorRef::Ruler(a);
         let mut out = vec![Option_ { call: None, utility: 0.0 }];
         if !self.alive(a) {
@@ -1121,7 +1155,7 @@ impl World {
                 }
             }
         }
-        let ctx = self.context(a, params);
+        let ctx = self.context_seen(a, params, seen.clone());
         for call in calls {
             let utility = self.utility_in(a, &call, params, &ctx);
             out.push(Option_ { call: Some(call), utility });
@@ -1153,8 +1187,13 @@ impl World {
     /// its best target (ties: the canonical first); and **what is no better than doing
     /// nothing is not chosen** — a price paid for nothing is not a choice but noise.
     pub fn choices(&self, a: ActorId, enabled: &[VerbId], params: &Params) -> Vec<Option_> {
+        self.choices_seen(a, enabled, params, &Default::default())
+    }
+
+    /// `choices` with what the tick's other decisions have read of the same polities.
+    fn choices_seen(&self, a: ActorId, enabled: &[VerbId], params: &Params, seen: &std::rc::Rc<TickSeen>) -> Vec<Option_> {
         let mut best: Vec<Option_> = Vec::new();
-        for o in self.options(a, enabled, params).into_iter().skip(1) {
+        for o in self.options_seen(a, enabled, params, seen).into_iter().skip(1) {
             let verb = o.call.map(|c| c.verb);
             match best.iter_mut().find(|b| b.call.map(|c| c.verb) == verb) {
                 Some(b) if o.utility > b.utility => *b = o,
@@ -1169,7 +1208,12 @@ impl World {
 
     /// One bot's decision: softmax over its choices at the temperature, by one keyed draw.
     pub fn decide(&mut self, a: ActorId, enabled: &[VerbId], params: &Params) -> Option<VerbCall> {
-        let options = self.choices(a, enabled, params);
+        self.decide_seen(a, enabled, params, &Default::default())
+    }
+
+    /// `decide` with what the tick's other decisions have read of the same polities.
+    fn decide_seen(&mut self, a: ActorId, enabled: &[VerbId], params: &Params, seen: &std::rc::Rc<TickSeen>) -> Option<VerbCall> {
+        let options = self.choices_seen(a, enabled, params, seen);
         let d = Draw { point: DrawPoint::Decision, tick: self.tick, id: a.0, n: self.draw_ordinal(DrawPoint::Decision, a.0) };
         let value = crate::rng::draw(self.seed, d);
         self.journal_draw(d, value);
@@ -1194,8 +1238,11 @@ impl World {
     pub fn decide_all(&mut self, enabled: &[VerbId], player: Option<ActorRef>, params: &Params) -> Vec<VerbCall> {
         let ids: Vec<ActorId> = self.actors.keys().copied().filter(|a| self.alive(*a) && player != Some(ActorRef::Ruler(*a))).collect();
         let mut out = Vec::new();
+        // The decisions change nothing they read (a decision journals its draw alone), so
+        // what one has read of a polity serves the next.
+        let seen = std::rc::Rc::new(TickSeen::default());
         for a in ids {
-            if let Some(call) = self.decide(a, enabled, params) {
+            if let Some(call) = self.decide_seen(a, enabled, params, &seen) {
                 out.push(call);
             }
         }
