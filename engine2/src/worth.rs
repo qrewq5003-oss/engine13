@@ -1175,12 +1175,37 @@ impl World {
     /// What `wars_a_tick_from(t, a, ..)` reads that no strength of `a` moves, read once per
     /// decision (`agents::Context`): whether `t` touches `a`, `t`'s rate of war and its odds
     /// against each of its other neighbours — facts of the world, not of the decision.
+    ///
+    /// **A neighbour at the threshold of the relation brings no war** (stage 7, plan §31.38,
+    /// decision № 13): by the rule of the peace a war across a relation at the threshold of
+    /// the treaties wins nothing — the peace is granted at the first offer
+    /// (`WarTerms::at_threshold`, `war_worth_of`) — so `t` does not fall on a polity it stands
+    /// at the threshold with, and its wars fall on the others it touches (measured: of the
+    /// wars opened, one or two in a hundred cross such a relation). The relation of a pair is
+    /// anyone's to see.
     pub fn threat_rate(&self, t: ActorId, a: ActorId, params: &Params) -> ThreatRate {
-        if !self.borders(t, a) {
+        if !self.borders(t, a) || self.war_wins_nothing(t, a, params) {
             return ThreatRate { touches: false, rate: 0.0, against: Vec::new() };
         }
-        let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, if x == a { 0.0 } else { self.war_odds(t, x, 0.0, params) })).collect();
+        let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, if x == a { 0.0 } else { self.odds_it_would_fall_on(t, x, params) })).collect();
         ThreatRate { touches: true, rate: self.war_rate(t, params), against }
+    }
+
+    /// A war of the pair wins nothing by the rule of the peace: their relation stands at the
+    /// threshold of the treaties (`WarTerms::at_threshold`).
+    pub fn war_wins_nothing(&self, t: ActorId, x: ActorId, params: &Params) -> bool {
+        self.relation(t, x) >= params.treaty_accept_at_relation
+    }
+
+    /// `t`'s odds against a polity `x` it touches as the share of its wars that falls on `x`
+    /// reads them: the odds of the war it would declare — nothing where that war wins nothing
+    /// (`war_wins_nothing`).
+    fn odds_it_would_fall_on(&self, t: ActorId, x: ActorId, params: &Params) -> f64 {
+        if self.war_wins_nothing(t, x, params) {
+            0.0
+        } else {
+            self.war_odds(t, x, 0.0, params)
+        }
     }
 
     /// `wars_a_tick_from` on its parts read once (`threat_rate`), `odds` being `a`'s odds in
@@ -1384,7 +1409,7 @@ impl World {
     /// against every polity it touches — `wars_a_tick_in` reads the slot of the polity asked
     /// about by that polity's own odds, so one reading serves them all.
     pub(crate) fn threat_rate_among(&self, t: ActorId, params: &Params) -> ThreatRate {
-        let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, self.war_odds(t, x, 0.0, params))).collect();
+        let against = self.actors.keys().copied().filter(|x| self.alive(*x) && self.borders(t, *x)).map(|x| (x, self.odds_it_would_fall_on(t, x, params))).collect();
         ThreatRate { touches: true, rate: self.war_rate(t, params), against }
     }
 
@@ -1396,7 +1421,7 @@ impl World {
         self.actors
             .keys()
             .copied()
-            .filter(|t| *t != a && *t != b && self.alive(*t) && self.borders(b, *t) && !self.at_war(b, *t) && !self.at_war(a, *t) && !self.peace_in_force(a, *t))
+            .filter(|t| *t != a && *t != b && self.alive(*t) && self.borders(b, *t) && !self.at_war(b, *t) && !self.at_war(a, *t) && !self.peace_in_force(a, *t) && !self.war_wins_nothing(*t, b, params))
             .map(|t| {
                 let (with_b, with_t) = self.threat_sides_strength(b, t);
                 let sides = (with_b + mine, with_t);

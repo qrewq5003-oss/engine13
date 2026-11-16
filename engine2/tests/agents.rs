@@ -2085,6 +2085,53 @@ fn an_alliance_is_worth_the_allys_army_against_the_neighbours_threat_less_the_wa
     let _ = s2;
 }
 
+/// Stage 7, step 1 (plan §31.38, decision № 13): **a neighbour at the threshold of the relation
+/// brings no war.** By the rule of the peace a war across a relation at the threshold of the
+/// treaties wins nothing, so the neighbour does not fall on the polity it stands there with —
+/// and its wars fall on the others it touches. The threat read no relation before.
+#[test]
+fn a_neighbour_at_the_threshold_of_the_relation_brings_no_war_and_its_wars_fall_on_the_others() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    w.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    assert!(w.borders(s1, s0) && w.borders(s1, s2));
+    let (on_s0, on_s2) = (w.wars_a_tick_from(s1, s0, 0.0, &p), w.wars_a_tick_from(s1, s2, 0.0, &p));
+    assert!(on_s0 > 0.0 && on_s2 > 0.0, "the neighbour with wars on its record threatens both: {on_s0}, {on_s2}");
+    // Just under the threshold nothing is read of the relation.
+    let mut near = w.clone();
+    near.relations.insert((s0, s1), p.treaty_accept_at_relation - 0.001);
+    assert_eq!((near.wars_a_tick_from(s1, s0, 0.0, &p), near.wars_a_tick_from(s1, s2, 0.0, &p)), (on_s0, on_s2), "under the threshold the relation moves no threat");
+    // At it: no war on `s0`, whatever its army; and more of `s1`'s wars on `s2`.
+    let mut at = w.clone();
+    at.relations.insert((s0, s1), p.treaty_accept_at_relation);
+    assert!(at.war_wins_nothing(s1, s0, &p) && at.war_wins_nothing(s0, s1, &p) && !at.war_wins_nothing(s1, s2, &p));
+    assert_eq!(at.wars_a_tick_from(s1, s0, 0.0, &p), 0.0, "a neighbour at the threshold brings no war");
+    assert_eq!(at.wars_a_tick_from(s1, s0, -1.0e9, &p), 0.0, "nor on a polity with no army at all");
+    assert!(at.wars_a_tick_from(s1, s2, 0.0, &p) > on_s2, "its wars fall on the others it touches: {} against {on_s2}", at.wars_a_tick_from(s1, s2, 0.0, &p));
+    // So a levy is worth less to `s0` — the threat of `s1` is gone from what its army stands
+    // against — and an ally against that neighbour is worth nothing to it.
+    let blow = |w: &World| w.ceded_province_blow(s0, &w.risk_prices(s0, &p), &p);
+    let gain = |w: &World| {
+        let threats = w.threats(s0, blow(w), &p);
+        let rates: Vec<_> = threats.iter().map(|(t, _)| w.threat_rate(*t, s0, &p)).collect();
+        w.alliance_gain(s0, s2, &threats, &rates, false, &p)
+    };
+    assert!(gain(&w) > 0.0 && gain(&at) == 0.0, "an ally against a neighbour at the threshold takes nothing off: {} then {}", gain(&w), gain(&at));
+    // Nor is an ally of `s0` drawn into a war `s1` would not open: to `s2` the cost of an
+    // alliance with `s0` is what `s0`'s neighbours would bring on it, and `s1` brings nothing.
+    let cost = |w: &World| w.alliance_cost(s2, s0, w.ceded_province_blow(s2, &w.risk_prices(s2, &p), &p), &w.own_money(s2, &p), false, &p);
+    assert!(cost(&w) < 0.0 && cost(&at) == 0.0, "an ally is drawn into no war across the threshold: {} then {}", cost(&w), cost(&at));
+    // With every polity it touches at the threshold the neighbour brings no war on anyone.
+    let mut all = w.clone();
+    for x in all.actors.keys().copied().collect::<Vec<_>>() {
+        if x != s1 {
+            all.relations.insert((x.min(s1), x.max(s1)), 100.0);
+        }
+    }
+    assert!(all.actors.keys().all(|x| *x == s1 || all.wars_a_tick_from(s1, *x, 0.0, &p) == 0.0));
+}
+
 /// E3, stage 5, decision № 12 (plan §31.35): the offering side reads the receiver's answer **as
 /// anyone can** — the receiver's side of the alliance on what a player would see of it, and
 /// nothing of its goals, its treasury, its missed pay, its orders — and an alliance the other
