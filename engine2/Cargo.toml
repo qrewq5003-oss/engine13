@@ -30,6 +30,10 @@ name = "sentinel_short_run"
 required-features = ["sentinel"]
 
 [[test]]
+name = "milan_1477_sentinel"
+required-features = ["sentinel"]
+
+[[test]]
 name = "worldgen"
 required-features = ["sentinel", "worldgen"]
 
