@@ -40,8 +40,12 @@ import base  # noqa: E402
 import geo  # noqa: E402
 import rules  # noqa: E402
 
-TYPES = ["Irrigated", "Hills", "Desert", "Steppe", "Arable"]
+TYPES = ["Irrigated", "Hills", "Desert", "Steppe", "Arable", "Dense"]
 I, H, D, S, A = range(5)
+# Dense — land denser than the arable (engine2's `Land::Dense`, plan §22): no cell is of this
+# type and no fit sees it — it is the class of a land whose opened source says so (`dense` in
+# [lands]), given whole to the land's provinces.
+N = 5
 FITTED = [A, H, S]
 E0 = {"Arable": (40.0, 26.0, 42.0), "Hills": (12.0, 8.0, 19.0), "Steppe": (1.0, 0.5, 2.0),
       "Desert": (0.5, 0.1, 1.0)}
@@ -453,7 +457,7 @@ def land_depth(land: str, lands: dict) -> int:
 
 
 def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rules.Params, method="flip",
-                    sparse=frozenset(), cold=None, river=frozenset(), **variant):
+                    sparse=frozenset(), cold=None, river=frozenset(), whole=None, **variant):
     """Classes of units (blocks, or a scenario's provinces) for the lands of a scenario, with
     each unit's density (its class's, or the continuous one of `calibrate_nearest`).
     `order` — the lands, inner ones first; `member[land]` — its units (an inner land's units
@@ -464,14 +468,19 @@ def calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p: rule
     share (owner's decision §13a п. 4): a land below Hills that is not dry stays Hills — unless
     the land is in `sparse` (`sparse_lands`): then any unit may turn Steppe, by `cold`, the
     coldest first (owner's decision on §15a п. 4). A land in `river` lives off its river — the
-    Sawad: its desert climate does not hold its units at Desert; its source sets the class."""
+    Sawad: its desert climate does not hold its units at Desert; its source sets the class.
+    `whole` — lands that take one class whole (land → class): the source gives the land's own
+    density as a class of the engine (Dense), and the outer land counts it at that density."""
     variant.setdefault("dry_steppe", p.steppe_share)
+    whole = whole or {}
     cls = np.full(len(area), -1)
     d = np.full(len(area), np.nan)
     for land in order:
         m = member[land]
         free = m & (cls < 0)
-        if ceiling[land] is not None:
+        if land in whole:
+            cls[free] = whole[land]
+        elif ceiling[land] is not None:
             fixed = m & (cls >= 0)
             target = ceiling[land] * area[m].sum() - float(area[fixed] @ dens[cls[fixed]])
             desert = (bw[free] >= 0.5) & (land not in river)

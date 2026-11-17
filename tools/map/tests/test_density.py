@@ -145,3 +145,21 @@ def test_calibrate_above_arable_everywhere_leaves_a_residual():
     cls = density.calibrate(area, rugged, dry, desert, 10000.0, DENS)
     assert list(cls) == [A, A]
     assert float(area @ DENS[cls]) == pytest.approx(8000.0)
+
+
+def test_a_whole_land_takes_its_class_and_the_outer_land_counts_it_at_that_density():
+    # Three units of 100 km²: the first is a land of its own that takes Dense whole (75 per km²,
+    # its source's own density); the outer land's ceiling of 45 leaves the other two 6,000
+    # people — one stays Arable (40), the more rugged turns Hills (12): 7,500 + 4,000 + 1,200.
+    dens = np.append(DENS, 75.0)
+    area, rugged, dry, bw = np.full(3, 100.0), np.array([0.9, 0.1, 0.8]), np.zeros(3), np.zeros(3)
+    member = {"inner": np.array([True, False, False]), "outer": np.ones(3, bool)}
+    ceiling = {"inner": 75.0, "outer": 45.0}
+    p = type("P", (), {"steppe_share": 0.5})()
+    cls, d = density.calibrate_lands(["inner", "outer"], member, ceiling, area, rugged, dry, bw, dens, p,
+                                     whole={"inner": density.N})
+    assert list(cls) == [density.N, A, H]
+    assert list(d) == [75.0, 40.0, 12.0]
+    # Without it the inner land is calibrated like any other: above the arable everywhere — Arable.
+    cls, _ = density.calibrate_lands(["inner", "outer"], member, ceiling, area, rugged, dry, bw, dens, p)
+    assert cls[0] == A

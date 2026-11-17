@@ -282,6 +282,17 @@ region = "tuscany"
 population = [1.1, 1.1]
 source = "Malanima 2002, там же, табл. A.4 (1330 — наибольшее до чумы)"
 
+# The State of Milan (owner's decision 2026-11-17: land denser than the arable is a class of its
+# own, engine2's Dense; plan §18.3, §22). Sella's number is the state's own density about 1600,
+# before the plague of 1630, on its own 16,000 km² — its plain, hills and mountains together.
+[[obs]]
+id = "lombardy_1600"
+fit = false
+land = "lombardy"
+region = "lombardy_state"
+density = [75.0, 75.0]
+source = "Sella D., Crisis and Continuity: The Economy of Spanish Lombardy in the Seventeenth Century (Harvard, 1979), гл. 1: Миланское государство — около 1,2 млн на 16 000 км², 75 чел./км², «nearly twice that of Italy as a whole»; число — по Beloch, Bevölkerungsgeschichte Italiens, т. 3, с. 169 и 242 — открыл (поиск по тексту, archive.org crisiscontinuity0000sell)"
+
 # Regions: unions of parts; a part takes blocks of the listed countries whose representative
 # point passes the box, optionally by name, by size, or by the block's dry share.
 
@@ -330,6 +341,13 @@ minus = ["italy_cn", "italy_isole"]
 [regions.tuscany]
 parts = [{ countries = ["ITA"], names = ["Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara",
                                         "Pisa", "Pistoia", "Prato", "Siena"] }]
+
+[regions.lombardy_state]
+# The State of Milan of the source by today's provinces: the Milanese with Lodi, Pavia, Cremona,
+# Como with Lecco and Varese, Novara, Alessandria with Tortona — 15.6 thousand km² on the map
+# against the source's 16 thousand.
+parts = [{ countries = ["ITA"], names = ["Milano", "Monza e della Brianza", "Lodi", "Pavia", "Cremona", "Como", "Lecco",
+                                        "Varese", "Novara", "Alessandria"] }]
 
 [regions.italy_alps]
 # The Italian provinces wholly in the Alps: of the provinces north of 45.5° N, those whose rugged
@@ -506,6 +524,11 @@ within = "italy_cn"
 [lands.tuscany]
 within = "italy_cn"
 
+# Dense: the land takes engine2's class Dense whole (layout.py), no share of hills.
+[lands.lombardy]
+within = "italy_cn"
+dense = true
+
 [lands.italy_sud]
 within = "italy_si"
 
@@ -537,7 +560,7 @@ lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_is
          "germany", "denmark", "scandinavia", "russia", "sawad"]
 
 [scenarios.milan_1477]
-lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
+lands = ["italy_cn", "tuscany", "lombardy", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
 # Population of the start year by land (millions): the fill at start (plan §7) next to the fill
 # at which engine2's growth equals the plague loss.
 start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407, italy_sud = 2.395, italy_isole = 1.012 }
