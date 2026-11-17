@@ -1,0 +1,34 @@
+# The real course of events for milan_1477, in the sentinel's own data (plan §8): what a
+# player-less run must not repeat in ≥ 50 % of runs (brief §11 №5). Neither engine nor
+# chronicler can read this file by construction — it lives outside their crates.
+#
+# The outcomes are the state of the world at the end of the run — 300 ticks, 1627 (the working
+# horizon; docs/engine2_map.md §21.1) — and they hold all at once (`History::matches`), so the
+# list is the short core of the real course, not its whole: the two great powers of the
+# peninsula gone, the other three standing. Dates and sources — docs/engine2_map.md §21.2; the
+# rest of the real course, which this file leaves out on purpose, — §21.3.
+
+scenario = "milan_1477"
+
+# The duchy of Milan: the last Sforza duke died in the night of 1–2 November 1535, and the
+# duchy passed to a crown that is not an actor of the start.
+[[outcome]]
+kind = "dead"
+id = "milan"
+
+# The kingdom of Naples: the Aragonese line of Naples lost the crown in 1501.
+[[outcome]]
+kind = "dead"
+id = "naples"
+
+[[outcome]]
+kind = "alive"
+id = "venice"
+
+[[outcome]]
+kind = "alive"
+id = "papacy"
+
+[[outcome]]
+kind = "alive"
+id = "florence"
