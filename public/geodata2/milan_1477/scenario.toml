@@ -14,10 +14,8 @@
 #   - the rulers of Siena, Lucca, Ragusa and the Confederation are offices, not persons: no
 #     single ruler, and the holder of the start of 1477 is not opened; born = 1440 is the stub
 #     of the map's test, not a fact;
-#   - years of birth from it.wikipedia only: René of Anjou, John II of Aragon, Sigismund of
-#     Tyrol;
-#   - EI's year against the later literature: Mehmed II (EI 1430, elsewhere 1432), Matthias
-#     Corvinus (EI «probably 1440», elsewhere 1443) — EI's is written.
+#   - EI's year against it.wikipedia: Mehmed II (EI 1430, there 1432), Matthias Corvinus (EI
+#     «probably 1440», there 1443), John II of Aragon (EI 1397, there 1398) — EI's is written.
 #
 # treasury_kg = 0 everywhere: no source names cash in hand (owner's decision 2026-11-17).
 # soldiers — only where a source gives the army (Mallett 1974): Milan and Venice; the rest is
@@ -512,10 +510,11 @@ culture = "italian"
 religion = "catholic"
 soldiers = 0
 
+# John II: «Nacque nel 1397» (EI 1933; Treccani on line: 1397–1479).
 [persons.giovanni_d_aragona]
 name = "Хуан II Арагонский"
 house = "trastamara"
-born = 1398
+born = 1397
 
 [persons.ferdinando_il_cattolico]
 name = "Фердинанд Арагонский"
@@ -661,6 +660,7 @@ culture = "french"
 religion = "catholic"
 soldiers = 0
 
+# René: «nato ad Angers il 16 gennaio 1409» (EI 1936).
 [persons.renato_d_angio]
 name = "Рене Анжуйский"
 house = "angio"
@@ -738,6 +738,7 @@ culture = "german"
 religion = "catholic"
 soldiers = 0
 
+# Sigismund: «Innsbruck 1427 – ivi 1496» (Treccani, Enciclopedia on line).
 [persons.sigismondo_d_austria]
 name = "Сигизмунд Тирольский"
 house = "asburgo"
