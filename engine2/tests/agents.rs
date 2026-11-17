@@ -599,6 +599,16 @@ impl Measures {
         m
     }
 
+    /// The measures of one scenario over game `seeds`, one run per thread, folded in the
+    /// order of the seeds.
+    fn over_scenario(s: &ScenarioData, seeds: &[u64], p: &Params) -> Measures {
+        let mut m = Measures::default();
+        for w in engine2::par::map(seeds, |seed| measure_scenario(s, *seed, p)) {
+            m.add(w);
+        }
+        m
+    }
+
     fn add(&mut self, o: Measures) {
         self.reigns.extend(o.reigns);
         self.usurpations += o.usurpations;
@@ -795,6 +805,13 @@ impl Measures {
 
 /// One generated world with the bots, 300 ticks: what it adds to the measures.
 fn measure_world(seed: u64, p: &Params) -> Measures {
+    measure_scenario(&worldgen::generate(seed, p), seed, p)
+}
+
+/// One scenario with the bots, 300 ticks, played with the game seed `seed`: what it adds to
+/// the measures. The measures of a generated world (`measure_world`) and of a scenario given
+/// as data (E4, stage 5: Milan) are read by this one function.
+fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
     let (mut reigns, mut usurpations, mut polity_centuries) = (Vec::<f64>::new(), 0u64, 0.0f64);
     let (mut risings, mut large_ticks) = (0u64, 0u64);
     let (mut polities_start, mut polities_century) = (0usize, 0usize);
@@ -816,8 +833,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
     let (mut elections, mut elections_turned) = (0u64, 0u64);
     let mut kind_of: BTreeMap<u32, &'static str> = BTreeMap::new();
-    let s = worldgen::generate(seed, p);
-    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let mut g = Game::new(s, p.clone(), seed).unwrap();
     let people_of = |g: &Game| g.world().provinces.keys().map(|q| g.world().population(*q)).sum::<i64>();
     let (people_start, mut people_100, mut migrants, mut migrants_across) = (people_of(&g), 0i64, 0i64, 0i64);
     let (mut deficit_share, mut deficit_samples, mut deficit_heavy) = (0.0f64, 0u64, 0u64);
@@ -1763,8 +1779,13 @@ fn a_side_with_nothing_to_fight_for_accepts_a_peace_one_with_a_cause_at_the_thre
 /// outcome the idle player's (plan §28.12): a foolish probe, not a degeneration of the
 /// engine. The change is to the probe player, not to the measures.
 fn play_strategy(s: &ScenarioData, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
+    play_strategy_as(s, ActorId(0), seed, strategy, ticks)
+}
+
+/// The same with the player at the polity `me` (E4, stage 5: the player of a scenario given
+/// as data is not its first polity).
+fn play_strategy_as(s: &ScenarioData, me: ActorId, seed: u64, strategy: &str, ticks: u32) -> sentinel::RunSummary {
     let p = params();
-    let me = ActorId(0);
     let mut g = Game::new(s, params(), seed).unwrap();
     if strategy != "none" {
         g.set_player(Some(ActorRef::Ruler(me)));
@@ -5321,4 +5342,186 @@ fn diagnosis_why_the_order_is_never_bought() {
             line(format!("[{band}] decisions {} ({}); the gain, years of income {} (the most {:.3})", d.n(&format!("decisions — {band}")), d.share(&format!("decisions — {band}"), "decisions"), d.q(&format!("the gain, years of income — {band}")), top(&format!("the gain, years of income — {band}"))));
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// E4, stage 5 (plan §31.52): the scenario of Milan — the measures and the player's matrix.
+// Probes: they print and assert nothing. What of this becomes an acceptance is decided
+// measure by measure, after the numbers.
+// ---------------------------------------------------------------------------------------
+
+const MILAN_SCENARIO: &str = include_str!("../../public/geodata2/milan_1477/scenario.toml");
+const MILAN_PROVINCES: &str = include_str!("../../public/geodata2/milan_1477/provinces.toml");
+
+fn milan() -> ScenarioData {
+    ScenarioData::parse_parts(MILAN_SCENARIO, MILAN_PROVINCES).expect("the two files of milan_1477 join into the scenario")
+}
+
+/// Where the band of a measure comes from, beside the band itself (the reviewer's condition on
+/// step 5.1: a measure of Milan is read against its source, not against the generated worlds).
+/// `italy` says what the band's source gives for Italy of the fifteenth century, if anything.
+struct BandSource {
+    measure: &'static str,
+    key: &'static str,
+    source: &'static str,
+    italy: &'static str,
+}
+
+const BAND_SOURCES: [BandSource; 12] = [
+    BandSource { measure: "В5", key: "reign.observed_years", source: "E0 В5: principate 7, dominate 11, the Middle Ages 15–20 years (Ramos et al. 2020; Eisner 2011)", italy: "the Middle Ages' 15–20; the band is one for all eras" },
+    BandSource { measure: "В6", key: "usurpation.observed_per_century", source: "E0 В6: Rome 284–395 about 23 a century (Omissi 2018 — opened, secondary)", italy: "2–4 a century per polity (Mallett 1974; Lubkin 1994 — by memory); the top of the band is Rome's" },
+    BandSource { measure: "В7", key: "revolt.observed_per_century", source: "E0 В7: Rome 3–5 a century per large polity (Ammianus — by memory)", italy: "Volterra 1472, Genoa 1478, Otranto 1480: 3–5 a century per large polity (Mallett 1974 — by memory)" },
+    BandSource { measure: "В8", key: "collapse.observed_polities_after_a_century", source: "E0 В8: by memory; Abramson 2017 opened for Europe's mean", italy: "Italy of 1400 gathered into the five powers by 1454 (Mallett 1974 — by memory; no count opened)" },
+    BandSource { measure: "А11", key: "army.observed_share_of_population", source: "E0 А11 (Jones; Treadgold; Mallett–Hale): peace 0.5–1.5 %, war 2–3 % — the band holds both", italy: "Venice of the 1460–80s 0.6–1.3 %, Milan about 1.5 % at peace (Mallett–Hale — opened, secondary)" },
+    BandSource { measure: "А12", key: "war.observed_share_of_years", source: "E0 А12 (Ammianus; Mallett)", italy: "no number of Italy's own in the record; the band is one for all eras" },
+    BandSource { measure: "Д3", key: "diplomacy.observed_bound_share", source: "E0 Д3: the band by memory", italy: "the league of 1455: the five powers among eight to ten states, and by 1455 every state but Genoa and Rimini (opened, secondary)" },
+    BandSource { measure: "Э8", key: "tax.observed_share_of_production", source: "E0 Э8", italy: "no number of Italy's own in the record" },
+    BandSource { measure: "В9", key: "revolt.observed_share_of_provinces", source: "E0 В9: by memory, a source to open", italy: "Volterra 1472 put down in a month — by memory" },
+    BandSource { measure: "П7", key: "population.observed_growth_per_year", source: "E0 П7", italy: "Italy of the fifteenth century +0.2 % a year; the Centre-North 1450–1500 +0.37 % (Malanima 2002, tab. A.4 — opened)" },
+    BandSource { measure: "А13", key: "battle.observed_win_share_of_the_stronger", source: "E0 А13: derived from Rotte & Schmidt 2003, 625 battles of 1600–1973", italy: "none: another era; on the bots the measure is printed (plan §31.33)" },
+    BandSource { measure: "Э9", key: "budget.observed_military_share", source: "E0 Э9", italy: "no number of Italy's own in the record" },
+];
+
+/// The measures of E2/E3 on the scenario of Milan (E4, stage 5, step 5.1, plan §31.52): the
+/// same measures the generated worlds are held to, each beside its band and the band's
+/// source, and what the generated worlds have no reason to print — which polities of the
+/// start die, when and to whom; the reigns; the treasuries; the time of a turn.
+#[test]
+#[ignore = "probe: prints, asserts nothing"]
+fn diagnosis_the_measures_of_e2_and_e3_on_the_scenario_of_milan() {
+    const TICKS: u32 = 300;
+    let p = params();
+    let s = milan();
+    let seeds: Vec<u64> = (1..=10).collect();
+    eprintln!("the scenario of Milan: {} polities, {} provinces; game seeds 1–10, {TICKS} ticks, every polity a bot. A probe: nothing here is an acceptance.", s.actors.len(), s.provinces.len());
+    let started = std::time::Instant::now();
+    let m = Measures::over_scenario(&s, &seeds, &p);
+    let took = started.elapsed();
+    let r = m.rates();
+    let e9 = m.pay as f64 / (m.pay + m.court).max(1) as f64;
+    let value_of = |measure: &str| match measure {
+        "Э9" => e9,
+        name => r.against_bands(&p).into_iter().find(|(n, ..)| *n == name).map(|(_, v, ..)| v).expect("a measure of the row"),
+    };
+    for b in &BAND_SOURCES {
+        let band = p.entries[b.key].band.unwrap();
+        let v = value_of(b.measure);
+        eprintln!("{} {v:.4} — {} the band {band:?} | the band's source: {} | Italy of the XV c. in it: {}", b.measure, if (band[0]..=band[1]).contains(&v) { "inside" } else { "OUTSIDE" }, b.source, b.italy);
+    }
+    let war_band = p.entries["army.observed_share_at_war"].band.unwrap();
+    eprintln!(
+        "А11 at war {:.4} — {} the band {war_band:?} (E0 А11: at war 2–3 %, Jones; Mallett–Hale); at peace {:.4}, by windows of 50 ticks {:?}",
+        r.a11_war,
+        if (war_band[0]..=war_band[1]).contains(&r.a11_war) { "inside" } else { "OUTSIDE" },
+        r.a11_peace,
+        m.a11_peace_windows.iter().map(|(a, n)| format!("{:.4}", *a as f64 / (*n).max(1) as f64)).collect::<Vec<_>>()
+    );
+    eprintln!(
+        "war declarations {}, the tick after a peace of the same pair {} ({:.3} — the stop of §31.29.3 is 0.10, a rule of the plan, not a source), within five years of it {} ({:.3})",
+        m.declarations,
+        m.declared_after_peace,
+        m.declared_after_peace as f64 / m.declarations.max(1) as f64,
+        m.declared_within_five_years,
+        m.declared_within_five_years as f64 / m.declarations.max(1) as f64
+    );
+    eprintln!("falls {} of which by conquest {}; goals reached {}, put aside {}; verbs {:?}", m.falls, m.falls_by_conquest, m.reached, m.dropped, m.verbs);
+    eprintln!("the order bought (`enforce_order`): {} times in {} runs", m.verbs.get(&VerbId::EnforceOrder).copied().unwrap_or(0), seeds.len());
+    eprintln!("{}", m.fill_line());
+    for line in m.war_lines() {
+        eprintln!("{line}");
+    }
+    eprintln!("the measures took {:.0} s for {} runs", took.as_secs_f64(), seeds.len());
+
+    // What the measures do not carry: the polities of the start one by one. The same games
+    // again (the same scenario and seeds give the same runs), read by their events.
+    let names: Vec<String> = s.compile(&p).unwrap().names.actors.into_iter().map(|(id, _)| id).collect();
+    struct Run {
+        died: BTreeMap<u32, (u32, Option<u32>)>,
+        rulers_died: BTreeMap<u32, u32>,
+        dynasties: u32,
+        treasury_years: Vec<f64>,
+        turn_ms: (f64, f64),
+    }
+    let runs = engine2::par::map(&seeds, |seed| {
+        let mut g = Game::new(&s, p.clone(), *seed).unwrap();
+        let start = g.world().actors.len() as u32;
+        let (mut died, mut rulers_died, mut dynasties) = (BTreeMap::new(), BTreeMap::new(), 0u32);
+        let mut last_taker: BTreeMap<u32, u32> = BTreeMap::new();
+        let (mut total, mut worst) = (0.0f64, 0.0f64);
+        for t in 0..TICKS {
+            let at = std::time::Instant::now();
+            let report = g.tick(&[]).unwrap();
+            let ms = at.elapsed().as_secs_f64() * 1000.0;
+            total += ms;
+            worst = worst.max(ms);
+            for e in &report.events {
+                match &e.event {
+                    Event::ProvinceChangedHands { from, to, .. } => {
+                        last_taker.insert(from.0, to.0);
+                    }
+                    Event::ActorDied { actor } if actor.0 < start => {
+                        died.insert(actor.0, (t + 1, last_taker.get(&actor.0).copied()));
+                    }
+                    Event::RulerDied { actor, .. } if actor.0 < start => *rulers_died.entry(actor.0).or_insert(0) += 1,
+                    Event::NewDynasty { .. } => dynasties += 1,
+                    _ => {}
+                }
+            }
+        }
+        let w = g.world();
+        let treasury_years = w.actors.keys().filter(|a| w.alive(**a)).map(|a| w.treasury(*a) as f64 / w.yearly_income(*a, &p).max(1) as f64).collect();
+        Run { died, rulers_died, dynasties, treasury_years, turn_ms: (total / f64::from(TICKS), worst) }
+    });
+    let who = |id: u32| names.get(id as usize).cloned().unwrap_or_else(|| format!("a polity born in the run ({id})"));
+    eprintln!("the polities of the start that die, by the runs of {} they are dead at the end of (the tick of the death → who took the last province):", seeds.len());
+    let mut deaths: Vec<(usize, String)> = (0..names.len() as u32)
+        .filter_map(|a| {
+            let in_runs: Vec<String> = runs.iter().filter_map(|r| r.died.get(&a)).map(|(tick, taker)| format!("{tick}→{}", taker.map(who).unwrap_or_else(|| "nobody: no house left".to_string()))).collect();
+            (!in_runs.is_empty()).then(|| (in_runs.len(), format!("  {} — {} of {}: {}", names[a as usize], in_runs.len(), seeds.len(), in_runs.join(", "))))
+        })
+        .collect();
+    deaths.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+    for (_, line) in &deaths {
+        eprintln!("{line}");
+    }
+    let rulers: u32 = runs.iter().flat_map(|r| r.rulers_died.values()).sum();
+    let dynasties: u32 = runs.iter().map(|r| r.dynasties).sum();
+    eprintln!(
+        "rulers of the polities of the start that died: {rulers} in {} runs of 150 years — {:.1} a run; new dynasties (of every polity) {dynasties} — {:.1} a run",
+        seeds.len(),
+        f64::from(rulers) / seeds.len() as f64,
+        f64::from(dynasties) / seeds.len() as f64
+    );
+    let mut years: Vec<f64> = runs.iter().flat_map(|r| r.treasury_years.iter().copied()).collect();
+    years.sort_by(f64::total_cmp);
+    let q = |share: f64| years[((years.len() - 1) as f64 * share).round() as usize];
+    eprintln!("the treasuries of the living at the end, in years of their income (the start is nothing): q10 {:.1} / q50 {:.1} / q90 {:.1} / max {:.1}, over {} polities", q(0.1), q(0.5), q(0.9), q(1.0), years.len());
+    let mean_ms = runs.iter().map(|r| r.turn_ms.0).sum::<f64>() / runs.len() as f64;
+    let worst_ms = runs.iter().map(|r| r.turn_ms.1).fold(0.0, f64::max);
+    eprintln!("a turn, the runs played {} at a time: {mean_ms:.1} ms on average, {worst_ms:.1} ms at worst", runs.len().min(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)));
+}
+
+/// The sentinel's matrix on the scenario of Milan with a player at the polity `milan` (E4,
+/// stage 5, step 5.1, plan §31.52): does the outcome depend on the player's strategy and on
+/// the seed — the flags the generated worlds are held to
+/// (`the_outcome_depends_on_the_players_strategy_and_on_the_seed_the_sentinel_matrix_on_every_world`).
+#[test]
+#[ignore = "probe: prints, asserts nothing"]
+fn diagnosis_the_outcome_on_milan_by_the_players_strategy_and_the_seed() {
+    const TICKS: u32 = 300;
+    let p = params();
+    let s = milan();
+    let me = ActorId(s.compile(&p).unwrap().names.actors.iter().position(|(id, _)| id == "milan").expect("the polity of the player") as u32);
+    let runs: Vec<(u64, &str)> = [1u64, 2, 3].into_iter().flat_map(|seed| ["none", "idle", "conqueror"].into_iter().map(move |st| (seed, st))).collect();
+    let started = std::time::Instant::now();
+    let summaries = engine2::par::map(&runs, |(seed, st)| play_strategy_as(&s, me, *seed, st, TICKS));
+    let mut m = sentinel::Matrix::new();
+    for ((seed, st), summary) in runs.iter().zip(summaries) {
+        let alive = |id: &str| summary.outcome.alive.iter().any(|a| a.0 == id);
+        let held = summary.outcome.owners.iter().filter(|(_, owner)| owner.0 == "milan").count();
+        eprintln!("seed {seed}, the player {st}: {} polities alive at the end; milan alive {}, holding {held} of {} provinces", summary.outcome.alive.len(), alive("milan"), summary.outcome.owners.len());
+        m.add(summary);
+    }
+    let flags: Vec<sentinel::Flag> = m.flags(&sentinel::Thresholds::default(), &[], None).into_iter().filter(|f| matches!(f, sentinel::Flag::StrategyIndependent { .. } | sentinel::Flag::SeedIndependent { .. })).collect();
+    eprintln!("the sentinel's matrix on Milan, the player at milan, 3 seeds × 3 strategies × {TICKS} ticks, {:.0} s: {flags:?}", started.elapsed().as_secs_f64());
 }
