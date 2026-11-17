@@ -4,6 +4,7 @@ province's land is the innermost land holding the majority of its area."""
 import numpy as np
 import pytest
 
+import density
 import layout
 
 
@@ -38,3 +39,24 @@ def test_province_land_is_the_innermost_land_of_the_majority():
     owner_of[1] = "q"  # q: 30 of the inner land, 80 of the outer only → the outer land
     got = layout.province_lands(["p", "q", "r"], owner_of, b, masks, lands, ["outer", "inner"])
     assert got == {"p": "inner", "q": "outer", "r": None}
+
+
+def test_land_fields_write_the_share_only_between_the_plain_classes():
+    # No share: the class as it is.
+    assert layout.land_fields(density.S, float("nan")) == ("Steppe", None)
+    assert layout.land_fields(density.H, float("nan")) == ("Hills", None)
+    # A share: arable with `hills` to three places; none is plain Arable, all is plain Hills —
+    # whatever class the province had as a whole.
+    assert layout.land_fields(density.H, 0.3764) == ("Arable", 0.376)
+    assert layout.land_fields(density.A, 0.0004) == ("Arable", None)
+    assert layout.land_fields(density.A, 0.9996) == ("Hills", None)
+    assert layout.land_fields(density.H, 1.0) == ("Hills", None)
+
+
+def test_mixed_density_lowers_only_arable_land_toward_the_hills():
+    dens = np.zeros(5)
+    dens[density.A], dens[density.H], dens[density.S], dens[density.I] = 50.0, 12.0, 1.0, 184.0
+    cls = np.array([density.A, density.A, density.H, density.S, density.I])
+    hills = np.array([0.0, 0.25, 0.25, 0.25, 0.25])
+    # engine2's `capacity_of`: 100 km² at a quarter of hills carry 4,050 — 40.5 per km².
+    assert layout.mixed_density(dens, cls, hills).tolist() == [50.0, 40.5, 12.0, 1.0, 184.0]
