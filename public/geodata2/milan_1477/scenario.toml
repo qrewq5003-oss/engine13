@@ -50,11 +50,30 @@ send_embassy = "Отправить посольство"
 
 # ---------------------------------------------------------------- relations at the start
 # Venice and the Ottomans at war: from 1463–64, peace on 25 April 1479 (DBI, Vendramin).
-# The league of Florence, Milan and Venice of November 1474 is not written: its term is not
-# opened and the schema asks for one. No vassals: none who paid and fought by an opened source.
+#
+# The league of Florence, Milan and Venice: signed on 2 November 1474, defensive, for twenty-five
+# years (Sismondi, Storia delle repubbliche italiane, 1832; Zanotto, Il Palazzo ducale di
+# Venezia, 1853) — to 1499, the term of the treaty as it stood in 1477, not what became of it.
+# In 1477 it was in force: Milan and Venice «erano ancora alleate» (DBI, Ercole I d'Este).
+# The schema's alliance is a pair, so three powers are three pairs (К15).
+# Mantua: Ludovico Gonzaga signed the same pact at Mantua on 18 November 1474 «come aderente
+# del duca di Milano» (DBI, Ludovico III Gonzaga) — a pair with Milan alone (К16).
+# Ferrara: «l'alleanza tra Milano, Venezia, Firenze e Ferrara» (DBI, Ercole I d'Este); the day
+# of its accession is not opened, the term is the league's (К17).
+# Not written: Montferrat — the marquis served Milan by a condotta, which is not an alliance
+# and has no term; the understanding of the pope and Naples — no treaty opened (§26.4).
+# No vassals: none who paid and fought by an opened source.
 [relations]
 wars = [["venice", "ottomans"]]
-alliances = []
+alliances = [
+    { a = "florence", b = "milan", until_year = 1499 },
+    { a = "milan", b = "venice", until_year = 1499 },
+    { a = "florence", b = "venice", until_year = 1499 },
+    { a = "mantua", b = "milan", until_year = 1499 },
+    { a = "ferrara", b = "milan", until_year = 1499 },
+    { a = "ferrara", b = "venice", until_year = 1499 },
+    { a = "ferrara", b = "florence", until_year = 1499 },
+]
 vassals = []
 
 # ---------------------------------------------------------------- Milan
