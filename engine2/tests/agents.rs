@@ -477,6 +477,12 @@ struct Measures {
     people_start: i64,
     people_100: i64,
     people_end: i64,
+    /// The capacity of the land of the measured worlds, and of the worlds with plague the
+    /// capacity and the people at the ticks 0, 100 and 300: the fill printed beside П7 (E4,
+    /// plan §31.46 — the plague's loss and the growth were moved together).
+    capacity: i64,
+    plague_capacity: i64,
+    plague_people: [i64; 3],
     migrants: i64,
     migrants_across: i64,
     deficit_share: f64,
@@ -570,6 +576,20 @@ impl Measures {
         }
     }
 
+    /// The fill of the land — the people over its capacity — at the ticks 0, 100 and 300: of
+    /// all the measured worlds and of those with plague, which settle below the capacity; and
+    /// П7 to four digits, which the row of the measures against their bands prints to three.
+    fn fill_line(&self) -> String {
+        let fill = |people: i64, capacity: i64| format!("{:.3}", people as f64 / capacity.max(1) as f64);
+        let all = [self.people_start, self.people_100, self.people_end].map(|n| fill(n, self.capacity)).join(" → ");
+        let plague = self.plague_people.map(|n| fill(n, self.plague_capacity)).join(" → ");
+        format!(
+            "the fill of the land at the ticks 0, 100, 300: all the worlds {all} (П7 {:.4} a year over the first 100); the worlds with plague, {:.2} of all the capacity, {plague}",
+            self.rates().p7,
+            self.plague_capacity as f64 / self.capacity.max(1) as f64
+        )
+    }
+
     /// The measures over `seeds`, one world per thread, folded in the order of the seeds.
     fn over(seeds: &[u64], p: &Params) -> Measures {
         let mut m = Measures::default();
@@ -641,6 +661,11 @@ impl Measures {
         self.people_start += o.people_start;
         self.people_100 += o.people_100;
         self.people_end += o.people_end;
+        self.capacity += o.capacity;
+        self.plague_capacity += o.plague_capacity;
+        for (mine, theirs) in self.plague_people.iter_mut().zip(o.plague_people) {
+            *mine += theirs;
+        }
         self.migrants += o.migrants;
         self.migrants_across += o.migrants_across;
         self.deficit_share += o.deficit_share;
@@ -1088,6 +1113,8 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
     polity_centuries += n0 as f64 * 1.5;
     let people_end = people_of(&g);
     let w = g.world();
+    let capacity = w.provinces.values().map(|q| q.capacity as i64).sum::<i64>();
+    let (plague_capacity, plague_people) = if w.diseases.contains(&engine2::Disease::Plague) { (capacity, [people_start, people_100, people_end]) } else { (0, [0; 3]) };
     rates.extend(w.actors.iter().filter(|(a, _)| w.alive(**a)).map(|(_, x)| x.tax_rate_ppm as f64 / 1e6));
     for (k, v) in g.preempted_reasons() {
         *rejections.entry(k.clone()).or_insert(0) += v;
@@ -1097,7 +1124,7 @@ fn measure_world(seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1110,7 +1137,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let m = Measures::over(&seeds, &p);
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7, a13 } = m.rates();
     let war_lines = m.war_lines();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
+    let fill_line = m.fill_line();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1234,6 +1262,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         "П7 {p7:.4} a year over 100 ticks; people {people_start} → {people_end} over 300 ticks; migrants {migrants}, of them across a border {migrants_across} ({:.3})",
         migrants_across as f64 / migrants.max(1) as f64
     );
+    eprintln!("{fill_line}");
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
@@ -1859,6 +1888,7 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
             m.declared_within_five_years,
             m.declared_within_five_years as f64 / m.declarations.max(1) as f64
         );
+        eprintln!("{label}: {}", m.fill_line());
         for line in m.war_lines() {
             eprintln!("{label}: {line}");
         }
