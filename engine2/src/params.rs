@@ -269,9 +269,13 @@ pub struct Params {
 }
 
 impl Params {
-    /// People a province can carry: `area × density(land)`, rounded down.
+    /// People a province can carry: `area × density(land)`, rounded down — for arable land
+    /// with a share of hills (`Land::Mixed`), `capacity_of` at that share.
     pub fn capacity(&self, area_km2: u64, land: Land) -> u64 {
-        self.capacity_of(area_km2, land, 0)
+        match land {
+            Land::Mixed(hills_ppm) => self.capacity_of(area_km2, Land::Arable, hills_ppm),
+            class => self.capacity_of(area_km2, class, 0),
+        }
     }
 
     /// People a province can carry with a share of its area in hills (E4, plan §31.43.2 p. 1,
@@ -683,6 +687,8 @@ mod tests {
         assert_eq!(p.capacity_of(1000, Land::Arable, 1_000_000), p.capacity(1000, Land::Hills));
         assert_eq!(p.capacity_of(1000, Land::Arable, 500_000), (p.capacity(1000, Land::Arable) + p.capacity(1000, Land::Hills)) / 2);
         assert_eq!(p.capacity_of(1000, Land::Arable, 250_000), 40_500);
+        assert_eq!(p.capacity(1000, Land::Mixed(250_000)), 40_500, "the land of a mix carries its share");
+        assert_eq!(p.capacity(1000, Land::Mixed(0)), p.capacity(1000, Land::Arable));
         assert_eq!(p.capacity_of(1000, Land::Arable, 2_000_000), p.capacity(1000, Land::Hills), "a share past the whole is the whole");
         let steps: Vec<u64> = (0..=10).map(|k| p.capacity_of(1000, Land::Arable, k * 100_000)).collect();
         assert!(steps.windows(2).all(|x| x[0] > x[1] && x[0] - x[1] == steps[0] - steps[1]), "even steps down from the arable to the hills: {steps:?}");

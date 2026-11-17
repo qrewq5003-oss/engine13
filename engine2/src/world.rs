@@ -148,6 +148,13 @@ pub enum Land {
     /// An irrigated valley — Egypt: only land whose source gives a density well above the
     /// arable (plan §30.7, `docs/engine2_map.md` §11e). The generator of worlds draws none.
     Irrigated,
+    /// Arable land with a share of its area in hills, parts per million (E4, plan §31.44;
+    /// `docs/engine2_map.md` §12b, §17): the share carries the hills' density, the rest the
+    /// arable's (`Params::capacity`) — the capacity is continuous, and a land's ceiling is met
+    /// without turning a whole province from one class to the other. A scenario gives it as
+    /// `land = "Arable"` with `hills`; a province with no hills is plain `Arable`, as it was.
+    /// The generator of worlds draws none.
+    Mixed(u32),
 }
 
 /// A polity as the engine sees it: its provinces, its capital and a legitimacy rating.
@@ -441,9 +448,6 @@ pub struct Names {
 pub struct ProvinceFact {
     pub area_km2: u64,
     pub land: Land,
-    /// The share of the area in hills, parts per million (`Params::capacity_of`): a fact of
-    /// the scenario read when the capacity is derived, and not kept in the world.
-    pub hills_ppm: u32,
     pub coastal: bool,
     pub population: u64,
     pub owner: ActorId,
@@ -790,7 +794,7 @@ impl World {
             if let Some(g) = f.governor {
                 seat(g, f.owner)?;
             }
-            let capacity = params.capacity_of(f.area_km2, f.land, f.hills_ppm);
+            let capacity = params.capacity(f.area_km2, f.land);
             known_faith(f.culture, f.religion)?;
             provinces.insert(
                 id,

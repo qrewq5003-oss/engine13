@@ -70,3 +70,30 @@ fn a_save_written_before_the_lands_change_loads_and_goes_on() {
         w.tick(&params).unwrap();
     }
 }
+
+/// A **game's** save written before the share of hills (E4, plan §31.44): `Game::to_save` on
+/// main afc34ac — the test world, seed 0xE4, thirty ticks with the bots. This is the path of
+/// a real load: `Game::from_save` takes the scenario and refuses a save whose facts hash
+/// otherwise (`SimError::WrongScenario`), and the hash is of the facts' JSON — a field added
+/// to a province's facts, written even when empty, would change the hash of every scenario
+/// and turn every earlier save away. (It did, on the first cut of the share of hills; the
+/// test of the world's save above loads past that check and saw nothing.) When the test
+/// world's facts are changed on purpose, this file is written again.
+const GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS: &str = include_str!("data/game_save_before_the_share_of_hills.json");
+
+#[test]
+fn a_games_save_written_before_the_share_of_hills_loads_by_its_scenario_and_goes_on() {
+    use engine2::sim::{Game, SimError, Simulation};
+    let params = Params::load().unwrap();
+    let scenario = testworld::five_states_scenario();
+    let mut g = Game::from_save(&scenario, params.clone(), GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS).expect("the scenario's facts hash as they did before the share of hills");
+    assert_eq!(g.to_save().unwrap(), GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS, "the loaded game saves byte for byte as it was");
+    for _ in 0..10 {
+        g.tick(&[]).unwrap();
+    }
+    // The check the load passed is alive: the same save against a scenario with a share of
+    // hills in one province — other facts — is refused.
+    let mut hilly = scenario.clone();
+    hilly.provinces.values_mut().next().unwrap().hills = Some(0.25);
+    assert!(matches!(Game::from_save(&hilly, params, GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS), Err(SimError::WrongScenario { .. })), "a share of hills is another scenario");
+}

@@ -55,7 +55,7 @@ pub fn five_states() -> (Facts, Names) {
             }
             let area_km2 = 200 + 20 * u64::from(i);
             let capacity = 10_000 + 1_000 * u64::from(i);
-            provinces.push(ProvinceFact { area_km2, land: Land::Arable, hills_ppm: 0, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours, governor: None, culture: CultureId(0), religion: ReligionId(0) });
+            provinces.push(ProvinceFact { area_km2, land: Land::Arable, coastal, population: capacity * 6 / 10, owner: ActorId(x), neighbours, sea_neighbours, governor: None, culture: CultureId(0), religion: ReligionId(0) });
             province_names.push((format!("p{i:02}"), format!("Province {i}")));
         }
     }
@@ -156,8 +156,8 @@ pub fn five_states_scenario() -> ScenarioData {
                 name: name.clone(),
                 owner: names.actors[f.owner.index()].0.clone(),
                 area_km2: f.area_km2,
-                land: f.land,
-                hills: (f.hills_ppm > 0).then(|| f64::from(f.hills_ppm) / 1e6),
+                land: if matches!(f.land, Land::Mixed(_)) { Land::Arable } else { f.land },
+                hills: if let Land::Mixed(hills_ppm) = f.land { Some(f64::from(hills_ppm) / 1e6) } else { None },
                 coastal: f.coastal,
                 population: f.population,
                 neighbours: f.neighbours.iter().map(pname).collect(),
