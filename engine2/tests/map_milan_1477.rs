@@ -18,7 +18,7 @@ const PROVINCES: &str = include_str!("../../public/geodata2/milan_1477/provinces
 
 /// The scenario's own text for the map's stub: the top keys and, for every owner of the
 /// province table, an actor with one house and one ruler, its capital at its first province,
-/// no treasury and no soldiers.
+/// no treasury and no soldiers; every verb of the engine turned on.
 fn stub_head() -> String {
     let table: toml::Table = toml::from_str(PROVINCES).expect("the province table is TOML");
     let provinces = table["provinces"].as_table().expect("[provinces]");
@@ -31,6 +31,12 @@ fn stub_head() -> String {
         "id = \"milan_1477_map\"\nstart_year = 1477\ndiseases = [\"Plague\"]\n\
          [display_currency]\nname = \"ducat\"\nkg_per_unit = 100.0\n[verbs]\n",
     );
+    // Every verb of the engine is on: the bots act only by the verbs a scenario turns on, and
+    // a stub with none is a world they can do nothing in (the first cut of this stub had none
+    // — plan §31.50). The verbs are of the presentation, not of the facts: the hash stands.
+    for verb in engine2::verbs::VerbId::ALL {
+        text += &format!("{0} = \"{0}\"\n", verb.key());
+    }
     for (owner, cap) in &capital {
         text += &format!(
             "[actors.{owner}]\nname = \"{owner}\"\ntreasury_kg = 0\ncapital = \"{cap}\"\nsoldiers = 0\n\
@@ -65,14 +71,15 @@ fn milan_1477_map_compiles_through_the_scenario_schema() {
 /// on the stub actors — does a turn panic or fail on real areas, and how long does it take.
 /// **It prints and asserts nothing; its numbers are no measure of the scenario** and go into
 /// no stop: the actors are stubs — one house and one ruler a polity, no treasury, no
-/// soldiers, no aspirations, no relations. What the bots do on them (nobody at war, or all
-/// of them bankrupt) is the stub's, not Milan's.
+/// soldiers, no aspirations, no relations, every verb of the engine on (with none on the bots
+/// can do nothing: the first cut of this probe ran so, plan §31.49). What the bots do on
+/// them is the stub's, not Milan's.
 #[test]
 #[ignore = "probe: prints, asserts nothing"]
 fn diagnosis_the_map_of_milan_runs_with_bots_on_stub_actors() {
     let p = Params::load().unwrap();
     let scenario = ScenarioData::parse(&stub_scenario()).expect("the map parses as a scenario");
-    eprintln!("the stub: every polity one house and one ruler, no treasury, no soldiers, no aspirations, no relations — what follows is the stub's, not Milan's; {} provinces", scenario.provinces.len());
+    eprintln!("the stub: every polity one house and one ruler, no treasury, no soldiers, no aspirations, no relations, every verb on — what follows is the stub's, not Milan's; {} provinces", scenario.provinces.len());
     let census = |g: &Game| {
         let w = g.world();
         let people: i64 = w.provinces.keys().map(|q| w.population(*q)).sum();
