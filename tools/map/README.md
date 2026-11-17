@@ -36,6 +36,7 @@ conda run -n engine13-map python -I -X utf8 -m pytest -p no:cacheprovider tools/
   план §12:
   - `public/geodata2/<сценарий>/provinces.geojson` — полигоны для интерфейса;
   - `public/geodata2/<сценарий>/provinces.toml` — провинции и регионы в полях схемы engine2;
+    земля — класс `land`, а у пашни с холмами — ещё доля `hills` (план §20);
   - замер и превью — `<cache>/out/<сценарий>/`.
 
   ```bash

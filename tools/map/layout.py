@@ -160,6 +160,7 @@ def main() -> None:
     # in part inherits: its provinces are calibrated to the capacity their blocks have in the layout
     # of the scenario named by `inherit`, which covers it whole; without one — the §4 class.
     inherited = inherit_classes(sc.get("inherit"), blocks)
+    inherited_hills = inherit_hills(sc.get("inherit"), blocks)
     cover, how_land = {}, {}
     for land in order:
         region = masks[lands_cfg[land]["region"]]
@@ -190,7 +191,7 @@ def main() -> None:
         for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
             if plands[pid] in how_land:
                 mine = block_prov == k
-                d[k] = float(blocks["area"][mine] @ dens[inherited[mine]]) / blocks["area"][mine].sum()
+                d[k] = float(blocks["area"][mine] @ mixed_density(dens, inherited[mine], inherited_hills[mine])) / blocks["area"][mine].sum()
                 cls[k] = min((A, H, S, D), key=lambda c: abs(dens[c] - d[k]))
         # A province of no land with a source: §4, not above Hills (owner's decision on §13b п. 1).
         cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p, cap_hills=True)
@@ -219,21 +220,25 @@ def main() -> None:
     start = sc.get("start_population", {})
     block_rule = density.rule_class(block_rugged, blocks["bw"], blocks["dry"], p)
 
-    def populate(dens, cls):
-        cap = area * dens[cls]
+    def populate(dens, cls, pdens=None):
+        """Capacity, start population and the stub mark of the provinces: at the density of their
+        class, or at `pdens` per province (the share of hills)."""
+        pdens = dens[cls] if pdens is None else pdens
+        cap = area * pdens
         pop = np.full(len(pids), np.nan)
         for land in order:
             if land not in start:
                 continue
             region = masks[lands_cfg[land]["region"]]
             inreg = region & (block_prov >= 0)
-            bcap = blocks["area"][inreg] * dens[cls[block_prov[inreg]]]
+            bcap = blocks["area"][inreg] * pdens[block_prov[inreg]]
             ours = np.array([member[land][k] for k in block_prov[inreg]], dtype=bool)
             # Blocks of the land outside the scenario carry their share of its people too: by
             # their own §4 class (no province gives them one).
             out_ = region & (block_prov < 0)
             out_cls = block_rule[out_] if inherited is None else np.where(inherited[out_] >= 0, inherited[out_], block_rule[out_])
-            out_cap = float(blocks["area"][out_] @ dens[out_cls])
+            out_hills = np.zeros(int(out_.sum())) if inherited is None else np.where(inherited[out_] >= 0, inherited_hills[out_], 0.0)
+            out_cap = float(blocks["area"][out_] @ mixed_density(dens, out_cls, out_hills))
             share = bcap[ours].sum() / (bcap.sum() + out_cap)
             people = start[land] * 1e6 * share
             m = member[land]
@@ -246,7 +251,7 @@ def main() -> None:
         return cap, np.round(pop), stub
 
     work = (dcfg["calibration"]["arable"][0], dcfg["calibration"]["method"])
-    dens, cls, _ = variants[work]
+    dens, cls, d_work = variants[work]
     cap, pop, stub = populate(dens, cls)
     # Rule variants measured for the owner (plan §13b; no decision): each against the working rules.
     poor = poor_share(cache, blocks, owner_of, pids, p, rep)
@@ -262,12 +267,27 @@ def main() -> None:
     hshare, hdens, hunder, hland = density.hills_share_lands(order, member, ceiling, area, poor, bw, dens, cls,
                                                              skip=set(wet) | set(how_land), river=river)
 
+    # The share written (plan §20; engine2's schema since #359): a land under h gives its provinces
+    # `hills`; a land covered in part gives its provinces the share that holds the capacity their
+    # blocks have in the layout it inherits from, where that lies between Hills and Arable. The
+    # rest keep their class. The start population (§11d) follows the capacity with the share.
+    hwrite = np.where(hunder, hshare, np.nan)
+    for k, pid in enumerate(pids):
+        if plands[pid] in how_land and dens[H] <= d_work[k] <= dens[A] and cls[k] in (A, H):
+            hwrite[k] = (dens[A] - d_work[k]) / (dens[A] - dens[H])
+    fields = [land_fields(cls[k], hwrite[k]) for k in range(len(pids))]
+    pdens = np.array([dens[cls[k]] if np.isnan(hwrite[k]) else
+                      dens[A] - (dens[A] - dens[H]) * (fields[k][1] if fields[k][1] is not None else float(fields[k][0] == "Hills"))
+                      for k in range(len(pids))])
+    cap_w, pop_w, stub_w = populate(dens, cls, pdens)
+
     # --- checks of §7
     provs = {}
     for k, pid in enumerate(pids):
         f = facts[pid]
-        provs[pid] = rules.Province(f.area_km2, TYPES[cls[k]], f.coastal, f.neighbours, f.sea_neighbours, f.zones,
+        provs[pid] = rules.Province(f.area_km2, fields[k][0], f.coastal, f.neighbours, f.sea_neighbours, f.zones,
                                     f.irrigated, f.shares)
+    hills_of = {pid: fields[k][1] for k, pid in enumerate(pids) if fields[k][1] is not None}
     comps = rules.components(provs)
     for pid in pids:
         for nb in provs[pid].neighbours:
@@ -287,7 +307,7 @@ def main() -> None:
     holes = [k for k in np.flatnonzero(left) if nbrs[blocks["id"][k]] and nbrs[blocks["id"][k]] <= in_layout]
 
     # --- outputs
-    write_toml(public / "provinces.toml", args.scenario, layout, provs_cfg, pids, provs, pop, stub, work, pending, rep)
+    write_toml(public / "provinces.toml", args.scenario, layout, provs_cfg, pids, provs, hills_of, pop_w, stub_w, work, pending, rep)
     geoms = write_geojson(public / "provinces.geojson", blocks, owner_of, pids, provs_cfg)
     previews(out, geoms, pids, provs_cfg, provs)
 
@@ -459,11 +479,31 @@ def main() -> None:
         hrep.append(f"| {pids[k]} | {provs_cfg[pids[k]]['owner']} | {plands[pids[k]]} | {TYPES[cls[k]]} | {poor[k]:.2f} | {hv} | "
                     f"{hdens[k]:.1f} | {cap[k] / 1e3:,.0f} → {area[k] * hdens[k] / 1e3:,.0f} |")
     hrep.append("")
-    rep("## Доля холмов h — замер для E4, раскладка не меняется (план §12b, §17)")
+    rep("## Доля холмов h — замер рядом с классами flip (план §12b, §17)")
     rep()
     for line in hrep[2:]:
         rep(line)
     (out / "hills_share.md").write_text("\n".join(hrep) + "\n", encoding="utf-8", newline="\n")
+
+    rep("## Записано в provinces.toml (план §20)")
+    rep()
+    rep("Земля под h отдаёт провинциям долю холмов `hills` (три знака; 0 — Arable без поля, 1 — Hills без поля); "
+        "земля, покрытая частью, — долю, которая держит ёмкость её блоков в раскладке-источнике; остальные — класс. "
+        "Население на старте — по ёмкости с долей (§11d).")
+    rep()
+    lw = collections.Counter(("Arable + hills" if pid in hills_of else provs[pid].land) for pid in pids)
+    rep("- земля в файле: " + ", ".join(f"{t} {n}" for t, n in sorted(lw.items())))
+    rep(f"- ёмкость — {cap.sum() / 1e6:.2f} → {cap_w.sum() / 1e6:.2f} млн; население на старте — "
+        f"{pop.sum() / 1e6:.2f} → {pop_w.sum() / 1e6:.2f} млн (классы flip → записано)")
+    rep()
+    rep("| земля | провинций | ёмкость, млн | население, млн | заполненность |")
+    rep("|---|---|---|---|---|")
+    for land in sc["lands"]:
+        m = member[land]
+        if m.any():
+            rep(f"| {land} | {int(m.sum())} | {cap_w[m].sum() / 1e6:.2f} | {pop_w[m].sum() / 1e6:.2f} | "
+                f"{pop_w[m].sum() / cap_w[m].sum():.2f}{' — выше' if pop_w[m].sum() / cap_w[m].sum() > balance else ''} |")
+    rep()
 
     rep("## Морские зоны (план §10a п. 5: разрез — по числу провинций зоны)")
     rep()
@@ -526,16 +566,51 @@ def inherit_classes(scenario, blocks):
     return np.array([land_of.get(x, -1) if x else -1 for x in assign(other, blocks)])
 
 
+def inherit_hills(scenario, blocks):
+    """Per block, the share of hills (`hills`) its province has in the layout of `scenario` — 0
+    where the province gives none or that layout has no province; None without a scenario."""
+    if not scenario:
+        return None
+    other = tomllib.loads((HERE / "layouts" / f"{scenario}.toml").read_text(encoding="utf-8"))
+    table = tomllib.loads((REPO / "public" / "geodata2" / scenario / "provinces.toml").read_text(encoding="utf-8"))
+    hills_of = {pid: float(p.get("hills", 0.0)) for pid, p in table["provinces"].items()}
+    return np.array([hills_of.get(x, 0.0) if x else 0.0 for x in assign(other, blocks)])
+
+
+def mixed_density(dens, cls, hills):
+    """People per km² of units of class `cls` with the share of hills `hills` (engine2's
+    `Params::capacity_of`): the class density, lowered toward the hills' by the share — only
+    arable land takes a share."""
+    cls, hills = np.asarray(cls), np.asarray(hills, dtype=float)
+    return np.where(cls == A, dens[A] - (dens[A] - dens[H]) * hills, dens[cls])
+
+
+def land_fields(cls: int, h: float):
+    """The `land` and `hills` fields of engine2's schema for a province of class `cls` whose share
+    of hills is `h` (NaN — the province has no share): the share is written to three places, and
+    only between the plain classes — none is `Arable` without the field, all is `Hills` without it."""
+    if np.isnan(h):
+        return TYPES[cls], None
+    h3 = round(float(h), 3)
+    if h3 <= 0.0:
+        return "Arable", None
+    if h3 >= 1.0:
+        return "Hills", None
+    return "Arable", h3
+
+
 def toml_str(s: str) -> str:
     return json.dumps(s, ensure_ascii=False)
 
 
-def write_toml(path, scenario, layout, provs_cfg, pids, provs, pop, stub, work, pending, rep):
+def write_toml(path, scenario, layout, provs_cfg, pids, provs, hills_of, pop, stub, work, pending, rep):
     """The province table in the field names of engine2's schema (`ProvinceData`, `RegionData`)."""
     lines = [f"# {scenario}: provinces and regions in the field names of engine2's scenario schema.",
              "# Generated by tools/map/layout.py from tools/map/layouts/" + scenario + ".toml — do not edit by hand.",
-             f"# land — the capacity class calibrated at arable {work[0]:g} per km², method «{work[1]}»"
-             " (docs/engine2_map.md §11a–§11c, §12b);",
+             f"# land — the capacity class at arable {work[0]:g} per km²; hills — the share of an arable province's"
+             " area that carries",
+             "# the hills' density, where its land has a ceiling between the two (docs/engine2_map.md §11a–§11c,"
+             " §12b, §17, §20);",
              "# population — the start population by the rule of §11d; provinces of no land carry a stub",
              f"# ({STUB_FILL:g} of capacity) until E4: " + ", ".join(pid for k, pid in enumerate(pids) if stub[k]) + "."]
     if pending:
@@ -549,6 +624,7 @@ def write_toml(path, scenario, layout, provs_cfg, pids, provs, pop, stub, work, 
                   f"owner = {toml_str(pc['owner'])}",
                   f"area_km2 = {f.area_km2}",
                   f"land = {toml_str(f.land)}",
+                  *([f"hills = {hills_of[pid]:.3f}"] if pid in hills_of else []),
                   f"coastal = {'true' if f.coastal else 'false'}",
                   f"population = {int(pop[k])}",
                   "neighbours = [" + ", ".join(toml_str(x) for x in f.neighbours) + "]",
