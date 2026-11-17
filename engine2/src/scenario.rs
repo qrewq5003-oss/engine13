@@ -177,7 +177,8 @@ pub struct ProvinceData {
     /// The share of the area that carries the hills' density, 0 to 1, the rest carrying the
     /// arable's (E4, plan §31.43.2 p. 1; `docs/engine2_map.md` §12b, §17): only with
     /// `land = "Arable"` — a province all in hills is `land = "Hills"`, and the steppe, the
-    /// desert and the irrigated valley take no share. Absent, the class is the whole of it.
+    /// desert, the irrigated valley and the dense land take no share. Absent, the class is
+    /// the whole of it.
     pub hills: Option<f64>,
     /// Touches the sea.
     pub coastal: bool,
@@ -744,7 +745,7 @@ raise_tax = "Поднять налог"
         for bad in ["hills = 1.2\n", "hills = -0.1\n"] {
             assert!(matches!(ScenarioData::parse(&with(bad, 50)).unwrap().compile(&params()), Err(SchemaError::HillsOutOfRange { .. })), "{bad}");
         }
-        for land in ["Hills", "Steppe", "Desert", "Irrigated"] {
+        for land in ["Hills", "Steppe", "Desert", "Irrigated", "Dense"] {
             let other = OK.replacen("land = \"Hills\"\ncoastal = false", &format!("land = \"{land}\"\nhills = 0.5\ncoastal = false"), 1);
             assert_ne!(other, OK);
             assert!(matches!(ScenarioData::parse(&other).unwrap().compile(&params()), Err(SchemaError::HillsOnOtherLand { .. })), "{land}");
@@ -772,6 +773,17 @@ raise_tax = "Поднять налог"
         assert_eq!(c.facts.provinces[0].land, Land::Irrigated);
         let over = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Irrigated\"\ncoastal = false\npopulation = 18401", 1);
         assert!(matches!(ScenarioData::parse(&over).unwrap().compile(&params()), Err(SchemaError::OverCapacity { .. })));
+        // The dense land is of the closed list too (E4, plan §31.47): the same 100 km² carry
+        // 7500 — more than the arable's 5000 and far less than the valley's.
+        let dense = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Dense\"\ncoastal = false\npopulation = 7500", 1);
+        assert_ne!(dense, OK);
+        let c = ScenarioData::parse(&dense).unwrap().compile(&params()).unwrap();
+        let at = c.facts.provinces.iter().position(|f| f.land == Land::Dense).expect("the dense province is in the facts");
+        let w = crate::world::World::from_facts(&c.facts, c.names, &params(), 1).unwrap();
+        let in_world = &w.provinces[&crate::ids::ProvinceId(at as u32)];
+        assert_eq!((in_world.capacity, in_world.land), (7500, Land::Dense), "the world derives the capacity of the dense land and keeps the land");
+        let over = OK.replacen("land = \"Hills\"\ncoastal = false\npopulation = 50", "land = \"Dense\"\ncoastal = false\npopulation = 7501", 1);
+        assert!(matches!(ScenarioData::parse(&over).unwrap().compile(&params()), Err(SchemaError::OverCapacity { capacity: 7500, .. })));
     }
 
     #[test]

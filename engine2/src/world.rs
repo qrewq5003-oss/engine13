@@ -155,6 +155,13 @@ pub enum Land {
     /// `land = "Arable"` with `hills`; a province with no hills is plain `Arable`, as it was.
     /// The generator of worlds draws none.
     Mixed(u32),
+    /// Land denser than the arable and well below an irrigated valley (E4, plan §31.47, the
+    /// owner's decision of 2026-11-17): the State of Milan about 1600 carried 75 people per km²
+    /// against the 50 of the Centre-North of Italy (`docs/engine2_map.md` §18.3). A class of
+    /// capacity like the others — the engine reads its density and nothing else; it takes no
+    /// share of hills, the source's density being of the land with its hills. Last in the
+    /// list, so the order of the earlier values stands. The generator of worlds draws none.
+    Dense,
 }
 
 /// A polity as the engine sees it: its provinces, its capital and a legitimacy rating.
