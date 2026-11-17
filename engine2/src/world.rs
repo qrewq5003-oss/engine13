@@ -471,8 +471,11 @@ pub struct ActorFact {
     /// Starting treasury in kg of wheat-equivalent.
     pub treasury_kg: i64,
     pub capital: ProvinceId,
-    /// Starting army, stationed at the capital as one unit.
-    pub soldiers: u64,
+    /// Starting army, stationed at the capital as one unit: the number the scenario gives, or
+    /// none — then the world starts the polity by its rule (`World::start_army`; E4, plan
+    /// §31.50). A number given is written into the facts as it always was, so a scenario
+    /// that gives every number hashes as before; none is another fact.
+    pub soldiers: Option<u64>,
     /// The polity's institutions, from the engine's closed list.
     pub institutions: Vec<Institution>,
     pub ruler: PersonId,
@@ -831,11 +834,11 @@ impl World {
             if provinces.get(&a.capital).map(|p| p.owner) != Some(id) {
                 return Err(WorldError::CapitalNotOwned(id, a.capital));
             }
-            if a.soldiers > 0 {
+            if let Some(soldiers) = a.soldiers.filter(|n| *n > 0) {
                 let uid = UnitId(next_unit);
                 next_unit += 1;
                 units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None, mercenary: false, house: None });
-                ledger.open(tick, Account::Soldiers(uid), a.soldiers as i64)?;
+                ledger.open(tick, Account::Soldiers(uid), soldiers as i64)?;
             }
         }
         // The houses' own men (E0 Х2): a unit of the house's polity at its capital, marked
@@ -951,6 +954,24 @@ impl World {
             for g in &a.goals {
                 world.set_goal(id, g.kind, g.target)?;
             }
+        }
+        // The armies the scenario left to the rule (E4, plan §31.50): read off the world as
+        // it stands assembled — the rule reads the budget of the tick, which only a world
+        // has — and placed as the given ones are, one unit at the capital. After every unit
+        // of the facts, so the units of a scenario that gives every number keep their ids.
+        for (i, a) in facts.actors.iter().enumerate() {
+            if a.soldiers.is_some() {
+                continue;
+            }
+            let id = ActorId(i as u32);
+            let soldiers = world.start_army(id, params);
+            if soldiers > 0 {
+                let uid = UnitId(world.next_unit);
+                world.next_unit += 1;
+                world.units.insert(uid, Unit { owner: id, position: a.capital, quality: 50.0, destination: None, mercenary: false, house: None });
+                world.ledger.open(tick, Account::Soldiers(uid), soldiers as i64)?;
+            }
+            world.actors.get_mut(&id).expect("known").army_at_start = world.army_size(id);
         }
         Ok(world)
     }

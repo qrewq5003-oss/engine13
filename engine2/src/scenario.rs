@@ -10,8 +10,9 @@
 //! face each other across the water). A sea link is what makes an island reachable; the
 //! `coastal` mark alone is not a link (plan §14). Both are checked symmetric.
 //!
-//! A polity gives its capital and its starting army in soldiers (E0 А11); the army starts as
-//! one unit at the capital. It gives its ruler, its rule of succession, and — facts, when
+//! A polity gives its capital and, where a source has it, its starting army in soldiers (E0
+//! А11) — without a number the engine starts it by its rule; the army starts as one unit at
+//! the capital. It gives its ruler, its rule of succession, and — facts, when
 //! they are facts — a designated heir and a regent (plan §18); a province may give its
 //! governor. Houses say which polity they belong to; persons their house, their year of
 //! birth and their parent. Every person listed is alive at the start.
@@ -151,8 +152,11 @@ pub struct ActorData {
     pub treasury_kg: i64,
     /// The province id of the capital; must be one of the actor's own.
     pub capital: String,
-    /// Starting army in soldiers, one unit at the capital.
-    pub soldiers: u64,
+    /// Starting army in soldiers, one unit at the capital — the number of a source. Absent, the
+    /// engine starts the polity by its one rule for every scenario (`World::start_army`; E4,
+    /// the owner's decision «rule + source», plan §31.50): a scenario writes no number it has
+    /// no source for.
+    pub soldiers: Option<u64>,
     /// The polity's institutions, from the engine's closed list (facts: a bank exists or not).
     pub institutions: Vec<Institution>,
     /// The person on the throne.
@@ -687,7 +691,7 @@ raise_tax = "Поднять налог"
         assert_eq!(c.names.actors[0].0, "a");
         assert_eq!(c.names.actors[1].0, "b");
         assert_eq!(c.facts.actors[0].treasury_kg, 20);
-        assert_eq!(c.facts.actors[1].soldiers, 20);
+        assert_eq!(c.facts.actors[1].soldiers, Some(20));
         assert_eq!(c.facts.actors[1].institutions, vec![Institution::Bank]);
         assert!(c.facts.actors[0].institutions.is_empty());
         assert!(ScenarioData::parse(&OK.replacen("institutions = [\"Bank\"]", "institutions = [\"Guild\"]", 1)).is_err());

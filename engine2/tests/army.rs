@@ -560,3 +560,67 @@ fn the_dead_of_a_levy_leave_the_ceiling_until_the_cohort_grows_up_and_mercenarie
     w.post(Account::Treasury(s0), Source::Test, (p.mercenary_advance_kg * ceiling * 2 - treasury) * 1000).unwrap();
     assert_eq!(w.hire_count(s0, &p), (w.recruit_ceiling(s0, &p) - w.army_size(s0)).max(0), "a hire fills the ceiling of А1, not the spent cohort");
 }
+
+/// E4 (the owner's decision of 2026-11-17 «rule + source», plan §31.50, executor's decision
+/// № 21): a polity whose scenario gives no number of soldiers starts with the army of the
+/// engine's one rule — a hundredth of its people, never more than the tick's remainder pays,
+/// less the men the scenario gives its houses. A number given stands as it is, zero too.
+#[test]
+fn a_polity_without_a_number_of_soldiers_starts_with_the_army_of_the_rule() {
+    let p = params();
+    let s1 = ActorId(1);
+    let people_of = |w: &World| w.actors[&s1].provinces.iter().map(|q| w.population(*q)).sum::<i64>();
+    let given = bare(&testworld::five_states_scenario(), p.clone(), 1).unwrap();
+    let people = people_of(given.world());
+    let by_share = people / 100;
+    assert_eq!(p.start_army_share_ppm, 10_000, "a hundredth: the middle of the peacetime band of А11");
+    assert!(by_share > 0 && by_share != 600, "the rule's army is not the test world's given one: {by_share}");
+
+    // The number left out: a hundredth of the polity's people, one unit of its own at its
+    // capital, placed after every unit the facts give; the others stand as given.
+    let mut s = testworld::five_states_scenario();
+    s.actors.get_mut("s1").unwrap().soldiers = None;
+    let g = bare(&s, p.clone(), 1).unwrap();
+    let w = g.world();
+    assert!(by_share < w.peace_army(s1, &p), "the tick's remainder pays more than the share: {} against {by_share}", w.peace_army(s1, &p));
+    assert_eq!(w.start_army(s1, &p), 0, "the rule gives nothing more to a polity that has its army");
+    assert_eq!(w.army_size(s1), by_share);
+    assert_eq!(people_of(w), people, "the men of the start are not taken from the people, as the given ones are not");
+    assert_eq!(w.actors[&s1].army_at_start, by_share, "the army of the rule is the army the polity started with");
+    let units = w.units_of(s1);
+    assert_eq!(units, vec![UnitId(4)], "after the four units the facts give");
+    let unit = &w.units[&units[0]];
+    assert_eq!((unit.position, unit.house, unit.mercenary), (w.actors[&s1].capital, None, false));
+    assert_eq!(unit.quality, given.world().units[&UnitId(1)].quality, "of the quality a given army starts with");
+    for a in [0, 2, 3, 4] {
+        assert_eq!(w.army_size(ActorId(a)), 600, "a number given stands");
+    }
+
+    // The men of its houses are of the same army: the polity's own are the rest; a house
+    // that brings more than the whole leaves the polity none of its own.
+    let mut with_retinue = s.clone();
+    with_retinue.houses.get_mut("h1").unwrap().soldiers = 30;
+    let g = bare(&with_retinue, p.clone(), 1).unwrap();
+    assert_eq!(g.world().army_size(s1), by_share);
+    assert_eq!(g.world().units_of(s1).iter().filter(|u| g.world().units[u].house.is_none()).map(|u| g.world().soldiers(*u)).sum::<i64>(), by_share - 30);
+    with_retinue.houses.get_mut("h1").unwrap().soldiers = by_share as u64 + 10;
+    let g = bare(&with_retinue, p.clone(), 1).unwrap();
+    assert_eq!(g.world().army_size(s1), by_share + 10);
+    assert!(g.world().units_of(s1).iter().all(|u| g.world().units[u].house.is_some()), "no unit of the polity's own");
+
+    // Never more than the tick's remainder pays: with a court that takes nine tenths of the
+    // take the remainder pays less than the share, and the army is what it pays.
+    let mut tight = p.clone();
+    tight.court_share_ppm = 900_000;
+    let g = bare(&s, tight.clone(), 1).unwrap();
+    let paid = g.world().peace_army(s1, &tight);
+    assert!(paid > 0 && paid < by_share, "the remainder pays {paid}, the share is {by_share}");
+    assert_eq!(g.world().army_size(s1), paid);
+
+    // Zero is a number: no army, and the rule is not asked.
+    let mut none = testworld::five_states_scenario();
+    none.actors.get_mut("s1").unwrap().soldiers = Some(0);
+    let g = bare(&none, p, 1).unwrap();
+    assert_eq!(g.world().army_size(s1), 0);
+    assert!(g.world().units_of(s1).is_empty());
+}
