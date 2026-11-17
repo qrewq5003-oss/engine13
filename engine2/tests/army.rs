@@ -580,6 +580,7 @@ fn a_polity_without_a_number_of_soldiers_starts_with_the_army_of_the_rule() {
     // capital, placed after every unit the facts give; the others stand as given.
     let mut s = testworld::five_states_scenario();
     s.actors.get_mut("s1").unwrap().soldiers = None;
+    s.actors.get_mut("s2").unwrap().soldiers = Some(100);
     let g = bare(&s, p.clone(), 1).unwrap();
     let w = g.world();
     assert!(by_share < w.peace_army(s1, &p), "the tick's remainder pays more than the share: {} against {by_share}", w.peace_army(s1, &p));
@@ -592,9 +593,11 @@ fn a_polity_without_a_number_of_soldiers_starts_with_the_army_of_the_rule() {
     let unit = &w.units[&units[0]];
     assert_eq!((unit.position, unit.house, unit.mercenary), (w.actors[&s1].capital, None, false));
     assert_eq!(unit.quality, given.world().units[&UnitId(1)].quality, "of the quality a given army starts with");
-    for a in [0, 2, 3, 4] {
+    for a in [0, 3, 4] {
         assert_eq!(w.army_size(ActorId(a)), 600, "a number given stands");
     }
+    assert!(100 < w.start_army(ActorId(2), &p) + 100, "the rule would give s2 more than its number");
+    assert_eq!(w.army_size(ActorId(2)), 100, "a number given stands below the rule's too: the rule is not asked");
 
     // The men of its houses are of the same army: the polity's own are the rest; a house
     // that brings more than the whole leaves the polity none of its own.

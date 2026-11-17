@@ -101,6 +101,11 @@ fn diagnosis_the_map_of_milan_runs_with_bots_on_stub_actors() {
         let alive = w.actors.keys().filter(|a| w.alive(**a)).count();
         (people, capacity, alive, w.actors.len())
     };
+    // The men under arms over the people: the starting army of the rule and of the source.
+    let under_arms = |g: &Game| {
+        let w = g.world();
+        w.units.keys().map(|u| w.soldiers(*u)).sum::<i64>() as f64 / w.provinces.keys().map(|q| w.population(*q)).sum::<i64>().max(1) as f64
+    };
     for seed in [1u64, 2, 3] {
         let mut g = match Game::new(&scenario, p.clone(), seed) {
             Ok(g) => g,
@@ -110,6 +115,7 @@ fn diagnosis_the_map_of_milan_runs_with_bots_on_stub_actors() {
             }
         };
         let (people_0, capacity, alive_0, actors) = census(&g);
+        let army_0 = under_arms(&g);
         let (mut played, mut worst, mut total) = (0u32, std::time::Duration::ZERO, std::time::Duration::ZERO);
         let mut kinds: BTreeMap<String, u64> = BTreeMap::new();
         let mut stopped = String::from("no panic, no error");
@@ -138,17 +144,23 @@ fn diagnosis_the_map_of_milan_runs_with_bots_on_stub_actors() {
             played += 1;
             total += took;
             worst = worst.max(took);
-            if [50, 100, 200].contains(&played) {
+            if [10, 20, 50, 100, 200].contains(&played) {
                 let (people, _, alive, _) = census(&g);
-                marks.push(format!("tick {played}: {alive} alive, fill {:.3}", people as f64 / capacity as f64));
+                marks.push(format!("tick {played}: {alive} alive, fill {:.3}, army {:.4}", people as f64 / capacity as f64, under_arms(&g)));
             }
         }
         // After a panic the world may be half-changed: it is read only when the run ended whole.
         let end = if played == 300 {
             let (people, _, alive, _) = census(&g);
-            format!("polities alive {alive_0} → {alive} (born in the run {}); people {people_0} → {people}; fill {:.3} → {:.3}", g.world().actors.len() - actors, people_0 as f64 / capacity as f64, people as f64 / capacity as f64)
+            format!(
+                "polities alive {alive_0} → {alive} (born in the run {}); people {people_0} → {people}; fill {:.3} → {:.3}; the army over the people {army_0:.4} → {:.4}",
+                g.world().actors.len() - actors,
+                people_0 as f64 / capacity as f64,
+                people as f64 / capacity as f64,
+                under_arms(&g)
+            )
         } else {
-            format!("polities alive at the start {alive_0}; people {people_0}; fill {:.3}", people_0 as f64 / capacity as f64)
+            format!("polities alive at the start {alive_0}; people {people_0}; fill {:.3}; the army over the people at the start {army_0:.4}", people_0 as f64 / capacity as f64)
         };
         eprintln!(
             "seed {seed}: {stopped}; {played} ticks; a turn {:.1} ms on average, {:.1} ms at worst; {end}; {}",
