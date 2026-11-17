@@ -33,6 +33,21 @@ band = [167.0, 200.0]
 unit = "people per km²"
 e0 = "П1"
 
+# E0 П1 — land denser than the arable and well below an irrigated valley (the owner's decision
+# of 2026-11-17; plan §31.47, executor's decision № 19). The State of Milan about 1600, before
+# the plague of 1630: ~1.2 M on 16,000 km² = 75 per km², «nearly twice that of Italy as a whole»
+# (Sella 1979, ch. 1, after Beloch, Bevölkerungsgeschichte Italiens, vol. 3 — opened by a search
+# of the text, Beloch himself unread; engine2_map.md §18.3). The top of the band is the densest
+# zone of the first precise survey, the low irrigated plain of 1723: 103. The value stands at
+# the bottom of its band: no source gives the whole land less. The density is of the land with
+# its hills and mountains, so the class takes no share of hills.
+[capacity.dense]
+kind = "a"
+value = 75.0
+band = [75.0, 103.0]
+unit = "people per km²"
+e0 = "П1"
+
 [capacity.hills]
 kind = "a"
 value = 12.0

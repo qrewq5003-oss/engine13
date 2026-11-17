@@ -98,7 +98,7 @@ pub struct Params {
     /// E0 П5 (в): fill gap below which nobody moves, parts per million.
     pub migration_min_gap_ppm: i64,
     /// E0 П1: people per km² by land, as thousandths so capacity is integer arithmetic.
-    pub capacity_milli_per_km2: [(Land, i64); 5],
+    pub capacity_milli_per_km2: [(Land, i64); 6],
     /// E0 Э2: output per head per year, kg.
     pub output_per_head_kg: i64,
     /// E0 Э4: the starting tax rate, parts per million of production.
@@ -371,6 +371,7 @@ impl Params {
             (Land::Steppe, milli("capacity.steppe")?),
             (Land::Desert, milli("capacity.desert")?),
             (Land::Irrigated, milli("capacity.irrigated")?),
+            (Land::Dense, milli("capacity.dense")?),
         ];
         let output = value("production.output_per_head_kg")?;
         let tax = value("tax.default_rate")?;
@@ -678,9 +679,14 @@ mod tests {
         // Every land of the closed list has its density: a land without a row in the table
         // would carry nobody (plan §30.7).
         assert_eq!(p.capacity(1000, Land::Irrigated), 184_000);
-        for land in [Land::Arable, Land::Hills, Land::Steppe, Land::Desert, Land::Irrigated] {
+        for land in [Land::Arable, Land::Hills, Land::Steppe, Land::Desert, Land::Irrigated, Land::Dense] {
             assert!(p.capacity(1000, land) > 0, "{land:?} carries nobody");
         }
+        // The dense land (E4, plan §31.47): the density of its source, between the arable's
+        // and the irrigated valley's.
+        assert_eq!(p.capacity(1000, Land::Dense), 75_000);
+        assert!(p.capacity(1000, Land::Arable) < p.capacity(1000, Land::Dense));
+        assert!(p.capacity(1000, Land::Dense) < p.capacity(1000, Land::Irrigated));
         // A share of hills (E4, plan §31.44): the capacity between the arable's and the
         // hills', by the share — continuous, never a whole province turned over.
         assert_eq!(p.capacity_of(1000, Land::Arable, 0), p.capacity(1000, Land::Arable));
