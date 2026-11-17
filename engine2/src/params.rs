@@ -245,6 +245,9 @@ pub struct Params {
     /// (в) The core tongue of a polity changes only when another tongue outgrows it by this
     /// share of the polity's people, parts per million (owner's rule on §21).
     pub core_switch_margin_ppm: i64,
+    /// E0 А11: the army a polity starts with when its scenario gives no number, parts per
+    /// million of its people (`World::start_army`; E4, plan §31.50).
+    pub start_army_share_ppm: i64,
     /// E0 Х2: the ruling house's retinue as parts per million of the polity's army, and (в)
     /// the retinue of a house that does not rule.
     pub retinue_share_ppm: i64,
@@ -454,6 +457,7 @@ impl Params {
         let revolt = value("revolt.per_year")?;
         let cost_revolt = value("legitimacy.cost_revolt")?;
         let core_margin = value("core.switch_margin")?;
+        let start_army_share = value("army.start_share_of_population")?;
         let retinue = value("house.retinue_share_of_army")?;
         let other_retinue = value("house.other_retinue_share")?;
         let temperature = value("agent.temperature")?;
@@ -554,6 +558,7 @@ impl Params {
             revolt_per_tick: revolt / 2.0,
             legitimacy_cost_revolt: cost_revolt,
             core_switch_margin_ppm: (core_margin * 1_000_000.0).round() as i64,
+            start_army_share_ppm: (start_army_share * 1_000_000.0).round() as i64,
             retinue_share_ppm: (retinue * 1_000_000.0).round() as i64,
             other_retinue_share_ppm: (other_retinue * 1_000_000.0).round() as i64,
             agent_temperature: temperature,
@@ -703,6 +708,7 @@ mod tests {
         assert_eq!(p.capacity_of(3_000_000, Land::Arable, 400_000), 3_000_000 * 348 / 10);
         assert_eq!(p.output_per_head_kg, 700);
         assert_eq!(p.tax_default_ppm, 100_000);
+        assert_eq!(p.start_army_share_ppm, 10_000);
         assert_eq!(p.court_share_ppm, 400_000);
         assert_eq!(p.pay_per_soldier_kg_per_year, 2100);
         assert_eq!(p.loan_interest_ppm_per_tick, 40_000);

@@ -539,7 +539,7 @@ impl Map {
                 2 => Succession::Election,
                 _ => Succession::Mixed,
             };
-            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: own_soldiers, institutions, ruler: ruler.clone(), heir, regent: None, succession, aspirations: Vec::new() });
+            actors.insert(sid(s), ActorData { name: format!("State {s}"), treasury_kg: kg.floor() as i64, capital: pid(cap_i), soldiers: Some(own_soldiers), institutions, ruler: ruler.clone(), heir, regent: None, succession, aspirations: Vec::new() });
             // Governors of the provinces that are not the capital (owner's rule on #289:
             // the secession of a house must be reachable, so the houses that do not rule
             // hold seats): each province with `GOVERNOR_CHANCE`, the seat to a free adult
@@ -934,11 +934,13 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the text of the scenario with the share of hills (E4, plan §31.44): the
-    /// fingerprint is of the scenario's text form, and a province gained a field — `hills`,
-    /// none in any generated world. **The worlds are the same**: the saves after 300 ticks
-    /// and the tick reports of the seeds 1–20 and 100–129 are byte for byte those of the
-    /// version before (the probe of plan §31.44). Before: the arable-50 version (the land's
+    /// Pinned on the text of the scenario with the optional starting army (E4, plan §31.50):
+    /// the fingerprint is of the scenario's text form, and a polity's `soldiers` reads there
+    /// as `Some(n)` now — every generated world gives the number. **The worlds are the same**:
+    /// the saves after 300 ticks and the tick reports of the seeds 1–20 and 100–129 are byte
+    /// for byte those of the version before (the probe of plan §31.50). Before: the text with
+    /// the share of hills (plan §31.44 — a province gained the field `hills`, none in any
+    /// generated world; the worlds the same by the same probe). Before: the arable-50 version (the land's
     /// change of plan §30.7: the
     /// people of every arable province are a share of a capacity a quarter larger; before: the
     /// union-aspiration version of E3 (в), owner's rule on #293;
@@ -952,7 +954,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 5_948_384_461_043_430_833;
+    const PINNED_WORLD_ONE: u64 = 9_572_301_322_378_482_337;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {
@@ -983,7 +985,7 @@ mod tests {
                 assert_eq!(&s.provinces[&actor.capital].owner, a, "seed {seed}: capital of {a} not its own");
                 let people: u64 = s.provinces.values().filter(|pr| &pr.owner == a).map(|pr| pr.population).sum();
                 let retinues: u64 = s.houses.values().filter(|h| &h.polity == a).map(|h| h.soldiers).sum();
-                assert!((actor.soldiers + retinues) as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
+                assert!((actor.soldiers.expect("the generator gives every army its number") + retinues) as f64 <= people as f64 * ARMY_SHARE.1 + 1.0, "seed {seed}: {a} over the army band");
                 let ruler = &s.persons[&actor.ruler];
                 assert_eq!(&s.houses[&ruler.house].polity, a, "seed {seed}: the ruler of {a} is of another polity's house");
                 let age = s.start_year - ruler.born;
