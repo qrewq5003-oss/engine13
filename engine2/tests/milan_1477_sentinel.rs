@@ -117,7 +117,7 @@ fn the_scenario_of_milan_stands_under_the_sentinel_without_a_player() {
         .iter()
         .find_map(|id| {
             let alive = ends.iter().filter(|end| end.alive.contains(id)).count();
-            (alive == ends.len()).then(|| ("alive", id)).or_else(|| (alive == 0).then(|| ("dead", id)))
+            (alive == ends.len()).then_some(("alive", id)).or_else(|| (alive == 0).then_some(("dead", id)))
         })
         .expect("of the scenario's polities one lives or dies in every run");
     let a_course_taken = History::load(&format!("scenario = \"{}\"\n[[outcome]]\nkind = \"{}\"\nid = \"{}\"\n", scenario.id, constant.0, constant.1 .0), &start).unwrap();
