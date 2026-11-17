@@ -441,6 +441,9 @@ pub struct Names {
 pub struct ProvinceFact {
     pub area_km2: u64,
     pub land: Land,
+    /// The share of the area in hills, parts per million (`Params::capacity_of`): a fact of
+    /// the scenario read when the capacity is derived, and not kept in the world.
+    pub hills_ppm: u32,
     pub coastal: bool,
     pub population: u64,
     pub owner: ActorId,
@@ -787,7 +790,7 @@ impl World {
             if let Some(g) = f.governor {
                 seat(g, f.owner)?;
             }
-            let capacity = params.capacity(f.area_km2, f.land);
+            let capacity = params.capacity_of(f.area_km2, f.land, f.hills_ppm);
             known_faith(f.culture, f.religion)?;
             provinces.insert(
                 id,

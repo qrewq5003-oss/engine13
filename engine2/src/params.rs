@@ -271,8 +271,19 @@ pub struct Params {
 impl Params {
     /// People a province can carry: `area × density(land)`, rounded down.
     pub fn capacity(&self, area_km2: u64, land: Land) -> u64 {
-        let d = self.capacity_milli_per_km2.iter().find(|(l, _)| *l == land).map(|(_, d)| *d).unwrap_or(0);
-        (area_km2 as i64 * d / 1000) as u64
+        self.capacity_of(area_km2, land, 0)
+    }
+
+    /// People a province can carry with a share of its area in hills (E4, plan §31.43.2 p. 1,
+    /// §30.7; `docs/engine2_map.md` §12b): `area × (density(land) × (1 − h) + density(hills) ×
+    /// h)`, `h` in parts per million, rounded down. The capacity is continuous in `h`: a
+    /// land's ceiling is met without turning a whole province from one class to another. With
+    /// no hills it is `capacity`.
+    pub fn capacity_of(&self, area_km2: u64, land: Land, hills_ppm: u32) -> u64 {
+        let density = |x: Land| self.capacity_milli_per_km2.iter().find(|(l, _)| *l == x).map(|(_, d)| *d as i128).unwrap_or(0);
+        let h = i128::from(hills_ppm.min(1_000_000));
+        let milli = density(land) * (1_000_000 - h) + density(Land::Hills) * h;
+        (i128::from(area_km2) * milli / 1_000_000 / 1000) as u64
     }
 
     /// The yearly mortality of an age by the table (E0 В2), before the elite factor.
@@ -666,6 +677,18 @@ mod tests {
         for land in [Land::Arable, Land::Hills, Land::Steppe, Land::Desert, Land::Irrigated] {
             assert!(p.capacity(1000, land) > 0, "{land:?} carries nobody");
         }
+        // A share of hills (E4, plan §31.44): the capacity between the arable's and the
+        // hills', by the share — continuous, never a whole province turned over.
+        assert_eq!(p.capacity_of(1000, Land::Arable, 0), p.capacity(1000, Land::Arable));
+        assert_eq!(p.capacity_of(1000, Land::Arable, 1_000_000), p.capacity(1000, Land::Hills));
+        assert_eq!(p.capacity_of(1000, Land::Arable, 500_000), (p.capacity(1000, Land::Arable) + p.capacity(1000, Land::Hills)) / 2);
+        assert_eq!(p.capacity_of(1000, Land::Arable, 250_000), 40_500);
+        assert_eq!(p.capacity_of(1000, Land::Arable, 2_000_000), p.capacity(1000, Land::Hills), "a share past the whole is the whole");
+        let steps: Vec<u64> = (0..=10).map(|k| p.capacity_of(1000, Land::Arable, k * 100_000)).collect();
+        assert!(steps.windows(2).all(|x| x[0] > x[1] && x[0] - x[1] == steps[0] - steps[1]), "even steps down from the arable to the hills: {steps:?}");
+        // Rounded down, and no overflow on the largest province of the maps.
+        assert_eq!(p.capacity_of(7, Land::Arable, 333_333), 261);
+        assert_eq!(p.capacity_of(3_000_000, Land::Arable, 400_000), 3_000_000 * 348 / 10);
         assert_eq!(p.output_per_head_kg, 700);
         assert_eq!(p.tax_default_ppm, 100_000);
         assert_eq!(p.court_share_ppm, 400_000);
