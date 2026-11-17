@@ -60,3 +60,11 @@ def test_mixed_density_lowers_only_arable_land_toward_the_hills():
     hills = np.array([0.0, 0.25, 0.25, 0.25, 0.25])
     # engine2's `capacity_of`: 100 km² at a quarter of hills carry 4,050 — 40.5 per km².
     assert layout.mixed_density(dens, cls, hills).tolist() == [50.0, 40.5, 12.0, 1.0, 184.0]
+
+
+def test_a_dense_province_carries_its_class_and_no_share_of_hills():
+    assert layout.land_fields(density.N, float("nan")) == ("Dense", None)
+    dens = np.zeros(6)
+    dens[density.A], dens[density.H], dens[density.N] = 50.0, 12.0, 75.0
+    # A share of hills never lowers a dense block (the schema refuses the pair).
+    assert layout.mixed_density(dens, np.array([density.N]), np.array([0.5])).tolist() == [75.0]

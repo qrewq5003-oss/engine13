@@ -12,7 +12,8 @@ scenario = "milan_1477"
 start_year = 1477
 # The actors of the scenario by E0 (docs/engine2_e0.md §1, §6.3): the 13 polities, the Ottomans
 # (at war with Venice at the start) and France (external force). Owners outside this list are new
-# actors with land — the owner's decision.
+# actors with land — the owner's decision. `genoa` stays in E0's list but holds no land at the
+# start: Liguria and Corsica are Milan's (owner's decision 2026-11-17, К4; plan §19.8).
 e0_actors = ["milan", "venice", "florence", "naples", "papacy", "genoa", "ferrara", "mantua", "siena", "urbino",
              "bologna", "savoy", "sicily", "ottomans", "france"]
 # The lands calibrated in this scenario and the start population by land — density.toml,
@@ -52,7 +53,6 @@ venice = "venezia"
 florence = "firenze"
 naples = "napoli"
 papacy = "roma"
-genoa = "liguria"
 ferrara = "ferrara"
 mantua = "mantova"
 siena = "siena"
@@ -180,24 +180,24 @@ note = "Беллинцона — миланская до 1500, Лугано и �
 [[province]]
 id = "liguria"
 name = "Genova e Riviere"
-owner = "genoa"
+owner = "milan"
 region = "liguria"
 culture = "italian"
 religion = "catholic"
 parts = [{ countries = ["ITA"], names = ["Genova", "La Spezia", "Savona", "Imperia", "Massa Carrara"] }]
 source = "e0_genoa"
-note = "Владение — Shepherd 1911, с. 90; Финале — маркизы дель Карретто; Луниджана (Масса и Каррара — Маласпина, Понтремоли — Милан, Фивиццано — Флоренция) ни у кого не большинство, отнесена сюда; приближение"
+note = "На старте — под властью герцога Милана («sottoposta al dominio sforzesco dal 1464», DBI, Fregoso Battista); актора genoa нет — решение владельца 2026-11-17, К4 (план карты §19.8). Владение — Shepherd 1911, с. 90; Финале — маркизы дель Карретто; Луниджана (Масса и Каррара — Маласпина, Понтремоли — Милан, Фивиццано — Флоренция) ни у кого не большинство, отнесена сюда; приближение"
 
 [[province]]
 id = "corsica"
 name = "Corsica"
-owner = "genoa"
+owner = "milan"
 region = "corsica"
 culture = "italian"
 religion = "catholic"
 parts = [{ countries = ["FRA"], names = ["Corse-du-Sud", "Haute-Corse"] }]
 source = "shepherd_italy"
-note = "«To Genoa» на карте 1494; власть на острове дробная — по памяти"
+note = "С Генуей у герцога Милана — решение владельца 2026-11-17, К4 (план карты §19.8). «To Genoa» на карте 1494; власть на острове дробная — по памяти"
 
 # ---------------------------------------------------------------- Savoy
 

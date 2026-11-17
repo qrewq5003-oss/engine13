@@ -32,7 +32,7 @@ from shapely.geometry import mapping  # noqa: E402
 import base  # noqa: E402
 import density  # noqa: E402
 import rules  # noqa: E402
-from density import A, D, H, I, S, TYPES  # noqa: E402
+from density import A, D, H, I, N, S, TYPES  # noqa: E402
 
 REPO = HERE.parent.parent
 SIMPLIFY_DEG = 0.005  # the interface polygons (E5): ~0.5 km, below a pixel of the map at Italy's scale
@@ -179,6 +179,15 @@ def main() -> None:
     # province is listed as waiting for the engine (plan §11a п. 2).
     wet = [land for land in order if lands_cfg[land]["region"] in dcfg["scan"]["irrigated_regions"]]
     engine_irrigated = "irrigated" in engine.get("capacity", {})
+    # Dense lands (plan §22): a land whose opened source gives a density above the arable takes
+    # engine2's class Dense whole — the class density is the land's own, with its hills and
+    # mountains, so no province of it takes a share of hills.
+    dense = {land: N for land in order if lands_cfg[land].get("dense")}
+    for land in dense:
+        if not (land in top and top[land].get("opened", True)):
+            raise SystemExit(f"land {land}: `dense` needs an opened source of the land's density")
+        if "dense" not in engine.get("capacity", {}):
+            raise SystemExit(f"land {land}: engine2/params.toml has no capacity.dense")
 
     # Every arable density of [calibration] by both methods: "flip" turns whole provinces to
     # Hills, the most rugged first, while that brings the land closer to its ceiling; "nearest"
@@ -187,12 +196,12 @@ def main() -> None:
         """Classes and densities of the provinces. `variant` (density.calibrate) — the rule variants
         measured for the owner (plan §13b); the working rules use none of them."""
         cls, d = density.calibrate_lands(order, member, ceiling, area, rugged, dry, bw, dens, p, method,
-                                         sparse=sparse, cold=cold, river=river, **variant)
+                                         sparse=sparse, cold=cold, river=river, whole=dense, **variant)
         for k, pid in enumerate(pids):  # inherited lands: the class nearest to the blocks' mean density
             if plands[pid] in how_land:
                 mine = block_prov == k
                 d[k] = float(blocks["area"][mine] @ mixed_density(dens, inherited[mine], inherited_hills[mine])) / blocks["area"][mine].sum()
-                cls[k] = min((A, H, S, D), key=lambda c: abs(dens[c] - d[k]))
+                cls[k] = min((A, H, S, D) + ((N,) if (inherited[mine] == N).any() else ()), key=lambda c: abs(dens[c] - d[k]))
         # A province of no land with a source: §4, not above Hills (owner's decision on §13b п. 1).
         cls[no_land] = density.rule_class(rugged[no_land], bw[no_land], dry[no_land], p, cap_hills=True)
         for land in wet:
@@ -204,11 +213,12 @@ def main() -> None:
 
     variants = {}
     for arable in dcfg["calibration"]["arable"]:
-        dens = np.zeros(5)
+        dens = np.zeros(len(TYPES))
         for t in ("Arable", "Hills", "Steppe", "Desert"):
             dens[TYPES.index(t)] = density.E0[t][0]
         dens[A] = arable
         dens[I] = top[wet[0]]["y"] if wet else 0.0
+        dens[N] = engine.get("capacity", {}).get("dense", {}).get("value", 0.0)  # also for inherited blocks
         for method in METHODS:
             cls, d = classify(dens, method)
             variants[(arable, method)] = (dens, cls, d)
@@ -265,7 +275,7 @@ def main() -> None:
     # keeps its classes): the provinces of a land with a ceiling between Hills and Arable hold
     # A·(1 − h) + H·h with h = min(1, k·poor), inner lands first, as in the calibration.
     hshare, hdens, hunder, hland = density.hills_share_lands(order, member, ceiling, area, poor, bw, dens, cls,
-                                                             skip=set(wet) | set(how_land), river=river)
+                                                             skip=set(wet) | set(how_land) | set(dense), river=river)
 
     # The share written (plan §20; engine2's schema since #359): a land under h gives its provinces
     # `hills`; a land covered in part gives its provinces the share that holds the capacity their
@@ -667,7 +677,8 @@ def previews(out, geoms, pids, provs_cfg, provs):
     colour = {o: palette[(7 * k) % len(palette)] for k, o in enumerate(owners)}
     df = gpd.GeoDataFrame({"id": pids, "owner": [provs_cfg[pid]["owner"] for pid in pids],
                            "land": [provs[pid].land for pid in pids]}, geometry=[geoms[pid] for pid in pids], crs="EPSG:4326")
-    land_colour = {"Arable": "#e9d98b", "Hills": "#9c7b52", "Steppe": "#c9b77d", "Desert": "#e8c9a0", "Irrigated": "#5aa86b"}
+    land_colour = {"Arable": "#e9d98b", "Hills": "#9c7b52", "Steppe": "#c9b77d", "Desert": "#e8c9a0", "Irrigated": "#5aa86b",
+                   "Dense": "#c9a227"}
     for name, col, legend in (("owners", df["owner"].map(colour), owners), ("land", df["land"].map(land_colour), list(land_colour))):
         fig, ax = plt.subplots(figsize=(16, 13), dpi=110)
         df.plot(ax=ax, color=list(col), edgecolor="#333333", linewidth=0.4)
