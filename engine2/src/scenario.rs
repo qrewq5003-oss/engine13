@@ -208,6 +208,8 @@ pub struct Display {
 pub enum SchemaError {
     #[error("scenario is not valid TOML of the schema: {0}")]
     Toml(String),
+    #[error("the province table gives '{0}' at its top: the second text of a scenario holds `provinces` and `regions` and nothing else")]
+    NotOfTheMap(String),
     #[error("province '{0}' names unknown owner '{1}'")]
     UnknownOwner(String, String),
     #[error("province '{0}' names unknown neighbour '{1}'")]
@@ -281,6 +283,26 @@ pub struct Compiled {
 impl ScenarioData {
     pub fn parse(toml_text: &str) -> Result<ScenarioData, SchemaError> {
         toml::from_str(toml_text).map_err(|e| SchemaError::Toml(e.to_string()))
+    }
+
+    /// Parse a scenario kept in two files (E4, plan §31.43.2 p. 3, §31.49): the scenario's own
+    /// text — its top keys, actors, houses, persons, relations — and the table of provinces and
+    /// regions the map's tools write. The two are joined as text, the scenario first, and parsed
+    /// as the one schema by [`ScenarioData::parse`]: there is no second way to read a scenario.
+    /// The engine opens no file and knows no scenario's name — the caller hands both texts.
+    ///
+    /// The second text is first read on its own and held to `provinces` and `regions` at its
+    /// top (the reviewer's finding on PR #367, executor's decision № 20): joined as text, a key
+    /// at the head of it falls into the last table of the scenario's text — and where that is
+    /// the free table of the verbs, the map's file would turn a verb on without an error. The
+    /// map's file may not change what the scenario says. A table given in both texts is
+    /// refused at the join, as any TOML that names a table twice.
+    pub fn parse_parts(scenario: &str, provinces: &str) -> Result<ScenarioData, SchemaError> {
+        let of_the_map: toml::Table = toml::from_str(provinces).map_err(|e| SchemaError::Toml(e.to_string()))?;
+        if let Some(key) = of_the_map.keys().find(|key| !matches!(key.as_str(), "provinces" | "regions")) {
+            return Err(SchemaError::NotOfTheMap(key.clone()));
+        }
+        ScenarioData::parse(&format!("{scenario}\n{provinces}"))
     }
 
     /// Compile into engine facts, the starting names and the presentation data. Ids are
@@ -754,6 +776,67 @@ raise_tax = "Поднять налог"
         let as_class = OK.replacen("land = \"Hills\"\ncoastal = false", "land = { Mixed = 250000 }\ncoastal = false", 1);
         assert_ne!(as_class, OK);
         assert!(matches!(ScenarioData::parse(&as_class).unwrap().compile(&params()), Err(SchemaError::HillsOnOtherLand { .. })));
+    }
+
+    /// The fixture as the two files of a real scenario: the provinces and the regions as the
+    /// map's tools write them, everything else as the scenario's own text.
+    fn in_two_files() -> (String, String) {
+        let (mut scenario, mut provinces) = (String::new(), String::new());
+        let mut of_the_map = false;
+        for line in OK.lines() {
+            if line.starts_with('[') {
+                of_the_map = line.starts_with("[provinces.") || line.starts_with("[regions.");
+            }
+            let part = if of_the_map { &mut provinces } else { &mut scenario };
+            part.push_str(line);
+            part.push('\n');
+        }
+        (scenario, provinces)
+    }
+
+    #[test]
+    fn a_scenario_in_two_files_is_the_scenario_in_one() {
+        let (scenario, provinces) = in_two_files();
+        // The regions lie with the provinces and not with the scenario, as in the map's data.
+        assert!(provinces.contains("[regions.west]") && provinces.contains("[provinces.p1]"));
+        assert!(!scenario.contains("[regions.") && !scenario.contains("[provinces.") && scenario.contains("[actors.a]"));
+        let whole = ScenarioData::parse(OK).unwrap();
+        let parts = ScenarioData::parse_parts(&scenario, &provinces).unwrap();
+        assert_eq!(parts, whole, "two files give the scenario one file gives");
+        let (one, two) = (whole.compile(&params()).unwrap(), parts.compile(&params()).unwrap());
+        assert_eq!(two.facts, one.facts);
+        assert_eq!(two.facts.hash(), one.facts.hash(), "the same facts, the same hash: a save of the one loads by the other");
+        assert_eq!(two.facts.regions.len(), 1, "the regions of the second file are in the facts");
+        // A first text that ends without a line break joins all the same.
+        assert_eq!(ScenarioData::parse_parts(scenario.trim_end(), &provinces).unwrap(), whole);
+        // The scenario comes first: handed as the second text it is not of the map.
+        assert!(matches!(ScenarioData::parse_parts(&provinces, &scenario), Err(SchemaError::NotOfTheMap(_))));
+    }
+
+    #[test]
+    fn two_files_that_do_not_join_into_one_scenario_are_refused() {
+        let (scenario, provinces) = in_two_files();
+        // The second text holds the provinces and the regions and nothing else at its top.
+        // Joined as text, a key at its head would fall into the last table of the first — here
+        // the free table of the verbs: an unknown word would be refused only as a verb, at the
+        // compile, and the key of a verb the scenario has not turned on would turn it on with
+        // no error at all. Both are refused at the parse, by the name of the key.
+        assert!(scenario.trim_end().ends_with("raise_tax = \"Поднять налог\""), "the fixture's first text ends in the table of the verbs");
+        assert!(!scenario.contains("declare_war") && VerbId::from_key("declare_war").is_some(), "a verb of the engine the fixture has not turned on");
+        for (key, line) in [("id", "id = \"other\""), ("declare_war", "declare_war = \"x\""), ("start_year", "start_year = 1500"), ("verbs", "verbs.declare_war = \"x\"")] {
+            let with_key = format!("{line}\n{provinces}");
+            assert_eq!(ScenarioData::parse_parts(&scenario, &with_key), Err(SchemaError::NotOfTheMap(key.to_string())), "{line}");
+        }
+        // A table of the scenario's own in the second text: an actor is not of the map.
+        let actor = format!("{provinces}[actors.c]\nname = \"C\"\n");
+        assert_eq!(ScenarioData::parse_parts(&scenario, &actor), Err(SchemaError::NotOfTheMap("actors".to_string())));
+        // A second text that is no TOML by itself.
+        assert!(matches!(ScenarioData::parse_parts(&scenario, "[provinces.p1\n"), Err(SchemaError::Toml(_))));
+        // A table given in both texts.
+        let twice = format!("{scenario}[regions.west]\nname = \"The West\"\nprovinces = [\"p1\", \"p3\"]\n");
+        assert!(matches!(ScenarioData::parse_parts(&twice, &provinces), Err(SchemaError::Toml(_))));
+        // The provinces left out of both: the schema has nothing to stand the actors on.
+        assert!(matches!(ScenarioData::parse_parts(&scenario, ""), Err(SchemaError::Toml(_))));
     }
 
     #[test]
