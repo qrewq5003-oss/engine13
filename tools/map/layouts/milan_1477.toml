@@ -2,6 +2,8 @@
 # the start (1477). A province is a union of blocks of the common base; `parts` select blocks the
 # way density.toml selects regions (countries, names, lon/lat boxes, `coastal`). Provinces are
 # read in order and a block goes to the first province that selects it, so a catch-all comes last.
+# A province may name its `governor` — a person of the scenario's own file (scenario.toml), of a
+# house of the owner's polity; the province table then loads only together with that file.
 # Every province names its source; where blocks cut a historical border, `note` records the
 # approximation (E0 rule: no row without a source; «по памяти» is marked).
 #
@@ -181,6 +183,7 @@ note = "Беллинцона — миланская до 1500, Лугано и �
 id = "liguria"
 name = "Genova e Riviere"
 owner = "milan"
+governor = "prospero_adorno"
 region = "liguria"
 culture = "italian"
 religion = "catholic"
