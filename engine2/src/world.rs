@@ -148,6 +148,13 @@ pub enum Land {
     /// An irrigated valley — Egypt: only land whose source gives a density well above the
     /// arable (plan §30.7, `docs/engine2_map.md` §11e). The generator of worlds draws none.
     Irrigated,
+    /// Arable land with a share of its area in hills, parts per million (E4, plan §31.44;
+    /// `docs/engine2_map.md` §12b, §17): the share carries the hills' density, the rest the
+    /// arable's (`Params::capacity`) — the capacity is continuous, and a land's ceiling is met
+    /// without turning a whole province from one class to the other. A scenario gives it as
+    /// `land = "Arable"` with `hills`; a province with no hills is plain `Arable`, as it was.
+    /// The generator of worlds draws none.
+    Mixed(u32),
 }
 
 /// A polity as the engine sees it: its provinces, its capital and a legitimacy rating.
