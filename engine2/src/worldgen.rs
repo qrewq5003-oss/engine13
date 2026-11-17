@@ -442,6 +442,8 @@ impl Map {
                     owner: sid(cell.owner),
                     area_km2: cell.area_km2,
                     land: cell.land,
+                    // The generator draws whole classes: no province of a mix.
+                    hills: None,
                     coastal: cell.coastal,
                     population,
                     neighbours,
@@ -932,7 +934,12 @@ mod tests {
         assert_ne!(generate(7, &p), generate(8, &p));
     }
 
-    /// Pinned on the arable-50 version of the generator (the land's change of plan §30.7: the
+    /// Pinned on the text of the scenario with the share of hills (E4, plan §31.44): the
+    /// fingerprint is of the scenario's text form, and a province gained a field — `hills`,
+    /// none in any generated world. **The worlds are the same**: the saves after 300 ticks
+    /// and the tick reports of the seeds 1–20 and 100–129 are byte for byte those of the
+    /// version before (the probe of plan §31.44). Before: the arable-50 version (the land's
+    /// change of plan §30.7: the
     /// people of every arable province are a share of a capacity a quarter larger; before: the
     /// union-aspiration version of E3 (в), owner's rule on #293;
     /// before that: the regions-and-aspirations version of E3 (а), the governors version of E2
@@ -945,7 +952,7 @@ mod tests {
         assert_eq!(fingerprint(&generate(1, &p)), PINNED_WORLD_ONE);
     }
 
-    const PINNED_WORLD_ONE: u64 = 10_674_552_433_772_278_063;
+    const PINNED_WORLD_ONE: u64 = 5_948_384_461_043_430_833;
 
     #[test]
     fn generated_worlds_stay_inside_the_bands() {

@@ -174,6 +174,11 @@ pub struct ProvinceData {
     pub owner: String,
     pub area_km2: u64,
     pub land: Land,
+    /// The share of the area that carries the hills' density, 0 to 1, the rest carrying the
+    /// arable's (E4, plan §31.43.2 p. 1; `docs/engine2_map.md` §12b, §17): only with
+    /// `land = "Arable"` — a province all in hills is `land = "Hills"`, and the steppe, the
+    /// desert and the irrigated valley take no share. Absent, the class is the whole of it.
+    pub hills: Option<f64>,
     /// Touches the sea.
     pub coastal: bool,
     pub population: u64,
@@ -218,6 +223,10 @@ pub enum SchemaError {
     UnknownVerb(String),
     #[error("scenario has no actors or no provinces")]
     Empty,
+    #[error("province '{province}' gives a share of hills {hills}, outside 0 to 1")]
+    HillsOutOfRange { province: String, hills: String },
+    #[error("province '{province}' gives a share of hills on {land:?} land: only `land = \"Arable\"` takes one, through `hills`")]
+    HillsOnOtherLand { province: String, land: Land },
     #[error("province '{province}' starts with {population} people on land that carries {capacity}")]
     OverCapacity { province: String, population: u64, capacity: u64 },
     #[error("house '{0}' names unknown polity '{1}'")]
@@ -389,12 +398,26 @@ impl ScenarioData {
             if !sea_neighbours.is_empty() && !p.coastal {
                 return Err(SchemaError::SeaWithoutCoast(key.clone()));
             }
-            let capacity = params.capacity(p.area_km2, p.land);
+            // The share of hills is given beside the class, never as the class (one form in the
+            // files); a province with none is the plain class — the facts of a scenario with no
+            // hills are what they were, and so is their hash (`Facts::hash`), which a save
+            // carries and a load checks.
+            let land = match (p.land, p.hills) {
+                (Land::Mixed(_), _) => return Err(SchemaError::HillsOnOtherLand { province: key.clone(), land: p.land }),
+                (class, None) => class,
+                (_, Some(h)) if !(0.0..=1.0).contains(&h) => return Err(SchemaError::HillsOutOfRange { province: key.clone(), hills: h.to_string() }),
+                (class, Some(_)) if class != Land::Arable => return Err(SchemaError::HillsOnOtherLand { province: key.clone(), land: class }),
+                (class, Some(h)) => match (h * 1e6).round() as u32 {
+                    0 => class,
+                    hills_ppm => Land::Mixed(hills_ppm),
+                },
+            };
+            let capacity = params.capacity(p.area_km2, land);
             if p.population > capacity {
                 return Err(SchemaError::OverCapacity { province: key.clone(), population: p.population, capacity });
             }
             let governor = p.governor.as_deref().map(|g| seat(key, g, owner)).transpose()?;
-            provinces.push(ProvinceFact { area_km2: p.area_km2, land: p.land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor, culture: culture(&p.culture), religion: religion(&p.religion) });
+            provinces.push(ProvinceFact { area_km2: p.area_km2, land, coastal: p.coastal, population: p.population, owner, neighbours, sea_neighbours, governor, culture: culture(&p.culture), religion: religion(&p.religion) });
         }
 
         // Regions (E3): every province known; ids in sorted order of the string ids.
@@ -685,6 +708,51 @@ raise_tax = "Поднять налог"
         let no_plague = ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = []", 1)).unwrap();
         assert!(no_plague.compile(&params()).unwrap().facts.diseases.is_empty());
         assert!(ScenarioData::parse(&OK.replacen("diseases = [\"Plague\"]", "diseases = [\"Dragonpox\"]", 1)).is_err());
+    }
+
+    /// E4 (plan §31.43.2 p. 1, §31.44): a province gives the share of its area in hills —
+    /// its capacity lies between the arable's and the hills' by that share — and only arable
+    /// land takes one.
+    #[test]
+    fn a_share_of_hills_sets_the_capacity_between_the_arable_and_the_hills() {
+        use crate::world::World;
+        let with = |field: &str, people: u32| OK.replacen("land = \"Arable\"\ncoastal = true\npopulation = 50\nneighbours = [\"p1\"]", &format!("land = \"Arable\"\n{field}coastal = true\npopulation = {people}\nneighbours = [\"p1\"]"), 1);
+        assert_ne!(with("hills = 0.25\n", 50), OK, "the fixture's province p2 is found");
+        // 100 km²: three quarters at the arable's 50, a quarter at the hills' 12 — 4050 people.
+        let c = ScenarioData::parse(&with("hills = 0.25\n", 4050)).unwrap().compile(&params()).unwrap();
+        let p2 = c.names.provinces.iter().position(|(sid, _)| sid == "p2").unwrap();
+        assert_eq!(c.facts.provinces[p2].land, Land::Mixed(250_000));
+        let w = World::from_facts(&c.facts, c.names, &params(), 1).unwrap();
+        let in_world = &w.provinces[&crate::ids::ProvinceId(p2 as u32)];
+        assert_eq!((in_world.capacity, in_world.land), (4050, Land::Mixed(250_000)), "the world's capacity is derived with the share, and the world keeps the land it was derived from");
+        assert_eq!(in_world.capacity, params().capacity(in_world.area_km2, in_world.land), "the capacity can be read again off the world's province");
+        let over = ScenarioData::parse(&with("hills = 0.25\n", 4051)).unwrap().compile(&params()).unwrap_err();
+        assert_eq!(over, SchemaError::OverCapacity { province: "p2".into(), population: 4051, capacity: 4050 });
+        // Absent, the class is the whole of it; all in hills, the arable carries as the hills.
+        // No hills — absent or nothing — is the plain class: the same facts, the same hash.
+        let plain = ScenarioData::parse(&with("", 5000)).unwrap().compile(&params()).unwrap();
+        let none = ScenarioData::parse(&with("hills = 0.0\n", 5000)).unwrap().compile(&params()).unwrap();
+        assert_eq!(plain.facts.provinces[p2].land, Land::Arable);
+        assert_eq!(none.facts, plain.facts);
+        let untouched = ScenarioData::parse(OK).unwrap().compile(&params()).unwrap();
+        assert_eq!(ScenarioData::parse(&with("hills = 0.0\n", 50)).unwrap().compile(&params()).unwrap().facts.hash(), untouched.facts.hash(), "no hills is no new fact: the scenario hashes as it did");
+        assert_ne!(c.facts.hash(), ScenarioData::parse(&with("", 4050)).unwrap().compile(&params()).unwrap().facts.hash(), "a share of hills is another fact");
+        assert!(ScenarioData::parse(&with("hills = 1.0\n", 1200)).unwrap().compile(&params()).is_ok());
+        assert!(matches!(ScenarioData::parse(&with("hills = 1.0\n", 1201)).unwrap().compile(&params()), Err(SchemaError::OverCapacity { capacity: 1200, .. })));
+        assert!(ScenarioData::parse(&with("hills = 0.0\n", 5000)).unwrap().compile(&params()).is_ok());
+        // Outside 0 to 1, or on land that is not arable: a schema error, not a guess.
+        for bad in ["hills = 1.2\n", "hills = -0.1\n"] {
+            assert!(matches!(ScenarioData::parse(&with(bad, 50)).unwrap().compile(&params()), Err(SchemaError::HillsOutOfRange { .. })), "{bad}");
+        }
+        for land in ["Hills", "Steppe", "Desert", "Irrigated"] {
+            let other = OK.replacen("land = \"Hills\"\ncoastal = false", &format!("land = \"{land}\"\nhills = 0.5\ncoastal = false"), 1);
+            assert_ne!(other, OK);
+            assert!(matches!(ScenarioData::parse(&other).unwrap().compile(&params()), Err(SchemaError::HillsOnOtherLand { .. })), "{land}");
+        }
+        // The mix is given through `hills`, never as the class itself: one form in the files.
+        let as_class = OK.replacen("land = \"Hills\"\ncoastal = false", "land = { Mixed = 250000 }\ncoastal = false", 1);
+        assert_ne!(as_class, OK);
+        assert!(matches!(ScenarioData::parse(&as_class).unwrap().compile(&params()), Err(SchemaError::HillsOnOtherLand { .. })));
     }
 
     #[test]
