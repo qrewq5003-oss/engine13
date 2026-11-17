@@ -57,12 +57,16 @@ e0 = "П1"
 # E0 П2 — intrinsic growth below capacity. Derived with the plague loss in (owner, PR #282):
 # Italy c. 1300 stood at capacity (12.5 M, Munro 2013), c. 1400 at about two thirds of it, and
 # over the 15th century grew ≈ 0.2 % a year with plague alive (≈ 10 M by 1500, Malanima).
-# Logistic growth at two thirds of capacity is r × ⅓; net of the plague loss of 0.24 % a year
-# that must leave +0.2 %: r × ⅓ − 0.24 % ≈ 0.2 % → r ≈ 1.2 %. The earlier band (0.5–1.0) was
+# Logistic growth at two thirds of capacity is r × ⅓; net of the plague loss of 0.30 % a year
+# that must leave +0.2 %: r × ⅓ − 0.30 % ≈ 0.2 % → r ≈ 1.5 %. The earlier band (0.5–1.0) was
 # derived without the plague loss, which is why its top was too low.
+# Until E4 the loss stood at 0.24 % and the growth at 1.2 %: the plague's frequency was then
+# by memory. The growth is derived from the loss, so the opened catalogue moved both (plan
+# §31.45, executor's decision № 18; measured in §31.46), and a plague world settles where it
+# did — at 1 − 0.30 / 1.5 = 0.80 of its capacity.
 [population.growth_per_year]
 kind = "a"
-value = 0.012
+value = 0.015
 band = [0.008, 0.016]
 unit = "share per year, logistic toward capacity"
 e0 = "П2"
@@ -80,20 +84,25 @@ e0 = "П3"
 # gives the *urban* outbreak (10–20 % of a city) and Europe-wide recurrence (somewhere,
 # every 2–20 years); a province is a city and its countryside, and a province sees only its
 # own outbreaks.
-#   frequency — one city's catalogue: Florence 1400, 1411, 1417, 1424, 1430, 1437, 1449,
-#   1457, 1464, 1479 ≈ 10 outbreaks a century (Biraben 1975 vol. 1; Del Panta 1980;
-#   Carmichael 1986 — by memory, to open before E4), hence 0.08 per province-year, band
-#   0.05–0.15 (every 7–20 years);
+#   frequency — one city's catalogue, opened for E4 (`docs/engine2_map.md` §18.1): Florence
+#   in 1400–1499 saw ten episodes — 1399–1400, 1411, 1417, 1422–25, 1429–30, 1437–38,
+#   1448–50, 1456–57, 1478–79, 1497 (Corradi 1865, vol. 1, the entries by year; Carmichael
+#   1986, ch. 1 and 3 — both opened), nine without 1497, when the plague came mixed with
+#   fevers; Carmichael in words: «at least once a decade». Hence 0.10 per province-year,
+#   band 0.05–0.15 (every 7–20 years). Until E4 the value was 0.08 on a list by memory;
+#   its 1464 is in neither source and is dropped (plan §31.45, executor's decision № 18);
 #   mortality — urban share × urban outbreak, countryside largely spared: 15th-century
-#   plague had become an urban disease of the poor (Carmichael 1986, ch. 3–4); urban share
-#   of Italy c. 1500 ≈ 20 % (Malanima 2005 — by memory); 0.2 × 10–20 % = 2–4 % of the
+#   plague had become an urban disease of the poor (Carmichael 1986, ch. 1 and 3); a city
+#   lost under 10 % in the plague years of 1424–1457 and 20 % in 1400 (the same, ch. 3);
+#   the towns of the Centre-North of Italy held 21.0 % of its people in 1500 (Malanima
+#   2002, appendix, tab. A.12 — opened, §18.1); 0.21 × 10–20 % = 2.1–4.2 % of the
 #   province, value 0.03, band 0.02–0.05.
-# Check: 0.08 × 0.03 = 0.24 % a year lost, below the П2 growth of 0.7 % — a plague world
-# settles near two thirds of capacity instead of dying out (the loader refuses constants
+# Check: 0.10 × 0.03 = 0.30 % a year lost, below the П2 growth of 1.5 % — a plague world
+# settles at 0.80 of its capacity instead of dying out (the loader refuses constants
 # whose mean plague loss exceeds the growth: extinction would then be written in them).
 [plague.outbreaks_per_year]
 kind = "a"
-value = 0.08
+value = 0.10
 band = [0.05, 0.15]
 unit = "outbreaks per province per year"
 e0 = "П4"
