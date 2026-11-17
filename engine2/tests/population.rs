@@ -212,3 +212,48 @@ fn people_flee_the_heavier_tax_across_a_border_and_at_the_tithe_nothing_changes(
     assert_eq!(w.tax_burden_ppm(to), 0);
     assert!(w.migration_fills(&p)[&to] < plain(&w, to));
 }
+
+/// Probe for the second land change of E4 (plan §31.46; the reviewer's condition on the
+/// executor's decision № 18): how fast a world with plague grows at the fill of the fifteenth
+/// century, read from the run and not from the formula. Every generated world is given plague
+/// and each of its provinces 0.55 of its capacity — the Centre-North of Italy about 1450 on
+/// Malanima's series (`docs/engine2_map.md` §18.2), which then grows 0.37 % a year to 0.66 of
+/// the plateau by 1500. The bots are off: the rule of the people is read, not the wars; the
+/// growth with the bots is П7 in `tests/agents.rs`. 100 ticks are those fifty years.
+#[test]
+#[ignore = "probe: prints, asserts nothing"]
+fn diagnosis_how_fast_a_plague_world_grows_at_the_fill_of_the_fifteenth_century() {
+    let p = params();
+    let loss = p.entries["plague.outbreaks_per_year"].value.unwrap() * p.entries["plague.mortality"].value.unwrap();
+    let rate = p.entries["population.growth_per_year"].value.unwrap();
+    eprintln!("the formula: growth {rate} × (1 − fill) − plague loss {loss:.4}: at the fill 0.55 {:.4}, at 0.60 {:.4}, at 0.66 {:.4} a year; the source 0.0037", rate * 0.45 - loss, rate * 0.40 - loss, rate * 0.34 - loss);
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+        let (mut start, mut end, mut capacity) = (0i64, 0i64, 0i64);
+        let mut growths = Vec::new();
+        for world_seed in &seeds {
+            let mut s = worldgen::generate(*world_seed, &p);
+            s.diseases = vec![Disease::Plague];
+            for province in s.provinces.values_mut() {
+                province.population = p.capacity(province.area_km2, province.land) * 55 / 100;
+            }
+            for game_seed in [1u64, 2, 3] {
+                let g0 = bare(&s, params(), game_seed).unwrap();
+                let before = total_people(&g0);
+                let (g, _) = play(&s, game_seed, 100);
+                let after = total_people(&g);
+                start += before;
+                end += after;
+                capacity += g.world().provinces.values().map(|q| q.capacity as i64).sum::<i64>();
+                growths.push(yearly_growth(before, after, 100));
+            }
+        }
+        let (lo, hi) = growths.iter().fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(*g), hi.max(*g)));
+        eprintln!(
+            "{label}: {} runs of 100 ticks; fill {:.3} → {:.3}; growth a year: of all the people {:.4}, by runs min {lo:.4}, max {hi:.4}",
+            growths.len(),
+            start as f64 / capacity as f64,
+            end as f64 / capacity as f64,
+            yearly_growth(start, end, 100)
+        );
+    }
+}
