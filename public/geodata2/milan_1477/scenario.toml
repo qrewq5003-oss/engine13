@@ -1,0 +1,731 @@
+# milan_1477: the scenario's own facts — polities, houses, persons, relations, aspirations.
+# The provinces and the regions are in provinces.toml (tools/map/layout.py); the engine joins
+# the two texts (`ScenarioData::parse_parts`). Written by hand by the cartographer; every fact
+# has its source in docs/engine2_map.md §19, §23, §25.
+#
+# The state of the start is the first half of 1477 (tick 0): after 9 January, when Bona of
+# Savoy took the wardship of the duke, and with Prospero Adorno the ducal governor of Genoa
+# (from 11 April). No rule number and no date after 1477: the schema has no place for either.
+#
+# Sources of the years of birth: DBI — Dizionario Biografico degli Italiani (treccani.it);
+# EI — Enciclopedia Italiana (treccani.it, 1930–1934); EdP — Enciclopedia dei Papi (2000).
+#
+# STUBS — what no opened source gives, written so that the scenario loads (§25.3):
+#   - the rulers of Siena, Lucca, Ragusa and the Confederation are offices, not persons: no
+#     single ruler, and the holder of the start of 1477 is not opened; born = 1440 is the stub
+#     of the map's test, not a fact;
+#   - years of birth from it.wikipedia only: René of Anjou, John II of Aragon, Sigismund of
+#     Tyrol;
+#   - EI's year against the later literature: Mehmed II (EI 1430, elsewhere 1432), Matthias
+#     Corvinus (EI «probably 1440», elsewhere 1443) — EI's is written.
+#
+# treasury_kg = 0 everywhere: no source names cash in hand (owner's decision 2026-11-17).
+# soldiers — only where a source gives the army (Mallett 1974): Milan and Venice; the rest is
+# left to the engine's rule (owner's decision 2026-11-17). Houses' own men — 0: no source.
+
+id = "milan_1477"
+start_year = 1477
+diseases = ["Plague"]
+
+# A ducat buys about 100 kg of wheat: Florence in the 1470s, a florin for 80–120 kg (E0 Э1б).
+[display_currency]
+name = "дукат"
+kg_per_unit = 100.0
+
+# Every verb of the engine: the bots act only by the verbs a scenario turns on.
+[verbs]
+recruit = "Набрать войско"
+disband = "Распустить войско"
+hire_mercenaries = "Нанять кондотьеров"
+declare_war = "Объявить войну"
+make_peace = "Заключить мир"
+propose_alliance = "Предложить союз"
+propose_marriage = "Предложить брак"
+bribe = "Послать дар"
+take_loan = "Взять заём"
+raise_tax = "Поднять налог"
+lower_tax = "Снизить налог"
+enforce_order = "Навести порядок"
+send_embassy = "Отправить посольство"
+
+# ---------------------------------------------------------------- relations at the start
+# Venice and the Ottomans at war: from 1463–64, peace on 25 April 1479 (DBI, Vendramin).
+# The league of Florence, Milan and Venice of November 1474 is not written: its term is not
+# opened and the schema asks for one. No vassals: none who paid and fought by an opened source.
+[relations]
+wars = [["venice", "ottomans"]]
+alliances = []
+vassals = []
+
+# ---------------------------------------------------------------- Milan
+# Liguria and Corsica are Milan's (owner's decision 2026-11-17, К4). The army — Mallett 1974,
+# «a permanent army of well over 20,000 men» in 1472–1474: the lower end.
+[actors.milan]
+name = "Миланское герцогство"
+treasury_kg = 0
+capital = "milano"
+soldiers = 20000
+institutions = []
+ruler = "gian_galeazzo_sforza"
+heir = "ermes_sforza"
+regent = "bona_di_savoia"
+succession = "Blood"
+aspirations = [{ kind = "Hold", target = "lombardia" }]
+
+[houses.sforza]
+name = "Сфорца"
+polity = "milan"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+# The house of the ducal governor of Genoa (К4): a house of the polity of Milan.
+[houses.adorno]
+name = "Адорно"
+polity = "milan"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.gian_galeazzo_sforza]
+name = "Джан Галеаццо Мария Сфорца"
+house = "sforza"
+born = 1469
+
+# The duke's mother and regent; a widow, written into her husband's house (К3).
+[persons.bona_di_savoia]
+name = "Бона Савойская"
+house = "sforza"
+born = 1449
+
+[persons.ermes_sforza]
+name = "Эрмес Сфорца"
+house = "sforza"
+born = 1470
+
+[persons.bianca_maria_sforza]
+name = "Бьянка Мария Сфорца"
+house = "sforza"
+born = 1471
+
+[persons.anna_sforza]
+name = "Анна Сфорца"
+house = "sforza"
+born = 1476
+
+[persons.caterina_sforza]
+name = "Катерина Сфорца"
+house = "sforza"
+born = 1463
+
+[persons.ludovico_sforza]
+name = "Лодовико Сфорца"
+house = "sforza"
+born = 1452
+
+[persons.ascanio_sforza]
+name = "Асканио Мария Сфорца"
+house = "sforza"
+born = 1455
+
+[persons.prospero_adorno]
+name = "Просперо Адорно"
+house = "adorno"
+born = 1428
+
+# ---------------------------------------------------------------- Venice
+# The army — Mallett 1974, «probably little more than 10,000 men» in the 1470s: the lower end.
+# The Monte — Pezzolo 2007 (E0 Э6).
+[actors.venice]
+name = "Венецианская республика"
+treasury_kg = 0
+capital = "venezia"
+soldiers = 10000
+institutions = ["Bank"]
+ruler = "andrea_vendramin"
+succession = "Election"
+aspirations = [{ kind = "Take", target = "lombardia" }, { kind = "Take", target = "ferrara" }, { kind = "Take", target = "romagna" }]
+
+[houses.vendramin]
+name = "Вендрамин"
+polity = "venice"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.andrea_vendramin]
+name = "Андреа Вендрамин"
+house = "vendramin"
+born = 1400
+
+# ---------------------------------------------------------------- Florence
+# Lorenzo holds no office: the head of the house the republic follows. The Monte — Pezzolo 2007.
+[actors.florence]
+name = "Флорентийская республика"
+treasury_kg = 0
+capital = "firenze"
+institutions = ["Bank"]
+ruler = "lorenzo_de_medici"
+succession = "Election"
+aspirations = [{ kind = "Subdue", target = "siena" }]
+
+[houses.medici]
+name = "Медичи"
+polity = "florence"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.lorenzo_de_medici]
+name = "Лоренцо Медичи"
+house = "medici"
+born = 1449
+spouse = "clarice_orsini"
+
+[persons.giuliano_de_medici]
+name = "Джулиано Медичи"
+house = "medici"
+born = 1453
+
+# ---------------------------------------------------------------- Naples
+[actors.naples]
+name = "Неаполитанское королевство"
+treasury_kg = 0
+capital = "napoli"
+institutions = []
+ruler = "ferrante"
+succession = "Blood"
+aspirations = [{ kind = "Hold", target = "regno_napoli" }, { kind = "Take", target = "lazio" }]
+
+[houses.aragona_napoli]
+name = "Арагонский дом Неаполя"
+polity = "naples"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.ferrante]
+name = "Ферранте I"
+house = "aragona_napoli"
+born = 1424
+
+[persons.alfonso_di_calabria]
+name = "Альфонсо, герцог Калабрии"
+house = "aragona_napoli"
+born = 1448
+parent = "ferrante"
+
+[persons.federico_d_aragona]
+name = "Федерико Арагонский"
+house = "aragona_napoli"
+born = 1451
+parent = "ferrante"
+
+[persons.ferrandino]
+name = "Феррандино"
+house = "aragona_napoli"
+born = 1467
+parent = "alfonso_di_calabria"
+
+# ---------------------------------------------------------------- the Papacy
+[actors.papacy]
+name = "Папская область"
+treasury_kg = 0
+capital = "roma"
+institutions = []
+ruler = "sisto_iv"
+succession = "Election"
+aspirations = [{ kind = "Take", target = "romagna" }, { kind = "AllianceAgainst", target = "florence" }]
+
+[houses.della_rovere]
+name = "Делла Ровере"
+polity = "papacy"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[houses.riario]
+name = "Риарио"
+polity = "papacy"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+# Roman barons: the house of Lorenzo de' Medici's wife.
+[houses.orsini]
+name = "Орсини"
+polity = "papacy"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.sisto_iv]
+name = "Сикст IV"
+house = "della_rovere"
+born = 1414
+
+[persons.girolamo_riario]
+name = "Джироламо Риарио"
+house = "riario"
+born = 1443
+
+[persons.clarice_orsini]
+name = "Клариче Орсини"
+house = "orsini"
+born = 1452
+spouse = "lorenzo_de_medici"
+
+# ---------------------------------------------------------------- Ferrara
+[actors.ferrara]
+name = "Феррарское герцогство"
+treasury_kg = 0
+capital = "ferrara"
+institutions = []
+ruler = "ercole_d_este"
+succession = "Blood"
+aspirations = []
+
+[houses.este]
+name = "Эсте"
+polity = "ferrara"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.ercole_d_este]
+name = "Эрколе I д'Эсте"
+house = "este"
+born = 1431
+
+[persons.alfonso_d_este]
+name = "Альфонсо д'Эсте"
+house = "este"
+born = 1476
+parent = "ercole_d_este"
+
+# ---------------------------------------------------------------- Mantua
+# The marquis of the start is Ludovico III: he died on 12 June 1478 (DBI, Federico I Gonzaga).
+[actors.mantua]
+name = "Мантуанское маркграфство"
+treasury_kg = 0
+capital = "mantova"
+institutions = []
+ruler = "ludovico_gonzaga"
+succession = "Blood"
+aspirations = []
+
+[houses.gonzaga]
+name = "Гонзага"
+polity = "mantua"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.ludovico_gonzaga]
+name = "Лодовико III Гонзага"
+house = "gonzaga"
+born = 1412
+
+[persons.federico_gonzaga]
+name = "Федерико Гонзага"
+house = "gonzaga"
+born = 1441
+parent = "ludovico_gonzaga"
+
+[persons.francesco_gonzaga]
+name = "Франческо Гонзага"
+house = "gonzaga"
+born = 1466
+parent = "federico_gonzaga"
+
+# ---------------------------------------------------------------- Urbino
+[actors.urbino]
+name = "Урбинское герцогство"
+treasury_kg = 0
+capital = "urbino"
+institutions = []
+ruler = "federico_da_montefeltro"
+succession = "Blood"
+aspirations = []
+
+[houses.montefeltro]
+name = "Монтефельтро"
+polity = "urbino"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.federico_da_montefeltro]
+name = "Федерико да Монтефельтро"
+house = "montefeltro"
+born = 1422
+
+[persons.guidobaldo_da_montefeltro]
+name = "Гвидобальдо да Монтефельтро"
+house = "montefeltro"
+born = 1472
+parent = "federico_da_montefeltro"
+
+# ---------------------------------------------------------------- Bologna
+# Annibale holds the right to succeed his father from January 1474 (DBI, Annibale Bentivoglio).
+[actors.bologna]
+name = "Болонская синьория"
+treasury_kg = 0
+capital = "bologna"
+institutions = []
+ruler = "giovanni_bentivoglio"
+heir = "annibale_bentivoglio"
+succession = "Blood"
+aspirations = [{ kind = "Hold", target = "bologna" }]
+
+[houses.bentivoglio]
+name = "Бентивольо"
+polity = "bologna"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.giovanni_bentivoglio]
+name = "Джованни II Бентивольо"
+house = "bentivoglio"
+born = 1443
+
+[persons.annibale_bentivoglio]
+name = "Аннибале Бентивольо"
+house = "bentivoglio"
+born = 1469
+parent = "giovanni_bentivoglio"
+
+# ---------------------------------------------------------------- Savoy
+# Iolanda of France, the duke's mother, regent since 1472; a widow in her husband's house (К3).
+[actors.savoy]
+name = "Савойское герцогство"
+treasury_kg = 0
+capital = "savoia"
+institutions = []
+ruler = "filiberto_di_savoia"
+heir = "carlo_di_savoia"
+regent = "iolanda_di_francia"
+succession = "Blood"
+aspirations = [{ kind = "Hold", target = "piemonte" }]
+
+[houses.savoia]
+name = "Савойский дом"
+polity = "savoy"
+treasury_kg = 0
+culture = "french"
+religion = "catholic"
+soldiers = 0
+
+[persons.filiberto_di_savoia]
+name = "Филиберт I"
+house = "savoia"
+born = 1465
+
+[persons.carlo_di_savoia]
+name = "Карл Савойский"
+house = "savoia"
+born = 1468
+
+[persons.iolanda_di_francia]
+name = "Иоланда Французская"
+house = "savoia"
+born = 1434
+
+# ---------------------------------------------------------------- Montferrat
+[actors.montferrat]
+name = "Монферратское маркграфство"
+treasury_kg = 0
+capital = "monferrato"
+institutions = []
+ruler = "guglielmo_paleologo"
+heir = "bonifacio_paleologo"
+succession = "Blood"
+aspirations = []
+
+[houses.paleologo]
+name = "Палеологи Монферратские"
+polity = "montferrat"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.guglielmo_paleologo]
+name = "Гульельмо VIII Палеолог"
+house = "paleologo"
+born = 1420
+
+[persons.bonifacio_paleologo]
+name = "Бонифачо Палеолог"
+house = "paleologo"
+born = 1424
+
+# ---------------------------------------------------------------- Sicily (the Crown of Aragon's islands)
+# John II, king of Aragon and of Sicily; his son Ferdinand is king of Sicily beside him.
+# John's year — it.wikipedia only (stub list above).
+[actors.sicily]
+name = "Сицилийское королевство"
+treasury_kg = 0
+capital = "palermo"
+institutions = []
+ruler = "giovanni_d_aragona"
+succession = "Blood"
+aspirations = [{ kind = "Hold", target = "sicilia" }]
+
+[houses.trastamara]
+name = "Трастамара Арагонские"
+polity = "sicily"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.giovanni_d_aragona]
+name = "Хуан II Арагонский"
+house = "trastamara"
+born = 1398
+
+[persons.ferdinando_il_cattolico]
+name = "Фердинанд Арагонский"
+house = "trastamara"
+born = 1452
+parent = "giovanni_d_aragona"
+
+# ---------------------------------------------------------------- the republics without one ruler
+# STUBS: the ruler is an office, the holder of the start of 1477 is not opened (§25.3).
+[actors.siena]
+name = "Сиенская республика"
+treasury_kg = 0
+capital = "siena"
+institutions = []
+ruler = "siena_capitano_del_popolo"
+succession = "Election"
+aspirations = []
+
+[houses.comune_di_siena]
+name = "Коммуна Сиены"
+polity = "siena"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.siena_capitano_del_popolo]
+name = "Капитан народа Сиены"
+house = "comune_di_siena"
+born = 1440
+
+[actors.lucca]
+name = "Луккская республика"
+treasury_kg = 0
+capital = "lucca"
+institutions = []
+ruler = "lucca_gonfaloniere"
+succession = "Election"
+aspirations = []
+
+[houses.comune_di_lucca]
+name = "Коммуна Лукки"
+polity = "lucca"
+treasury_kg = 0
+culture = "italian"
+religion = "catholic"
+soldiers = 0
+
+[persons.lucca_gonfaloniere]
+name = "Гонфалоньер справедливости Лукки"
+house = "comune_di_lucca"
+born = 1440
+
+[actors.ragusa]
+name = "Рагузская республика"
+treasury_kg = 0
+capital = "ragusa"
+institutions = []
+ruler = "ragusa_rettore"
+succession = "Election"
+aspirations = []
+
+[houses.comune_di_ragusa]
+name = "Коммуна Рагузы"
+polity = "ragusa"
+treasury_kg = 0
+culture = "south_slavic"
+religion = "catholic"
+soldiers = 0
+
+[persons.ragusa_rettore]
+name = "Ректор Рагузы"
+house = "comune_di_ragusa"
+born = 1440
+
+[actors.swiss]
+name = "Швейцарская конфедерация"
+treasury_kg = 0
+capital = "svizzera"
+institutions = []
+ruler = "swiss_tagsatzung"
+succession = "Election"
+aspirations = []
+
+[houses.eidgenossen]
+name = "Союз кантонов"
+polity = "swiss"
+treasury_kg = 0
+culture = "german"
+religion = "catholic"
+soldiers = 0
+
+[persons.swiss_tagsatzung]
+name = "Тагзатцунг"
+house = "eidgenossen"
+born = 1440
+
+# ---------------------------------------------------------------- the edges of the map
+# France: Louis XI (EI 1934), the dauphin Charles (EI 1931).
+[actors.france]
+name = "Французское королевство"
+treasury_kg = 0
+capital = "delfinato"
+institutions = []
+ruler = "luigi_xi"
+succession = "Blood"
+aspirations = []
+
+[houses.valois]
+name = "Валуа"
+polity = "france"
+treasury_kg = 0
+culture = "french"
+religion = "catholic"
+soldiers = 0
+
+[persons.luigi_xi]
+name = "Людовик XI"
+house = "valois"
+born = 1423
+
+[persons.carlo_delfino]
+name = "Карл, дофин"
+house = "valois"
+born = 1470
+parent = "luigi_xi"
+
+# Provence: René of Anjou; the year — it.wikipedia only (stub list above).
+[actors.provence]
+name = "Графство Прованс"
+treasury_kg = 0
+capital = "provenza"
+institutions = []
+ruler = "renato_d_angio"
+succession = "Blood"
+aspirations = []
+
+[houses.angio]
+name = "Анжуйский дом"
+polity = "provence"
+treasury_kg = 0
+culture = "french"
+religion = "catholic"
+soldiers = 0
+
+[persons.renato_d_angio]
+name = "Рене Анжуйский"
+house = "angio"
+born = 1409
+
+# Hungary: Matthias Corvinus, elected by the diet on 24 January 1458 (EI 1934).
+[actors.hungary]
+name = "Венгерское королевство"
+treasury_kg = 0
+capital = "croazia"
+institutions = []
+ruler = "mattia_corvino"
+succession = "Election"
+aspirations = []
+
+[houses.hunyadi]
+name = "Хуньяди"
+polity = "hungary"
+treasury_kg = 0
+culture = "hungarian"
+religion = "catholic"
+soldiers = 0
+
+[persons.mattia_corvino]
+name = "Матьяш Корвин"
+house = "hunyadi"
+born = 1440
+
+# The Ottomans: Mehmed II (EI 1934); Bayezid — 35 years old at his accession in 1481 (EI 1930).
+[actors.ottomans]
+name = "Османская держава"
+treasury_kg = 0
+capital = "albania_ottomana"
+institutions = []
+ruler = "maometto_ii"
+succession = "Blood"
+aspirations = []
+
+[houses.osman]
+name = "Дом Османа"
+polity = "ottomans"
+treasury_kg = 0
+culture = "turkish"
+religion = "muslim"
+soldiers = 0
+
+[persons.maometto_ii]
+name = "Мехмед II"
+house = "osman"
+born = 1430
+
+[persons.bayazid]
+name = "Баязид"
+house = "osman"
+born = 1446
+parent = "maometto_ii"
+
+# Austria on this map is Tyrol, Trent and Carniola: three powers, one actor (§19.5 п. 10). The
+# seat is Tyrol, so the ruler is Sigismund (it.wikipedia only — stub list); the emperor
+# Frederick III, lord of Carniola, is the elder of the house (EI 1932).
+[actors.austria]
+name = "Габсбургские земли"
+treasury_kg = 0
+capital = "tirolo"
+institutions = []
+ruler = "sigismondo_d_austria"
+succession = "Blood"
+aspirations = []
+
+[houses.asburgo]
+name = "Габсбурги"
+polity = "austria"
+treasury_kg = 0
+culture = "german"
+religion = "catholic"
+soldiers = 0
+
+[persons.sigismondo_d_austria]
+name = "Сигизмунд Тирольский"
+house = "asburgo"
+born = 1427
+
+[persons.federico_iii]
+name = "Фридрих III"
+house = "asburgo"
+born = 1415
+
