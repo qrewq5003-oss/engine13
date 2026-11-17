@@ -284,8 +284,8 @@ source = "Malanima 2002, там же, табл. A.4 (1330 — наибольше
 
 # The Confederation — an edge of milan_1477 with an opened source (plan §24): the Historical
 # Lexicon gives Switzerland about 1300, at the beginning of the 16th century (the same number
-# again) and at the beginning of the 17th. The ceiling is the highest of the agrarian plateau
-# to 1700 (executor's decision № 17) — the beginning of the 17th century. The country's own
+# again), at the beginning of the 17th and in 1700. The ceiling is the highest of the series to
+# 1700, that year included (executor's decision № 17) — 1.2 M in 1700. The country's own
 # density — its 40,632 km² on the map — is carried to the Confederation's part of it (87.7 %
 # of the area: without Ticino south of the Alps, Vaud and Geneva, which the layout gives to
 # Milan and Savoy).
@@ -304,6 +304,14 @@ land = "confederation"
 region = "confederation"
 density = [22.15, 22.15]
 source = "Head-König, там же, раздел «16. und 17. Jahrhundert»: «Anfang des 17. Jahrhunderts rund 900'000 Personen» — открыл; 900 000 на 40 632 км² Швейцарии на карте"
+
+[[obs]]
+id = "switzerland_1700"
+fit = false
+land = "confederation"
+region = "confederation"
+density = [29.53, 29.53]
+source = "Head-König, там же: «Gesamthaft wuchs die Bevölkerung in der Schweiz im 17. Jahrhundert von 0,9 auf 1,2 Mio. Einwohner»; раздел «Wachstum im 18. und 19. Jahrhundert»: «Von 1700 bis 1914 wuchs die Bevölkerung der Schweiz von 1,2 Mio. auf 3,9 Mio. Einwohner» — открыл; 1 200 000 на 40 632 км² Швейцарии на карте"
 
 # The State of Milan (owner's decision 2026-11-17: land denser than the arable is a class of its
 # own, engine2's Dense; plan §18.3, §22). Sella's number is the state's own density about 1600,
