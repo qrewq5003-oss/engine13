@@ -82,7 +82,7 @@ pub fn five_states() -> (Facts, Names) {
         .map(|a| ActorFact {
             treasury_kg: 100_000,
             capital: ProvinceId(a),
-            soldiers: 600,
+            soldiers: Some(600),
             institutions: Vec::new(),
             ruler: person_index(&format!("r{a}")),
             heir: if a == 0 { Some(person_index("c0")) } else { None },

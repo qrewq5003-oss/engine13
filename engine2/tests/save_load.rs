@@ -97,3 +97,36 @@ fn a_games_save_written_before_the_share_of_hills_loads_by_its_scenario_and_goes
     hilly.provinces.values_mut().next().unwrap().hills = Some(0.25);
     assert!(matches!(Game::from_save(&hilly, params, GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS), Err(SimError::WrongScenario { .. })), "a share of hills is another scenario");
 }
+
+const FACTS_BEFORE_THE_OPTIONAL_SOLDIERS: &str = include_str!("data/facts_before_the_optional_soldiers.json");
+
+/// E4 (plan §31.50, executor's decision № 21): the starting army of a polity became optional
+/// in the scenario and in the facts. A scenario that gives every number must be written as it
+/// was — the facts' JSON byte for byte (the fixture is the test world's facts as main eb116e8
+/// wrote them, before the change), so its hash stands and every save of it loads
+/// (`a_games_save_written_before_the_share_of_hills_loads_by_its_scenario_and_goes_on` is
+/// that load). A number left out is another fact — written as `null`, never as zero.
+#[test]
+fn the_facts_of_a_scenario_that_gives_its_armies_are_written_byte_for_byte_as_before() {
+    use engine2::sim::{Game, SimError, Simulation};
+    let params = Params::load().unwrap();
+    let scenario = testworld::five_states_scenario();
+    let facts = scenario.compile(&params).unwrap().facts;
+    assert_eq!(serde_json::to_string(&facts).unwrap(), FACTS_BEFORE_THE_OPTIONAL_SOLDIERS);
+    assert_eq!(facts.hash(), 17_085_394_115_506_308_705);
+    assert!(FACTS_BEFORE_THE_OPTIONAL_SOLDIERS.contains("\"soldiers\":600"), "the fixture carries armies given by number");
+
+    let with = |soldiers: Option<u64>| {
+        let mut s = scenario.clone();
+        s.actors.get_mut("s1").unwrap().soldiers = soldiers;
+        s
+    };
+    let left_out = serde_json::to_string(&with(None).compile(&params).unwrap().facts).unwrap();
+    let zero = serde_json::to_string(&with(Some(0)).compile(&params).unwrap().facts).unwrap();
+    assert_eq!(left_out.matches("\"soldiers\":null").count(), 1, "a number left out is written as none");
+    assert_eq!(zero.matches("\"soldiers\":null").count(), 0);
+    assert_ne!(left_out, zero, "none is not zero: «no number» and «no army» are two facts");
+    assert_ne!(with(None).compile(&params).unwrap().facts.hash(), facts.hash());
+    // And the old save is of the scenario that gave the number, not of the one that left it out.
+    assert!(matches!(Game::from_save(&with(None), params, GAME_SAVE_BEFORE_THE_SHARE_OF_HILLS), Err(SimError::WrongScenario { .. })));
+}

@@ -191,6 +191,19 @@ impl World {
         }
     }
 
+    /// **The army a polity starts with when its scenario gives no number** (E4, the owner's
+    /// decision of 2026-11-17 «rule + source»; plan §31.50, executor's decision № 21) — one
+    /// rule for every scenario: the peacetime army of E0 А11 at the middle of its band
+    /// (`army.start_share_of_population` of the polity's people), never more than the tick's
+    /// remainder pays (`peace_army`), less the men it has already — those the scenario gives
+    /// its houses: the army of А11 is the polity's whole army, and the houses' retinues are
+    /// of it. Called by `World::from_facts` on the assembled world.
+    pub fn start_army(&self, a: ActorId, params: &Params) -> u64 {
+        let people: i64 = self.actors[&a].provinces.iter().map(|p| self.population(*p)).sum();
+        let by_share = people * params.start_army_share_ppm / 1_000_000;
+        (by_share.min(self.peace_army(a, params)) - self.army_size(a)).max(0) as u64
+    }
+
     /// All soldiers of a polity, levies and mercenaries.
     pub fn army_size(&self, a: ActorId) -> i64 {
         self.units_of(a).iter().map(|u| self.soldiers(*u)).sum()
