@@ -282,6 +282,19 @@ region = "tuscany"
 population = [1.1, 1.1]
 source = "Malanima 2002, там же, табл. A.4 (1330 — наибольшее до чумы)"
 
+# The Confederation — an edge of milan_1477 with an opened source (plan §24): the Historical
+# Lexicon gives Switzerland about 1300, before the crisis of the 14th century, and says the
+# number was reached again only at the beginning of the 16th. The country's own density — its
+# 40,632 km² on the map — is carried to the Confederation's part of it (87.7 % of the area:
+# without Ticino south of the Alps, Vaud and Geneva, which the layout gives to Milan and Savoy).
+[[obs]]
+id = "switzerland_1300"
+fit = false
+land = "confederation"
+region = "confederation"
+density = [17.2, 20.9]
+source = "Head-König A.-L., «Bevölkerung», Historisches Lexikon der Schweiz (версия 30.03.2012), разделы «Urgeschichte bis Hochmittelalter» и «16. und 17. Jahrhundert»: около 1300 г. — 700 000–850 000 человек; «Erst Anfang des 16. Jahrhunderts erreichte die Bevölkerungszahl in der Schweiz wieder den Stand, den sie vor dem Einbruch des 14. Jahrhunderts aufgewiesen hatte»; начало XVII в. — около 900 000 — открыл (hls-dhs-dss.ch/de/articles/007946); плотность — на 40 632 км² Швейцарии на карте"
+
 # The State of Milan (owner's decision 2026-11-17: land denser than the arable is a class of its
 # own, engine2's Dense; plan §18.3, §22). Sella's number is the state's own density about 1600,
 # before the plague of 1630, on its own 16,000 km² — its plain, hills and mountains together.
@@ -341,6 +354,17 @@ minus = ["italy_cn", "italy_isole"]
 [regions.tuscany]
 parts = [{ countries = ["ITA"], names = ["Arezzo", "Firenze", "Grosseto", "Livorno", "Lucca", "Massa Carrara",
                                         "Pisa", "Pistoia", "Prato", "Siena"] }]
+
+[regions.switzerland_south_west]
+# The parts of Switzerland the layout of milan_1477 gives to others: Ticino south of the Alps
+# (Milan), Vaud and Geneva (Savoy).
+parts = [{ countries = ["CHE"], names = ["Lugano", "Mendrisio", "Locarno", "Bellinzona", "Vallemaggia", "Riviera", "Blenio",
+                                        "Nyon", "Morges", "Lausanne", "Ouest lausannois", "Lavaux-Oron", "Gros-de-Vaud",
+                                        "Jura-North Vaudois", "Broye-Vully", "Pays-d'Enhaut", "Genève"] }]
+
+[regions.confederation]
+parts = [{ countries = ["CHE"] }]
+minus = ["switzerland_south_west"]
 
 [regions.lombardy_state]
 # The State of Milan of the source by today's provinces: the Milanese with Lodi, Pavia, Cremona,
@@ -560,7 +584,7 @@ lands = ["italy_cn", "tuscany", "italy_alps", "italy_si", "italy_sud", "italy_is
          "germany", "denmark", "scandinavia", "russia", "sawad"]
 
 [scenarios.milan_1477]
-lands = ["italy_cn", "tuscany", "lombardy", "italy_alps", "italy_si", "italy_sud", "italy_isole"]
+lands = ["italy_cn", "tuscany", "lombardy", "italy_alps", "italy_si", "italy_sud", "italy_isole", "confederation"]
 # Population of the start year by land (millions): the fill at start (plan §7) next to the fill
 # at which engine2's growth equals the plague loss.
 start_population = { italy_cn = 5.125, tuscany = 0.486, italy_si = 3.407, italy_sud = 2.395, italy_isole = 1.012 }
