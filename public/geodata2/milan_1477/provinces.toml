@@ -483,6 +483,7 @@ coastal = true
 population = 240915
 neighbours = ["alessandria", "cuneo", "lucca", "modena", "nizza", "parma"]
 sea_neighbours = ["basilicata", "cagliari", "calabria_citra", "calabria_ultra", "campagna", "corsica", "messina", "napoli", "palermo", "pisa", "principato", "roma", "sassari", "siena"]
+governor = "prospero_adorno"
 culture = "italian"
 religion = "catholic"
 

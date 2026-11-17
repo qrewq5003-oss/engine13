@@ -1,12 +1,16 @@
-//! The map of milan_1477 (E1b, docs/engine2_map.md §7) compiles through the scenario schema.
+//! The map of milan_1477 (E1b, docs/engine2_map.md §7) and the scenario's own facts (E4, §25)
+//! compile through the scenario schema.
 //!
 //! The province table is the cartographer's output (`tools/map/layout.py` →
 //! `public/geodata2/milan_1477/provinces.toml`): areas, land classes, neighbours, sea
-//! neighbours, cultures, religions, regions and the start population of §11d. The actors are
-//! stubs — one house and one ruler per owner, the capital at the owner's first province — until
-//! the scenario's own actors (E7). Compiling checks what the schema checks: owners known,
-//! neighbours symmetric and known, sea neighbours only on coasts, regions' provinces known, and
-//! no province above the capacity the engine derives for its land.
+//! neighbours, governors, cultures, religions, regions and the start population of §11d. The
+//! polities, houses, persons, relations and aspirations are the scenario's own file beside it,
+//! `scenario.toml`, written by the cartographer from the sources (docs/engine2_map.md §19, §23,
+//! §25). The two texts are one scenario (`ScenarioData::parse_parts`, plan §31.49): a province
+//! names its governor in the other file, so the table no longer loads on stub actors.
+//! Compiling checks what the schema checks: owners known, neighbours symmetric and known, sea
+//! neighbours only on coasts, regions' provinces known, seats held by persons of the polity,
+//! and no province above the capacity the engine derives for its land.
 
 use std::collections::BTreeMap;
 
@@ -14,86 +18,49 @@ use engine2::params::Params;
 use engine2::scenario::ScenarioData;
 use engine2::sim::{Game, Simulation};
 
+const HEAD: &str = include_str!("../../public/geodata2/milan_1477/scenario.toml");
 const PROVINCES: &str = include_str!("../../public/geodata2/milan_1477/provinces.toml");
 
-/// The two starting armies a source gives (`docs/engine2_map.md` §23, Mallett): Milan «more
-/// than 20 thousand» in 1472–1474, Venice «little more than 10 thousand» in the 1470s — the
-/// lower ends, for the stub only; the scenario's data will carry the cartographer's numbers.
-const SOLDIERS_BY_SOURCE: [(&str, u64); 2] = [("milan", 20_000), ("venice", 10_000)];
-
-/// The scenario's own text for the map's stub: the top keys and, for every owner of the
-/// province table, an actor with one house and one ruler, its capital at its first province,
-/// no treasury; the starting army by the source where there is one, else left to the engine's
-/// rule; every verb of the engine turned on.
-fn stub_head() -> String {
-    let table: toml::Table = toml::from_str(PROVINCES).expect("the province table is TOML");
-    let provinces = table["provinces"].as_table().expect("[provinces]");
-    let mut capital: BTreeMap<String, String> = BTreeMap::new();
-    for (id, p) in provinces {
-        let owner = p["owner"].as_str().expect("owner").to_string();
-        capital.entry(owner).or_insert_with(|| id.clone());
-    }
-    let mut text = String::from(
-        "id = \"milan_1477_map\"\nstart_year = 1477\ndiseases = [\"Plague\"]\n\
-         [display_currency]\nname = \"ducat\"\nkg_per_unit = 100.0\n[verbs]\n",
-    );
-    // Every verb of the engine is on: the bots act only by the verbs a scenario turns on, and
-    // a stub with none is a world they can do nothing in (the first cut of this stub had none
-    // — plan §31.50). The verbs are of the presentation, not of the facts: the hash stands.
-    for verb in engine2::verbs::VerbId::ALL {
-        text += &format!("{0} = \"{0}\"\n", verb.key());
-    }
-    for (owner, cap) in &capital {
-        // The starting army: the number of a source where one is opened, else left out — the
-        // engine's rule (E4, plan §31.50).
-        let soldiers = SOLDIERS_BY_SOURCE.iter().find(|(id, _)| id == owner).map(|(_, n)| format!("soldiers = {n}\n")).unwrap_or_default();
-        text += &format!(
-            "[actors.{owner}]\nname = \"{owner}\"\ntreasury_kg = 0\ncapital = \"{cap}\"\n{soldiers}\
-             institutions = []\nruler = \"{owner}_ruler\"\nsuccession = \"Blood\"\naspirations = []\n\
-             [houses.{owner}_house]\nname = \"{owner}\"\npolity = \"{owner}\"\ntreasury_kg = 0\n\
-             culture = \"stub\"\nreligion = \"stub\"\nsoldiers = 0\n\
-             [persons.{owner}_ruler]\nname = \"{owner}\"\nhouse = \"{owner}_house\"\nborn = 1440\n"
-        );
-    }
-    text
-}
-
-/// The map as a scenario on stub actors: the stub's text and the province table, one text.
-fn stub_scenario() -> String {
-    stub_head() + PROVINCES
+/// The scenario as one text: its own file and the province table after it.
+fn whole_scenario() -> String {
+    HEAD.to_string() + PROVINCES
 }
 
 #[test]
 fn milan_1477_map_compiles_through_the_scenario_schema() {
-    let scenario = ScenarioData::parse(&stub_scenario()).expect("the map parses as a scenario");
+    let scenario = ScenarioData::parse(&whole_scenario()).expect("the map parses as a scenario");
     assert!(scenario.provinces.len() >= 50, "{} provinces", scenario.provinces.len());
     let whole = scenario.compile(&Params::load().unwrap()).expect("the map compiles through the schema");
-    // The same as the two files a real scenario is kept in (E4, plan §31.49): the province
+    // The same as the two files the scenario is kept in (E4, plan §31.49): the province
     // table carries the regions, the scenario's text none — the same facts, the same hash.
-    let parts = ScenarioData::parse_parts(&stub_head(), PROVINCES).expect("the two texts join into the scenario");
+    let parts = ScenarioData::parse_parts(HEAD, PROVINCES).expect("the two texts join into the scenario");
     let parts = parts.compile(&Params::load().unwrap()).expect("the joined scenario compiles");
     assert!(!whole.facts.regions.is_empty(), "the map's regions are in the facts");
-    // The stub turns on every verb of the engine: the bots act only by the verbs a scenario
-    // turns on, and a stub with none is a world they can do nothing in — the probe below ran
-    // so once and reported it as a run with the bots (plan §31.49, §31.50).
+    // The scenario turns on every verb of the engine: the bots act only by the verbs a
+    // scenario turns on, and one with none is a world they can do nothing in — the probe
+    // below ran so once and reported it as a run with the bots (plan §31.49, §31.50).
     let on: Vec<engine2::verbs::VerbId> = whole.display.verbs.iter().map(|(verb, _)| *verb).collect();
-    assert_eq!(on, engine2::verbs::VerbId::ALL.to_vec(), "every verb of the engine is on in the stub");
+    assert_eq!(on, engine2::verbs::VerbId::ALL.to_vec(), "every verb of the engine is on in the scenario");
     assert_eq!(parts.facts.hash(), whole.facts.hash());
+    // Every owner of the province table is a polity of the scenario's own file, and none of
+    // that file is without land (docs/engine2_map.md §25).
+    let owners: std::collections::BTreeSet<&String> = scenario.provinces.values().map(|p| &p.owner).collect();
+    let actors: std::collections::BTreeSet<&String> = scenario.actors.keys().collect();
+    assert_eq!(owners, actors);
 }
 
-/// Probe before the scenario's data (E4, plan §31.49): the map of Milan played with the bots
-/// on the stub actors — does a turn panic or fail on real areas, and how long does it take.
-/// **It prints and asserts nothing; its numbers are no measure of the scenario** and go into
-/// no stop: the actors are stubs — one house and one ruler a polity, no treasury, the
-/// starting army by the engine's rule, no aspirations, no relations, every verb of the
-/// engine on (with none on the bots can do nothing: the first cut of this probe ran so,
-/// plan §31.49). What the bots do on them is the stub's, not Milan's.
+/// Probe (E4, plan §31.49): the scenario of Milan played with the bots — does a turn panic
+/// or fail on real areas, and how long does it take. **It prints and asserts nothing; its
+/// numbers are no measure of the scenario** and go into no stop. First written on stub
+/// actors, before the scenario's data; now it runs on the scenario's own file
+/// (docs/engine2_map.md §25), whose stubs are listed at its head: the rulers of the
+/// republics without one ruler, and no treasury anywhere.
 #[test]
 #[ignore = "probe: prints, asserts nothing"]
-fn diagnosis_the_map_of_milan_runs_with_bots_on_stub_actors() {
+fn diagnosis_the_scenario_of_milan_runs_with_bots() {
     let p = Params::load().unwrap();
-    let scenario = ScenarioData::parse(&stub_scenario()).expect("the map parses as a scenario");
-    eprintln!("the stub: every polity one house and one ruler, no treasury, the starting army by the rule (Milan and Venice by the source), no aspirations, no relations, every verb on — what follows is the stub's, not Milan's; {} provinces", scenario.provinces.len());
+    let scenario = ScenarioData::parse(&whole_scenario()).expect("the map parses as a scenario");
+    eprintln!("the scenario's own file (its stubs are listed at its head): no treasury, the starting army by the rule (Milan and Venice by the source), every verb on; {} provinces, {} polities", scenario.provinces.len(), scenario.actors.len());
     let census = |g: &Game| {
         let w = g.world();
         let people: i64 = w.provinces.keys().map(|q| w.population(*q)).sum();

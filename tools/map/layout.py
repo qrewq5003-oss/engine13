@@ -639,6 +639,7 @@ def write_toml(path, scenario, layout, provs_cfg, pids, provs, hills_of, pop, st
                   f"population = {int(pop[k])}",
                   "neighbours = [" + ", ".join(toml_str(x) for x in f.neighbours) + "]",
                   "sea_neighbours = [" + ", ".join(toml_str(x) for x in f.sea_neighbours) + "]",
+                  *([f"governor = {toml_str(pc['governor'])}"] if "governor" in pc else []),
                   f"culture = {toml_str(pc['culture'])}",
                   f"religion = {toml_str(pc['religion'])}",
                   ""]
