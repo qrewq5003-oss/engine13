@@ -3,7 +3,7 @@
 # land — the capacity class at arable 50 per km²; hills — the share of an arable province's area that carries
 # the hills' density, where its land has a ceiling between the two (docs/engine2_map.md §11a–§11c, §12b, §17, §20);
 # population — the start population by the rule of §11d; provinces of no land carry a stub
-# (0.5 of capacity) until E4: albania_ottomana, albania_veneta, bosnia, bresse, carniola, corfu, creta, croazia, dalmazia, delfinato, epiro, erzegovina, istria, lepanto, malvasia, modone, morea, nauplia, nizza, ossola, provenza, ragusa, savoia, svizzera, tirolo.
+# (0.5 of capacity) until E4: albania_ottomana, albania_veneta, bosnia, bresse, carniola, corfu, creta, croazia, dalmazia, delfinato, epiro, erzegovina, istria, lepanto, malvasia, modone, morea, nauplia, nizza, ossola, provenza, ragusa, savoia, tirolo.
 
 [provinces.abruzzo]
 name = "Abruzzi"
@@ -483,6 +483,7 @@ coastal = true
 population = 240915
 neighbours = ["alessandria", "cuneo", "lucca", "modena", "nizza", "parma"]
 sea_neighbours = ["basilicata", "cagliari", "calabria_citra", "calabria_ultra", "campagna", "corsica", "messina", "napoli", "palermo", "pisa", "principato", "roma", "sassari", "siena"]
+governor = "prospero_adorno"
 culture = "italian"
 religion = "catholic"
 
@@ -871,9 +872,10 @@ religion = "catholic"
 name = "Confederazione"
 owner = "swiss"
 area_km2 = 35623
-land = "Hills"
+land = "Arable"
+hills = 0.539
 coastal = false
-population = 213738
+population = 614000
 neighbours = ["aosta", "bresse", "como", "ossola", "savoia", "tirolo", "valtellina"]
 sea_neighbours = []
 culture = "german"
