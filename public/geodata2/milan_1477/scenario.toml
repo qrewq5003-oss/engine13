@@ -575,13 +575,15 @@ parent = "giovanni_d_aragona"
 
 # ---------------------------------------------------------------- the republics without one ruler
 # STUBS: the ruler is an office, the holder of the start of 1477 is not opened (§25.3).
+# succession = "Office" (owner's decision 2026-11-18, К23): the holder is not usurped and
+# leaves no dynasty; at his death the house raises the next.
 [actors.siena]
 name = "Сиенская республика"
 treasury_kg = 0
 capital = "siena"
 institutions = []
 ruler = "siena_capitano_del_popolo"
-succession = "Election"
+succession = "Office"
 # E0 §6.3: «выжить против Флоренции» — to hold its own (К21).
 aspirations = [{ kind = "Hold", target = "siena" }]
 
@@ -604,7 +606,7 @@ treasury_kg = 0
 capital = "lucca"
 institutions = []
 ruler = "lucca_gonfaloniere"
-succession = "Election"
+succession = "Office"
 # No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
 aspirations = [{ kind = "Hold", target = "lucca" }]
 
@@ -627,7 +629,7 @@ treasury_kg = 0
 capital = "ragusa"
 institutions = []
 ruler = "ragusa_rettore"
-succession = "Election"
+succession = "Office"
 # No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
 aspirations = [{ kind = "Hold", target = "ragusa" }]
 
@@ -650,7 +652,7 @@ treasury_kg = 0
 capital = "svizzera"
 institutions = []
 ruler = "swiss_tagsatzung"
-succession = "Election"
+succession = "Office"
 # No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
 aspirations = [{ kind = "Hold", target = "svizzera" }]
 
