@@ -494,7 +494,8 @@ institutions = []
 ruler = "guglielmo_paleologo"
 heir = "bonifacio_paleologo"
 succession = "Blood"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "monferrato" }]
 
 [houses.paleologo]
 name = "Палеологи Монферратские"
@@ -555,7 +556,8 @@ capital = "siena"
 institutions = []
 ruler = "siena_capitano_del_popolo"
 succession = "Election"
-aspirations = []
+# E0 §6.3: «выжить против Флоренции» — to hold its own (К21).
+aspirations = [{ kind = "Hold", target = "siena" }]
 
 [houses.comune_di_siena]
 name = "Коммуна Сиены"
@@ -577,7 +579,8 @@ capital = "lucca"
 institutions = []
 ruler = "lucca_gonfaloniere"
 succession = "Election"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "lucca" }]
 
 [houses.comune_di_lucca]
 name = "Коммуна Лукки"
@@ -599,7 +602,8 @@ capital = "ragusa"
 institutions = []
 ruler = "ragusa_rettore"
 succession = "Election"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "ragusa" }]
 
 [houses.comune_di_ragusa]
 name = "Коммуна Рагузы"
@@ -621,7 +625,8 @@ capital = "svizzera"
 institutions = []
 ruler = "swiss_tagsatzung"
 succession = "Election"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "svizzera" }]
 
 [houses.eidgenossen]
 name = "Союз кантонов"
@@ -645,7 +650,8 @@ capital = "delfinato"
 institutions = []
 ruler = "luigi_xi"
 succession = "Blood"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "delfinato" }]
 
 [houses.valois]
 name = "Валуа"
@@ -674,7 +680,8 @@ capital = "provenza"
 institutions = []
 ruler = "renato_d_angio"
 succession = "Blood"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "provenza" }]
 
 [houses.angio]
 name = "Анжуйский дом"
@@ -698,7 +705,8 @@ capital = "croazia"
 institutions = []
 ruler = "mattia_corvino"
 succession = "Election"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [{ kind = "Hold", target = "croazia" }]
 
 [houses.hunyadi]
 name = "Хуньяди"
@@ -721,7 +729,14 @@ capital = "albania_ottomana"
 institutions = []
 ruler = "maometto_ii"
 succession = "Blood"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [
+    { kind = "Hold", target = "bosnia" },
+    { kind = "Hold", target = "morea" },
+    { kind = "Hold", target = "albania_ottomana" },
+    { kind = "Hold", target = "epiro" },
+    { kind = "Hold", target = "erzegovina" },
+]
 
 [houses.osman]
 name = "Дом Османа"
@@ -752,7 +767,12 @@ capital = "tirolo"
 institutions = []
 ruler = "sigismondo_d_austria"
 succession = "Blood"
-aspirations = []
+# No row in E0 §6.3: to hold its own (owner's decision 2026-11-18, К21).
+aspirations = [
+    { kind = "Hold", target = "tirolo" },
+    { kind = "Hold", target = "carniola" },
+    { kind = "Hold", target = "trento" },
+]
 
 [houses.asburgo]
 name = "Габсбурги"
