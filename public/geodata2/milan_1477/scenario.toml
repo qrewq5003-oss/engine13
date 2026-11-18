@@ -87,7 +87,20 @@ ruler = "gian_galeazzo_sforza"
 heir = "ermes_sforza"
 regent = "bona_di_savoia"
 succession = "Blood"
-aspirations = [{ kind = "Hold", target = "lombardia" }]
+# E0 §6.3: «удержать Ломбардию против Венеции» — its own provinces there. Not the region
+# `lombardia`: it holds `bergamo` and `brescia` of Venice and `mantova` of the marquis, and to
+# hold a region not wholly one's own is, in the engine, to make war for the rest (К20).
+aspirations = [
+    { kind = "Hold", target = "milano" },
+    { kind = "Hold", target = "pavia" },
+    { kind = "Hold", target = "cremona" },
+    { kind = "Hold", target = "parma" },
+    { kind = "Hold", target = "alessandria" },
+    { kind = "Hold", target = "novara" },
+    { kind = "Hold", target = "como" },
+    { kind = "Hold", target = "ossola" },
+    { kind = "Hold", target = "valtellina" },
+]
 
 [houses.sforza]
 name = "Сфорца"
@@ -308,7 +321,8 @@ capital = "ferrara"
 institutions = []
 ruler = "ercole_d_este"
 succession = "Blood"
-aspirations = []
+# E0 §6.3, the row of Ferrara, Mantua and Urbino: «удержать независимость» — to hold its own (К18).
+aspirations = [{ kind = "Hold", target = "ferrara" }, { kind = "Hold", target = "modena" }]
 
 [houses.este]
 name = "Эсте"
@@ -338,7 +352,8 @@ capital = "mantova"
 institutions = []
 ruler = "ludovico_gonzaga"
 succession = "Blood"
-aspirations = []
+# E0 §6.3, the row of Ferrara, Mantua and Urbino: «удержать независимость» — to hold its own (К18).
+aspirations = [{ kind = "Hold", target = "mantova" }]
 
 [houses.gonzaga]
 name = "Гонзага"
@@ -373,7 +388,8 @@ capital = "urbino"
 institutions = []
 ruler = "federico_da_montefeltro"
 succession = "Blood"
-aspirations = []
+# E0 §6.3, the row of Ferrara, Mantua and Urbino: «удержать независимость» — to hold its own (К18).
+aspirations = [{ kind = "Hold", target = "urbino" }]
 
 [houses.montefeltro]
 name = "Монтефельтро"
@@ -436,7 +452,15 @@ ruler = "filiberto_di_savoia"
 heir = "carlo_di_savoia"
 regent = "iolanda_di_francia"
 succession = "Blood"
-aspirations = [{ kind = "Hold", target = "piemonte" }]
+# E0 §6.3: «удержать Пьемонт» — its own provinces there. Not the region `piemonte`: it holds
+# `monferrato` of the marquis, and to hold a region not wholly one's own is, in the engine, to
+# make war for the rest (К19).
+aspirations = [
+    { kind = "Hold", target = "torino" },
+    { kind = "Hold", target = "cuneo" },
+    { kind = "Hold", target = "vercelli" },
+    { kind = "Hold", target = "aosta" },
+]
 
 [houses.savoia]
 name = "Савойский дом"
