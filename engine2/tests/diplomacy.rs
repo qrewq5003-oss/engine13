@@ -586,6 +586,81 @@ fn declare_war_costs_legitimacy_a_breach_costs_the_factor_and_ends_the_treaty_an
     assert!(!offer.available && offer.why.as_deref() == Some("a vassal fights only its lord"), "{:?}", offer.why);
 }
 
+/// E4, plan §31.71 — the ladder of defeat, its second half (the owner's decision (в)): **while
+/// the peace of a submission is in force the lord's claim on the vassal's land counts as met,
+/// and the lord declares no war on the vassal.** The submission stands by two facts read
+/// together — the vassalage and a peace of the pair in force; without either nothing stands.
+/// It ends with the peace: at the treaty's term, when the vassal itself declares on its lord,
+/// when another treaty of the pair takes the peace's place.
+#[test]
+fn while_the_peace_of_a_submission_stands_the_lords_claim_on_the_vassals_land_is_met_and_it_declares_no_war_on_the_vassal() {
+    use engine2::{GoalKind, GoalTarget, VerbId, WarAim};
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let q = at(1, 1);
+    let start = || {
+        let mut g = bare(&scenario_with_verbs(), params(), 11).unwrap();
+        let w = g.world_mut();
+        // A region of the lord's capital and two provinces of the vassal; three goals on its land.
+        w.regions.push(vec![at(0, 0), at(1, 0), q]);
+        let region = engine2::RegionId((w.regions.len() - 1) as u32);
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Province(q)).unwrap();
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Region(region)).unwrap();
+        g
+    };
+    let progress = |w: &World| -> Vec<f64> { w.actors[&s0].goals.iter().rev().take(3).map(|g| w.goal_progress(s0, g)).collect() };
+    let met = |w: &World| w.claim_met(s0, s1, WarAim::Province(q));
+
+    // Neither fact alone: a vassal with no peace of the pair, a peace with a polity that is no vassal.
+    let mut g = start();
+    g.world_mut().make_vassal(s1, s0).unwrap();
+    g.world_mut().bind(s0, s2, TreatyKind::Peace, &p).unwrap();
+    let w = g.world();
+    assert!(!w.submission_stands(s0, s1) && !w.submission_stands(s0, s2));
+    assert!(w.war_room(s0, s1).is_ok() && w.war_room(s0, s2).is_ok(), "a peace is broken at its price, not forbidden");
+    assert!(!met(w) && progress(w).iter().all(|x| *x < 1.0), "nothing counts as met: {:?}", progress(w));
+
+    // Both: the submission stands — for the lord, not for the vassal.
+    g.world_mut().bind(s0, s1, TreatyKind::Peace, &p).unwrap();
+    let w = g.world();
+    assert!(w.submission_stands(s0, s1) && !w.submission_stands(s1, s0));
+    assert_eq!(w.war_room(s0, s1), Err("the submission stands"));
+    assert!(w.war_room(s1, s0).is_ok(), "the vassal may fight its lord, as it always might");
+    assert!(met(w), "the claim on the vassal's province is met");
+    assert_eq!(progress(w), vec![1.0, 1.0, 1.0], "the province, the polity and the region with the vassal's land: taken, for the lord's goals");
+    let offer = g.verbs(engine2::ActorRef::Ruler(s0)).into_iter().find(|o| o.verb == VerbId::DeclareWar).unwrap();
+    assert!(offer.available, "the lord may declare on others");
+    assert!(g.tick(&[call(s0, VerbId::DeclareWar, s1)]).is_err(), "the world refuses the lord's declaration on the vassal");
+    assert!(!g.world().at_war(s0, s1));
+
+    // The term: the peace runs out with its event, and nothing stands any more.
+    let now = g.world().tick;
+    g.world_mut().treaties.get_mut(&(s0, s1)).unwrap().until = Tick(now.0 + 1);
+    let r = g.tick(&[]).unwrap();
+    assert!(g.world().submission_stands(s0, s1), "to the very term");
+    let r2 = g.tick(&[]).unwrap();
+    assert!(r.events.iter().chain(&r2.events).any(|e| matches!(e.event, Event::TreatyExpired { a, b, kind: TreatyKind::Peace } if (a, b) == (s0, s1))));
+    let w = g.world();
+    assert!(w.lord_of(s1) == Some(s0) && !w.submission_stands(s0, s1), "a vassal still, the submission stands no more");
+    assert!(w.war_room(s0, s1).is_ok() && !met(w) && progress(w).iter().all(|x| *x < 1.0), "the lord's claim is unmet again and it may declare: {:?}", progress(w));
+
+    // The vassal declares on its lord itself: the peace is broken, and with it the submission.
+    let mut g = start();
+    g.world_mut().make_vassal(s1, s0).unwrap();
+    g.world_mut().bind(s0, s1, TreatyKind::Peace, &p).unwrap();
+    let r = g.tick(&[call(s1, VerbId::DeclareWar, s0)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::TreatyBroken { kind: TreatyKind::Peace, .. })));
+    assert!(g.world().at_war(s0, s1) && !g.world().submission_stands(s0, s1) && !met(g.world()));
+
+    // Another treaty of the pair takes the peace's place: no peace, no standing submission.
+    let mut g = start();
+    g.world_mut().make_vassal(s1, s0).unwrap();
+    g.world_mut().bind(s0, s1, TreatyKind::Peace, &p).unwrap();
+    g.world_mut().ally_now(s0, s1, &p).unwrap();
+    assert!(!g.world().submission_stands(s0, s1) && g.world().war_room(s0, s1).is_ok());
+}
+
 #[test]
 fn peace_is_accepted_by_the_state_of_the_war_closes_the_obligations_and_settles_the_loser() {
     use engine2::VerbId;

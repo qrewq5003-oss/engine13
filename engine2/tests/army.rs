@@ -194,8 +194,43 @@ fn an_undefended_province_falls_within_the_tick_and_a_capital_after_siege_capita
     assert!(w.provinces[&at(1, 4)].siege.is_none());
 }
 
+/// The sweep of the tests of the last province: `u0` of `s0` marches down the column of `s1`
+/// until the event `done` names comes; the report of that tick with the legitimacy `s1` had
+/// before it, and none when it never came.
+fn sweep(g: &mut Game, u0: UnitId, s0: ActorId, done: impl Fn(&Event) -> bool) -> Option<(engine2::world::TickReport, f64)> {
+    for target in [at(1, 0), at(1, 1), at(1, 2), at(1, 3), at(1, 4)] {
+        if g.world().provinces[&target].owner == s0 {
+            continue;
+        }
+        g.world_mut().order_move(u0, target).unwrap();
+        for _ in 0..12 {
+            let legitimacy = g.world().actors[&ActorId(1)].legitimacy;
+            let r = g.tick(&[]).unwrap();
+            // The levy and the fall move men between people and soldiers, never make or
+            // lose them: those sources sum to zero over all accounts.
+            let moved: i64 = r.postings.iter().filter(|q| matches!(q.source, Source::Recruit | Source::Disband)).map(|q| q.milli).sum();
+            assert_eq!(moved, 0);
+            assert!(r.postings.iter().all(|q| q.source != Source::Hire));
+            if r.events.iter().any(|e| done(&e.event)) {
+                return Some((r, legitimacy));
+            }
+            if g.world().provinces[&target].owner == s0 {
+                break;
+            }
+        }
+    }
+    None
+}
+
+/// E4, plan §31.71 — the ladder of defeat (the owner's decision (2) + (в), executor's decision
+/// № 27): **the last province of a polity is not taken** — the polity submits to the taker,
+/// the war closes with a peace for the term, and it lives on as the taker's vassal. The fall
+/// stays where the taker is the polity's own lord: once the peace of the submission is gone,
+/// the lord takes the vassal's last province and the vassal falls, its levies to the people
+/// where they stand.
 #[test]
-fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
+fn the_last_province_of_a_polity_is_not_taken_it_submits_to_the_taker_and_the_takers_own_vassal_falls_its_levies_to_the_people() {
+    let p = params();
     let mut s = testworld::five_states_scenario();
     s.verbs.insert("disband".to_string(), "Disband".to_string());
     let mut g = bare(&s, params(), 2).unwrap();
@@ -203,34 +238,38 @@ fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
     let (u0, u1) = (g.world().units_of(s0)[0], g.world().units_of(s1)[0]);
     g.world_mut().declare_war(s0, s1).unwrap();
     set_soldiers(g.world_mut(), u0, 6000);
-    // s1's army stands abroad, on s2's land, and is still there when the last province falls.
+    // s1's army stands abroad, on s2's land, and is still there when the last province is reached.
     let abroad = at(2, 4);
     g.world_mut().units.get_mut(&u1).unwrap().position = abroad;
     let people_abroad = g.world().population(abroad);
-    let mut fell_in = None;
-    'sweep: for target in [at(1, 0), at(1, 1), at(1, 2), at(1, 3), at(1, 4)] {
-        g.world_mut().order_move(u0, target).unwrap();
-        for _ in 0..12 {
-            let r = g.tick(&[]).unwrap();
-            // The levy and the fall move men between people and soldiers, never make or
-            // lose them: those sources sum to zero over all accounts.
-            let moved: i64 = r.postings.iter().filter(|q| matches!(q.source, Source::Recruit | Source::Disband)).map(|q| q.milli).sum();
-            assert_eq!(moved, 0);
-            assert!(r.postings.iter().all(|q| q.source != Source::Hire));
-            if r.events.iter().any(|e| matches!(e.event, Event::ActorDied { actor } if actor == s1)) {
-                let soldiers_out: i64 = r.postings.iter().filter(|q| q.source == Source::Disband && matches!(q.account, Account::Soldiers(_))).map(|q| q.milli).sum();
-                let people_in: i64 = r.postings.iter().filter(|q| q.source == Source::Disband && matches!(q.account, Account::Population(_))).map(|q| q.milli).sum();
-                assert!(soldiers_out < 0 && people_in == -soldiers_out, "the fallen polity's levies joined the people where they stood: {soldiers_out} {people_in}");
-                assert!(g.world().population(abroad) >= people_abroad + 500, "into the province they stood in");
-                fell_in = Some(r.tick);
-                break 'sweep;
-            }
-            if g.world().provinces[&target].owner == s0 {
-                break;
-            }
-        }
-    }
-    assert!(fell_in.is_some(), "s1 lost its last province");
+    let (r, legitimacy) = sweep(&mut g, u0, s0, |e| matches!(e, Event::Submission { .. })).expect("s1 was brought to its last province");
+    let w = g.world();
+    assert!(p.legitimacy_cost_province_lost > 0.0 && w.actors[&s1].legitimacy < legitimacy - 1.0, "its ruler paid for the provinces ceded: {legitimacy} → {}", w.actors[&s1].legitimacy);
+    let last = w.actors[&s1].provinces.clone();
+    assert_eq!(last.len(), 1, "the last province is not taken");
+    assert!(w.alive(s1) && w.provinces[&last[0]].owner == s1 && w.provinces[&last[0]].siege.is_none(), "the polity lives, its province its own, the siege lifted");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorDied { .. })), "nobody fell");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, .. } if province == last[0])));
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Submission { vassal, lord } if (vassal, lord) == (s1, s0))), "it submitted to the taker");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Peace { a, b } if (a, b) == (s0, s1))), "the war closed");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Defeat { actor, by, provinces: 4 } if (actor, by) == (s1, s0))), "the defeat of the four provinces it ceded");
+    assert_eq!(w.lord_of(s1), Some(s0));
+    assert!(!w.at_war(s0, s1) && w.peace_in_force(s0, s1) && w.submission_stands(s0, s1), "a peace for the term: the submission stands");
+    assert!(w.units.contains_key(&u1), "its army is its own still");
+    assert_eq!(w.war_room(s0, s1), Err("the submission stands"), "the lord declares no war on the vassal while the peace is in force");
+
+    // The peace of the submission gone (its term), the lord takes the last province of its own
+    // vassal as any province was taken before: the vassal falls.
+    g.world_mut().treaties.remove(&(s0, s1));
+    assert!(g.world().war_room(s0, s1).is_ok() && !g.world().submission_stands(s0, s1));
+    g.world_mut().declare_war(s0, s1).unwrap();
+    let (r, _) = sweep(&mut g, u0, s0, |e| matches!(e, Event::ActorDied { actor } if *actor == s1)).expect("the lord took its vassal's last province");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { province, from, to, how: Transfer::Conquest } if province == last[0] && from == s1 && to == s0)));
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Submission { .. })));
+    let soldiers_out: i64 = r.postings.iter().filter(|q| q.source == Source::Disband && matches!(q.account, Account::Soldiers(_))).map(|q| q.milli).sum();
+    let people_in: i64 = r.postings.iter().filter(|q| q.source == Source::Disband && matches!(q.account, Account::Population(_))).map(|q| q.milli).sum();
+    assert!(soldiers_out < 0 && people_in == -soldiers_out, "the fallen polity's levies joined the people where they stood: {soldiers_out} {people_in}");
+    assert!(g.world().population(abroad) >= people_abroad + 500, "into the province they stood in");
     let w = g.world();
     assert!(!w.alive(s1));
     assert!(w.actors[&s1].provinces.is_empty());
@@ -241,6 +280,42 @@ fn a_polity_without_land_falls_its_levies_join_the_people_and_its_war_closes() {
     assert!(g.verbs(ActorRef::Ruler(s1)).iter().all(|o| !o.available && o.why.as_deref() == Some("the polity has fallen")));
     let err = g.tick(&[VerbCall { actor: ActorRef::Ruler(s1), verb: VerbId::Recruit, target: Target::Province(at(1, 0)) }]).unwrap_err();
     assert!(matches!(err, SimError::Verb(engine2::economy::VerbError::Fallen(a)) if a == s1), "{err}");
+}
+
+/// The ladder of defeat, the two cases beside it (plan §31.71.4, questions 2 and 3): a lord
+/// whose last province its own vassal takes falls as before, and the vassal is free; a vassal
+/// whose last province a third polity takes changes its lord.
+#[test]
+fn a_lord_taken_by_its_own_vassal_falls_and_a_vassal_another_polity_takes_changes_its_lord() {
+    let s = testworld::five_states_scenario();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    // The vassal s0 against its lord s1.
+    let mut g = bare(&s, params(), 2).unwrap();
+    let (u0, u1) = (g.world().units_of(s0)[0], g.world().units_of(s1)[0]);
+    g.world_mut().make_vassal(s0, s1).unwrap();
+    g.world_mut().declare_war(s0, s1).unwrap();
+    set_soldiers(g.world_mut(), u0, 6000);
+    g.world_mut().units.get_mut(&u1).unwrap().position = at(2, 4);
+    let (r, _) = sweep(&mut g, u0, s0, |e| matches!(e, Event::ActorDied { actor } if *actor == s1)).expect("the vassal took its lord's last province");
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::Submission { .. })), "no submission of a lord to its vassal");
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::Released { vassal, lord } if (vassal, lord) == (s0, s1))), "the fallen lord frees its vassal");
+    assert!(!g.world().alive(s1) && g.world().lord_of(s0).is_none());
+
+    // The vassal s1 of s2, its last province reached by s0.
+    let mut g = bare(&s, params(), 2).unwrap();
+    let (u0, u1) = (g.world().units_of(s0)[0], g.world().units_of(s1)[0]);
+    g.world_mut().make_vassal(s1, s2).unwrap();
+    g.world_mut().declare_war(s0, s1).unwrap();
+    set_soldiers(g.world_mut(), u0, 6000);
+    g.world_mut().units.get_mut(&u1).unwrap().position = at(2, 4);
+    let (r, _) = sweep(&mut g, u0, s0, |e| matches!(e, Event::Submission { .. })).expect("s1 was brought to its last province");
+    let released = r.events.iter().position(|e| matches!(e.event, Event::Released { vassal, lord } if (vassal, lord) == (s1, s2))).expect("its lord lost it");
+    let submitted = r.events.iter().position(|e| matches!(e.event, Event::Submission { vassal, lord } if (vassal, lord) == (s1, s0))).expect("it submitted to the taker");
+    assert!(released < submitted);
+    let w = g.world();
+    assert!(w.alive(s1) && w.actors[&s1].provinces.len() == 1 && w.lord_of(s1) == Some(s0));
+    assert!(w.vassals_of(s2).is_empty());
+    assert!(!w.at_war(s0, s1) && !w.at_war(s0, s2), "the war and the lord's war of obligation closed with the peace");
 }
 
 #[test]

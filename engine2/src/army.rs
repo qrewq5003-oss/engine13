@@ -443,6 +443,14 @@ impl World {
 
     /// The siege phase: an unopposed enemy takes a province — at once, or a capital after
     /// `siege.capital_ticks` consecutive ticks.
+    ///
+    /// **The last province of a polity is not taken** (E4, plan §31.71 — the ladder of
+    /// defeat, the owner's decision (2) + (в) of 2026-11-18, executor's decision № 27): the
+    /// polity submits to the taker (`submit_at_the_last`) and lives on as its vassal. So in
+    /// the war of a secession too — the «suppression» of a polity of one province is gone
+    /// (the owner's decision on the question of §31.71.4). Two falls stay as they were: a
+    /// vassal whose last province its own lord takes, and a lord whose last province its own
+    /// vassal takes.
     pub(crate) fn phase_siege(&mut self, params: &Params) -> Result<(), WorldError> {
         let provinces: Vec<ProvinceId> = self.provinces.keys().copied().collect();
         for p in provinces {
@@ -464,6 +472,10 @@ impl World {
                     self.provinces.get_mut(&p).unwrap().siege = Some(crate::world::Siege { by, ticks });
                     continue;
                 }
+            }
+            if self.actors[&owner].provinces.len() == 1 && self.lord_of(owner) != Some(by) && self.lord_of(by) != Some(owner) {
+                self.submit_at_the_last(owner, by, params)?;
+                continue;
             }
             self.transfer(p, owner, by, Transfer::Conquest)?;
         }
