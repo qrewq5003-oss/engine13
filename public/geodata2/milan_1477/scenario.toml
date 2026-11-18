@@ -87,7 +87,20 @@ ruler = "gian_galeazzo_sforza"
 heir = "ermes_sforza"
 regent = "bona_di_savoia"
 succession = "Blood"
-aspirations = [{ kind = "Hold", target = "lombardia" }]
+# E0 §6.3: «удержать Ломбардию против Венеции» — its own provinces there. Not the region
+# `lombardia`: it holds `bergamo` and `brescia` of Venice and `mantova` of the marquis, and to
+# hold a region not wholly one's own is, in the engine, to make war for the rest (К20).
+aspirations = [
+    { kind = "Hold", target = "milano" },
+    { kind = "Hold", target = "pavia" },
+    { kind = "Hold", target = "cremona" },
+    { kind = "Hold", target = "parma" },
+    { kind = "Hold", target = "alessandria" },
+    { kind = "Hold", target = "novara" },
+    { kind = "Hold", target = "como" },
+    { kind = "Hold", target = "ossola" },
+    { kind = "Hold", target = "valtellina" },
+]
 
 [houses.sforza]
 name = "Сфорца"
