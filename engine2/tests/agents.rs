@@ -492,6 +492,24 @@ struct Measures {
     /// (E4, plan §31.70), years. `reigns` (В5) holds those that ended by the ruler's death, as
     /// before; printed beside it, asserted nowhere.
     reigns_deposed: Vec<f64>,
+    /// The ladder of defeat (E4, plan §31.71 — printed; the rule's own assertion comes with
+    /// the rule): the submissions, and of them those of a polity holding one province when it
+    /// submitted; the falls of a vassal at the hand of its own lord, each with the years
+    /// since it submitted (a vassal of the starting facts counts from the start); the
+    /// declarations of a lord on its own vassal — all, and with a peace between the two in
+    /// force; the falls of a polity born of a secession at the hand of its parent in the war
+    /// of its birth (the «suppression» of the secession's rule) and its submissions to the
+    /// parent in that war (the owner's decision on §31.71.4: the ladder holds there too); the
+    /// polities that began with one province — dead at the run's end, and all of them; the
+    /// living at the run's end that are vassals, and all the living.
+    vassals_at_end: [u64; 2],
+    submissions: u64,
+    last_submissions: u64,
+    submissions_in_birth_war: u64,
+    vassals_absorbed: Vec<f64>,
+    lord_on_vassal: [u64; 2],
+    falls_in_birth_war: u64,
+    one_province_dead: [u64; 2],
     army_by_obligation: i64,
     people_by_obligation: i64,
     army_first_tick: i64,
@@ -641,6 +659,28 @@ impl Measures {
         format!("В5 by the ruler's death {:.2} years ({} reigns); by every end of a reign {:.2} years ({} reigns, of them {} with the ruler set aside alive, {:.2} years)", mean(&self.reigns), self.reigns.len(), mean(&all), all.len(), self.reigns_deposed.len(), mean(&self.reigns_deposed))
     }
 
+    /// The ladder of defeat (E4, plan §31.71): what stands between a defeat and the fall.
+    fn ladder_line(&self) -> String {
+        let mut years = self.vassals_absorbed.clone();
+        years.sort_by(f64::total_cmp);
+        let median = if years.is_empty() { 0.0 } else { years[(years.len() - 1) / 2] };
+        format!(
+            "the ladder of defeat: submissions {}, of them of a polity holding one province {}, to the parent in the war of its birth {}; vassals fallen at the hand of their own lord {} (years since the submission, median {:.1}); declarations of a lord on its own vassal {}, with a peace between them in force {}; polities born of a secession fallen at the hand of the parent in the war of their birth {}; polities of one province at the start dead at the end {} of {}; vassals among the living at the end {} of {}",
+            self.submissions,
+            self.last_submissions,
+            self.submissions_in_birth_war,
+            years.len(),
+            median,
+            self.lord_on_vassal[0],
+            self.lord_on_vassal[1],
+            self.falls_in_birth_war,
+            self.one_province_dead[0],
+            self.one_province_dead[1],
+            self.vassals_at_end[0],
+            self.vassals_at_end[1]
+        )
+    }
+
     /// The ally of both sides (E4, plan §31.57): the wars between allies with the alliance in
     /// force, the pair-ticks allied and at war at once, the treaties broken by a declaration.
     fn allies_line(&self) -> String {
@@ -743,6 +783,17 @@ impl Measures {
         self.declared_weaker[1] += o.declared_weaker[1];
         self.declared_weaker_ally_nearer += o.declared_weaker_ally_nearer;
         self.reigns_deposed.extend(o.reigns_deposed);
+        self.submissions += o.submissions;
+        self.last_submissions += o.last_submissions;
+        self.submissions_in_birth_war += o.submissions_in_birth_war;
+        self.vassals_absorbed.extend(o.vassals_absorbed);
+        self.lord_on_vassal[0] += o.lord_on_vassal[0];
+        self.lord_on_vassal[1] += o.lord_on_vassal[1];
+        self.falls_in_birth_war += o.falls_in_birth_war;
+        self.one_province_dead[0] += o.one_province_dead[0];
+        self.one_province_dead[1] += o.one_province_dead[1];
+        self.vassals_at_end[0] += o.vassals_at_end[0];
+        self.vassals_at_end[1] += o.vassals_at_end[1];
         self.wars_between_allies += o.wars_between_allies;
         self.allied_at_war_pair_ticks += o.allied_at_war_pair_ticks;
         self.treaties_broken += o.treaties_broken;
@@ -940,6 +991,14 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
     let mut last_peace: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
     let mut war_since: BTreeMap<(ActorId, ActorId), u32> = BTreeMap::new();
     let n0 = g.world().actors.len();
+    // The ladder of defeat (plan §31.71): when each vassal submitted (the vassals of the
+    // starting facts at the start), the polities born of a secession whose war of birth is
+    // still open with the parent, the polities that began with one province.
+    let (mut submissions, mut last_submissions, mut vassals_absorbed, mut lord_on_vassal, mut falls_in_birth_war) = (0u64, 0u64, Vec::<f64>::new(), [0u64; 2], 0u64);
+    let mut submissions_in_birth_war = 0u64;
+    let mut submitted_at: BTreeMap<ActorId, u32> = g.world().actors.iter().filter(|(_, x)| x.vassal_of.is_some()).map(|(a, _)| (*a, 0)).collect();
+    let mut birth_war: BTreeMap<ActorId, ActorId> = BTreeMap::new();
+    let one_province: Vec<ActorId> = g.world().actors.iter().filter(|(a, x)| g.world().alive(**a) && x.provinces.len() == 1).map(|(a, _)| *a).collect();
     polities_start += n0;
     let mut since: BTreeMap<ActorId, u32> = g.world().actors.keys().map(|a| (*a, 0)).collect();
     let mut war_by_actor: BTreeMap<ActorId, (u64, u64)> = BTreeMap::new();
@@ -1049,6 +1108,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
             Event::ProvinceChangedHands { from, how: engine2::event::Transfer::Conquest, .. } => Some(from),
             _ => None,
         }).collect();
+        let mut birth_war_over: Vec<ActorId> = Vec::new();
         for e in &r.events {
             match &e.event {
                 Event::RulerDied { actor, .. } => reigns.push(f64::from(t + 1 - since.get(actor).copied().unwrap_or(t + 1)) / 2.0),
@@ -1068,6 +1128,22 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                     if sizes.get(from).copied().unwrap_or(0) >= 5 {
                         risings += 1;
                     }
+                    if g.world().at_war(*actor, *from) {
+                        birth_war.insert(*actor, *from);
+                    }
+                }
+                Event::Submission { vassal, lord } => {
+                    submissions += 1;
+                    if g.world().actors[vassal].provinces.len() == 1 {
+                        last_submissions += 1;
+                    }
+                    if birth_war.get(vassal) == Some(lord) {
+                        submissions_in_birth_war += 1;
+                    }
+                    submitted_at.insert(*vassal, t);
+                }
+                Event::Released { vassal, .. } => {
+                    submitted_at.remove(vassal);
                 }
                 Event::Revolt { from, province } => {
                     revolts_started += 1;
@@ -1086,6 +1162,20 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                     falls += 1;
                     if conquered_this_tick.contains(actor) {
                         falls_by_conquest += 1;
+                    }
+                    // Who took its last province: its own lord, or the parent it was born of
+                    // in the war of its birth.
+                    let taker = r.events.iter().rev().find_map(|x| match x.event {
+                        Event::ProvinceChangedHands { from, to, how: engine2::event::Transfer::Conquest, .. } if from == *actor => Some(to),
+                        _ => None,
+                    });
+                    if let Some(taker) = taker {
+                        if before.actors[actor].vassal_of == Some(taker) {
+                            vassals_absorbed.push(f64::from(t - submitted_at.get(actor).copied().unwrap_or(t)) / 2.0);
+                        }
+                        if birth_war.get(actor) == Some(&taker) {
+                            falls_in_birth_war += 1;
+                        }
                     }
                 }
                 // A declaration claims a polity or one of its provinces (plan §28.9): the war
@@ -1106,6 +1196,12 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                     declarations += 1;
                     if unpaid_seen.get(a).copied().unwrap_or(false) {
                         declared_unpaid += 1;
+                    }
+                    if before.actors.get(&b).is_some_and(|x| x.vassal_of == Some(*a)) {
+                        lord_on_vassal[0] += 1;
+                        if before.peace_in_force(*a, b) {
+                            lord_on_vassal[1] += 1;
+                        }
                     }
                     if before.alive(*a) && before.alive(b) && !before.at_war(*a, b) {
                         let odds = before.war_odds(*a, b, 0.0, p);
@@ -1134,6 +1230,15 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                 Event::Peace { a, b } => {
                     let k = ((*a).min(*b), (*a).max(*b));
                     last_peace.insert(k, t);
+                    // The war of a secession's birth is over: what follows is another war
+                    // (struck out after the tick's events — the submission of this very
+                    // peace comes after it and is of that war still).
+                    if birth_war.get(a) == Some(b) {
+                        birth_war_over.push(*a);
+                    }
+                    if birth_war.get(b) == Some(a) {
+                        birth_war_over.push(*b);
+                    }
                     if let Some(t0) = war_since.remove(&k) {
                         war_lengths.push(t - t0);
                     }
@@ -1163,6 +1268,9 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                 Event::Verb { verb, .. } => *verbs.entry(*verb).or_insert(0) += 1,
                 _ => {}
             }
+        }
+        for a in birth_war_over {
+            birth_war.remove(&a);
         }
         // The wars of principals and the battles (plan §30.10), in the order of the events.
         {
@@ -1228,10 +1336,25 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                                 _ => None,
                             });
                             assert_eq!(x.taken.0.abs_diff(x.taken.1), defeat.map_or(0, |(_, n)| n), "the test's count of the war's conquests parts with the peace's record");
-                            let won = defeat.map(|(winner, ceded)| {
-                                let (winner, loser) = if winner == k.0 { x.start } else { (x.start.1, x.start.0) };
-                                Won { winner, loser, ceded: Some(ceded), fell_to_another: false }
+                            // The ladder of defeat (plan §31.71): a polity at its last province
+                            // submits to the taker — the war is decided for the lord, whatever
+                            // the count of the provinces says (none ceded where the polity had
+                            // the one province).
+                            let lord = r.events.iter().find_map(|e| match e.event {
+                                Event::Submission { vassal, lord } if pair(vassal, lord) == k => Some(lord),
+                                _ => None,
                             });
+                            let won = match (lord, defeat) {
+                                (Some(lord), _) => {
+                                    let (winner, loser) = if lord == k.0 { x.start } else { (x.start.1, x.start.0) };
+                                    Some(Won { winner, loser, ceded: Some(defeat.filter(|(by, _)| *by == lord).map_or(0, |(_, n)| n)), fell_to_another: false })
+                                }
+                                (None, Some((winner, ceded))) => {
+                                    let (winner, loser) = if winner == k.0 { x.start } else { (x.start.1, x.start.0) };
+                                    Some(Won { winner, loser, ceded: Some(ceded), fell_to_another: false })
+                                }
+                                (None, None) => None,
+                            };
                             principal_wars.push(EndedWar { length: t - x.since, battles: x.battles, won });
                         }
                     }
@@ -1270,7 +1393,9 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, wars_between_allies, allied_at_war_pair_ticks, treaties_broken, reigns_deposed, army_by_obligation, people_by_obligation, army_first_tick, people_first_tick, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
+    let one_province_dead = [one_province.iter().filter(|a| !g.world().alive(**a)).count() as u64, one_province.len() as u64];
+    let vassals_at_end = [w.actors.iter().filter(|(a, x)| w.alive(**a) && x.vassal_of.is_some()).count() as u64, w.actors.keys().filter(|a| w.alive(**a)).count() as u64];
+    Measures { vassals_at_end, submissions, last_submissions, submissions_in_birth_war, vassals_absorbed, lord_on_vassal, falls_in_birth_war, one_province_dead, reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, wars_between_allies, allied_at_war_pair_ticks, treaties_broken, reigns_deposed, army_by_obligation, people_by_obligation, army_first_tick, people_first_tick, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1288,8 +1413,10 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let a11_line = m.a11_line();
     let allies_line = m.allies_line();
     let reigns_line = m.reigns_line();
+    let ladder_line = m.ladder_line();
+    let lord_on_vassal = m.lord_on_vassal;
     let (wars_between_allies, allied_at_war_pair_ticks) = (m.wars_between_allies, m.allied_at_war_pair_ticks);
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, wars_between_allies: _, allied_at_war_pair_ticks: _, treaties_broken: _, reigns_deposed: _, army_by_obligation: _, people_by_obligation: _, army_first_tick: _, people_first_tick: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
+    let Measures { vassals_at_end: _, submissions: _, last_submissions: _, submissions_in_birth_war: _, vassals_absorbed: _, lord_on_vassal: _, falls_in_birth_war: _, one_province_dead: _, reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, wars_between_allies: _, allied_at_war_pair_ticks: _, treaties_broken: _, reigns_deposed: _, army_by_obligation: _, people_by_obligation: _, army_first_tick: _, people_first_tick: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1418,8 +1545,13 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     eprintln!("{a11_line}");
     eprintln!("{allies_line}");
     eprintln!("{reigns_line}");
+    eprintln!("{ladder_line}");
     // The owner's decision В3 (plan §31.57): a rule of the world, not a measure with a band.
     assert_eq!((wars_between_allies, allied_at_war_pair_ticks), (0, 0), "no pair is allied and at war at once: an alliance a war sets across its sides breaks at its opening");
+    // The ladder of defeat (E4, plan §31.71): while the peace of a submission is in force the
+    // lord declares no war on the vassal (`World::war_room`, which the bots read too where
+    // they choose whom to declare on).
+    assert_eq!(lord_on_vassal[1], 0, "a lord declared war on its own vassal with a peace between them in force ({} declarations of a lord on its vassal in all)", lord_on_vassal[0]);
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
@@ -2055,6 +2187,7 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
         eprintln!("{label}: {}", m.a11_line());
         eprintln!("{label}: {}", m.allies_line());
         eprintln!("{label}: {}", m.reigns_line());
+        eprintln!("{label}: {}", m.ladder_line());
         for line in m.war_lines() {
             eprintln!("{label}: {line}");
         }
@@ -3368,8 +3501,13 @@ fn the_bot_reads_that_a_revolt_left_standing_its_term_costs_the_province() {
 /// chain of conquests covers all the polity's land, the loss is its whole income to the
 /// horizon, not the provinces' takes with their discounts; a polity with land beyond the chain
 /// loses provinces.
+///
+/// **The ladder of defeat** (E4, plan §31.71, executor's decision № 27): the last province of
+/// that chain is not taken — the polity submits to the taker, and what it reads is the tribute
+/// of Д2 on its own take of that province, to the horizon. The fall and the whole income stay
+/// where the world keeps them: the enemy is the polity's lord, or its own vassal.
 #[test]
-fn a_chain_of_conquests_over_all_the_land_is_the_fall_worth_the_whole_income_to_the_horizon() {
+fn a_chain_of_conquests_over_all_the_land_ends_in_a_submission_worth_its_tribute_and_in_the_fall_worth_the_whole_income_where_the_enemy_is_its_lord_or_its_vassal() {
     let p = params();
     let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
     let mut w = world_of(&testworld::five_states_scenario(), 39);
@@ -3383,11 +3521,137 @@ fn a_chain_of_conquests_over_all_the_land_is_the_fall_worth_the_whole_income_to_
         w.actors.get_mut(&s2).unwrap().provinces.push(q);
     }
     let t = w.war_terms(s0, s1, blow, &p);
-    assert!(t.fall(), "one province within the enemy's reach: the fall");
+    assert!(t.fall(), "one province within the enemy's reach: the chain covers all its land");
+    assert!(t.submits(), "and its end is a submission: the enemy is neither its lord nor its vassal");
     let q = 1.0 - w.war_odds(s0, s1, 0.0, &p);
     let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    let tribute = engine2::economy::tribute_due(w.take_of(s0, at(0, 0), &p) as i64, &p) as f64 / w.yearly_income(s0, &p).max(1) as f64;
+    assert!(tribute > 0.0 && tribute < 0.5, "the tribute of Д2 on the take of the province it is left with, a share of its income: {tribute}");
     let worth = w.war_worth_of(s0, &t, false, 0.0, &p);
+    assert!(worth <= -q * tribute * years * 0.999, "the tribute to the horizon at the odds of the defeat: {worth} vs {}", -q * tribute * years);
+    assert!(worth > -q * years * 0.5, "and not the whole income: {worth} vs {}", -q * years);
+    // The enemy its lord: a lord takes the last province of its own vassal as before.
+    let mut lord = w.clone();
+    lord.make_vassal(s0, s1).unwrap();
+    let t = lord.war_terms(s0, s1, blow, &p);
+    assert!(t.fall() && !t.submits() && t.last_tribute() == 0.0, "the vassal of the enemy reads its fall");
+    let q_lord = 1.0 - lord.war_odds(s0, s1, 0.0, &p);
+    let fall = lord.war_worth_of(s0, &t, false, 0.0, &p);
+    assert!(fall <= -q_lord * years * 0.999, "the whole income to the horizon at the odds of the fall: {fall} vs {}", -q_lord * years);
+    // The two readings part by exactly what the ladder takes out of the fall: the income the
+    // polity keeps less the tribute, and the blow of a ceded province — the last is not ceded.
+    assert_eq!(q, q_lord, "the same odds either way");
+    assert!(((worth - fall) - q * (years * (1.0 - tribute) + blow)).abs() < 1e-9, "the submission against the fall: {} against {}", worth - fall, q * (years * (1.0 - tribute) + blow));
+    // The enemy its own vassal: a vassal that takes its lord's last province fells it.
+    let mut vassal = w.clone();
+    vassal.make_vassal(s1, s0).unwrap();
+    let t = vassal.war_terms(s0, s1, blow, &p);
+    assert!(t.fall() && !t.submits(), "the lord of the enemy reads its fall");
+    let q = 1.0 - vassal.war_odds(s0, s1, 0.0, &p);
+    let worth = vassal.war_worth_of(s0, &t, false, 0.0, &p);
     assert!(worth <= -q * years * 0.999, "the whole income to the horizon at the odds of the fall: {worth} vs {}", -q * years);
+
+    // Two provinces, both within the chain: the first is ceded at its take, the second is the
+    // one the polity is left with — the tribute is on the take of that one, not on its income.
+    let mut two = world_of(&testworld::five_states_scenario(), 39);
+    for y in 2..5 {
+        let q = at(0, y);
+        two.provinces.get_mut(&q).unwrap().owner = s2;
+        two.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        two.actors.get_mut(&s2).unwrap().provinces.push(q);
+    }
+    // (A capital that stands no longer than any province and a stake a long march away, a
+    // step a tick, so that the war's length holds both conquests.)
+    let mut quick = p.clone();
+    quick.siege_capital_ticks = 1;
+    quick.march_km_per_tick = 1;
+    two.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 4))).unwrap();
+    let t = two.war_terms(s0, s1, blow, &quick);
+    assert!(t.fall() && t.submits(), "both its provinces within the enemy's chain");
+    let takes: Vec<f64> = [at(0, 0), at(0, 1)].into_iter().map(|q| engine2::economy::tribute_due(two.take_of(s0, q, &quick) as i64, &quick) as f64).collect();
+    assert!(takes.contains(&t.last_tribute()), "the tribute on the take of the province it is left with: {} of {takes:?}", t.last_tribute());
+    assert!(t.last_tribute() < engine2::economy::tribute_due(two.yearly_income(s0, &quick), &quick) as f64, "not on its whole income");
+
+    // A claim on the polity prices its submission already (`tribute`, at `to_submit`): the
+    // ladder's tribute is not added to it. The same war with the claim and without reads the
+    // same for a polity of one province — its whole income is the take of that province.
+    let mut claimed = w.clone();
+    claimed.declare_war(s1, s0).unwrap();
+    let mut plain = claimed.clone();
+    plain.wars.get_mut(&(s0, s1)).unwrap().aim = None;
+    assert_eq!((claimed.wars[&(s0, s1)].aim, plain.wars[&(s0, s1)].aim), (Some(engine2::WarAim::Polity(s0)), None), "the claim of the one, none of the other");
+    let (tc, tp) = (claimed.war_terms(s0, s1, blow, &p), plain.war_terms(s0, s1, blow, &p));
+    assert!(tc.submits() && tp.submits());
+    let (wc, wp) = (claimed.war_worth_of(s0, &tc, false, 0.0, &p), plain.war_worth_of(s0, &tp, false, 0.0, &p));
+    assert!((wc - wp).abs() < 1e-6, "the submission is priced once: {wc} with the claim, {wp} without");
+}
+
+/// The ladder of defeat as the attacker reads it (E4, plan §31.71, executor's decision № 27):
+/// **the last province of a polity is not taken**, so a stake that covers all of a polity's
+/// land counts one of its provinces — its capital, the one the siege holds longest — as the
+/// tribute of Д2 the polity would pay on it as a vassal, and not as the attacker's own take.
+/// A stake on a part of its land is as it was; so is the stake on a polity that is the
+/// attacker's vassal or its lord, whose last province is taken as before; and a goal to
+/// subdue it prices the tribute already — the capital's is not added to it.
+#[test]
+fn a_stake_on_all_of_a_politys_land_counts_its_capital_as_the_tribute_of_its_submission() {
+    let p = params();
+    let (s0, s1) = (ActorId(0), ActorId(1));
+    let tribute_due = engine2::economy::tribute_due;
+    // The stake by hand: the take of every province of `b` but `skip`, held against the take
+    // back and the rising, and `tribute` beside it against the take back.
+    let by_hand = |w: &World, skip: Option<engine2::ProvinceId>, tribute: f64| {
+        let back = w.retake_odds(s0, s1, s0, w.war_ticks(s0, s1, &p), &p);
+        w.actors[&s1].provinces.iter().filter(|q| Some(**q) != skip).map(|q| w.take_of(s0, *q, &p) * (1.0 - back) * (1.0 - w.revolt_share(s0, *q, &p))).sum::<f64>() + tribute * (1.0 - back)
+    };
+    let close = |x: f64, y: f64| (x - y).abs() <= 1e-9 * y.abs().max(1.0);
+    let mut w = world_of(&testworld::five_states_scenario(), 39);
+    w.set_goal(s0, GoalKind::Take, GoalTarget::Polity(s1)).unwrap();
+    // The capital not the first of its provinces, and its tax not the attacker's: the tribute
+    // is the polity's own on the take of its capital.
+    w.actors.get_mut(&s1).unwrap().capital = at(1, 2);
+    w.actors.get_mut(&s1).unwrap().tax_rate_ppm /= 2;
+    let capital = w.actors[&s1].capital;
+    let its_tribute = tribute_due(w.take_of(s1, capital, &p) as i64, &p) as f64;
+    assert!(its_tribute > 0.0 && its_tribute != tribute_due(w.take_of(s0, capital, &p) as i64, &p) as f64 && its_tribute != tribute_due(w.take_of(s1, at(1, 0), &p) as i64, &p) as f64);
+    let stake = w.war_stake(s0, s1, &p);
+    assert!(close(stake, by_hand(&w, Some(capital), its_tribute)), "four provinces at the take and the capital at its tribute: {stake} against {}", by_hand(&w, Some(capital), its_tribute));
+    assert!(stake < by_hand(&w, None, 0.0), "less than all five at the take: {stake} against {}", by_hand(&w, None, 0.0));
+
+    // The polity the attacker's vassal, or its lord: its last province is taken as before.
+    for (vassal, lord) in [(s1, s0), (s0, s1)] {
+        let mut v = w.clone();
+        v.make_vassal(vassal, lord).unwrap();
+        let stake = v.war_stake(s0, s1, &p);
+        assert!(close(stake, by_hand(&v, None, 0.0)), "{vassal:?} the vassal of {lord:?}: all its land at the take, {stake} against {}", by_hand(&v, None, 0.0));
+    }
+
+    // A goal to subdue it beside: the tribute of all its income is the stake's already.
+    let mut both = w.clone();
+    both.set_goal(s0, GoalKind::Subdue, GoalTarget::Polity(s1)).unwrap();
+    let whole = tribute_due(both.yearly_income(s1, &p), &p) as f64;
+    let stake = both.war_stake(s0, s1, &p);
+    assert!(close(stake, by_hand(&both, Some(capital), whole)), "the capital's tribute is not added to the submission's: {stake} against {}", by_hand(&both, Some(capital), whole));
+
+    // A part of its land: the stake as it was.
+    let mut part = world_of(&testworld::five_states_scenario(), 39);
+    part.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 1))).unwrap();
+    let back = part.retake_odds(s0, s1, s0, part.war_ticks(s0, s1, &p), &p);
+    let one = part.take_of(s0, at(1, 1), &p) * (1.0 - back) * (1.0 - part.revolt_share(s0, at(1, 1), &p));
+    assert!(close(part.war_stake(s0, s1, &p), one), "one province of five at the take: {} against {one}", part.war_stake(s0, s1, &p));
+
+    // The polity of one province: all the attacker can win of it is its tribute.
+    let mut small = world_of(&testworld::five_states_scenario(), 39);
+    for y in 1..5 {
+        let q = at(1, y);
+        small.provinces.get_mut(&q).unwrap().owner = ActorId(2);
+        small.actors.get_mut(&s1).unwrap().provinces.retain(|x| *x != q);
+        small.actors.get_mut(&ActorId(2)).unwrap().provinces.push(q);
+    }
+    small.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 0))).unwrap();
+    let its_tribute = tribute_due(small.take_of(s1, at(1, 0), &p) as i64, &p) as f64;
+    let stake = small.war_stake(s0, s1, &p);
+    assert!(close(stake, by_hand(&small, Some(at(1, 0)), its_tribute)) && stake > 0.0 && stake <= its_tribute, "its tribute and nothing else: {stake} against {its_tribute}");
 }
 
 /// The rule of the peace read for a war not yet open (E3 (г), owner's decision 1 on §29.10 —
@@ -3444,7 +3708,8 @@ fn a_war_the_rule_of_the_peace_would_close_before_the_stake_is_reached_wins_noth
 /// its war to the enemy's first conquest.** Its own march does not end the war — the rule of
 /// the peace forces the weaker side when it has lost a province on balance — so the land the
 /// enemy takes first is at risk though the blow comes after its own march and siege, and for a
-/// polity of one province that land is its fall. The case found on the scenario of Milan
+/// polity of one province that land is all it has — the end of the chain (a submission since the
+/// ladder of defeat, plan §31.71; the fall before it). The case found on the scenario of Milan
 /// (plan §31.54): Mantua, one province, its stake two ticks away and the enemy's first blow
 /// the fifth, read a gain at its odds and no land at risk — a war at one to forty for nothing.
 /// The stake still counts (the rule of the peace does not close the war before it is
@@ -3475,10 +3740,14 @@ fn the_weaker_side_reads_its_war_to_the_enemys_first_conquest() {
     assert!(odds < 0.5, "the weaker side: {odds}");
     let t = terms(&w, &p);
     assert!(t.first_blow().is_finite() && t.first_blow() > t.ticks, "the enemy's first conquest {} comes after the polity's own march and siege {}", t.first_blow(), t.ticks);
-    assert!(t.fall(), "its one province is the first the enemy takes: the war it reads ends in its fall");
+    assert!(t.fall(), "its one province is the first the enemy takes: the chain the war reads covers all its land");
     let (with, without) = (w.war_worth_of(s0, &t, false, 0.0, &p), w.war_worth_of(s0, &t, true, 0.0, &p));
     assert!(with > without, "the stake counts — the rule of the peace does not close the war before it is reached: {with} against {without}");
-    assert!(without <= -(1.0 - odds) * years * 0.999, "the whole income to the horizon at the odds of the fall: {without} against {}", -(1.0 - odds) * years);
+    // The ladder of defeat (plan §31.71): the enemy is neither its lord nor its vassal, so
+    // that end is a submission — the tribute of Д2 to the horizon, not the whole income.
+    let tribute = engine2::economy::tribute_due(w.take_of(s0, at(0, 0), &p) as i64, &p) as f64 / w.yearly_income(s0, &p).max(1) as f64;
+    assert!(t.submits() && without <= -(1.0 - odds) * tribute * years * 0.999, "the tribute to the horizon at the odds of the defeat: {without} against {}", -(1.0 - odds) * tribute * years);
+    assert!(without > -(1.0 - odds) * years * 0.5, "and not the whole income: {without} against {}", -(1.0 - odds) * years);
     assert!(with < 0.0, "a war at these odds with all its land at risk is worth less than nothing: {with}");
 
     // The same polity the stronger: it is not the side the rule forces, and it reads the
@@ -5757,6 +6026,7 @@ fn diagnosis_the_measures_of_e2_and_e3_on_the_scenario_of_milan() {
     eprintln!("{}", m.a11_line());
     eprintln!("{}", m.allies_line());
     eprintln!("{}", m.reigns_line());
+    eprintln!("{}", m.ladder_line());
     for line in m.war_lines() {
         eprintln!("{line}");
     }

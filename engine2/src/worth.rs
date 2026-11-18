@@ -148,6 +148,13 @@ pub struct WarTerms {
     /// discounts (owner's decision 2 on §29.8 — in the polity's currency; the throne is the
     /// house's and stays out).
     fall: bool,
+    /// The ladder of defeat (E4, plan §31.71, executor's decision № 27): the last province of
+    /// that chain is not taken — the polity submits to the taker and lives on as its vassal
+    /// (`World::submit_at_the_last`), unless the enemy is its lord or its own vassal, whose
+    /// taking of it is the fall as before. `last_tribute`: what the submission costs it, kg a
+    /// year — the tribute of Д2 on its own take of the province it is left with.
+    submits: bool,
+    last_tribute: f64,
     /// The ticks until the enemy's first conquest in the polity's land — the quickest of
     /// the provinces in its reach, a march and a siege (infinite with none in reach). With
     /// it the rule of the peace is read for the war not yet open (owner's decision 1 on
@@ -220,6 +227,18 @@ impl WarTerms {
     /// its land.
     pub fn fall(&self) -> bool {
         self.fall
+    }
+
+    /// Whether that end is a submission and not the fall (the ladder of defeat, plan §31.71):
+    /// the enemy is neither the polity's lord nor its vassal.
+    pub fn submits(&self) -> bool {
+        self.submits
+    }
+
+    /// What that submission costs the polity, kg a year: the tribute of Д2 on its own take of
+    /// the province it is left with (nothing where the terms do not end in a submission).
+    pub fn last_tribute(&self) -> f64 {
+        self.last_tribute
     }
 
     /// The ticks until the enemy's first conquest in the polity's land (infinite with none
@@ -517,11 +536,24 @@ impl World {
                 _ => {}
             }
         }
+        // The ladder of defeat (E4, plan §31.71, executor's decision № 27): the last province
+        // of `b` is not taken — `b` submits and pays the tribute of Д2 on it. Where the goals
+        // want all of `b`'s land and `b` is neither `a`'s vassal nor its lord (those two take
+        // the last province as before), one province enters the stake as that tribute and
+        // not as `a`'s take: **its capital**, the one the siege holds longest
+        // (`siege.capital_ticks`) — which province will be the last the terms cannot know.
+        let all = !wanted.is_empty() && self.actors[&b].provinces.iter().all(|q| wanted.contains(q));
+        let kept = (all && self.lord_of(b) != Some(a) && self.lord_of(a) != Some(b)).then(|| self.actors[&b].capital);
+        if let Some(c) = kept {
+            wanted.remove(&c);
+        }
         // The odds of the take back, read only where a province or the submission is at stake.
-        let back = if wanted.is_empty() && !subdue { 0.0 } else { self.retake_odds(a, b, a, ticks, params) };
+        let back = if wanted.is_empty() && !subdue && kept.is_none() { 0.0 } else { self.retake_odds(a, b, a, ticks, params) };
         let mut kg: f64 = wanted.iter().map(|q| self.take_of(a, *q, params) * (1.0 - back) * (1.0 - self.revolt_share(a, *q, params))).sum();
         if subdue {
             kg += tribute_due(self.yearly_income(b, params), params) as f64 * (1.0 - back);
+        } else if let Some(c) = kept {
+            kg += tribute_due(self.take_of(b, c, params) as i64, params) as f64 * (1.0 - back);
         }
         if free {
             kg += tribute_due(self.yearly_income(a, params), params) as f64;
@@ -738,6 +770,14 @@ impl World {
         };
         // All its land within the chain: the fall of the polity (owner's decision 2 on §29.8).
         let fall = !at_risk.is_empty() && at_risk.len() == self.actors[&a].provinces.len();
+        // The ladder of defeat (plan §31.71): the last of them is not taken — `a` submits and
+        // pays the tribute of Д2 on its own take of it; its lord or its own vassal takes it
+        // as before, and that is the fall.
+        let submits = fall && self.lord_of(a) != Some(b) && self.lord_of(b) != Some(a);
+        let last_tribute = match at_risk.last() {
+            Some(q) if submits => tribute_due(self.take_of(a, *q, params) as i64, params) as f64,
+            _ => 0.0,
+        };
         let back = 1.0 - self.retake_odds_as(b, a, (!seen).then_some(a), ticks, params);
         // The march of `b`'s men from its capital to each, by one search (`revolt_share`).
         let from_capital = if at_risk.is_empty() { std::collections::BTreeMap::new() } else { self.steps_from(b, self.actors[&b].capital) };
@@ -757,6 +797,8 @@ impl World {
             stake: if seen { 0.0 } else { self.war_stake_at(a, b, ticks, params) },
             at_risk,
             fall,
+            submits,
+            last_tribute,
             first_blow,
             blow: blow_per_province,
             tribute,
@@ -843,6 +885,17 @@ impl World {
             odds *= q;
             // The last province of a chain over all the land is the fall: everything the
             // polity still had — its whole income to the horizon less the land already counted.
+            // By the ladder of defeat (plan §31.71) that province is not taken where the enemy
+            // is neither the polity's lord nor its vassal: the polity submits — the tribute
+            // on it to the horizon, nothing ceded and so no blow of a ceded province; where a
+            // claim on the polity is priced already (`tribute`, below), the submission is not
+            // priced twice.
+            if t.submits && k == last {
+                if t.tribute == 0.0 {
+                    lose += odds * t.last_tribute * t.years;
+                }
+                break;
+            }
             let loss = if t.fall && k == last { (t.income * t.years - taken).max(take * t.years) } else { take * t.years };
             lose += odds * loss;
             taken += take * t.years;

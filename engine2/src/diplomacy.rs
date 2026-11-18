@@ -68,7 +68,7 @@ use crate::ledger::{Account, Source};
 use crate::params::Params;
 use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbCall, VerbId};
-use crate::world::{Treaty, TreatyKind, WarAim, World, WorldError};
+use crate::world::{Treaty, TreatyKind, War, WarAim, World, WorldError};
 
 /// The push a breach of a treaty gives a relation (`World::push_relation`): the declarer's
 /// with every ally of the polity it broke with (the verb `declare_war`), and that of the two
@@ -148,6 +148,18 @@ impl World {
 
     pub fn peace_in_force(&self, a: ActorId, b: ActorId) -> bool {
         self.treaty(a, b).is_some_and(|t| t.kind == TreatyKind::Peace)
+    }
+
+    /// Whether the submission of `x` to `a` stands (E4, plan §31.71, the ladder of defeat):
+    /// `x` is `a`'s vassal and a peace between the two is in force — the peace of the
+    /// submission, or any later peace of the pair (no treaty is marked as the one of a
+    /// submission: the mark would be a field of the treaty). While it stands the lord's
+    /// claim on the vassal's land counts as met (`claim_met`, `goal_progress`) and the lord
+    /// declares no war on the vassal (`war_room`). It ends with the peace: at the treaty's
+    /// term, when the vassal itself declares on the lord and breaks it, when another treaty
+    /// of the pair replaces it (`bind`); or with the vassalage.
+    pub fn submission_stands(&self, a: ActorId, x: ActorId) -> bool {
+        self.lord_of(x) == Some(a) && self.peace_in_force(a, x)
     }
 
     /// Friendly land for a polity's units: its own, an ally's, its lord's or a vassal's —
@@ -346,7 +358,8 @@ impl World {
         (odds < 0.5).then_some(loser)
     }
 
-    /// Could `a` declare war on `b`?
+    /// Could `a` declare war on `b`? Not on its own vassal while the peace of its submission
+    /// is in force (`submission_stands`; E4, plan §31.71 — the ladder of defeat).
     pub fn war_room(&self, a: ActorId, b: ActorId) -> Result<(), &'static str> {
         if a == b {
             return Err("no polity to fight");
@@ -356,6 +369,9 @@ impl World {
         }
         if self.at_war(a, b) {
             return Err("already at war");
+        }
+        if self.submission_stands(a, b) {
+            return Err("the submission stands");
         }
         if self.lord_of(a).is_some_and(|lord| lord != b) {
             return Err("a vassal fights only its lord");
@@ -451,13 +467,14 @@ impl World {
     }
 
     /// Whether the claim `aim` of `claimant` in its war with `other` is met (plan §28.9): the
-    /// province is the claimant's; the polity would submit at a peace now — down to half the
+    /// province is the claimant's, or its vassal's whose submission stands (plan §31.71:
+    /// `submission_stands`); the polity would submit at a peace now — down to half the
     /// land it held when the war began (`make_peace_between`) — or is the claimant's vassal
     /// already, or has fallen.
     pub fn claim_met(&self, claimant: ActorId, other: ActorId, aim: WarAim) -> bool {
         match aim {
             WarAim::Province(q) => match self.provinces.get(&q) {
-                Some(pr) => pr.owner == claimant,
+                Some(pr) => pr.owner == claimant || self.submission_stands(claimant, pr.owner),
                 None => true,
             },
             WarAim::Polity(x) => {
@@ -799,25 +816,8 @@ impl World {
     /// half its land, release of a vassal that beat its lord.
     pub(crate) fn make_peace_between(&mut self, a: ActorId, b: ActorId, params: &Params) -> Result<(), WorldError> {
         let key = pair(a, b);
-        let Some(war) = self.wars.remove(&key) else { return Ok(()) };
-        self.emit(Event::Peace { a: key.0, b: key.1 });
-        let dependents: Vec<(ActorId, ActorId)> = self.wars.iter().filter(|(_, w)| w.of == Some(key)).map(|(k, _)| *k).collect();
-        for k in dependents {
-            self.wars.remove(&k);
-            self.emit(Event::Peace { a: k.0, b: k.1 });
-        }
-        let loser = match war.taken.0.cmp(&war.taken.1) {
-            std::cmp::Ordering::Greater => Some(key.1),
-            std::cmp::Ordering::Less => Some(key.0),
-            std::cmp::Ordering::Equal => None,
-        };
-        if let Some(loser) = loser {
-            let winner = if loser == key.0 { key.1 } else { key.0 };
-            // A lost war costs the ruler who lost it (owner's rule on #293): the provinces
-            // ceded on balance, each at `legitimacy.cost_province_lost`.
-            let ceded = war.taken.0.abs_diff(war.taken.1);
-            self.pay_legitimacy(loser, f64::from(ceded) * params.legitimacy_cost_province_lost);
-            self.emit(Event::Defeat { actor: loser, by: winner, provinces: ceded });
+        let Some(war) = self.close_war(key) else { return Ok(()) };
+        if let Some((loser, winner)) = self.defeat_of(key, &war, params) {
             if self.lord_of(winner) == Some(loser) {
                 self.actors.get_mut(&winner).unwrap().vassal_of = None;
                 self.emit(Event::Released { vassal: winner, lord: loser });
@@ -829,6 +829,59 @@ impl World {
                 }
             }
         }
+        self.bind(key.0, key.1, TreatyKind::Peace, params)?;
+        Ok(())
+    }
+
+    /// The war of a pair closes, and with it the wars that were its obligations: the record
+    /// of the war, for the peace to settle. None when the pair is not at war.
+    fn close_war(&mut self, key: (ActorId, ActorId)) -> Option<War> {
+        let war = self.wars.remove(&key)?;
+        self.emit(Event::Peace { a: key.0, b: key.1 });
+        let dependents: Vec<(ActorId, ActorId)> = self.wars.iter().filter(|(_, w)| w.of == Some(key)).map(|(k, _)| *k).collect();
+        for k in dependents {
+            self.wars.remove(&k);
+            self.emit(Event::Peace { a: k.0, b: k.1 });
+        }
+        Some(war)
+    }
+
+    /// The defeat a war's record names, at its peace: the side that has ceded provinces on
+    /// balance pays for them — a lost war costs the ruler who lost it (owner's rule on #293),
+    /// each province at `legitimacy.cost_province_lost` — and the chronicle records it. The
+    /// loser and the winner; none when neither has ceded on balance.
+    fn defeat_of(&mut self, key: (ActorId, ActorId), war: &War, params: &Params) -> Option<(ActorId, ActorId)> {
+        let (loser, winner) = match war.taken.0.cmp(&war.taken.1) {
+            std::cmp::Ordering::Greater => (key.1, key.0),
+            std::cmp::Ordering::Less => (key.0, key.1),
+            std::cmp::Ordering::Equal => return None,
+        };
+        let ceded = war.taken.0.abs_diff(war.taken.1);
+        self.pay_legitimacy(loser, f64::from(ceded) * params.legitimacy_cost_province_lost);
+        self.emit(Event::Defeat { actor: loser, by: winner, provinces: ceded });
+        Some((loser, winner))
+    }
+
+    /// The peace of a polity whose last province is at the enemy's mercy (E4, plan §31.71,
+    /// the ladder of defeat): the province is not taken — the war closes as at any peace
+    /// (`close_war`, a treaty of peace for the term; `defeat_of`: the side that ceded on
+    /// balance pays for it — none where a polity had the one province and lost none) and
+    /// `vassal` becomes the vassal of `lord`, the taker, whatever the count of the provinces
+    /// taken says: its last province stood at the taker's mercy. A lord it had loses it.
+    /// Called by the siege (`phase_siege`), which keeps the two falls that stay: the taker's
+    /// own vassal, and a lord taken by its own vassal.
+    pub(crate) fn submit_at_the_last(&mut self, vassal: ActorId, lord: ActorId, params: &Params) -> Result<(), WorldError> {
+        let key = pair(vassal, lord);
+        let Some(war) = self.close_war(key) else { return Ok(()) };
+        for p in self.actors[&vassal].provinces.clone() {
+            self.provinces.get_mut(&p).unwrap().siege = None;
+        }
+        self.defeat_of(key, &war, params);
+        if let Some(old) = self.lord_of(vassal) {
+            self.emit(Event::Released { vassal, lord: old });
+        }
+        self.actors.get_mut(&vassal).unwrap().vassal_of = Some(lord);
+        self.emit(Event::Submission { vassal, lord });
         self.bind(key.0, key.1, TreatyKind::Peace, params)?;
         Ok(())
     }

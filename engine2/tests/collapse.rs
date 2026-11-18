@@ -699,19 +699,24 @@ fn call(a: ActorId, verb: VerbId, b: ActorId) -> VerbCall {
     VerbCall { actor: engine2::ActorRef::Ruler(a), verb, target: Target::Actor(b) }
 }
 
+/// The ladder of defeat reaches the war of a secession too (E4, plan §31.71, the owner's
+/// decision of 2026-11-18 on its question 1): the parent that takes the secession's land back
+/// does not take its last province — the secession submits there and lives on as the parent's
+/// vassal. **The «suppression» of a polity of one province, the fall this test asserted
+/// before, the owner has taken out of the rule.**
 #[test]
-fn the_end_of_a_secession_is_the_state_of_the_war_suppression_submission_or_freedom() {
+fn the_end_of_a_secession_is_the_state_of_the_war_submission_at_its_last_province_submission_at_half_its_land_or_freedom() {
     let p = calm();
     let (s0, s2) = (ActorId(0), ActorId(2));
     let (p05, p10) = (at(0, 1), at(0, 2));
-    // Suppression: the parent's army beats the militia and takes both provinces back; the
-    // polity falls as any conquered one, the militia to the people, the war closed.
+    // At its last province: the parent's army beats the militia and takes one province back;
+    // the other it does not take — the secession submits to the parent, the war closed.
     let s = carrier_scenario();
     let mut w = world_of(&s, 36);
     let new = w.rise_now(p05, &p).unwrap().unwrap();
     let u0 = w.units_of(s0)[0];
     w.post(Account::Soldiers(u0), Source::Test, (9000 - w.soldiers(u0)) * 1000).unwrap();
-    let mut fell = false;
+    let mut submitted = false;
     for _ in 0..30 {
         if w.units[&u0].destination.is_none() {
             if let Some(target) = [p05, p10].into_iter().find(|q| w.provinces[q].owner == new) {
@@ -719,18 +724,19 @@ fn the_end_of_a_secession_is_the_state_of_the_war_suppression_submission_or_free
             }
         }
         let r = w.tick(&p).unwrap();
-        if r.events.iter().any(|e| matches!(e.event, Event::ActorDied { actor } if actor == new)) {
-            assert!(r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { from, to, how: Transfer::Conquest, .. } if from == new && to == s0)));
-            assert!(r.postings.iter().filter(|q| q.source == Source::Disband).map(|q| q.milli).sum::<i64>() == 0, "the militia joined the people");
-            fell = true;
+        assert!(!r.events.iter().any(|e| matches!(e.event, Event::ActorDied { actor } if actor == new)), "the parent does not put a secession of one province down");
+        if r.events.iter().any(|e| matches!(e.event, Event::Submission { vassal, lord } if (vassal, lord) == (new, s0))) {
+            assert!(!r.events.iter().any(|e| matches!(e.event, Event::ProvinceChangedHands { .. })), "its last province is not taken");
+            submitted = true;
             break;
         }
     }
-    assert!(fell, "the parent put the secession down");
-    assert!(!w.alive(new) && w.actors[&new].provinces.is_empty());
-    assert!(w.units_of(new).is_empty());
-    assert!(!w.wars.keys().any(|(x, y)| *x == new || *y == new), "the war closed with the fall");
-    assert!(w.actors[&s0].provinces.contains(&p05) && w.actors[&s0].provinces.contains(&p10));
+    assert!(submitted, "the secession submitted to its parent at its last province");
+    assert!(w.alive(new) && w.actors[&new].provinces.len() == 1 && w.lord_of(new) == Some(s0));
+    assert_eq!([p05, p10].into_iter().filter(|q| w.provinces[q].owner == s0).count(), 1, "the parent took one province back");
+    assert!(!w.wars.keys().any(|(x, y)| *x == new || *y == new), "the war closed with the submission, and the ally's war of obligation with it");
+    assert_eq!(w.treaty(new, s0).map(|t| t.kind), Some(engine2::TreatyKind::Peace));
+    assert!(w.submission_stands(s0, new) && w.war_room(s0, new).is_err(), "and while that peace is in force the parent declares no war on it");
     assert!(w.actors.contains_key(&new) && w.names.actors.len() == w.actors.len(), "the record stays");
     // Submission: a secession of two provinces loses one — half its land — and the
     // parent, the winner, offers peace: the polity becomes its vassal (Genoa under Milan);

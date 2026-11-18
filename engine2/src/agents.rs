@@ -220,13 +220,15 @@ impl World {
         pr.owner == a && pr.revolt.is_none() && pr.siege.is_none()
     }
 
-    /// The share of a region's provinces a polity holds.
+    /// The share of a region's provinces a polity holds — its own, and those of a vassal
+    /// whose submission stands (E4, plan §31.71: while the peace of a submission is in force
+    /// the lord's claim on the vassal's land counts as met, `World::submission_stands`).
     fn region_share(&self, a: ActorId, r: RegionId) -> f64 {
         let ps = &self.regions[r.index()];
         if ps.is_empty() {
             return 1.0;
         }
-        ps.iter().filter(|p| self.provinces[p].owner == a).count() as f64 / ps.len() as f64
+        ps.iter().filter(|p| self.provinces[p].owner == a || self.submission_stands(a, self.provinces[p].owner)).count() as f64 / ps.len() as f64
     }
 
     /// Whether `b` is friendly land for `a`'s route: its own, an ally's, its lord's, a vassal's.
@@ -254,7 +256,7 @@ impl World {
             (GoalKind::Hold, GoalTarget::Region(r)) => self.region_share(a, r),
             (GoalKind::Hold, GoalTarget::Polity(b)) => f64::from(u8::from(self.lord_of(b) == Some(a))),
             (GoalKind::Take, GoalTarget::Province(p)) => {
-                if self.provinces[&p].owner == a {
+                if self.provinces[&p].owner == a || self.submission_stands(a, self.provinces[&p].owner) {
                     1.0
                 } else if at_war_with(self.provinces[&p].owner) {
                     0.3
@@ -265,7 +267,7 @@ impl World {
             (GoalKind::Take, GoalTarget::Route(p, q)) => (self.route_end(a, p) + self.route_end(a, q)) / 2.0,
             (GoalKind::Take, GoalTarget::Region(r)) => self.region_share(a, r),
             (GoalKind::Take, GoalTarget::Polity(b)) => {
-                if g.baseline == 0 {
+                if g.baseline == 0 || self.submission_stands(a, b) {
                     return 1.0;
                 }
                 let left = self.actors[&b].provinces.len() as f64;
