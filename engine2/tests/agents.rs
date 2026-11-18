@@ -3341,6 +3341,115 @@ fn a_war_the_rule_of_the_peace_would_close_before_the_stake_is_reached_wins_noth
     assert!(with > without, "the weaker side the rule cannot close first counts its stake: {with} against {without} with none");
 }
 
+/// E4, plan §31.55, executor's decision № 23: **the side the weaker by the battle formula reads
+/// its war to the enemy's first conquest.** Its own march does not end the war — the rule of
+/// the peace forces the weaker side when it has lost a province on balance — so the land the
+/// enemy takes first is at risk though the blow comes after its own march and siege, and for a
+/// polity of one province that land is its fall. The case found on the scenario of Milan
+/// (plan §31.54): Mantua, one province, its stake two ticks away and the enemy's first blow
+/// the fifth, read a gain at its odds and no land at risk — a war at one to forty for nothing.
+/// The stake still counts (the rule of the peace does not close the war before it is
+/// reached); the side not weaker than a half reads the terms as it did.
+#[test]
+fn the_weaker_side_reads_its_war_to_the_enemys_first_conquest() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let unit_of = |w: &World, a: ActorId| w.units.iter().find(|(_, u)| u.owner == a).map(|(u, _)| *u).expect("a unit");
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    // Polity 0 down to its capital, wanting a province of its neighbour a march and a siege
+    // away; the neighbour three times its strength, its unit a step from the capital.
+    let one_province = |seed: u64| {
+        let mut w = world_of(&testworld::five_states_scenario(), seed);
+        for y in 1..5 {
+            let q = at(0, y);
+            w.provinces.get_mut(&q).unwrap().owner = s2;
+            w.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+            w.actors.get_mut(&s2).unwrap().provinces.push(q);
+        }
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 1))).unwrap();
+        w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+        w
+    };
+    let terms = |w: &World, p: &Params| w.war_terms(s0, s1, w.ceded_province_blow(s0, &w.risk_prices(s0, p), p), p);
+    let w = one_province(93);
+    let odds = w.war_odds(s0, s1, 0.0, &p);
+    assert!(odds < 0.5, "the weaker side: {odds}");
+    let t = terms(&w, &p);
+    assert!(t.first_blow().is_finite() && t.first_blow() > t.ticks, "the enemy's first conquest {} comes after the polity's own march and siege {}", t.first_blow(), t.ticks);
+    assert!(t.fall(), "its one province is the first the enemy takes: the war it reads ends in its fall");
+    let (with, without) = (w.war_worth_of(s0, &t, false, 0.0, &p), w.war_worth_of(s0, &t, true, 0.0, &p));
+    assert!(with > without, "the stake counts — the rule of the peace does not close the war before it is reached: {with} against {without}");
+    assert!(without <= -(1.0 - odds) * years * 0.999, "the whole income to the horizon at the odds of the fall: {without} against {}", -(1.0 - odds) * years);
+    assert!(with < 0.0, "a war at these odds with all its land at risk is worth less than nothing: {with}");
+
+    // The same polity the stronger: it is not the side the rule forces, and it reads the
+    // land the enemy takes within its own march — none.
+    let mut strong = one_province(93);
+    strong.post(engine2::Account::Soldiers(unit_of(&strong, s0)), Source::Test, 2400 * 1000).unwrap();
+    assert!(strong.war_odds(s0, s1, 0.0, &p) > 0.5, "the stronger side");
+    let t = terms(&strong, &p);
+    assert!(t.first_blow() > t.ticks && !t.fall(), "the stronger side reads no fall beyond its own march");
+    let (with, without) = (strong.war_worth_of(s0, &t, false, 0.0, &p), strong.war_worth_of(s0, &t, true, 0.0, &p));
+    assert!(with > without, "and counts its stake: {with} against {without} with none");
+
+    // The reach is read over the enemy's march to the polity's capital, not over the polity's
+    // own march alone: on a world where a march is a step a tick, the enemy's unit stands five
+    // steps from the capital and the polity's stake two — within its own march the unit
+    // reaches none of its land, within the enemy's it reaches the capital.
+    let mut slow = p.clone();
+    slow.march_km_per_tick = 1;
+    let mut far = one_province(93);
+    assert_eq!(far.march_steps_per_tick(&slow), 1);
+    let enemy = unit_of(&far, s1);
+    far.units.get_mut(&enemy).unwrap().position = at(1, 4);
+    assert!(far.war_odds(s0, s1, 0.0, &slow) < 0.5);
+    let t = terms(&far, &slow);
+    assert!(far.land_in_reach(s1, s0, t.ticks.ceil() as usize, &slow).is_empty(), "within the polity's own march of {} ticks the enemy's unit reaches none of its land", t.ticks);
+    assert!(t.first_blow().is_finite() && t.first_blow() > t.ticks, "the first blow is read all the same: {} after {}", t.first_blow(), t.ticks);
+    assert!(t.fall(), "and the capital it reaches is the polity's fall");
+
+    // The longer of the two, and the polity's own march is one of them: its stake at the far
+    // end of the neighbour's land is six ticks away, the neighbour's march to its capital
+    // five, and the neighbour's unit stands six steps from the capital — out of the reach of
+    // the five, within the six.
+    let mut long = one_province(93);
+    long.actors.get_mut(&s0).unwrap().goals.clear();
+    long.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 4))).unwrap();
+    let enemy = unit_of(&long, s1);
+    long.units.get_mut(&enemy).unwrap().position = at(2, 4);
+    let t = terms(&long, &slow);
+    assert!(long.threat_ticks(s0, s1, &slow) < t.ticks, "the neighbour's march to the capital, {} ticks, is the shorter of the two: its own is {}", long.threat_ticks(s0, s1, &slow), t.ticks);
+    assert!(long.land_in_reach(s1, s0, long.threat_ticks(s0, s1, &slow) as usize, &slow).is_empty() && !long.land_in_reach(s1, s0, t.ticks as usize, &slow).is_empty());
+    assert!(t.first_blow().is_finite() && t.fall(), "the unit within the polity's own march is read: the first blow {}", t.first_blow());
+
+    // The enemy's march to the polity's capital — not the polity's to the enemy's: the enemy
+    // passes its ally's land between them and the polity does not. No bay across; the enemy
+    // two columns away, allied with the polity between; its unit six steps from the capital.
+    let (s2e, s4) = (ActorId(2), ActorId(4));
+    let mut across = world_of(&testworld::five_states_scenario(), 93);
+    for pr in across.provinces.values_mut() {
+        pr.sea_neighbours.clear();
+    }
+    for y in 1..5 {
+        let q = at(0, y);
+        across.provinces.get_mut(&q).unwrap().owner = s4;
+        across.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        across.actors.get_mut(&s4).unwrap().provinces.push(q);
+    }
+    across.treaties.insert((s1, s2e), engine2::world::Treaty { kind: engine2::world::TreatyKind::Alliance, until: engine2::time::Tick(1000), since: None });
+    across.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(2, 1))).unwrap();
+    let enemy = unit_of(&across, s2e);
+    across.post(engine2::Account::Soldiers(enemy), Source::Test, 1200 * 1000).unwrap();
+    across.units.get_mut(&enemy).unwrap().position = at(2, 4);
+    assert!(across.war_odds(s0, s2e, 0.0, &slow) < 0.5);
+    let (theirs, mine) = (across.threat_ticks(s0, s2e, &slow), across.threat_ticks(s2e, s0, &slow));
+    assert!(theirs > mine, "the enemy's march to the polity's capital passes its ally's land, {theirs} ticks; the polity's to the enemy's has no way, {mine}");
+    let t = across.war_terms(s0, s2e, across.ceded_province_blow(s0, &across.risk_prices(s0, &slow), &slow), &slow);
+    assert!(t.ticks < mine, "the polity's own march to its stake, {} ticks, is the shortest of the three", t.ticks);
+    assert!(across.land_in_reach(s2e, s0, mine as usize, &slow).is_empty() && !across.land_in_reach(s2e, s0, theirs as usize, &slow).is_empty());
+    assert!(t.first_blow().is_finite() && t.fall(), "read over the enemy's march: the first blow {}", t.first_blow());
+}
+
 /// The cold start (E3 (г), owner's decision 3 on §29.8): while a polity's record is shorter than
 /// the horizon a bot does not disband below the army it started with — an empty chronicle says
 /// nothing, not «no wars»; a levy above it may go, and once the record is as long as the
