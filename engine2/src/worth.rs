@@ -1116,7 +1116,8 @@ impl World {
     /// it — at the usurper's legitimacy, drawn to the usurper's norm, the hold lost at the next
     /// chance of usurpation (a murder or a natural death leaves the throne to the house's
     /// heir) — against the candidate's governorships, given up at the accession for the
-    /// horizon. No price on a life: the execution is the throne and the seats lost.
+    /// horizon. No price on a life: the ruler's fate is the throne and the seats lost — set
+    /// aside by a usurper of his own house, executed by one of another (plan §31.70).
     pub fn throne_worth(&self, a: ActorId, candidate: PersonId, params: &Params) -> f64 {
         let h = self.persons[&candidate].house;
         let (tax, default) = self.norm_shifts(a, params);

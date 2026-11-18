@@ -19,7 +19,9 @@
 //! order (E4, the owner's decision of 2026-11-18, plan §31.70: it stood first, and a regent
 //! of a scenario's facts may be the ward's mother); with no
 //! candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
-//! executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
+//! executed (`RulerDied { cause: Execution }`) by a usurper of another house and **set
+//! aside alive by one of his own house** (the same decision, plan §31.70: the deposed stays
+//! a member of the house), the usurper takes the throne with the
 //! standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
 //! usurper's norm if it was above it. The rule of succession acts through the norm,
 //! never as a multiplier (E0 §5.4).
@@ -294,9 +296,16 @@ impl World {
 
     /// The usurpation itself: the ruler executed, the usurper seated.
     pub(crate) fn usurp(&mut self, a: ActorId, usurper: PersonId, params: &Params) -> Result<(), WorldError> {
-        let dead = self.actors[&a].ruler;
+        let old = self.actors[&a].ruler;
         let court = self.polity_religion(a);
-        self.die(dead, Cause::Execution, params)?;
+        // **A usurper of the ruler's own house sets the ruler aside and does not kill him**
+        // (E4, plan §31.70, the owner's decision of 2026-11-18; executor's decision № 25):
+        // the deposed lives on as a member of the house — he may inherit, be a regent, take
+        // the throne back. The house is the one kinship the world knows. A usurper of another
+        // house executes the ruler, as before.
+        if self.persons[&usurper].house != self.persons[&old].house {
+            self.die(old, Cause::Execution, params)?;
+        }
         {
             let actor = self.actors.get_mut(&a).unwrap();
             actor.ruler = usurper;
@@ -306,7 +315,7 @@ impl World {
             actor.legitimacy = actor.legitimacy.min(params.legitimacy_norm_usurper);
         }
         self.keep_court_faith(court, usurper);
-        self.emit(Event::Succession { actor: a, from: dead, to: usurper, how: Standing::Usurper });
+        self.emit(Event::Succession { actor: a, from: old, to: usurper, how: Standing::Usurper });
         // The seats the usurper leaves go to other houses (owner's rule on #289).
         for province in self.governed_by(usurper) {
             self.pass_seat(province, usurper, true, params)?;
