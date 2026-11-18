@@ -694,8 +694,22 @@ impl World {
         // march to each (a tick at least, as `war_ticks` counts a march) and its siege — a
         // capital a step away stands its siege while the land behind it falls within the
         // tick (the test world's case).
+        //
+        // **The side the weaker by the battle formula reads its war to the enemy's first
+        // conquest** (E4, plan §31.55, executor's decision № 23): its own march does not end
+        // the war — the rule of the peace forces the weaker side when it has lost a province
+        // on balance (`forced_to_peace`), so until that loss the war goes on. A weak polity
+        // whose march to its stake was shorter than the enemy's first blow read a gain at its
+        // odds and no land at risk: a war at one to forty for nothing (Mantua on Ferrara,
+        // plan §31.54). For it the reach is read over the longer of its own march and the
+        // enemy's march to its capital (`threat_ticks`: seen — the capitals and the path, not
+        // the enemy's goals), and the chain of conquests over the longer of the war's length
+        // and the first blow. The reach is the principal enemy's units', as it was: those of
+        // its allies are in the odds and not read here (the decision's known limit).
         let per_tick = self.march_steps_per_tick(params).max(1);
-        let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
+        let weaker = Self::war_odds_of(sides, 0.0, params) < 0.5;
+        let reach_ticks = if weaker { ticks.max(self.threat_ticks(a, b, params)) } else { ticks };
+        let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, reach_ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
         reach.sort();
         // The enemy's first conquest: the ticks to the quickest of them.
         let first_blow = reach.first().map_or(f64::INFINITY, |(t, _, _)| *t as f64);
@@ -704,7 +718,8 @@ impl World {
             Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
             _ => {
                 let reach: Vec<(usize, ProvinceId)> = reach.into_iter().map(|(_, d, q)| (d, q)).collect();
-                let n = self.conquests_within(ticks, &reach, params);
+                let chain_ticks = if weaker && first_blow.is_finite() { ticks.max(first_blow) } else { ticks };
+                let n = self.conquests_within(chain_ticks, &reach, params);
                 reach.into_iter().take(n).map(|(_, q)| q).collect()
             }
         };
