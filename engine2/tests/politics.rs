@@ -63,6 +63,72 @@ fn succession_of(r: &engine2::TickReport, a: ActorId) -> Option<(PersonId, Perso
     })
 }
 
+/// E4, plan §31.70 — the owner's decision of 2026-11-18 on the republics, executor's decision
+/// № 26: **an office is not a prince.** Under `Succession::Office` the ruling house is an
+/// institution and the ruler the holder of its office: no child is born to him — no lot is
+/// drawn for one; at his death a new holder is raised out of the people into the same house,
+/// standing as one elected, and no dynasty is founded; the office is not usurped. The others
+/// of the polity live as they did.
+#[test]
+fn an_office_leaves_no_dynasty_and_is_not_usurped_its_next_holder_is_raised_into_the_same_house() {
+    let p = params();
+    let s = testworld::five_states_scenario();
+    let s0 = ActorId(0);
+    let (r0, c0, b0) = (person(&s, "r0"), person(&s, "c0"), person(&s, "b0"));
+    let born = |r: &engine2::TickReport, who: PersonId| r.draws.iter().any(|d| d.draw.point == engine2::DrawPoint::Birth && d.draw.id == who.0);
+    let fertile = |w: &mut World| {
+        let year = w.year();
+        w.persons.get_mut(&r0).unwrap().born = year - 30;
+    };
+    // A prince: the lot of a birth is drawn for him, and his governor would take the throne.
+    let mut prince = world_of(&s);
+    fertile(&mut prince);
+    assert!(prince.usurper_candidate(s0, &p).is_some());
+    let r = prince.tick(&p).unwrap();
+    assert!(born(&r, r0), "a ruler of fertile age draws the lot of a birth");
+    // An elected prince — a doge, a king chosen by a diet — is a prince too: the rule of the
+    // office does not reach the rule of election.
+    let mut elected = world_of(&s);
+    fertile(&mut elected);
+    elected.actors.get_mut(&s0).unwrap().succession = Succession::Election;
+    assert!(elected.usurper_candidate(s0, &p).is_some(), "an elected ruler may be usurped");
+    let r = elected.tick(&p).unwrap();
+    assert!(born(&r, r0), "and draws the lot of a birth");
+
+    // The same polity ruled by an office.
+    let mut w = world_of(&s);
+    fertile(&mut w);
+    w.actors.get_mut(&s0).unwrap().succession = Succession::Office;
+    w.actors.get_mut(&s0).unwrap().heir = None;
+    assert_eq!(w.usurper_candidate(s0, &p), None, "an office is not usurped: no candidate, whoever governs");
+    assert_eq!(w.usurp_now(s0, &p).unwrap(), None);
+    assert_eq!(w.next_ruler(s0, &p), None, "nobody of the house is next in line: the office is not inherited");
+    let r = w.tick(&p).unwrap();
+    assert!(!born(&r, r0), "no lot of a birth is drawn for the holder of an office");
+    assert!(born(&r, b0) || r.draws.iter().any(|d| d.draw.point == engine2::DrawPoint::Birth), "the others of the polity draw theirs as before");
+    assert_eq!(w.actors[&s0].ruler, r0);
+    // The holder dies: the next is raised out of the people into the same house.
+    let house = w.persons[&r0].house;
+    let known: Vec<PersonId> = w.persons.keys().copied().collect();
+    w.kill(r0, Cause::Natural, &p).unwrap();
+    let r = w.tick(&p).unwrap();
+    let (from, to, how) = succession_of(&r, s0).expect("a succession");
+    assert_eq!((from, how), (r0, Standing::Elected), "the next holder stands as one elected");
+    assert!(!known.contains(&to) && to != c0 && to != b0, "a new person: the office is not inherited by the house's child nor its elder");
+    assert_eq!((w.persons[&to].house, w.persons[&to].parent), (house, None), "raised into the same house, nobody's child");
+    assert!((30..=31).contains(&w.age(to)), "an adult of a founder's age (the year may have turned in the tick): {}", w.age(to));
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::NewDynasty { .. })), "no dynasty is founded");
+    assert!(r.postings.iter().any(|q| q.source == engine2::Source::Rise && q.milli == -1000), "one of the people of the polity");
+    assert_eq!((w.actors[&s0].ruler, w.actors[&s0].standing, w.actors[&s0].regent), (to, Standing::Elected, None));
+    assert!(w.alive(s0));
+    let r = w.tick(&p).unwrap();
+    assert!(!born(&r, to), "nor for the next holder");
+    assert_eq!(w.usurper_candidate(s0, &p), None);
+    // The scenario's schema reads the rule by the same list.
+    assert_eq!(serde_json::to_string(&Succession::Office).unwrap(), "\"Office\"");
+    assert_eq!(serde_json::from_str::<Succession>("\"Office\"").unwrap(), Succession::Office);
+}
+
 #[test]
 fn the_designated_heir_succeeds_a_child_gets_a_regent_and_the_regency_ends_at_majority() {
     let p = params();

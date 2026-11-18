@@ -307,7 +307,7 @@ fn a_debt_past_the_ceiling_the_treasury_cannot_serve_is_a_default_written_off_pa
 }
 
 #[test]
-fn the_usurper_is_the_regent_else_a_governor_else_the_eldest_adult_of_any_house_and_nobody_when_there_is_no_candidate() {
+fn the_usurper_is_a_governor_else_the_eldest_adult_of_any_house_the_regent_has_no_place_of_its_own_and_nobody_when_there_is_no_candidate() {
     let p = params();
     let s = testworld::five_states_scenario();
     let s0 = ActorId(0);
@@ -318,27 +318,57 @@ fn the_usurper_is_the_regent_else_a_governor_else_the_eldest_adult_of_any_house_
     assert!(w.age(other) > w.age(b0), "the other house's adult is the elder");
     assert_eq!(w.usurper_candidate(s0, &p), Some(b0));
     let l0 = w.actors[&s0].legitimacy;
+    // **A usurper of the ruler's own house sets him aside and does not kill him** (E4, plan
+    // §31.70, the owner's decision of 2026-11-18; executor's decision № 25): the governor
+    // is the ruler's brother.
+    assert_eq!(w.persons[&b0].house, w.persons[&r0].house, "the usurper is of the ruler's house");
     assert_eq!(w.usurp_now(s0, &p).unwrap(), Some(b0));
     let r = w.tick(&p).unwrap();
-    assert!(r.events.iter().any(|e| matches!(e.event, Event::RulerDied { actor, person, cause: Cause::Execution } if actor == s0 && person == r0)));
+    assert!(!r.events.iter().any(|e| matches!(e.event, Event::RulerDied { actor, .. } if actor == s0)), "the deposed is not killed");
+    assert!(w.person_alive(r0) && w.persons[&r0].house == w.persons[&b0].house, "he lives on, a member of the house");
     assert!(r.events.iter().any(|e| matches!(e.event, Event::Succession { actor, from, to, how: Standing::Usurper } if actor == s0 && from == r0 && to == b0)));
     assert_eq!(w.actors[&s0].ruler, b0);
     assert_eq!(w.actors[&s0].standing, Standing::Usurper);
-    assert_eq!(w.actors[&s0].heir, None, "the designated heir of the executed ruler is set aside");
+    assert_eq!(w.actors[&s0].heir, None, "the designated heir of the deposed ruler is set aside");
+    assert!(w.people_of_polity_adults(s0, &p).contains(&r0), "an adult of the polity like any other: he may be a candidate in his turn");
     assert_eq!(w.provinces[&ProvinceId(5)].governor, Some(other), "one seat per person: the seat the usurper leaves goes to another house (owner's rule on #289)");
     assert!(r.events.iter().any(|e| matches!(e.event, Event::GovernorChanged { province: ProvinceId(5), from, to: Some(to) } if from == b0 && to == other)));
     assert!(l0 > p.legitimacy_norm_usurper && w.actors[&s0].legitimacy <= p.legitimacy_norm_usurper + 1e-9, "legitimacy fell to the usurper's norm");
     assert!((w.legitimacy_norm(s0, &p) - p.legitimacy_norm_usurper).abs() < 1e-9);
-    // The regent first: a child on the throne with the governor as regent.
+    // A child on the throne with the governor as regent: the candidate is the governor.
     let mut w = testworld::world(1);
     w.kill(r0, Cause::Natural, &p).unwrap();
     w.tick(&p).unwrap();
     assert_eq!((w.actors[&s0].ruler, w.actors[&s0].regent), (c0, Some(b0)));
     assert_eq!(w.usurper_candidate(s0, &p), Some(b0));
+    // **The regent has no place of its own in the order** (E4, plan §31.70, the owner's
+    // decision of 2026-11-18; executor's decision № 25): the same regent with no seat to
+    // govern is passed over for the elder adult of another house — it stood first before.
+    w.provinces.get_mut(&ProvinceId(5)).unwrap().governor = None;
+    assert_eq!(w.actors[&s0].regent, Some(b0), "still the regent");
+    assert!(w.provinces.values().all(|pr| pr.owner != s0 || pr.governor.is_none()), "nobody governs in the polity");
+    assert_eq!(w.usurper_candidate(s0, &p), Some(other), "the eldest adult of any house, not the regent");
+    // And a regent that is the eldest adult is the candidate — as the eldest, like any other.
+    w.kill(other, Cause::Natural, &p).unwrap();
+    let elder: Vec<_> = w.people_of_polity_adults(s0, &p).into_iter().filter(|x| w.age(*x) > w.age(b0)).collect();
+    for x in elder {
+        w.kill(x, Cause::Natural, &p).unwrap();
+    }
+    assert_eq!(w.actors[&s0].regent, Some(b0));
+    assert_eq!(w.usurper_candidate(s0, &p), Some(b0), "the regent as the eldest adult left");
     assert_eq!(w.usurp_now(s0, &p).unwrap(), Some(b0));
     assert_eq!(w.actors[&s0].ruler, b0);
-    assert!(!w.person_alive(c0));
+    assert!(w.person_alive(c0) && w.persons[&c0].house == w.persons[&b0].house, "the ward set aside by one of his house lives on in it");
     assert_eq!(w.actors[&s0].regent, None);
+    // A usurper of another house executes the ruler, as before.
+    let mut w = testworld::world(1);
+    w.provinces.get_mut(&ProvinceId(5)).unwrap().governor = Some(other);
+    assert_ne!(w.persons[&other].house, w.persons[&r0].house);
+    assert_eq!(w.usurper_candidate(s0, &p), Some(other), "the governor of another house");
+    assert_eq!(w.usurp_now(s0, &p).unwrap(), Some(other));
+    let r = w.tick(&p).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::RulerDied { actor, person, cause: Cause::Execution } if actor == s0 && person == r0)), "executed");
+    assert!(!w.person_alive(r0) && w.actors[&s0].ruler == other && w.actors[&s0].standing == Standing::Usurper);
     // No candidate — no usurpation: a house of one, the polity's only house.
     let s4 = ActorId(4);
     let (r4, c4) = (person(&s, "r4"), person(&s, "c4"));
