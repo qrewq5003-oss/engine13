@@ -150,6 +150,13 @@ name = "Катерина Сфорца"
 house = "sforza"
 born = 1463
 
+# Sforza Maria, duke of Bari, brother of the late duke: born on 18 August 1451, died in 1479
+# (DBI 92). Of the brothers with an opened year none is older than Bona (К22).
+[persons.sforza_maria_sforza]
+name = "Сфорца Мария Сфорца"
+house = "sforza"
+born = 1451
+
 [persons.ludovico_sforza]
 name = "Лодовико Сфорца"
 house = "sforza"
@@ -484,6 +491,25 @@ born = 1468
 name = "Иоланда Французская"
 house = "savoia"
 born = 1434
+
+# The brothers of the late duke Amedeo IX alive and of age at the start (К22).
+# Filippo «Senza Terra», count of Bresse: born on 15 November 1443, died in 1497 (DBI 47).
+[persons.filippo_di_savoia]
+name = "Филипп Савойский, граф Бресский"
+house = "savoia"
+born = 1443
+
+# Gian Ludovico, bishop of Geneva: born «quasi certamente» in 1447, died in 1482 (DBI 91).
+[persons.gian_ludovico_di_savoia]
+name = "Жан-Луи Савойский, епископ Женевы"
+house = "savoia"
+born = 1447
+
+# Giacomo, count of Romont: 1450–1486 (Treccani, Enciclopedia on line).
+[persons.giacomo_di_savoia]
+name = "Жак Савойский, граф Ромон"
+house = "savoia"
+born = 1450
 
 # ---------------------------------------------------------------- Montferrat
 [actors.montferrat]
