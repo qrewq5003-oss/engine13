@@ -8,7 +8,9 @@
 //!
 //! Asserted: no flag of a single run (pinned to a bound, stagnation, a read of an absent
 //! actor); every kind the engine declares possible occurs; the real course does not repeat
-//! in half the runs or more (`history_lock`, brief §6); more than one polity lives at the end.
+//! in half the runs or more (`history_lock`, brief §6); more than one polity lives at the end;
+//! no pair is allied and at war at once (the owner's decision В3, plan §31.57 — a rule of the
+//! world, held on the scenario as on the generated worlds).
 //!
 //! **Printed, not asserted — and not waived** (executor's decision № 22): the polities that
 //! die in every run (`Always Died`). The sentinel calls the death of the same actor in every
@@ -47,9 +49,12 @@ fn the_scenario_of_milan_stands_under_the_sentinel_without_a_player() {
     let runs = engine2::par::map(&seeds, |seed| {
         let mut g = Game::new(&scenario, p.clone(), *seed).unwrap();
         let (mut played, mut at_century) = (0u32, String::new());
+        // The owner's decision В3 (plan §31.57): the pair-ticks a pair is allied and at war at once.
+        let mut allied_at_war = 0usize;
         let (sentinel, summary) = sentinel::run(&mut g, TICKS, *seed, "none", Thresholds::default(), |g| {
             g.tick(&[]).unwrap();
             played += 1;
+            allied_at_war += g.world().wars.keys().filter(|(a, b)| g.world().allied(*a, *b)).count();
             if played == CENTURY {
                 let o = g.observe();
                 let mut held: BTreeMap<&str, usize> = BTreeMap::new();
@@ -60,7 +65,7 @@ fn the_scenario_of_milan_stands_under_the_sentinel_without_a_player() {
                 at_century = format!("{} alive, the largest ({largest}) holds {provinces} of {} provinces", o.alive.len(), o.owners.len());
             }
         });
-        (sentinel.flags(), summary, at_century, g.observe().alive.len(), g.possible_kinds(TICKS))
+        (sentinel.flags(), summary, at_century, g.observe().alive.len(), g.possible_kinds(TICKS), allied_at_war)
     });
     let took = started.elapsed();
 
@@ -68,7 +73,8 @@ fn the_scenario_of_milan_stands_under_the_sentinel_without_a_player() {
     let mut possible = Vec::new();
     let mut repeats = 0usize;
     let mut ends: Vec<sentinel::EndState> = Vec::new();
-    for (seed, (flags, summary, at_century, alive_at_the_end, kinds)) in seeds.iter().zip(runs) {
+    for (seed, (flags, summary, at_century, alive_at_the_end, kinds, allied_at_war)) in seeds.iter().zip(runs) {
+        assert_eq!(allied_at_war, 0, "seed {seed}: no pair is allied and at war at once — an alliance a war sets across its sides breaks at its opening (plan §31.57)");
         let repeated = history.matches(&summary.outcome);
         eprintln!("seed {seed}: at a century {at_century}; at the end {alive_at_the_end} alive; the real course repeated: {repeated}");
         assert!(flags.is_empty(), "seed {seed}: flags of the single run: {flags:?}");

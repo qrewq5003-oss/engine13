@@ -351,6 +351,111 @@ fn a_war_on_a_member_of_an_alliance_brings_its_allies_lord_and_vassals_in_and_th
     assert!(!w.at_war(a, d), "the treaty of peace holds: the ally does not enter");
 }
 
+/// E4, plan §31.57 — the owner's decision В3 of 2026-11-18: **an alliance a war sets across
+/// its sides breaks at the war's opening, and the declarer pays each breach.** The ally of
+/// the attacked that is the attacker's ally too enters the war (the obligation stands); its
+/// alliance with the attacker ends with the event of a breach and the push a breach gives the
+/// relation; the declaration costs what a declaration on an ally costs, for every alliance
+/// broken apart; a vassal of the attacker allied with the attacked stands with its lord, and
+/// its alliance is broken the same. No pair is allied and at war at once.
+#[test]
+fn an_alliance_a_war_sets_across_its_sides_breaks_at_its_opening_and_the_declarer_pays_each_breach() {
+    use engine2::VerbId;
+    let p = params();
+    let (a, b, c, d, e) = (ActorId(0), ActorId(1), ActorId(2), ActorId(3), ActorId(4));
+    let base = p.legitimacy_cost_declare_war;
+    let breach = base * p.treaty_breach_factor;
+    // Treaties as of the scenario's facts: not fresh.
+    let old = |w: &mut World, x: ActorId, y: ActorId| {
+        w.ally_now(x, y, &p).unwrap();
+        w.treaties.get_mut(&(x.min(y), x.max(y))).unwrap().since = None;
+    };
+    let none_allied_and_at_war = |w: &World| w.wars.keys().all(|(x, y)| !w.allied(*x, *y));
+
+    // The ally of both sides: `c` is allied with the attacker and with the attacked.
+    let mut w = testworld::world(4);
+    old(&mut w, a, c);
+    old(&mut w, b, c);
+    assert_eq!(w.alliances_across(a, b), vec![(c, a)], "the war of a on b sets a's alliance with c across its sides");
+    assert_eq!(w.alliances_across(b, a), vec![(c, b)], "and that of b on a — b's");
+    assert!((w.war_price(a, b, &p) - breach).abs() < 1e-9, "a declaration on the ally of one's ally costs what a declaration on one's ally does: {}", w.war_price(a, b, &p));
+    assert!(w.relation(a, c) > 0.0, "allies stand well with each other before");
+    let legitimacy_c = w.actors[&c].legitimacy;
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(c, a), "the obligation stands: the ally of the attacked enters against the attacker");
+    assert!(!w.allied(a, c) && w.treaty(a, c).is_none(), "its alliance with the attacker ends at the war's opening");
+    assert!(w.allied(b, c), "its alliance with the attacked is what it fights for");
+    assert_eq!(w.relation(a, c), 0.0, "the relation of the two is pushed as a breach pushes it — to nothing");
+    assert!((w.actors[&c].legitimacy - legitimacy_c).abs() < 1e-9, "the entrant pays nothing: the breach is the declarer's");
+    assert!(none_allied_and_at_war(&w));
+    // In the war that is on a claim opens no war: nothing across, the plain price.
+    old(&mut w, a, d);
+    old(&mut w, b, d);
+    assert!(w.alliances_across(a, b).is_empty() && (w.war_price(a, b, &p) - base).abs() < 1e-9, "a claim in a war that is on breaks nothing");
+
+    // Every broken alliance is paid for apart; a fresh one costs more.
+    let mut w = testworld::world(4);
+    old(&mut w, a, c);
+    old(&mut w, b, c);
+    old(&mut w, a, d);
+    old(&mut w, b, d);
+    assert_eq!(w.alliances_across(a, b), vec![(c, a), (d, a)]);
+    assert!((w.war_price(a, b, &p) - 2.0 * breach).abs() < 1e-9, "two alliances broken: twice the breach, {}", w.war_price(a, b, &p));
+    w.treaties.get_mut(&(a, d)).unwrap().since = Some(w.tick);
+    assert!((w.war_price(a, b, &p) - breach * (1.0 + p.treaty_fresh_breach_factor)).abs() < 1e-9, "the fresh one at its own price: {}", w.war_price(a, b, &p));
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(c, a) && w.at_war(d, a) && !w.allied(a, c) && !w.allied(a, d) && none_allied_and_at_war(&w));
+    // The treaty with the attacked itself and an alliance across: both breaches.
+    let mut w = testworld::world(4);
+    old(&mut w, a, b);
+    old(&mut w, a, c);
+    old(&mut w, b, c);
+    assert!((w.war_price(a, b, &p) - 2.0 * breach).abs() < 1e-9, "the treaty with the attacked and the alliance across: {}", w.war_price(a, b, &p));
+
+    // Nothing across — nothing broken, the plain price: the ally of the attacked alone, the
+    // attacker's own ally, and one a peace with the attacker keeps out.
+    let mut w = testworld::world(4);
+    old(&mut w, b, c);
+    old(&mut w, a, d);
+    old(&mut w, b, e);
+    w.bind(a, e, TreatyKind::Peace, &p).unwrap();
+    assert!(w.alliances_across(a, b).is_empty() && (w.war_price(a, b, &p) - base).abs() < 1e-9);
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(c, a) && !w.at_war(e, a), "the ally enters, the one at peace with the attacker stays out");
+    assert!(w.allied(b, c) && w.allied(a, d) && w.allied(b, e) && w.peace_in_force(a, e), "no treaty is broken where none stands across the war");
+
+    // The vassal of the attacker allied with the attacked: it stands with its lord, and its
+    // alliance with the attacked is broken — at the declarer's price.
+    let mut w = testworld::world(4);
+    old(&mut w, c, b);
+    w.make_vassal(c, a).unwrap();
+    assert_eq!(w.war_entrants(a, b), (vec![], vec![c]), "it is read on its lord's side alone — by the war's opening and by all that reads the sides of a war not yet open");
+    assert_eq!(w.alliances_across(a, b), vec![(c, b)]);
+    assert!((w.war_price(a, b, &p) - breach).abs() < 1e-9, "the lord pays the breach of its vassal's alliance: {}", w.war_price(a, b, &p));
+    w.declare_war(a, b).unwrap();
+    assert!(w.at_war(c, b) && !w.at_war(c, a), "the vassal enters against the attacked, and does not fight its lord");
+    assert!(!w.allied(c, b) && w.relation(c, b) == 0.0 && none_allied_and_at_war(&w));
+
+    // By the verb: the event of the breach, the price paid, and the bot reads the same price.
+    let mut g = bare(&scenario_with_verbs(), params(), 11).unwrap();
+    old(g.world_mut(), a, c);
+    old(g.world_mut(), b, c);
+    let plain = {
+        let mut x = g.world().clone();
+        x.treaties.remove(&(a, c));
+        x
+    };
+    assert!((plain.war_price(a, b, &p) - base).abs() < 1e-9 && plain.war_sides(a, b) == g.world().war_sides(a, b), "without the alliance across the same war at the plain price");
+    assert!(g.world().utility(a, &call(a, VerbId::DeclareWar, b), &p) < plain.utility(a, &call(a, VerbId::DeclareWar, b), &p), "the ruler reads the price of the breach in the declaration's worth");
+    let (l0, norm) = (g.world().actors[&a].legitimacy, g.world().legitimacy_norm(a, &p));
+    let r = g.tick(&[call(a, VerbId::DeclareWar, b)]).unwrap();
+    assert!(r.events.iter().any(|e| matches!(e.event, Event::TreatyBroken { a: x, b: y, kind: TreatyKind::Alliance } if (x, y) == (a, c))), "the breach is an event");
+    assert!(g.world().at_war(a, b) && g.world().at_war(c, a) && !g.world().allied(a, c) && none_allied_and_at_war(g.world()));
+    let after = engine2::politics::saturate(l0, -breach);
+    let expected = after + p.legitimacy_rate_per_tick * (norm - after);
+    assert!((g.world().actors[&a].legitimacy - expected).abs() < 1e-6, "the declarer paid the breach: {} against {expected}", g.world().actors[&a].legitimacy);
+}
+
 #[test]
 fn bound_polities_march_through_each_others_land_and_are_supplied_there_by_their_pay_not_by_foraging() {
     let p = params();

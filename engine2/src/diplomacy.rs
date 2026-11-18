@@ -70,6 +70,11 @@ use crate::time::Tick;
 use crate::verbs::{ActorRef, Target, VerbCall, VerbId};
 use crate::world::{Treaty, TreatyKind, WarAim, World, WorldError};
 
+/// The push a breach of a treaty gives a relation (`World::push_relation`): the declarer's
+/// with every ally of the polity it broke with (the verb `declare_war`), and that of the two
+/// parties of an alliance a war breaks across its sides (`World::open_war`, plan §31.57).
+pub(crate) const BREACH_RELATION_PUSH: f64 = -100.0;
+
 pub(crate) use crate::army::pair;
 
 /// The rule of the peace (§19; plan §28.1 and §28.8, owner's decision 2026-10-17) on the
@@ -358,13 +363,26 @@ impl World {
         Ok(())
     }
 
-    /// The price of declaring war on `b` in legitimacy: the base, times the breach factor
-    /// when a treaty with `b` is in force — and **a fresh treaty costs more to break**
-    /// (owner's rule on #293: a price, not a prohibition): `treaty.fresh_breach_factor` times
-    /// more on the day it was signed, falling in a line to the plain breach over
-    /// `treaty.fresh_years`. A treaty of the scenario's facts is not fresh.
+    /// The price of declaring war on `b` in legitimacy: the base — or, where the declaration
+    /// breaks treaties, **the price of each breach** (`breach_price`): of the treaty with `b`
+    /// itself, and of every alliance the war sets across its sides (`alliances_across`; E4,
+    /// plan §31.57, the owner's decision В3 — each broken alliance is paid for apart). A
+    /// declaration on the ally of one's ally costs what a declaration on one's ally does.
     pub fn war_price(&self, a: ActorId, b: ActorId, params: &Params) -> f64 {
-        let Some(t) = self.treaty(a, b) else { return params.legitimacy_cost_declare_war };
+        let across = self.alliances_across(a, b);
+        let broken: Vec<&Treaty> = self.treaty(a, b).into_iter().chain(across.iter().filter_map(|(x, y)| self.treaty(*x, *y))).collect();
+        if broken.is_empty() {
+            return params.legitimacy_cost_declare_war;
+        }
+        broken.into_iter().map(|t| self.breach_price(t, params)).sum()
+    }
+
+    /// The price in legitimacy of a declaration that breaks treaty `t`: the base times the
+    /// breach factor — and **a fresh treaty costs more to break** (owner's rule on #293: a
+    /// price, not a prohibition): `treaty.fresh_breach_factor` times more on the day it was
+    /// signed, falling in a line to the plain breach over `treaty.fresh_years`. A treaty of
+    /// the scenario's facts is not fresh.
+    pub fn breach_price(&self, t: &Treaty, params: &Params) -> f64 {
         let fresh = match t.since {
             Some(since) if params.treaty_fresh_ticks > 0 => {
                 let left = 1.0 - f64::from(self.tick.0.saturating_sub(since.0)) / f64::from(params.treaty_fresh_ticks);
@@ -705,7 +723,7 @@ impl World {
                     let (x, y) = pair(a, b);
                     self.emit(Event::TreatyBroken { a: x, b: y, kind: t.kind });
                     for ally in self.allies_of(b) {
-                        self.push_relation(a, ally, -100.0);
+                        self.push_relation(a, ally, BREACH_RELATION_PUSH);
                     }
                 }
                 self.pay_legitimacy(a, price);

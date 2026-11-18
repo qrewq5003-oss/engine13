@@ -481,6 +481,13 @@ struct Measures {
     /// another's they were drawn into (`War::of`) — and those of the polities on **the first
     /// tick the measure sees them at war**, whose army is still the army of peace: the measure
     /// reads the world before the tick's decisions (E4, plan §31.56 — printed, asserted nowhere).
+    /// The ally of both sides (E4, plan §31.53, §31.57 — the owner's decision В3): the wars
+    /// opened in a tick between a pair whose alliance is in force when the tick ends; the
+    /// pair-ticks a pair is allied and at war at once; the treaties broken by a declaration
+    /// (`Event::TreatyBroken`).
+    wars_between_allies: u64,
+    allied_at_war_pair_ticks: u64,
+    treaties_broken: u64,
     army_by_obligation: i64,
     people_by_obligation: i64,
     army_first_tick: i64,
@@ -622,6 +629,12 @@ impl Measures {
         )
     }
 
+    /// The ally of both sides (E4, plan §31.57): the wars between allies with the alliance in
+    /// force, the pair-ticks allied and at war at once, the treaties broken by a declaration.
+    fn allies_line(&self) -> String {
+        format!("wars between allies with the alliance in force {}, pair-ticks allied and at war at once {}; treaties broken by a declaration {}", self.wars_between_allies, self.allied_at_war_pair_ticks, self.treaties_broken)
+    }
+
     /// А11 at war by who is at war (E4, plan §31.56): the principals of a war, the polities at
     /// war by obligation alone, and the first tick at war — the army's share of the people and
     /// the weight of each in the people at war. The measure itself (`Rates::a11_war`) is the
@@ -717,6 +730,9 @@ impl Measures {
         self.declared_weaker[0] += o.declared_weaker[0];
         self.declared_weaker[1] += o.declared_weaker[1];
         self.declared_weaker_ally_nearer += o.declared_weaker_ally_nearer;
+        self.wars_between_allies += o.wars_between_allies;
+        self.allied_at_war_pair_ticks += o.allied_at_war_pair_ticks;
+        self.treaties_broken += o.treaties_broken;
         self.army_by_obligation += o.army_by_obligation;
         self.people_by_obligation += o.people_by_obligation;
         self.army_first_tick += o.army_first_tick;
@@ -891,6 +907,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
     let (mut declared_weaker, mut declared_weaker_ally_nearer) = ([0u64; 2], 0u64);
     let (mut army_by_obligation, mut people_by_obligation, mut army_first_tick, mut people_first_tick) = (0i64, 0i64, 0i64, 0i64);
     let mut seen_at_war: BTreeSet<ActorId> = BTreeSet::new();
+    let (mut wars_between_allies, mut allied_at_war_pair_ticks, mut treaties_broken) = (0u64, 0u64, 0u64);
     let mut claims = 0u64;
     let mut declared_within_five_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
@@ -969,6 +986,12 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
         let r = g.tick(&[]).unwrap();
         if t == 99 {
             people_100 = people_of(&g);
+        }
+        {
+            let after = g.world();
+            allied_at_war_pair_ticks += after.wars.keys().filter(|(x, y)| after.allied(*x, *y)).count() as u64;
+            wars_between_allies += r.events.iter().filter(|e| matches!(e.event, Event::War { a, b } if after.allied(a, b))).count() as u64;
+            treaties_broken += r.events.iter().filter(|e| matches!(e.event, Event::TreatyBroken { .. })).count() as u64;
         }
         // Exhaustion of men (plan §27.1): the share of the ceiling of А1 the dead of the levies
         // hold, over the living polities.
@@ -1228,7 +1251,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, army_by_obligation, people_by_obligation, army_first_tick, people_first_tick, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, wars_between_allies, allied_at_war_pair_ticks, treaties_broken, army_by_obligation, people_by_obligation, army_first_tick, people_first_tick, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1244,7 +1267,9 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let fill_line = m.fill_line();
     let weaker_line = m.weaker_line();
     let a11_line = m.a11_line();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, army_by_obligation: _, people_by_obligation: _, army_first_tick: _, people_first_tick: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
+    let allies_line = m.allies_line();
+    let (wars_between_allies, allied_at_war_pair_ticks) = (m.wars_between_allies, m.allied_at_war_pair_ticks);
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, wars_between_allies: _, allied_at_war_pair_ticks: _, treaties_broken: _, army_by_obligation: _, people_by_obligation: _, army_first_tick: _, people_first_tick: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1371,6 +1396,9 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     eprintln!("{fill_line}");
     eprintln!("{weaker_line}");
     eprintln!("{a11_line}");
+    eprintln!("{allies_line}");
+    // The owner's decision В3 (plan §31.57): a rule of the world, not a measure with a band.
+    assert_eq!((wars_between_allies, allied_at_war_pair_ticks), (0, 0), "no pair is allied and at war at once: an alliance a war sets across its sides breaks at its opening");
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
@@ -2004,6 +2032,7 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
         eprintln!("{label}: {}", m.fill_line());
         eprintln!("{label}: {}", m.weaker_line());
         eprintln!("{label}: {}", m.a11_line());
+        eprintln!("{label}: {}", m.allies_line());
         for line in m.war_lines() {
             eprintln!("{label}: {line}");
         }
@@ -5690,6 +5719,7 @@ fn diagnosis_the_measures_of_e2_and_e3_on_the_scenario_of_milan() {
     eprintln!("{}", m.fill_line());
     eprintln!("{}", m.weaker_line());
     eprintln!("{}", m.a11_line());
+    eprintln!("{}", m.allies_line());
     for line in m.war_lines() {
         eprintln!("{line}");
     }
