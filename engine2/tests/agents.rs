@@ -5552,11 +5552,18 @@ fn diagnosis_what_a_match_is_worth() {
 }
 
 /// One generated world with the bots, 300 ticks: what buying order is worth to a ruler
-/// against its price, read at the start of every fifth tick as the bot reads it.
+/// against its price (`diagnose_order_in`).
 fn diagnose_order(seed: u64, p: &Params) -> Diagnosis {
+    diagnose_order_in(&worldgen::generate(seed, p), seed, p)
+}
+
+/// One scenario with the bots, 300 ticks, played with the game seed `seed`: what buying order
+/// is worth to a ruler against its price, read at the start of every fifth tick as the bot
+/// reads it. A generated world and a scenario given as data (E4, plan §31.60: Milan) are read
+/// by this one function.
+fn diagnose_order_in(s: &ScenarioData, seed: u64, p: &Params) -> Diagnosis {
     let mut d = Diagnosis::default();
-    let s = worldgen::generate(seed, p);
-    let mut g = Game::new(&s, p.clone(), seed).unwrap();
+    let mut g = Game::new(s, p.clone(), seed).unwrap();
     for tick in 0..300u32 {
         let w = g.world();
         if tick % 5 == 0 {
@@ -5597,15 +5604,22 @@ fn diagnose_order(seed: u64, p: &Params) -> Diagnosis {
 /// The probe of stage 8 (plan §31.37 p. 10): the bots never buy order — the one criterion of
 /// the acceptance of E3 (§23.4: every verb used) not met. With nothing of the world changed:
 /// what the gain of legitimacy is worth to a ruler by the bot's own valuation, against the
-/// price the world charges, by the legitimacy it stands at. Printed, never asserted, run on
+/// price the world charges, by the legitimacy it stands at — on the generated worlds and, since
+/// E4 (plan §31.60), on the scenario of Milan by ten seeds of the game. Printed, never asserted, run on
 /// demand: `cargo test --release -p engine2 --all-features --test agents diagnosis_why_the_order -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn diagnosis_why_the_order_is_never_bought() {
     let p = params();
-    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect())] {
+    let milan = milan();
+    let scenario_of = |label: &str| label.starts_with("Milan").then_some(&milan);
+    for (label, seeds) in [("calibration 1–20", (1..=20).collect::<Vec<u64>>()), ("held out 100–129", (100..=129).collect()), ("Milan, game seeds 1–10", (1..=10).collect())] {
         let mut d = Diagnosis::default();
-        for part in engine2::par::map(&seeds, |seed| diagnose_order(*seed, &p)) {
+        let scenario = scenario_of(label);
+        for part in engine2::par::map(&seeds, |seed| match scenario {
+            Some(s) => diagnose_order_in(s, *seed, &p),
+            None => diagnose_order(*seed, &p),
+        }) {
             d.add(part);
         }
         let line = |text: String| eprintln!("{label}: {text}");
