@@ -148,7 +148,7 @@ pub fn standing_of_rule(rule: Succession) -> Standing {
     match rule {
         Succession::Blood => Standing::Hereditary,
         Succession::Mixed => Standing::Confirmed,
-        Succession::Election => Standing::Elected,
+        Succession::Election | Succession::Office => Standing::Elected,
         Succession::Acclamation => Standing::Acclaimed,
     }
 }
@@ -276,7 +276,13 @@ impl World {
     /// decision of 2026-11-18 on the rule of §18; executor's decision № 25): it stood first,
     /// and the regent of a scenario's facts may be the ward's mother. A regent is a candidate
     /// as any other adult is — as a governor, or as the eldest.
+    ///
+    /// **An office is not usurped** (`Succession::Office`, plan §31.70, executor's decision
+    /// № 26): a polity ruled by an office has no candidate.
     pub fn usurper_candidate(&self, a: ActorId, params: &Params) -> Option<PersonId> {
+        if self.actors[&a].succession == Succession::Office {
+            return None;
+        }
         let adults = self.people_of_polity_adults(a, params);
         let governors: Vec<PersonId> = adults.iter().copied().filter(|p| !self.governed_by(*p).is_empty()).collect();
         self.eldest(&governors, true, params).or_else(|| self.eldest(&adults, true, params))
@@ -477,6 +483,8 @@ impl World {
                 self.eldest(&members, false, params)
             }
             Succession::Acclamation | Succession::Election => self.eldest(&members, true, params),
+            // An office has no heir: its next holder is raised (`succeed`, `raise_holder`).
+            Succession::Office => None,
         }
     }
 
@@ -496,6 +504,27 @@ impl World {
     /// in it) through the ledger and become a house of the polity; the household is as
     /// large as the province's people allow. `None` when no province of the polity has a
     /// person left.
+    /// The next holder of an office (`Succession::Office`, E4, plan §31.70, executor's
+    /// decision № 26): one adult out of the people of the capital — else of the first
+    /// province of the polity where anybody lives — into the house that is the office, at
+    /// the age a founder is raised at. No new house, no new dynasty; `None` when nobody
+    /// lives in the polity.
+    fn raise_holder(&mut self, a: ActorId, house: HouseId) -> Result<Option<PersonId>, WorldError> {
+        let capital = self.actors[&a].capital;
+        let provinces = self.actors[&a].provinces.clone();
+        let Some(from) = std::iter::once(capital).chain(provinces.into_iter().filter(|p| *p != capital)).find(|p| self.population(*p) >= 1) else {
+            return Ok(None);
+        };
+        self.post(Account::Population(from), Source::Rise, -1000)?;
+        let holder = PersonId(self.next_person);
+        self.next_person += 1;
+        let (hsid, hname) = self.names.houses[house.0 as usize].clone();
+        let n = self.persons.values().filter(|x| x.house == house).count() + 1;
+        self.names.persons.push((format!("{hsid}.{n}"), format!("{hname} {n}")));
+        self.persons.insert(holder, Person { house, born: self.year() - FOUNDER_AGE, parent: None, spouse: None, died: None });
+        Ok(Some(holder))
+    }
+
     fn raise_house(&mut self, a: ActorId) -> Result<Option<PersonId>, WorldError> {
         let capital = self.actors[&a].capital;
         let provinces = self.actors[&a].provinces.clone();
@@ -584,6 +613,15 @@ impl World {
         let designated = self.actors[&a].heir.filter(|h| self.person_alive(*h));
         let (next, how) = if let Some(h) = designated {
             (h, standing_of_rule(rule))
+        } else if rule == Succession::Office {
+            // The office outlives its holder: a new one is raised into the same house.
+            match self.raise_holder(a, self.persons[&dead].house)? {
+                Some(holder) => (holder, standing_of_rule(rule)),
+                None => {
+                    self.fall(a)?;
+                    return Ok(());
+                }
+            }
         } else if let Some(p) = self.heir_by_rule(dead, rule, params) {
             (p, standing_of_rule(rule))
         } else {
@@ -787,8 +825,11 @@ impl World {
         }
         // 5. Births, every living person of fertile age in id order (persons born this tick
         // are not of age).
+        // The holder of an office leaves no dynasty (`Succession::Office`, plan §31.70,
+        // executor's decision № 26): no child is born to him, and no lot is drawn for one.
+        let holders: Vec<PersonId> = self.actors.values().filter(|x| x.succession == Succession::Office).map(|x| x.ruler).collect();
         for p in &living {
-            if !self.person_alive(*p) {
+            if !self.person_alive(*p) || holders.contains(p) {
                 continue;
             }
             let age = year - self.persons[p].born;

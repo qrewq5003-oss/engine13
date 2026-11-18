@@ -74,6 +74,14 @@ pub enum Succession {
     /// Blood recognised through acclamation (Rome 375: Valentinian II proclaimed by the
     /// army within days): the line by seniority, the norm between the two.
     Mixed,
+    /// **An office, not a prince** (E4, plan §31.70, the owner's decision of 2026-11-18 on
+    /// the republics; executor's decision № 26): the ruling house is an institution — a
+    /// council, a diet — and the «ruler» the holder of its office. The holder leaves no
+    /// dynasty: no child is born to him, and at his death a new holder is raised into the
+    /// same house (`World::raise_holder`), standing as one elected. The office is not
+    /// usurped. An addition to the closed list, the last of it: a scenario that does not
+    /// use it writes its facts as before, and the save format is unchanged.
+    Office,
 }
 
 /// How the ruler came to the throne: the standing the legitimacy norm is keyed by (E0
