@@ -193,14 +193,22 @@ impl WarTerms {
 
     /// The same terms with an ally's `strength` standing on the polity's side of the war
     /// (plan §31.34): it moves the war's odds as the polity's own strength would, and is no
-    /// strength of the polity's — the pay of its campaign is not the polity's to pay.
+    /// strength of the polity's — the pay of its campaign is not the polity's to pay. The land
+    /// at risk stays as it was read on the sides without the ally (see `on_sides`).
     pub fn with_ally(&self, strength: f64) -> WarTerms {
         let mut t = self.clone();
         t.sides.0 += strength;
         t
     }
 
-    /// The same terms on other `sides` of the war: the terms read nothing else of them.
+    /// The same terms on other `sides` of the war. The odds follow the new sides; **the land
+    /// at risk, the fall and the first blow stay as `war_terms_on` read them on the sides it
+    /// was given** — since decision № 23 (plan §31.55) that reading asks whether the polity is
+    /// the weaker side, so the terms are no longer blind to the sides. The decision's limit,
+    /// recorded there: it holds for a polity's own war and for its threats; one that enters
+    /// another's war (`entrant_terms`, read on no sides and put on the war's here) reads the
+    /// land as before the decision, and the terms with an ally added (`with_ally`) keep the
+    /// land read without the ally.
     pub fn on_sides(&self, sides: (f64, f64)) -> WarTerms {
         let mut t = self.clone();
         t.sides = sides;
@@ -666,7 +674,7 @@ impl World {
     /// `war_terms` with `a`'s money read once (`own_money`): a decision reads the terms of a
     /// war with every polity.
     pub fn war_terms_with(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: &OwnMoney, params: &Params) -> WarTerms {
-        self.war_terms_on(a, b, blow_per_province, Some(own), self.war_sides_strength(a, b), self.war_ticks(a, b, params), params)
+        self.war_terms_on(a, b, blow_per_province, Some(own), self.war_sides_strength(a, b), self.war_ticks(a, b, params), None, params)
     }
 
     /// `war_terms_with` on the strengths of the sides and the length of the war given: the
@@ -682,7 +690,12 @@ impl World {
     /// anyone but the polity reads them** (plan §28.4, §31.35): nothing of its goals (no
     /// stake, no campaign), of its treasury (`OwnMoney::unseen`), of its count of the dead
     /// (what it can levy to take land back is read as anyone sees it, `retake_odds_as`).
-    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: Option<&OwnMoney>, sides: (f64, f64), ticks: f64, params: &Params) -> WarTerms {
+    ///
+    /// `enemy_march`: `b`'s march to `a`'s capital and the siege there (`threat_ticks(a, b)`)
+    /// **where the caller has read it already** — a threat's length is that very number, and
+    /// the weaker side's reading (decision № 23) would search the same path a second time;
+    /// `None` — read here, and only by the weaker side.
+    fn war_terms_on(&self, a: ActorId, b: ActorId, blow_per_province: f64, own: Option<&OwnMoney>, sides: (f64, f64), ticks: f64, enemy_march: Option<f64>, params: &Params) -> WarTerms {
         let seen = own.is_none();
         let unseen = OwnMoney::unseen();
         let own = own.unwrap_or(&unseen);
@@ -694,8 +707,22 @@ impl World {
         // march to each (a tick at least, as `war_ticks` counts a march) and its siege — a
         // capital a step away stands its siege while the land behind it falls within the
         // tick (the test world's case).
+        //
+        // **The side the weaker by the battle formula reads its war to the enemy's first
+        // conquest** (E4, plan §31.55, executor's decision № 23): its own march does not end
+        // the war — the rule of the peace forces the weaker side when it has lost a province
+        // on balance (`forced_to_peace`), so until that loss the war goes on. A weak polity
+        // whose march to its stake was shorter than the enemy's first blow read a gain at its
+        // odds and no land at risk: a war at one to forty for nothing (Mantua on Ferrara,
+        // plan §31.54). For it the reach is read over the longer of its own march and the
+        // enemy's march to its capital (`threat_ticks`: seen — the capitals and the path, not
+        // the enemy's goals), and the chain of conquests over the longer of the war's length
+        // and the first blow. The reach is the principal enemy's units', as it was: those of
+        // its allies are in the odds and not read here (the decision's known limit).
         let per_tick = self.march_steps_per_tick(params).max(1);
-        let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
+        let weaker = Self::war_odds_of(sides, 0.0, params) < 0.5;
+        let reach_ticks = if weaker { ticks.max(enemy_march.unwrap_or_else(|| self.threat_ticks(a, b, params))) } else { ticks };
+        let mut reach: Vec<(usize, usize, ProvinceId)> = self.land_in_reach(b, a, reach_ticks.ceil() as usize, params).into_iter().map(|(q, d)| (d.div_ceil(per_tick).max(1) + self.siege_ticks(q, params) as usize, d, q)).collect();
         reach.sort();
         // The enemy's first conquest: the ticks to the quickest of them.
         let first_blow = reach.first().map_or(f64::INFINITY, |(t, _, _)| *t as f64);
@@ -704,7 +731,8 @@ impl World {
             Some(WarAim::Province(q)) => self.provinces[&q].owner.eq(&a).then_some(q).into_iter().collect(),
             _ => {
                 let reach: Vec<(usize, ProvinceId)> = reach.into_iter().map(|(_, d, q)| (d, q)).collect();
-                let n = self.conquests_within(ticks, &reach, params);
+                let chain_ticks = if weaker && first_blow.is_finite() { ticks.max(first_blow) } else { ticks };
+                let n = self.conquests_within(chain_ticks, &reach, params);
                 reach.into_iter().take(n).map(|(_, q)| q).collect()
             }
         };
@@ -1327,7 +1355,7 @@ impl World {
     /// `threats_with`, or — with no money, `None` — the threats of `a` as anyone but `a`
     /// reads them (`war_terms_on`).
     fn threats_as(&self, a: ActorId, blow_per_province: f64, own: Option<&OwnMoney>, params: &Params) -> Vec<(ActorId, WarTerms)> {
-        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), self.threat_ticks(a, t, params), params))).collect()
+        self.actors.keys().copied().filter(|t| *t != a && self.alive(*t) && !self.at_war(a, *t) && self.borders(a, *t)).map(|t| (t, self.threat_ticks(a, t, params))).map(|(t, march)| (t, self.war_terms_on(a, t, blow_per_province, own, self.threat_sides_strength(a, t), march, Some(march), params))).collect()
     }
 
     /// What an alliance with `b` is worth to `a`, in years of its income — **through the
@@ -1375,7 +1403,7 @@ impl World {
         if a == b || !self.alive(a) || !self.alive(b) {
             return 0.0;
         }
-        let terms = |t: ActorId, ticks: f64| side.entrant.borrow_mut().entry((t, ticks.to_bits())).or_insert_with(|| self.war_terms_on(b, t, side.blow, None, (0.0, 0.0), ticks, params)).clone();
+        let terms = |t: ActorId, ticks: f64| side.entrant.borrow_mut().entry((t, ticks.to_bits())).or_insert_with(|| self.war_terms_on(b, t, side.blow, None, (0.0, 0.0), ticks, None, params)).clone();
         let cost = self.alliance_cost_by(b, a, false, &terms, rate, params);
         (self.alliance_gain(b, a, &side.threats, &side.rates, false, params) + cost) * Self::alliance_ticks(params)
     }
@@ -1411,7 +1439,7 @@ impl World {
     /// The terms of `a`'s war with `t` as an entrant of a war of `ticks` — all of them but
     /// the war's sides (`WarTerms::on_sides`), which are the war's it enters.
     pub(crate) fn entrant_terms(&self, a: ActorId, t: ActorId, blow_per_province: f64, own: &OwnMoney, ticks: f64, params: &Params) -> WarTerms {
-        self.war_terms_on(a, t, blow_per_province, Some(own), (0.0, 0.0), ticks, params)
+        self.war_terms_on(a, t, blow_per_province, Some(own), (0.0, 0.0), ticks, None, params)
     }
 
     /// `threat_rate(t, x)` for any `x` that touches `t`: `t`'s rate of war and its odds
@@ -1535,7 +1563,8 @@ impl World {
         let ticks = 2.0 * self.expected_years(p, params).min(self.expected_years(q, params));
         let blow = self.ceded_province_blow(mine, &self.risk_prices(mine, params), params);
         let own = (!seen).then(|| self.own_money(mine, params));
-        let terms = self.war_terms_on(mine, theirs, blow, own.as_ref(), self.threat_sides_strength(mine, theirs), self.threat_ticks(mine, theirs, params), params);
+        let march = self.threat_ticks(mine, theirs, params);
+        let terms = self.war_terms_on(mine, theirs, blow, own.as_ref(), self.threat_sides_strength(mine, theirs), march, Some(march), params);
         let unpaid = !seen && self.paid_share_seen_ppm(mine) < 1_000_000;
         let wars = Self::wars_a_tick_in(&self.threat_rate_below(theirs, mine, params), mine, terms.odds(0.0, params));
         let loss = (-self.war_worth_of(mine, &terms, unpaid, 0.0, params)).max(0.0);

@@ -469,6 +469,13 @@ struct Measures {
     claims: u64,
     declared_after_peace: u64,
     declared_unpaid: u64,
+    /// The declarations that opened a war by a declarer the weaker by the battle formula, read
+    /// off the state before the tick (`war_odds`): at odds under a half, and under a tenth;
+    /// and of the first, those whose principal enemy's units reach none of the declarer's land
+    /// within its own march while the units of an ally of that enemy do (E4, plan §31.55,
+    /// executor's decision № 23 — the reviewer's lines of the measure).
+    declared_weaker: [u64; 2],
+    declared_weaker_ally_nearer: u64,
     war_lengths: Vec<u32>,
     declared_within_five_years: u64,
     opportunities: BTreeMap<String, u64>,
@@ -590,6 +597,22 @@ impl Measures {
         )
     }
 
+    /// The declarations of the weaker side (E4, plan §31.55): of the declarations that opened
+    /// a war, those at odds under a half and under a tenth as the declarer read them, and
+    /// those of the first whose enemy's ally stood nearer than the enemy.
+    fn weaker_line(&self) -> String {
+        let share = |n: u64| n as f64 / self.declarations.max(1) as f64;
+        format!(
+            "declarations by the weaker side: at odds under a half {} of {} ({:.3}), under a tenth {} ({:.3}); of the first, the enemy's units out of reach of the declarer's land within its march and an ally's within it {}",
+            self.declared_weaker[0],
+            self.declarations,
+            share(self.declared_weaker[0]),
+            self.declared_weaker[1],
+            share(self.declared_weaker[1]),
+            self.declared_weaker_ally_nearer
+        )
+    }
+
     /// The measures over `seeds`, one world per thread, folded in the order of the seeds.
     fn over(seeds: &[u64], p: &Params) -> Measures {
         let mut m = Measures::default();
@@ -661,6 +684,9 @@ impl Measures {
         self.claims += o.claims;
         self.declared_after_peace += o.declared_after_peace;
         self.declared_unpaid += o.declared_unpaid;
+        self.declared_weaker[0] += o.declared_weaker[0];
+        self.declared_weaker[1] += o.declared_weaker[1];
+        self.declared_weaker_ally_nearer += o.declared_weaker_ally_nearer;
         self.war_lengths.extend(o.war_lengths);
         self.declared_within_five_years += o.declared_within_five_years;
         for (key, v) in o.opportunities {
@@ -828,6 +854,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
+    let (mut declared_weaker, mut declared_weaker_ally_nearer) = ([0u64; 2], 0u64);
     let mut claims = 0u64;
     let mut declared_within_five_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
@@ -864,6 +891,8 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
         let sides_before: BTreeMap<ActorId, Side> = living.iter().map(|a| (*a, side_of(w, *a))).collect();
         let obligations_before: BTreeMap<(ActorId, ActorId), (ActorId, ActorId)> = w.wars.iter().filter_map(|(k, x)| x.of.map(|principal| (*k, principal))).collect();
         let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
+        // The world as the tick's decisions read it: the odds of a declaration are read off it.
+        let before = w.clone();
         for a in &living {
             let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
             let people: i64 = w.actors[a].provinces.iter().map(|q| w.population(*q)).sum();
@@ -990,6 +1019,20 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                     declarations += 1;
                     if unpaid_seen.get(a).copied().unwrap_or(false) {
                         declared_unpaid += 1;
+                    }
+                    if before.alive(*a) && before.alive(b) && !before.at_war(*a, b) {
+                        let odds = before.war_odds(*a, b, 0.0, p);
+                        if odds < 0.5 {
+                            declared_weaker[0] += 1;
+                            let march = before.war_ticks(*a, b, p).ceil() as usize;
+                            let near = |x: ActorId| !before.land_in_reach(x, *a, march, p).is_empty();
+                            if !near(b) && before.war_sides(*a, b).1.into_iter().any(|x| x != b && near(x)) {
+                                declared_weaker_ally_nearer += 1;
+                            }
+                        }
+                        if odds < 0.1 {
+                            declared_weaker[1] += 1;
+                        }
                     }
                     if last_peace.get(&((*a).min(b), (*a).max(b))).is_some_and(|t0| t0 + 1 == t) {
                         declared_after_peace += 1;
@@ -1140,7 +1183,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1154,7 +1197,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7, a13 } = m.rates();
     let war_lines = m.war_lines();
     let fill_line = m.fill_line();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
+    let weaker_line = m.weaker_line();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1279,6 +1323,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         migrants_across as f64 / migrants.max(1) as f64
     );
     eprintln!("{fill_line}");
+    eprintln!("{weaker_line}");
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
@@ -1910,6 +1955,7 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
             m.declared_within_five_years as f64 / m.declarations.max(1) as f64
         );
         eprintln!("{label}: {}", m.fill_line());
+        eprintln!("{label}: {}", m.weaker_line());
         for line in m.war_lines() {
             eprintln!("{label}: {line}");
         }
@@ -3293,6 +3339,173 @@ fn a_war_the_rule_of_the_peace_would_close_before_the_stake_is_reached_wins_noth
     let (t, with, without) = worth(&w, s3);
     assert!(t.first_blow() > t.ticks, "the enemy's first conquest {} comes after the march and siege to the stake {}", t.first_blow(), t.ticks);
     assert!(with > without, "the weaker side the rule cannot close first counts its stake: {with} against {without} with none");
+}
+
+/// E4, plan §31.55, executor's decision № 23: **the side the weaker by the battle formula reads
+/// its war to the enemy's first conquest.** Its own march does not end the war — the rule of
+/// the peace forces the weaker side when it has lost a province on balance — so the land the
+/// enemy takes first is at risk though the blow comes after its own march and siege, and for a
+/// polity of one province that land is its fall. The case found on the scenario of Milan
+/// (plan §31.54): Mantua, one province, its stake two ticks away and the enemy's first blow
+/// the fifth, read a gain at its odds and no land at risk — a war at one to forty for nothing.
+/// The stake still counts (the rule of the peace does not close the war before it is
+/// reached); the side not weaker than a half reads the terms as it did.
+#[test]
+fn the_weaker_side_reads_its_war_to_the_enemys_first_conquest() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let unit_of = |w: &World, a: ActorId| w.units.iter().find(|(_, u)| u.owner == a).map(|(u, _)| *u).expect("a unit");
+    let years = f64::from(p.goal_horizon_ticks) / 2.0;
+    // Polity 0 down to its capital, wanting a province of its neighbour a march and a siege
+    // away; the neighbour three times its strength, its unit a step from the capital.
+    let one_province = |seed: u64| {
+        let mut w = world_of(&testworld::five_states_scenario(), seed);
+        for y in 1..5 {
+            let q = at(0, y);
+            w.provinces.get_mut(&q).unwrap().owner = s2;
+            w.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+            w.actors.get_mut(&s2).unwrap().provinces.push(q);
+        }
+        w.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 1))).unwrap();
+        w.post(engine2::Account::Soldiers(unit_of(&w, s1)), Source::Test, 1200 * 1000).unwrap();
+        w
+    };
+    let terms = |w: &World, p: &Params| w.war_terms(s0, s1, w.ceded_province_blow(s0, &w.risk_prices(s0, p), p), p);
+    let w = one_province(93);
+    let odds = w.war_odds(s0, s1, 0.0, &p);
+    assert!(odds < 0.5, "the weaker side: {odds}");
+    let t = terms(&w, &p);
+    assert!(t.first_blow().is_finite() && t.first_blow() > t.ticks, "the enemy's first conquest {} comes after the polity's own march and siege {}", t.first_blow(), t.ticks);
+    assert!(t.fall(), "its one province is the first the enemy takes: the war it reads ends in its fall");
+    let (with, without) = (w.war_worth_of(s0, &t, false, 0.0, &p), w.war_worth_of(s0, &t, true, 0.0, &p));
+    assert!(with > without, "the stake counts — the rule of the peace does not close the war before it is reached: {with} against {without}");
+    assert!(without <= -(1.0 - odds) * years * 0.999, "the whole income to the horizon at the odds of the fall: {without} against {}", -(1.0 - odds) * years);
+    assert!(with < 0.0, "a war at these odds with all its land at risk is worth less than nothing: {with}");
+
+    // The same polity the stronger: it is not the side the rule forces, and it reads the
+    // land the enemy takes within its own march — none.
+    let mut strong = one_province(93);
+    strong.post(engine2::Account::Soldiers(unit_of(&strong, s0)), Source::Test, 2400 * 1000).unwrap();
+    assert!(strong.war_odds(s0, s1, 0.0, &p) > 0.5, "the stronger side");
+    let t = terms(&strong, &p);
+    assert!(t.first_blow() > t.ticks && !t.fall(), "the stronger side reads no fall beyond its own march");
+    let (with, without) = (strong.war_worth_of(s0, &t, false, 0.0, &p), strong.war_worth_of(s0, &t, true, 0.0, &p));
+    assert!(with > without, "and counts its stake: {with} against {without} with none");
+
+    // The reach is read over the enemy's march to the polity's capital, not over the polity's
+    // own march alone: on a world where a march is a step a tick, the enemy's unit stands five
+    // steps from the capital and the polity's stake two — within its own march the unit
+    // reaches none of its land, within the enemy's it reaches the capital.
+    let mut slow = p.clone();
+    slow.march_km_per_tick = 1;
+    let mut far = one_province(93);
+    assert_eq!(far.march_steps_per_tick(&slow), 1);
+    let enemy = unit_of(&far, s1);
+    far.units.get_mut(&enemy).unwrap().position = at(1, 4);
+    assert!(far.war_odds(s0, s1, 0.0, &slow) < 0.5);
+    let t = terms(&far, &slow);
+    assert!(far.land_in_reach(s1, s0, t.ticks.ceil() as usize, &slow).is_empty(), "within the polity's own march of {} ticks the enemy's unit reaches none of its land", t.ticks);
+    assert!(t.first_blow().is_finite() && t.first_blow() > t.ticks, "the first blow is read all the same: {} after {}", t.first_blow(), t.ticks);
+    assert!(t.fall(), "and the capital it reaches is the polity's fall");
+
+    // The longer of the two, and the polity's own march is one of them: its stake at the far
+    // end of the neighbour's land is six ticks away, the neighbour's march to its capital
+    // five, and the neighbour's unit stands six steps from the capital — out of the reach of
+    // the five, within the six.
+    let mut long = one_province(93);
+    long.actors.get_mut(&s0).unwrap().goals.clear();
+    long.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(1, 4))).unwrap();
+    let enemy = unit_of(&long, s1);
+    long.units.get_mut(&enemy).unwrap().position = at(2, 4);
+    let t = terms(&long, &slow);
+    assert!(long.threat_ticks(s0, s1, &slow) < t.ticks, "the neighbour's march to the capital, {} ticks, is the shorter of the two: its own is {}", long.threat_ticks(s0, s1, &slow), t.ticks);
+    assert!(long.land_in_reach(s1, s0, long.threat_ticks(s0, s1, &slow) as usize, &slow).is_empty() && !long.land_in_reach(s1, s0, t.ticks as usize, &slow).is_empty());
+    assert!(t.first_blow().is_finite() && t.fall(), "the unit within the polity's own march is read: the first blow {}", t.first_blow());
+
+    // The enemy's march to the polity's capital — not the polity's to the enemy's: the enemy
+    // passes its ally's land between them and the polity does not. No bay across; the enemy
+    // two columns away, allied with the polity between; its unit six steps from the capital.
+    let (s2e, s4) = (ActorId(2), ActorId(4));
+    let mut across = world_of(&testworld::five_states_scenario(), 93);
+    for pr in across.provinces.values_mut() {
+        pr.sea_neighbours.clear();
+    }
+    for y in 1..5 {
+        let q = at(0, y);
+        across.provinces.get_mut(&q).unwrap().owner = s4;
+        across.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        across.actors.get_mut(&s4).unwrap().provinces.push(q);
+    }
+    across.treaties.insert((s1, s2e), engine2::world::Treaty { kind: engine2::world::TreatyKind::Alliance, until: engine2::time::Tick(1000), since: None });
+    across.set_goal(s0, GoalKind::Take, GoalTarget::Province(at(2, 1))).unwrap();
+    let enemy = unit_of(&across, s2e);
+    across.post(engine2::Account::Soldiers(enemy), Source::Test, 1200 * 1000).unwrap();
+    across.units.get_mut(&enemy).unwrap().position = at(2, 4);
+    assert!(across.war_odds(s0, s2e, 0.0, &slow) < 0.5);
+    let (theirs, mine) = (across.threat_ticks(s0, s2e, &slow), across.threat_ticks(s2e, s0, &slow));
+    assert!(theirs > mine, "the enemy's march to the polity's capital passes its ally's land, {theirs} ticks; the polity's to the enemy's has no way, {mine}");
+    let t = across.war_terms(s0, s2e, across.ceded_province_blow(s0, &across.risk_prices(s0, &slow), &slow), &slow);
+    assert!(t.ticks < mine, "the polity's own march to its stake, {} ticks, is the shortest of the three", t.ticks);
+    assert!(across.land_in_reach(s2e, s0, mine as usize, &slow).is_empty() && !across.land_in_reach(s2e, s0, theirs as usize, &slow).is_empty());
+    assert!(t.first_blow().is_finite() && t.fall(), "read over the enemy's march: the first blow {}", t.first_blow());
+}
+
+/// E4, plan §31.55: **a threat is read over the neighbour's march its caller read, and no
+/// further.** The weaker side's reading (decision № 23) takes the longer of the war's length
+/// and the enemy's march to the polity's capital; for a threat the two are one number
+/// (`threat_ticks`), read by the caller and handed to the terms (`enemy_march`) so that the
+/// path is not searched twice. Held here on both callers that hand it — the threats of a
+/// polity (`threats`) and the peace a match is worth (`match_peace`): a neighbour's unit that
+/// stands a step beyond its march from its capital puts no land at risk, and is read as one
+/// that stands out of every reach.
+#[test]
+fn a_threat_is_read_over_the_neighbours_march_its_caller_read_and_no_further() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut slow = p.clone();
+    slow.march_km_per_tick = 1;
+    // Polity 0 down to its capital and a vassal of its neighbour (the norm of the pair with a
+    // marriage reaches the threshold: the match has a peace to be worth); the neighbour three
+    // times its strength, with wars on its record.
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    for y in 1..5 {
+        let q = at(0, y);
+        w.provinces.get_mut(&q).unwrap().owner = s2;
+        w.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        w.actors.get_mut(&s2).unwrap().provinces.push(q);
+    }
+    let unit = w.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).expect("a unit");
+    w.post(engine2::Account::Soldiers(unit), Source::Test, 1200 * 1000).unwrap();
+    w.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    w.make_vassal(s0, s1).unwrap();
+    assert_eq!(w.march_steps_per_tick(&slow), 1);
+    let (mine, theirs) = w.threat_sides_strength(s0, s1);
+    assert!(World::war_odds_of((mine, theirs), 0.0, &slow) < 0.5, "the weaker side of the threat: {mine} against {theirs}");
+    let (h0, h1) = (w.ruling_house(s0), w.ruling_house(s1));
+    let march = w.threat_ticks(s0, s1, &slow) as usize;
+    let with_unit_at = |q: ProvinceId| {
+        let mut x = w.clone();
+        x.units.get_mut(&unit).unwrap().position = q;
+        x
+    };
+    let threat = |x: &World| {
+        let blow = x.ceded_province_blow(s0, &x.risk_prices(s0, &slow), &slow);
+        x.threats(s0, blow, &slow).into_iter().find(|(t, _)| *t == s1).map(|(_, t)| t).expect("the neighbour is a threat")
+    };
+    // The unit at the neighbour's capital: the polity's one province is within its march.
+    let near = with_unit_at(w.actors[&s1].capital);
+    assert!(!near.land_in_reach(s1, s0, march, &slow).is_empty());
+    assert!(threat(&near).first_blow().is_finite() && threat(&near).fall(), "within the neighbour's march the capital is the polity's fall");
+    // The unit a step beyond the march, within twice it; and one out of every reach.
+    let (beyond, away) = (with_unit_at(at(2, 4)), with_unit_at(at(3, 4)));
+    assert!(beyond.land_in_reach(s1, s0, march, &slow).is_empty() && !beyond.land_in_reach(s1, s0, 2 * march, &slow).is_empty(), "a step beyond the march of {march} ticks, within twice it");
+    assert!(away.land_in_reach(s1, s0, 2 * march, &slow).is_empty(), "out of every reach");
+    let t = threat(&beyond);
+    assert!(t.first_blow().is_infinite() && !t.fall(), "the threat is read over the neighbour's march and no further: the first blow {}", t.first_blow());
+    // The peace a match is worth reads the same threat.
+    let (near_peace, beyond_peace, away_peace) = (near.match_peace(h0, h1, &slow), beyond.match_peace(h0, h1, &slow), away.match_peace(h0, h1, &slow));
+    assert!(away_peace > 0.0 && near_peace > away_peace, "the match stands against the threat, the more where the threat is a fall: {near_peace} against {away_peace}");
+    assert!((beyond_peace - away_peace).abs() < 1e-9, "a unit beyond the neighbour's march is read as one out of every reach: {beyond_peace} against {away_peace}");
 }
 
 /// The cold start (E3 (г), owner's decision 3 on §29.8): while a polity's record is shorter than
@@ -5427,6 +5640,7 @@ fn diagnosis_the_measures_of_e2_and_e3_on_the_scenario_of_milan() {
     eprintln!("falls {} of which by conquest {}; goals reached {}, put aside {}; verbs {:?}", m.falls, m.falls_by_conquest, m.reached, m.dropped, m.verbs);
     eprintln!("the order bought (`enforce_order`): {} times in {} runs", m.verbs.get(&VerbId::EnforceOrder).copied().unwrap_or(0), seeds.len());
     eprintln!("{}", m.fill_line());
+    eprintln!("{}", m.weaker_line());
     for line in m.war_lines() {
         eprintln!("{line}");
     }
