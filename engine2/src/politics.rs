@@ -15,7 +15,9 @@
 //! **2b. Usurpation (E0 В6):** one draw per living polity whose ruler is still alive
 //! (`DrawPoint::Usurpation`, keyed by polity) against `В6_base/2 × (100 − L)/50`, the
 //! same shape as В3. The usurper is an adult of **any house of the polity** (owner's rule
-//! on §18): the regent first (Lodovico), then a governor, then the eldest adult; with no
+//! on §18): a governor, then the eldest adult — the regent has no place of its own in the
+//! order (E4, the owner's decision of 2026-11-18, plan §31.70: it stood first, and a regent
+//! of a scenario's facts may be the ward's mother); with no
 //! candidate there is no usurpation — a ruler out of nothing is forbidden. The ruler is
 //! executed (`RulerDied { cause: Execution }`), the usurper takes the throne with the
 //! standing `Usurper` (`Succession { how: Usurper }`), and legitimacy falls to the
@@ -265,13 +267,14 @@ impl World {
         self.standing_norm(a, params) + tax + default
     }
 
-    /// Who would take the throne by force: the regent, else a governor, else the eldest
-    /// adult of any house of the polity; never the ruler, never a child.
+    /// Who would take the throne by force: a governor, else the eldest adult of any house of
+    /// the polity; never the ruler, never a child.
+    ///
+    /// **The regent has no place of its own in the order** (E4, plan §31.70, the owner's
+    /// decision of 2026-11-18 on the rule of §18; executor's decision № 25): it stood first,
+    /// and the regent of a scenario's facts may be the ward's mother. A regent is a candidate
+    /// as any other adult is — as a governor, or as the eldest.
     pub fn usurper_candidate(&self, a: ActorId, params: &Params) -> Option<PersonId> {
-        let actor = &self.actors[&a];
-        if let Some(r) = actor.regent.filter(|r| self.person_alive(*r) && self.is_adult(*r, params)) {
-            return Some(r);
-        }
         let adults = self.people_of_polity_adults(a, params);
         let governors: Vec<PersonId> = adults.iter().copied().filter(|p| !self.governed_by(*p).is_empty()).collect();
         self.eldest(&governors, true, params).or_else(|| self.eldest(&adults, true, params))
