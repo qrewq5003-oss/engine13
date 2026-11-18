@@ -111,9 +111,17 @@ impl World {
     /// The war itself, with its obligations (E2 step 7, plan §19.2 p. 3–4, owner's rule):
     /// the attacked side's allies, its lord and its vassals enter the war against the
     /// attacker, and the attacker's vassals enter against the attacked — **their entry is no
-    /// declaration**: it costs nothing, breaks no treaty, and pulls nobody further in, so one
-    /// war does not light the world in a chain. An entrant whose peace with the other side
-    /// is in force stays out: the treaty holds.
+    /// declaration**: it costs the entrant nothing and pulls nobody further in, so one war
+    /// does not light the world in a chain. An entrant whose peace with the other side is in
+    /// force stays out: the treaty holds.
+    ///
+    /// **An alliance the war sets across its sides breaks at its opening** (E4, plan §31.57,
+    /// the owner's decision В3 of 2026-11-18): the ally of the attacked that is the
+    /// attacker's ally too enters, and its alliance with the attacker ends here, with the
+    /// event of a breach and the push of the relation a breach gives
+    /// (`alliances_across`, `BREACH_RELATION_PUSH`). No pair is allied and at war at once,
+    /// whatever opens the war — the verb, a breakaway (`collapse.rs`) or a test. The price of
+    /// those breaches is the declarer's, paid by the verb (`war_price`).
     pub(crate) fn open_war(&mut self, attacker: ActorId, victim: ActorId, aim: Option<crate::world::WarAim>) -> Result<(), WorldError> {
         if attacker == victim {
             return Err(WorldError::WarWithSelf(attacker));
@@ -123,9 +131,15 @@ impl World {
                 return Err(WorldError::UnknownActor(x));
             }
         }
+        for (x, y) in self.alliances_across(attacker, victim) {
+            self.treaties.remove(&pair(x, y));
+            let (lo, hi) = pair(x, y);
+            self.emit(Event::TreatyBroken { a: lo, b: hi, kind: crate::world::TreatyKind::Alliance });
+            self.push_relation(x, y, crate::diplomacy::BREACH_RELATION_PUSH);
+        }
+        let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
         self.war_between(attacker, victim, None, attacker, aim);
         let principal = Some(pair(attacker, victim));
-        let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
         for x in with_victim {
             self.war_between(x, attacker, principal, attacker, None);
         }
@@ -139,13 +153,36 @@ impl World {
     /// allies, lord and vassals against the attacker, the attacker's vassals against the
     /// victim — living, and not bound by a peace in force with the other side. The one rule
     /// the war opens by and the sides of a war not yet open are read by (`war_sides`).
+    ///
+    /// **The attacker's vassal stands with its lord** (plan §31.57, the owner's decision В3,
+    /// p. 4): one that is the victim's ally too enters against the victim alone — its
+    /// alliance with the victim is one the war breaks (`alliances_across`), not a cause to
+    /// fight its lord.
     pub fn war_entrants(&self, attacker: ActorId, victim: ActorId) -> (Vec<ActorId>, Vec<ActorId>) {
+        let with_attacker: Vec<ActorId> = self.vassals_of(attacker).into_iter().filter(|x| *x != victim && self.alive(*x) && !self.peace_in_force(*x, victim)).collect();
         let mut with_victim: Vec<ActorId> = self.allies_of(victim);
         with_victim.extend(self.lord_of(victim));
         with_victim.extend(self.vassals_of(victim));
-        let with_victim = with_victim.into_iter().filter(|x| *x != attacker && self.alive(*x) && !self.peace_in_force(*x, attacker)).collect();
-        let with_attacker = self.vassals_of(attacker).into_iter().filter(|x| *x != victim && self.alive(*x) && !self.peace_in_force(*x, victim)).collect();
+        let with_victim = with_victim.into_iter().filter(|x| *x != attacker && self.alive(*x) && !self.peace_in_force(*x, attacker) && !with_attacker.contains(x)).collect();
         (with_victim, with_attacker)
+    }
+
+    /// The alliances a war of `attacker` on `victim` would set across its sides (E4, plan
+    /// §31.57, the owner's decision В3): of each entrant on the victim's side that is the
+    /// attacker's ally — its alliance with the attacker; of each vassal of the attacker that
+    /// enters and is the victim's ally — its alliance with the victim. Read by the rule the
+    /// war opens by (`war_entrants`), and by all that needs them: the opening of the war,
+    /// which breaks them (`open_war`); the price of the declaration, which is a breach of
+    /// each (`war_price`); the measure. None where the pair is at war already: a claim stated
+    /// in a war that is on opens no war.
+    pub fn alliances_across(&self, attacker: ActorId, victim: ActorId) -> Vec<(ActorId, ActorId)> {
+        if self.at_war(attacker, victim) {
+            return Vec::new();
+        }
+        let (with_victim, with_attacker) = self.war_entrants(attacker, victim);
+        let ours = with_victim.into_iter().filter(|x| self.allied(*x, attacker)).map(|x| (x, attacker));
+        let theirs = with_attacker.into_iter().filter(|v| self.allied(*v, victim)).map(|v| (v, victim));
+        ours.chain(theirs).collect()
     }
 
     /// The two sides of the war of `a` and `b` (plan §28.1, owner's answer 1): `a` with
