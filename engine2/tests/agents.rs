@@ -469,6 +469,13 @@ struct Measures {
     claims: u64,
     declared_after_peace: u64,
     declared_unpaid: u64,
+    /// The declarations that opened a war by a declarer the weaker by the battle formula, read
+    /// off the state before the tick (`war_odds`): at odds under a half, and under a tenth;
+    /// and of the first, those whose principal enemy's units reach none of the declarer's land
+    /// within its own march while the units of an ally of that enemy do (E4, plan §31.55,
+    /// executor's decision № 23 — the reviewer's lines of the measure).
+    declared_weaker: [u64; 2],
+    declared_weaker_ally_nearer: u64,
     war_lengths: Vec<u32>,
     declared_within_five_years: u64,
     opportunities: BTreeMap<String, u64>,
@@ -590,6 +597,22 @@ impl Measures {
         )
     }
 
+    /// The declarations of the weaker side (E4, plan §31.55): of the declarations that opened
+    /// a war, those at odds under a half and under a tenth as the declarer read them, and
+    /// those of the first whose enemy's ally stood nearer than the enemy.
+    fn weaker_line(&self) -> String {
+        let share = |n: u64| n as f64 / self.declarations.max(1) as f64;
+        format!(
+            "declarations by the weaker side: at odds under a half {} of {} ({:.3}), under a tenth {} ({:.3}); of the first, the enemy's units out of reach of the declarer's land within its march and an ally's within it {}",
+            self.declared_weaker[0],
+            self.declarations,
+            share(self.declared_weaker[0]),
+            self.declared_weaker[1],
+            share(self.declared_weaker[1]),
+            self.declared_weaker_ally_nearer
+        )
+    }
+
     /// The measures over `seeds`, one world per thread, folded in the order of the seeds.
     fn over(seeds: &[u64], p: &Params) -> Measures {
         let mut m = Measures::default();
@@ -661,6 +684,9 @@ impl Measures {
         self.claims += o.claims;
         self.declared_after_peace += o.declared_after_peace;
         self.declared_unpaid += o.declared_unpaid;
+        self.declared_weaker[0] += o.declared_weaker[0];
+        self.declared_weaker[1] += o.declared_weaker[1];
+        self.declared_weaker_ally_nearer += o.declared_weaker_ally_nearer;
         self.war_lengths.extend(o.war_lengths);
         self.declared_within_five_years += o.declared_within_five_years;
         for (key, v) in o.opportunities {
@@ -828,6 +854,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
     let mut revolts_per_province: BTreeMap<(u64, ProvinceId), u32> = BTreeMap::new();
     let (mut tax_changes, mut tax_undone) = (0u64, 0u64);
     let (mut declarations, mut declared_after_peace, mut declared_unpaid, mut war_lengths) = (0u64, 0u64, 0u64, Vec::<u32>::new());
+    let (mut declared_weaker, mut declared_weaker_ally_nearer) = ([0u64; 2], 0u64);
     let mut claims = 0u64;
     let mut declared_within_five_years = 0u64;
     let mut opportunities: BTreeMap<String, u64> = BTreeMap::new();
@@ -864,6 +891,8 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
         let sides_before: BTreeMap<ActorId, Side> = living.iter().map(|a| (*a, side_of(w, *a))).collect();
         let obligations_before: BTreeMap<(ActorId, ActorId), (ActorId, ActorId)> = w.wars.iter().filter_map(|(k, x)| x.of.map(|principal| (*k, principal))).collect();
         let unpaid_seen: BTreeMap<ActorId, bool> = living.iter().map(|a| (*a, w.paid_share_seen_ppm(*a) < 1_000_000)).collect();
+        // The world as the tick's decisions read it: the odds of a declaration are read off it.
+        let before = w.clone();
         for a in &living {
             let at_war = w.wars.keys().any(|(x, y)| x == a || y == a);
             let people: i64 = w.actors[a].provinces.iter().map(|q| w.population(*q)).sum();
@@ -990,6 +1019,20 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
                     declarations += 1;
                     if unpaid_seen.get(a).copied().unwrap_or(false) {
                         declared_unpaid += 1;
+                    }
+                    if before.alive(*a) && before.alive(b) && !before.at_war(*a, b) {
+                        let odds = before.war_odds(*a, b, 0.0, p);
+                        if odds < 0.5 {
+                            declared_weaker[0] += 1;
+                            let march = before.war_ticks(*a, b, p).ceil() as usize;
+                            let near = |x: ActorId| !before.land_in_reach(x, *a, march, p).is_empty();
+                            if !near(b) && before.war_sides(*a, b).1.into_iter().any(|x| x != b && near(x)) {
+                                declared_weaker_ally_nearer += 1;
+                            }
+                        }
+                        if odds < 0.1 {
+                            declared_weaker[1] += 1;
+                        }
                     }
                     if last_peace.get(&((*a).min(b), (*a).max(b))).is_some_and(|t0| t0 + 1 == t) {
                         declared_after_peace += 1;
@@ -1140,7 +1183,7 @@ fn measure_scenario(s: &ScenarioData, seed: u64, p: &Params) -> Measures {
             per_polity_war_share.push(w as f64 / n as f64);
         }
     }
-    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
+    Measures { reigns, usurpations, polity_centuries, risings, large_ticks, polities_start, polities_century, war_ticks, polity_ticks, at_peace_ticks, army_at_war, people_at_war, army_at_peace, people_at_peace, a11_peace_windows, bound_century, alive_century, tax, production, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks, province_ticks, revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker, declared_weaker_ally_nearer, war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100, people_end, capacity, plague_capacity, plague_people, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars, principal_wars_open: open_wars.len() as u64, wars_within_a_tick, battles, battles_even, battles_drawn, alliances, alliance_repeats: alliance_repeats.into_values().collect() }
 }
 
 /// The measures of E2 read again with every polity a bot (owner's rule on #291): В5, В6,
@@ -1154,7 +1197,8 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
     let Rates { b5, b6, b7, b8, a11_war, a11_peace, a12, d3, e8, b9, p7, a13 } = m.rates();
     let war_lines = m.war_lines();
     let fill_line = m.fill_line();
-    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
+    let weaker_line = m.weaker_line();
+    let Measures { reigns, usurpations: _, polity_centuries: _, risings: _, large_ticks: _, polities_start: _, polities_century: _, war_ticks: _, polity_ticks: _, at_peace_ticks, army_at_war: _, people_at_war: _, army_at_peace: _, people_at_peace: _, a11_peace_windows, bound_century: _, alive_century: _, tax: _, production: _, falls, falls_by_conquest, reached, dropped, verbs, rejections, per_polity_war_share, rates, revolt_ticks: _, province_ticks: _, mut revolt_lengths, revolts_started, revolts_ended, revolts_per_province, tax_changes, tax_undone, declarations, claims, declared_after_peace, declared_unpaid, declared_weaker: _, declared_weaker_ally_nearer: _, mut war_lengths, declared_within_five_years, opportunities, elections, elections_turned, people_start, people_100: _, people_end, capacity: _, plague_capacity: _, plague_people: _, migrants, migrants_across, deficit_share, deficit_samples, deficit_heavy, pay, court, conquests, conquests_unfought, principal_wars: _, principal_wars_open: _, wars_within_a_tick: _, battles: _, battles_even: _, battles_drawn: _, alliances: _, alliance_repeats: _ } = m;
     let never = per_polity_war_share.iter().filter(|s| **s < 0.1).count();
     let always = per_polity_war_share.iter().filter(|s| **s > 0.9).count();
     eprintln!(
@@ -1279,6 +1323,7 @@ fn on_generated_worlds_with_bots_the_measures_of_e2_hold_and_nothing_falls_but_b
         migrants_across as f64 / migrants.max(1) as f64
     );
     eprintln!("{fill_line}");
+    eprintln!("{weaker_line}");
     let p7_band = band("population.observed_growth_per_year");
     assert!((p7_band[0]..=p7_band[1]).contains(&p7), "П7 {p7:.4} outside {p7_band:?}");
     // А11 at peace has a source (Venice about 1 %, Milan about 1,7 % — Mallett–Hale; the band
@@ -1910,6 +1955,7 @@ fn on_held_out_seeds_the_measures_are_read_beside_the_calibration_seeds() {
             m.declared_within_five_years as f64 / m.declarations.max(1) as f64
         );
         eprintln!("{label}: {}", m.fill_line());
+        eprintln!("{label}: {}", m.weaker_line());
         for line in m.war_lines() {
             eprintln!("{label}: {line}");
         }
@@ -5427,6 +5473,7 @@ fn diagnosis_the_measures_of_e2_and_e3_on_the_scenario_of_milan() {
     eprintln!("falls {} of which by conquest {}; goals reached {}, put aside {}; verbs {:?}", m.falls, m.falls_by_conquest, m.reached, m.dropped, m.verbs);
     eprintln!("the order bought (`enforce_order`): {} times in {} runs", m.verbs.get(&VerbId::EnforceOrder).copied().unwrap_or(0), seeds.len());
     eprintln!("{}", m.fill_line());
+    eprintln!("{}", m.weaker_line());
     for line in m.war_lines() {
         eprintln!("{line}");
     }
