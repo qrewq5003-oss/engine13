@@ -3450,6 +3450,64 @@ fn the_weaker_side_reads_its_war_to_the_enemys_first_conquest() {
     assert!(t.first_blow().is_finite() && t.fall(), "read over the enemy's march: the first blow {}", t.first_blow());
 }
 
+/// E4, plan §31.55: **a threat is read over the neighbour's march its caller read, and no
+/// further.** The weaker side's reading (decision № 23) takes the longer of the war's length
+/// and the enemy's march to the polity's capital; for a threat the two are one number
+/// (`threat_ticks`), read by the caller and handed to the terms (`enemy_march`) so that the
+/// path is not searched twice. Held here on both callers that hand it — the threats of a
+/// polity (`threats`) and the peace a match is worth (`match_peace`): a neighbour's unit that
+/// stands a step beyond its march from its capital puts no land at risk, and is read as one
+/// that stands out of every reach.
+#[test]
+fn a_threat_is_read_over_the_neighbours_march_its_caller_read_and_no_further() {
+    let p = params();
+    let (s0, s1, s2) = (ActorId(0), ActorId(1), ActorId(2));
+    let mut slow = p.clone();
+    slow.march_km_per_tick = 1;
+    // Polity 0 down to its capital and a vassal of its neighbour (the norm of the pair with a
+    // marriage reaches the threshold: the match has a peace to be worth); the neighbour three
+    // times its strength, with wars on its record.
+    let mut w = world_of(&all_verbs(testworld::five_states_scenario()), 7);
+    for y in 1..5 {
+        let q = at(0, y);
+        w.provinces.get_mut(&q).unwrap().owner = s2;
+        w.actors.get_mut(&s0).unwrap().provinces.retain(|x| *x != q);
+        w.actors.get_mut(&s2).unwrap().provinces.push(q);
+    }
+    let unit = w.units.iter().find(|(_, u)| u.owner == s1).map(|(u, _)| *u).expect("a unit");
+    w.post(engine2::Account::Soldiers(unit), Source::Test, 1200 * 1000).unwrap();
+    w.actors.get_mut(&s1).unwrap().wars_entered = 4;
+    w.make_vassal(s0, s1).unwrap();
+    assert_eq!(w.march_steps_per_tick(&slow), 1);
+    let (mine, theirs) = w.threat_sides_strength(s0, s1);
+    assert!(World::war_odds_of((mine, theirs), 0.0, &slow) < 0.5, "the weaker side of the threat: {mine} against {theirs}");
+    let (h0, h1) = (w.ruling_house(s0), w.ruling_house(s1));
+    let march = w.threat_ticks(s0, s1, &slow) as usize;
+    let with_unit_at = |q: ProvinceId| {
+        let mut x = w.clone();
+        x.units.get_mut(&unit).unwrap().position = q;
+        x
+    };
+    let threat = |x: &World| {
+        let blow = x.ceded_province_blow(s0, &x.risk_prices(s0, &slow), &slow);
+        x.threats(s0, blow, &slow).into_iter().find(|(t, _)| *t == s1).map(|(_, t)| t).expect("the neighbour is a threat")
+    };
+    // The unit at the neighbour's capital: the polity's one province is within its march.
+    let near = with_unit_at(w.actors[&s1].capital);
+    assert!(!near.land_in_reach(s1, s0, march, &slow).is_empty());
+    assert!(threat(&near).first_blow().is_finite() && threat(&near).fall(), "within the neighbour's march the capital is the polity's fall");
+    // The unit a step beyond the march, within twice it; and one out of every reach.
+    let (beyond, away) = (with_unit_at(at(2, 4)), with_unit_at(at(3, 4)));
+    assert!(beyond.land_in_reach(s1, s0, march, &slow).is_empty() && !beyond.land_in_reach(s1, s0, 2 * march, &slow).is_empty(), "a step beyond the march of {march} ticks, within twice it");
+    assert!(away.land_in_reach(s1, s0, 2 * march, &slow).is_empty(), "out of every reach");
+    let t = threat(&beyond);
+    assert!(t.first_blow().is_infinite() && !t.fall(), "the threat is read over the neighbour's march and no further: the first blow {}", t.first_blow());
+    // The peace a match is worth reads the same threat.
+    let (near_peace, beyond_peace, away_peace) = (near.match_peace(h0, h1, &slow), beyond.match_peace(h0, h1, &slow), away.match_peace(h0, h1, &slow));
+    assert!(away_peace > 0.0 && near_peace > away_peace, "the match stands against the threat, the more where the threat is a fall: {near_peace} against {away_peace}");
+    assert!((beyond_peace - away_peace).abs() < 1e-9, "a unit beyond the neighbour's march is read as one out of every reach: {beyond_peace} against {away_peace}");
+}
+
 /// The cold start (E3 (г), owner's decision 3 on §29.8): while a polity's record is shorter than
 /// the horizon a bot does not disband below the army it started with — an empty chronicle says
 /// nothing, not «no wars»; a levy above it may go, and once the record is as long as the
