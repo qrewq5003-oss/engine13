@@ -68,3 +68,38 @@ def test_a_dense_province_carries_its_class_and_no_share_of_hills():
     dens[density.A], dens[density.H], dens[density.N] = 50.0, 12.0, 75.0
     # A share of hills never lowers a dense block (the schema refuses the pair).
     assert layout.mixed_density(dens, np.array([density.N]), np.array([0.5])).tolist() == [75.0]
+
+
+def test_a_province_label_is_inside_its_largest_part():
+    import shapely
+
+    # A horseshoe: its centroid lies in the gap, outside the province.
+    shoe = shapely.Polygon([(0, 0), (3, 0), (3, 3), (2, 3), (2, 1), (1, 1), (1, 3), (0, 3)])
+    assert not shoe.contains(shoe.centroid)
+    assert shoe.contains(shapely.Point(layout.label_point(shoe)))
+    # A mainland and a small island far off: the centroid is in the sea between them, the label
+    # on the mainland — the larger part.
+    mainland = shapely.box(0, 0, 4, 4)
+    island = shapely.box(20, 0, 21, 1)
+    both = shapely.MultiPolygon([island, mainland])
+    assert mainland.contains(shapely.Point(layout.label_point(both)))
+    # A sliver thinner than the rounding step: the rounded point would fall out, so the point is
+    # kept as it is.
+    sliver = shapely.Polygon([(0.00001, 0.00001), (2, 0.00001), (2, 0.00004), (0.00001, 0.00004)])
+    assert sliver.contains(shapely.Point(layout.label_point(sliver)))
+
+
+def test_the_written_geojson_carries_a_label_inside_every_province():
+    import json
+    import pathlib
+    import shapely
+    from shapely.geometry import shape
+
+    root = pathlib.Path(__file__).resolve().parents[3] / "public" / "geodata2"
+    files = sorted(root.glob("*/provinces.geojson"))
+    assert len(files) == 3, files
+    for f in files:
+        feats = json.loads(f.read_text(encoding="utf-8"))["features"]
+        for feat in feats:
+            g = shape(feat["geometry"])
+            assert g.contains(shapely.Point(feat["properties"]["label"])), (f.parent.name, feat["properties"]["id"])
