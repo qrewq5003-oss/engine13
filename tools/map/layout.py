@@ -655,8 +655,21 @@ def write_toml(path, scenario, layout, provs_cfg, pids, provs, hills_of, pop, st
     rep.step(f"wrote {path.relative_to(REPO)}")
 
 
+def label_point(g):
+    """A point inside the province for its markers (E5, docs/engine2_map.md §37.6): the
+    representative point of its largest part, [lon, lat]. A centroid falls into the sea for a
+    province of several parts or a bent one; this point is inside by construction. Rounded as
+    the polygon's own vertices are, and kept unrounded where the rounding would put it out."""
+    part = max(getattr(g, "geoms", [g]), key=lambda q: q.area)
+    p = part.representative_point()
+    rounded = shapely.Point(round(p.x, 4), round(p.y, 4))
+    p = rounded if part.contains(rounded) else p
+    return [p.x, p.y]
+
+
 def write_geojson(path, blocks, owner_of, pids, provs_cfg):
-    """Simplified province polygons for the interface (E5): properties id, name, owner, region."""
+    """Simplified province polygons for the interface (E5): properties id, name, owner, region
+    and label — a point inside the province (`label_point`)."""
     geoms = {}
     feats = []
     for pid in pids:
@@ -665,7 +678,8 @@ def write_geojson(path, blocks, owner_of, pids, provs_cfg):
         geoms[pid] = g
         pc = provs_cfg[pid]
         feats.append({"type": "Feature",
-                      "properties": {"id": pid, "name": pc["name"], "owner": pc["owner"], "region": pc["region"]},
+                      "properties": {"id": pid, "name": pc["name"], "owner": pc["owner"], "region": pc["region"],
+                                     "label": label_point(g)},
                       "geometry": mapping(g)})
     text = json.dumps({"type": "FeatureCollection", "features": feats}, ensure_ascii=False, separators=(",", ":"))
     path.write_text(text + "\n", encoding="utf-8", newline="\n")
