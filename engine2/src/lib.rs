@@ -40,6 +40,7 @@ pub mod ledger;
 pub mod movement;
 #[cfg(feature = "sentinel")]
 pub mod observe;
+pub mod offers;
 pub mod opportunity;
 pub mod par;
 pub mod params;

@@ -1094,53 +1094,33 @@ impl World {
         if !self.alive(a) {
             return out;
         }
+        // The calls open to the ruler, drawn from the one going over of the targets the shell
+        // is offered by too (`offers.rs`; E5, plan §31.77): the caller's side of the verb
+        // once, then every target the world could name that its rule opens. Three choices
+        // among what is open stay the bot's own: the claim its declaration states
+        // (`claim_target`), the levy from one province in six sizes, no disbanding below the
+        // starting army.
         let others: Vec<ActorId> = self.actors.keys().copied().filter(|b| *b != a && self.alive(*b)).collect();
+        let targets = crate::offers::TargetSeen::default();
         let mut calls: Vec<VerbCall> = Vec::new();
         for v in enabled {
+            if self.caller_room_seen(who, *v, params, &targets).is_err() {
+                continue;
+            }
+            let open = |t: &Target| self.target_room_seen(who, *v, *t, params, &targets).is_ok();
+            let call = |target: Target| VerbCall { actor: who, verb: *v, target };
             match v {
                 // A war to declare, or (A′) a claim to state in the war declared on `a`.
-                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.war_room(a, **b).is_ok() || self.claim_room(a, **b).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: self.claim_target(a, *b) })),
-                VerbId::MakePeace => calls.extend(others.iter().filter(|b| self.peace_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) })),
-                VerbId::ProposeAlliance => {
-                    let cost = self.embassy_cost(a, params);
-                    if cost > 0 && self.treasury(a) >= cost && self.lord_of(a).is_none() {
-                        calls.extend(others.iter().filter(|b| self.alliance_room(a, **b, params).is_ok()).map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
-                    }
-                }
-                VerbId::SendEmbassy => {
-                    let cost = self.embassy_cost(a, params);
-                    if cost > 0 && self.treasury(a) >= cost {
-                        calls.extend(others.iter().map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
-                    }
-                }
-                VerbId::Bribe => {
-                    let gift = self.gift_size(a, params);
-                    if gift > 0 && self.treasury(a) >= gift {
-                        calls.extend(others.iter().map(|b| VerbCall { actor: who, verb: *v, target: Target::Actor(*b) }));
-                    }
-                }
-                VerbId::ProposeMarriage => {
-                    // The rule of `marriage_room`, with each house's eldest unmarried adult
-                    // read in one pass over the persons instead of one per pair of houses.
-                    let h = self.ruling_house(a);
-                    let unmarried = self.unmarried_adults(params);
-                    if unmarried.contains_key(&h) {
-                        calls.extend(
-                            self.houses
-                                .iter()
-                                .filter(|(g, x)| **g != h && unmarried.contains_key(g) && (x.polity == a || (!self.at_war(a, x.polity) && self.relation(a, x.polity) >= params.treaty_accept_at_relation)))
-                                .map(|(g, _)| VerbCall { actor: who, verb: *v, target: Target::House(*g) }),
-                        );
-                    }
-                }
+                VerbId::DeclareWar => calls.extend(others.iter().filter(|b| self.declare_room(a, **b).is_ok()).map(|b| self.claim_target(a, *b)).filter(open).map(call)),
+                VerbId::MakePeace | VerbId::ProposeAlliance | VerbId::SendEmbassy | VerbId::Bribe | VerbId::ProposeMarriage => calls.extend(self.target_candidates(who, *v).iter().filter(|t| open(t)).map(|t| call(*t))),
                 // The sizes to levy (E3 (г), owner's decision 4 on §29.8): the tick's levy and
                 // its halves down to a thirty-second, from the most peopled province not in
                 // revolt — the bot picks the size whose last man still pays (`utility_in`).
                 VerbId::Recruit => {
                     let n = self.recruit_per_tick(a, params);
                     let from = self.actors[&a].provinces.iter().copied().filter(|p| !self.in_revolt(*p) && self.population(*p) > 0).max_by_key(|p| (self.population(*p), std::cmp::Reverse(*p)));
-                    if let Some(p) = from.filter(|_| n > 0) {
-                        calls.extend((0..6).map(|k| n >> k).filter(|men| *men > 0).map(|men| VerbCall { actor: who, verb: *v, target: Target::Levy(p, men as u32) }));
+                    if let Some(p) = from {
+                        calls.extend((0..6).map(|k| n >> k).filter(|men| *men > 0).map(|men| Target::Levy(p, men as u32)).filter(open).map(call));
                     }
                 }
                 // A unit to disband — at peace not below the army the polity started with while
@@ -1152,29 +1132,9 @@ impl World {
                     let record_short = self.tick.0.saturating_sub(self.actors[&a].since.0) < params.goal_horizon_ticks;
                     let floor = if !at_war && record_short { self.actors[&a].army_at_start } else { 0 };
                     let army = self.army_size(a);
-                    calls.extend(self.units_of(a).into_iter().filter(|u| self.units[u].house.is_none() && army - self.soldiers(*u) >= floor).map(|u| VerbCall { actor: who, verb: *v, target: Target::Unit(u) }));
+                    calls.extend(self.units_of(a).into_iter().filter(|u| self.units[u].house.is_none() && army - self.soldiers(*u) >= floor).map(Target::Unit).filter(open).map(call));
                 }
-                VerbId::HireMercenaries => {
-                    if self.hire_count(a, params) > 0 {
-                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
-                    }
-                }
-                VerbId::TakeLoan => {
-                    if self.actors[&a].institutions.contains(&crate::world::Institution::Bank) && !self.credit_closed(a) && self.yearly_income(a, params).min(self.loan_room(a, params)) > 0 {
-                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
-                    }
-                }
-                VerbId::RaiseTax | VerbId::LowerTax => {
-                    if self.tax_room(a, *v, params).is_ok() {
-                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
-                    }
-                }
-                VerbId::EnforceOrder => {
-                    let cost = self.order_cost(a, params);
-                    if cost > 0 && self.treasury(a) >= cost {
-                        calls.push(VerbCall { actor: who, verb: *v, target: Target::None });
-                    }
-                }
+                VerbId::HireMercenaries | VerbId::TakeLoan | VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => calls.extend(Some(Target::None).filter(open).map(call)),
             }
         }
         let ctx = self.context_seen(a, params, seen.clone());
