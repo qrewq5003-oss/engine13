@@ -153,11 +153,11 @@ impl World {
     /// What the call would cost and move, read where the application reads it; the
     /// availability is `target_offers`'s to fill.
     fn target_price(&self, who: ActorRef, verb: VerbId, target: Target, params: &Params) -> TargetOffer {
-        let mut o = TargetOffer { target, available: false, why: None, cost_kg: 0, cost_legitimacy: 0.0, threshold: None, relation: None, up_to: None, receives_kg: None };
+        let mut o = TargetOffer { target, available: false, why: None, cost_kg: 0, cost_legitimacy: 0.0, threshold: None, relation: None, up_to: None, receives_kg: None, dowry_kg: None };
         let threshold = Some(params.treaty_accept_at_relation.round() as i64);
         if verb == VerbId::ProposeMarriage {
             if let (Some((h, a)), Target::House(g)) = (self.marrying_house(who), target) {
-                o.cost_kg = self.dowry(h, params);
+                o.dowry_kg = Some(self.dowry(h, params));
                 o.threshold = threshold;
                 o.relation = self.houses.get(&g).map(|x| x.polity).filter(|b| *b != a).map(|b| self.relation(a, b));
             }

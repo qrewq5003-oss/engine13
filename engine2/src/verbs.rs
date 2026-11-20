@@ -142,8 +142,8 @@ pub struct TargetOffer {
     pub available: bool,
     /// Why it is not available, when it is not: the caller's side first, then the target's.
     pub why: Option<String>,
-    /// What the treasury pays, kg. Of a marriage — the dowry the proposal names: nothing is
-    /// paid at the proposal, the house pays it at the wedding.
+    /// What the polity's treasury pays at the application, kg — of every verb alike. A
+    /// marriage costs the treasury nothing: its dowry is `dowry_kg`.
     pub cost_kg: i64,
     /// What the ruler pays in legitimacy, in points before saturation — exactly what the
     /// application hands to the price (`politics::saturate`); negative when the verb gives
@@ -160,6 +160,10 @@ pub struct TargetOffer {
     pub up_to: Option<u32>,
     /// What a loan brings, kg: the world decides the sum.
     pub receives_kg: Option<i64>,
+    /// The dowry a proposal of marriage names, kg: **not a price of the proposal** — nothing
+    /// is paid when it is made; the proposer's house pays it out of its own treasury at the
+    /// wedding, if the other house takes the match.
+    pub dowry_kg: Option<i64>,
 }
 
 /// What an order to a unit would be (E5, plan §31.77): the steps of the path the world

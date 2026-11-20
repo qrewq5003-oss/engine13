@@ -180,18 +180,21 @@ fn offers_agree_with_the_application(w: &World, enabled: &[VerbId], p: &Params, 
                     }
                     open += 1;
                     let (paid, legitimacy) = (w.treasury(a) - probe.treasury(a), probe.actors[&a].legitimacy);
-                    match verb {
-                        VerbId::TakeLoan => assert_eq!(Some(-paid), o.receives_kg, "{at}: the loan brings what the offer names"),
-                        VerbId::ProposeMarriage => {
-                            let h = w.ruling_house(a);
-                            assert_eq!((paid, w.house_treasury(h) - probe.house_treasury(h)), (0, 0), "{at}: nothing is paid at the proposal");
-                            let named = probe.opportunities.iter().rev().find_map(|x| match x.what {
-                                Chance::Marriage { from, dowry_kg, .. } if from == h => Some(dowry_kg),
-                                _ => None,
-                            });
-                            assert_eq!(named, Some(o.cost_kg), "{at}: the dowry the proposal names");
-                        }
-                        _ => assert_eq!(paid, o.cost_kg, "{at}: the treasury pays what the offer names"),
+                    // The treasury pays what the offer names — of every verb, with no
+                    // exception; a loan brings what the offer names besides.
+                    assert_eq!(paid + o.receives_kg.unwrap_or(0), o.cost_kg, "{at}: the treasury pays what the offer names");
+                    assert_eq!(o.receives_kg.is_some(), verb == VerbId::TakeLoan, "{at}: only a loan brings money");
+                    // The dowry is no price of the proposal: nothing leaves the house's
+                    // treasury now, and the offer opened to the other house names it.
+                    assert_eq!(o.dowry_kg.is_some(), verb == VerbId::ProposeMarriage, "{at}: only a marriage names a dowry");
+                    if verb == VerbId::ProposeMarriage {
+                        let h = w.ruling_house(a);
+                        assert_eq!(w.house_treasury(h), probe.house_treasury(h), "{at}: the house pays nothing at the proposal");
+                        let named = probe.opportunities.iter().rev().find_map(|x| match x.what {
+                            Chance::Marriage { from, dowry_kg, .. } if from == h => Some(dowry_kg),
+                            _ => None,
+                        });
+                        assert_eq!(named, o.dowry_kg, "{at}: the dowry the proposal names");
                     }
                     if o.cost_legitimacy == 0.0 {
                         assert_eq!(legitimacy, w.actors[&a].legitimacy, "{at}: no price in legitimacy");
