@@ -19,9 +19,15 @@ export interface ProvinceMapProvince {
   owner: string;
 }
 
+/**
+ * A polity as the engine's view names it. A fallen polity stays in the view with
+ * `alive = false` and the capital it had: its mark is not drawn — the province is another's
+ * now. The map reads the flag the view gives and decides nothing about who is alive.
+ */
 export interface ProvinceMapActor {
   id: string;
   name: string;
+  alive: boolean;
   /** The province of the capital, by its id; `null` — none shown. */
   capital: string | null;
 }
@@ -66,7 +72,30 @@ type Loaded =
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`${url}: не JSON`);
+  }
+}
+
+/**
+ * A map the component can draw: every province with its id and its point. A file without
+ * them — an older file, another scenario's — is refused as a whole, with the reason, and not
+ * drawn in part (AGENTS §11: no stand-in map).
+ */
+function checkedProvinces(raw: unknown, url: string): ProvinceCollection {
+  const features = (raw as { features?: unknown }).features;
+  if (!Array.isArray(features) || features.length === 0) throw new Error(`${url}: в файле нет провинций`);
+  features.forEach((f, i) => {
+    const p = (f as { properties?: { id?: unknown; label?: unknown } }).properties;
+    if (typeof p?.id !== 'string') throw new Error(`${url}: у объекта ${i} нет id`);
+    const label = p.label;
+    if (!Array.isArray(label) || label.length !== 2 || !label.every((x) => typeof x === 'number')) {
+      throw new Error(`${url}: у провинции ${p.id} нет точки label`);
+    }
+  });
+  return raw as ProvinceCollection;
 }
 
 const UNIT_STEP_PX = 14;
@@ -110,8 +139,9 @@ export const ProvinceMap: React.FC<ProvinceMapProps> = ({
   useEffect(() => {
     let live = true;
     setLoaded({ state: 'loading' });
-    Promise.all([fetchJson<ProvinceCollection>(geojsonUrl), fetchJson<ProvinceMapStyle>(styleUrl)])
-      .then(([geo, style]) => {
+    Promise.all([fetchJson<unknown>(geojsonUrl), fetchJson<ProvinceMapStyle>(styleUrl)])
+      .then(([raw, style]) => {
+        const geo = checkedProvinces(raw, geojsonUrl);
         if (live) setLoaded({ state: 'ready', geo, style });
       })
       .catch((e: unknown) => {
@@ -208,7 +238,7 @@ export const ProvinceMap: React.FC<ProvinceMapProps> = ({
     if (!featureOf.has(u.position)) continue;
     unitsIn.set(u.position, [...(unitsIn.get(u.position) ?? []), u]);
   }
-  const capitals = actors.filter((a) => a.capital !== null && featureOf.has(a.capital));
+  const capitals = actors.filter((a) => a.alive && a.capital !== null && featureOf.has(a.capital));
   const hoveredFeature = hovered ? featureOf.get(hovered) : undefined;
   const hoveredOwner = hovered ? ownerOf.get(hovered) : undefined;
 

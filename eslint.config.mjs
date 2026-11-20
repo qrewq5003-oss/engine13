@@ -35,5 +35,17 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // The scripts of the map's checks run under Node, not in the browser (the callbacks they
+    // hand to Playwright run in a page): `npm run lint` covers them with Node's globals.
+    files: ['tools/**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   prettierConfig,
 )

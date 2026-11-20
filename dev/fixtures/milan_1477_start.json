@@ -330,106 +330,127 @@
   {
    "id": "milan",
    "name": "Миланское герцогство",
+   "alive": true,
    "capital": "milano"
   },
   {
    "id": "venice",
    "name": "Венецианская республика",
+   "alive": true,
    "capital": "venezia"
   },
   {
    "id": "florence",
    "name": "Флорентийская республика",
+   "alive": true,
    "capital": "firenze"
   },
   {
    "id": "naples",
    "name": "Неаполитанское королевство",
+   "alive": true,
    "capital": "napoli"
   },
   {
    "id": "papacy",
    "name": "Папская область",
+   "alive": true,
    "capital": "roma"
   },
   {
    "id": "ferrara",
    "name": "Феррарское герцогство",
+   "alive": true,
    "capital": "ferrara"
   },
   {
    "id": "mantua",
    "name": "Мантуанское маркграфство",
+   "alive": true,
    "capital": "mantova"
   },
   {
    "id": "urbino",
    "name": "Урбинское герцогство",
+   "alive": true,
    "capital": "urbino"
   },
   {
    "id": "bologna",
    "name": "Болонская синьория",
+   "alive": true,
    "capital": "bologna"
   },
   {
    "id": "savoy",
    "name": "Савойское герцогство",
+   "alive": true,
    "capital": "savoia"
   },
   {
    "id": "montferrat",
    "name": "Монферратское маркграфство",
+   "alive": true,
    "capital": "monferrato"
   },
   {
    "id": "sicily",
    "name": "Сицилийское королевство",
+   "alive": true,
    "capital": "palermo"
   },
   {
    "id": "siena",
    "name": "Сиенская республика",
+   "alive": true,
    "capital": "siena"
   },
   {
    "id": "lucca",
    "name": "Луккская республика",
+   "alive": true,
    "capital": "lucca"
   },
   {
    "id": "ragusa",
    "name": "Рагузская республика",
+   "alive": true,
    "capital": "ragusa"
   },
   {
    "id": "swiss",
    "name": "Швейцарская конфедерация",
+   "alive": true,
    "capital": "svizzera"
   },
   {
    "id": "france",
    "name": "Французское королевство",
+   "alive": true,
    "capital": "delfinato"
   },
   {
    "id": "provence",
    "name": "Графство Прованс",
+   "alive": true,
    "capital": "provenza"
   },
   {
    "id": "hungary",
    "name": "Венгерское королевство",
+   "alive": true,
    "capital": "croazia"
   },
   {
    "id": "ottomans",
    "name": "Османская держава",
+   "alive": true,
    "capital": "albania_ottomana"
   },
   {
    "id": "austria",
    "name": "Габсбургские земли",
+   "alive": true,
    "capital": "tirolo"
   }
  ],

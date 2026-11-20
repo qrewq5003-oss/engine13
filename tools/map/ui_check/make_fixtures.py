@@ -2,10 +2,11 @@
 
 Writes dev/fixtures/<scenario>_start.json — owners and capitals of the start, from
 provinces.toml and scenario.toml — and <scenario>_after.json: the same with one province
-moved to another owner and three units, two of them in one province. The stand feeds these
+moved to another owner and three units, two of them in one province; and a map of three
+provinces without their points, as an older file was. The stand feeds these
 to `ProvinceMap` in place of the engine's view; nothing here is a fact of a played game.
 The names of the fields are those of the engine's `WorldView` (plan §31.77): a province's `id`
-and `owner`, a polity's `id`, `name` and `capital`, a unit's `id`, `owner` and `position`.
+and `owner`, a polity's `id`, `name`, `alive` and `capital`, a unit's `id`, `owner` and `position`.
 
     python tools/map/ui_check/make_fixtures.py
 """
@@ -31,7 +32,7 @@ def main():
     start = {
         "viewer": "milan",
         "provinces": [{"id": pid, "owner": p["owner"]} for pid, p in provinces.items()],
-        "actors": [{"id": aid, "name": a["name"], "capital": a["capital"]} for aid, a in scenario["actors"].items()],
+        "actors": [{"id": aid, "name": a["name"], "alive": True, "capital": a["capital"]} for aid, a in scenario["actors"].items()],
         "units": [],
     }
     assert provinces[MOVED]["owner"] != NEW_OWNER
@@ -44,6 +45,14 @@ def main():
         path = out / f"{SCENARIO}_{name}.json"
         path.write_text(json.dumps(view, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
         print(f"wrote {path.relative_to(REPO)}: {len(view['provinces'])} provinces, {len(view['actors'])} actors, {len(view['units'])} units")
+    # A map as it was before the provinces had their points: the first three provinces of the
+    # real file without `label`. The component must refuse it with the reason, not draw it.
+    geo = json.loads((data / "provinces.geojson").read_text(encoding="utf-8"))
+    old = [{**f, "properties": {k: v for k, v in f["properties"].items() if k != "label"}} for f in geo["features"][:3]]
+    path = out / "provinces_without_label.geojson"
+    text = json.dumps({"type": "FeatureCollection", "features": old}, ensure_ascii=False, separators=(",", ":"))
+    path.write_text(text + "\n", encoding="utf-8", newline="\n")
+    print(f"wrote {path.relative_to(REPO)}: {len(old)} provinces without label")
 
 
 if __name__ == "__main__":

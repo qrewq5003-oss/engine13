@@ -11,7 +11,7 @@ const path = require('path');
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const SCENARIO = 'milan_1477';
-const URL = 'http://localhost:1420/dev/province-map.html';
+const STAND = 'http://localhost:1420/dev/province-map.html';
 const shots = process.argv[2] ? path.resolve(process.argv[2]) : null;
 
 const read = (rel) => JSON.parse(fs.readFileSync(path.join(REPO, rel), 'utf8'));
@@ -30,14 +30,14 @@ async function waitForServer(ms) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
     try {
-      const res = await fetch(URL);
+      const res = await fetch(STAND);
       if (res.ok) return;
-    } catch (_) {
+    } catch {
       // not up yet
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error(`vite did not answer at ${URL}`);
+  throw new Error(`vite did not answer at ${STAND}`);
 }
 
 const fills = (page) =>
@@ -60,7 +60,7 @@ async function run(page) {
   // stand's own files: no tiles, no fonts, no library from elsewhere.
   const requested = [];
   page.on('request', (r) => requested.push(r.url()));
-  await page.goto(URL);
+  await page.goto(STAND);
   await page.waitForSelector('path.pm-province[data-province]');
 
   // ---- the start
@@ -102,6 +102,13 @@ async function run(page) {
   check('two units in one province do not cover each other', new Set(boxes).size === 3, boxes.join(' '));
   if (shots) await page.screenshot({ path: path.join(shots, 'province-map-after.png') });
 
+  // ---- a polity fell: its land is another's, it stays in the view with alive = false
+  await page.click('[data-testid="case-fallen"]');
+  await page.waitForFunction((n) => document.querySelectorAll('.pm-capital').length === n, withCapital - 1);
+  const atFall = await fills(page);
+  check('the fallen polity has no capital mark', (await page.$$('.pm-capital')).length === withCapital - 1);
+  check('its land has the colour of the one who took it', atFall.lucca === style.actors.florence.toLowerCase(), atFall.lucca);
+
   // ---- a province the inputs do not name
   await page.click('[data-testid="case-missing"]');
   await page.waitForSelector('path.pm-nodata');
@@ -116,6 +123,13 @@ async function run(page) {
   await page.waitForSelector('[data-testid="pm-error"]');
   check('a map that did not load is an error on the screen', (await page.textContent('[data-testid="pm-error"]')).includes('Карта не загружена'));
   check('and no map is drawn in its place', (await page.$$('path.pm-province')).length === 0);
+
+  // ---- a map without the provinces' points: an older file, another scenario's
+  await page.click('[data-testid="case-old"]');
+  await page.waitForSelector('[data-testid="pm-error"]');
+  const why = await page.textContent('[data-testid="pm-error"]');
+  check('a map without the points is refused with the reason', why.includes('Карта не загружена') && why.includes('label'), why);
+  check('and is not drawn in part', (await page.$$('path.pm-province')).length === 0);
 
   check('no script error on the page', errors.length === 0, errors.join(' | '));
   const outside = requested.filter((u) => !u.startsWith('http://localhost:1420/') && !u.startsWith('data:'));

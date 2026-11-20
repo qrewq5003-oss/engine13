@@ -17,14 +17,20 @@ const SCENARIO = 'milan_1477';
 /** The province the «без провинции» case leaves out of the inputs. */
 const LEFT_OUT = 'firenze';
 
-type Case = 'start' | 'after' | 'missing' | 'broken';
+type Case = 'start' | 'after' | 'fallen' | 'missing' | 'broken' | 'old';
 
 const CASES: { id: Case; label: string }[] = [
   { id: 'start', label: 'старт' },
   { id: 'after', label: 'после хода' },
+  { id: 'fallen', label: 'держава пала' },
   { id: 'missing', label: 'без провинции' },
   { id: 'broken', label: 'карта не загрузилась' },
+  { id: 'old', label: 'карта без точек' },
 ];
+
+/** The polity the «держава пала» case fells, and who takes its land. */
+const FALLEN = 'lucca';
+const TAKEN_BY = 'florence';
 
 const Stand: React.FC = () => {
   const [which, setWhich] = useState<Case>('start');
@@ -43,9 +49,23 @@ const Stand: React.FC = () => {
 
   const base = which === 'after' ? recordings.after : recordings.start;
   const view: Recording =
-    which === 'missing' ? { ...base, provinces: base.provinces.filter((p) => p.id !== LEFT_OUT) } : base;
+    which === 'missing'
+      ? { ...base, provinces: base.provinces.filter((p) => p.id !== LEFT_OUT) }
+      : which === 'fallen'
+        ? {
+            // As the engine's view shows a fall: the land is another's, the polity stays in
+            // the list with `alive = false` and the capital it had.
+            ...base,
+            provinces: base.provinces.map((p) => (p.owner === FALLEN ? { ...p, owner: TAKEN_BY } : p)),
+            actors: base.actors.map((a) => (a.id === FALLEN ? { ...a, alive: false } : a)),
+          }
+        : base;
   const geojsonUrl =
-    which === 'broken' ? `/geodata2/${SCENARIO}/no-such-file.geojson` : `/geodata2/${SCENARIO}/provinces.geojson`;
+    which === 'broken'
+      ? `/geodata2/${SCENARIO}/no-such-file.geojson`
+      : which === 'old'
+        ? '/dev/fixtures/provinces_without_label.geojson'
+        : `/geodata2/${SCENARIO}/provinces.geojson`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
