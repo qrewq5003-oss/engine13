@@ -81,13 +81,21 @@ async function run(page) {
   const milan = start.actors.find((a) => a.id === 'milan').name;
   check('the hint names the province and its owner from the inputs', info.includes(milan), info);
   await page.click('path[data-province="milano"]');
-  check('a click selects the province', (await page.textContent('[data-testid="selected"]')).includes('milano'));
+  const picked = await page
+    .waitForFunction(() => (document.querySelector('[data-testid="selected"]')?.textContent ?? '').includes('milano'), null, { timeout: 5000 })
+    .then(() => true, () => false);
+  check('a click selects the province', picked);
   await page.mouse.move(2, 2);
   if (shots) await page.screenshot({ path: path.join(shots, 'province-map-start.png') });
 
   // ---- after a turn: one province moved, three units
   await page.click('[data-testid="case-after"]');
-  await page.waitForFunction((n) => document.querySelectorAll('.pm-unit').length === n, after.units.length);
+  await page.waitForFunction(
+    ([n, colour]) =>
+      document.querySelectorAll('.pm-unit').length === n &&
+      (document.querySelector('path[data-province="bergamo"]')?.getAttribute('fill') ?? '').toLowerCase() === colour,
+    [after.units.length, style.actors.milan.toLowerCase()],
+  );
   const atAfter = await fills(page);
   const moved = differing(atStart, atAfter);
   check('after the move the colour changed for one province only', moved.length === 1 && moved[0] === 'bergamo', moved.join(', '));
@@ -104,7 +112,13 @@ async function run(page) {
 
   // ---- a polity fell: its land is another's, it stays in the view with alive = false
   await page.click('[data-testid="case-fallen"]');
-  await page.waitForFunction((n) => document.querySelectorAll('.pm-capital').length === n, withCapital - 1);
+  // The sign of this case, not of the one before: a capital mark fewer and the land repainted.
+  await page.waitForFunction(
+    ([n, colour]) =>
+      document.querySelectorAll('.pm-capital').length === n &&
+      (document.querySelector('path[data-province="lucca"]')?.getAttribute('fill') ?? '').toLowerCase() === colour,
+    [withCapital - 1, style.actors.florence.toLowerCase()],
+  );
   const atFall = await fills(page);
   check('the fallen polity has no capital mark', (await page.$$('.pm-capital')).length === withCapital - 1);
   check('its land has the colour of the one who took it', atFall.lucca === style.actors.florence.toLowerCase(), atFall.lucca);
@@ -126,7 +140,9 @@ async function run(page) {
 
   // ---- a map without the provinces' points: an older file, another scenario's
   await page.click('[data-testid="case-old"]');
-  await page.waitForSelector('[data-testid="pm-error"]');
+  // The error of the case before is still on the screen for a frame: wait for the text that
+  // names this case's file, not for the block.
+  await page.waitForFunction(() => (document.querySelector('[data-testid="pm-error"]')?.textContent ?? '').includes('provinces_without_label'));
   const why = await page.textContent('[data-testid="pm-error"]');
   check('a map without the points is refused with the reason', why.includes('Карта не загружена') && why.includes('label'), why);
   check('and is not drawn in part', (await page.$$('path.pm-province')).length === 0);
@@ -143,6 +159,12 @@ async function main() {
     await waitForServer(60000);
     browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: shots ? 2 : 1 });
+    // SLOW=6 makes the page's processor six times slower: a wait that passes only on a fast
+    // machine fails here.
+    if (process.env.SLOW) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.SLOW) });
+    }
     await run(page);
   } finally {
     if (browser) await browser.close();
