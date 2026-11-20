@@ -1,0 +1,28 @@
+{
+  "sea": "#d5e4ec",
+  "border": "#4a4a4a",
+  "no_data": "#9a9a9a",
+  "actors": {
+    "milan": "#2e8b57",
+    "venice": "#c0392b",
+    "florence": "#8e44ad",
+    "naples": "#e8a838",
+    "papacy": "#f1e189",
+    "ferrara": "#1f6f8b",
+    "mantua": "#e377c2",
+    "urbino": "#3fc1c9",
+    "bologna": "#5a3a1a",
+    "savoy": "#8d6cc4",
+    "montferrat": "#ffb07c",
+    "sicily": "#8a5a2b",
+    "siena": "#2c2c54",
+    "lucca": "#aee39a",
+    "ragusa": "#ff8fa3",
+    "swiss": "#d62d5a",
+    "france": "#1f3a93",
+    "provence": "#6fb7e0",
+    "hungary": "#6b8e23",
+    "ottomans": "#555555",
+    "austria": "#b9a06a"
+  }
+}

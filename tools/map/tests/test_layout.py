@@ -103,3 +103,42 @@ def test_the_written_geojson_carries_a_label_inside_every_province():
         for feat in feats:
             g = shape(feat["geometry"])
             assert g.contains(shapely.Point(feat["properties"]["label"])), (f.parent.name, feat["properties"]["id"])
+
+
+def test_the_map_style_of_milan_colours_every_polity_and_tells_neighbours_apart():
+    """The colours of the province map (docs/engine2_map.md §37.4): every polity of the start has
+    one, and two polities that touch — by land or across a strait — differ by a number, not by eye."""
+    import json
+    import math
+    import pathlib
+    import tomllib
+
+    data = pathlib.Path(__file__).resolve().parents[3] / "public" / "geodata2" / "milan_1477"
+    style = json.loads((data / "map_style.json").read_text(encoding="utf-8"))
+    provinces = tomllib.loads((data / "provinces.toml").read_text(encoding="utf-8"))["provinces"]
+    owners = {p["owner"] for p in provinces.values()}
+    assert set(style["actors"]) == owners
+
+    def lab(colour):
+        r, g, b = (int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+        lin = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        r, g, b = lin(r), lin(g), lin(b)
+        x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        f = lambda t: t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+        return (116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
+
+    def apart(a, b):  # CIE76: about 2 is the least a trained eye sees, 25 is plain to anyone
+        return math.dist(lab(a), lab(b))
+
+    pairs = set()
+    for p in provinces.values():
+        for n in p["neighbours"] + p.get("sea_neighbours", []):
+            if provinces[n]["owner"] != p["owner"]:
+                pairs.add(tuple(sorted((p["owner"], provinces[n]["owner"]))))
+    close = sorted((round(apart(style["actors"][a], style["actors"][b]), 1), a, b) for a, b in pairs)
+    assert close[0][0] >= 25, close[:3]
+    for other in ("sea", "no_data"):
+        nearest = min((round(apart(c, style[other]), 1), a) for a, c in style["actors"].items())
+        assert nearest[0] >= 25, (other, nearest)

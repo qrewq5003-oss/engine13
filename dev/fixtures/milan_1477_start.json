@@ -1,0 +1,437 @@
+{
+ "viewer": "milan",
+ "provinces": [
+  {
+   "id": "abruzzo",
+   "owner": "naples"
+  },
+  {
+   "id": "agrigento",
+   "owner": "sicily"
+  },
+  {
+   "id": "albania_ottomana",
+   "owner": "ottomans"
+  },
+  {
+   "id": "albania_veneta",
+   "owner": "venice"
+  },
+  {
+   "id": "alessandria",
+   "owner": "milan"
+  },
+  {
+   "id": "aosta",
+   "owner": "savoy"
+  },
+  {
+   "id": "arezzo",
+   "owner": "florence"
+  },
+  {
+   "id": "bari",
+   "owner": "naples"
+  },
+  {
+   "id": "basilicata",
+   "owner": "naples"
+  },
+  {
+   "id": "belluno",
+   "owner": "venice"
+  },
+  {
+   "id": "bergamo",
+   "owner": "venice"
+  },
+  {
+   "id": "bologna",
+   "owner": "bologna"
+  },
+  {
+   "id": "bosnia",
+   "owner": "ottomans"
+  },
+  {
+   "id": "brescia",
+   "owner": "venice"
+  },
+  {
+   "id": "bresse",
+   "owner": "savoy"
+  },
+  {
+   "id": "cagliari",
+   "owner": "sicily"
+  },
+  {
+   "id": "calabria_citra",
+   "owner": "naples"
+  },
+  {
+   "id": "calabria_ultra",
+   "owner": "naples"
+  },
+  {
+   "id": "campagna",
+   "owner": "papacy"
+  },
+  {
+   "id": "capitanata",
+   "owner": "naples"
+  },
+  {
+   "id": "carniola",
+   "owner": "austria"
+  },
+  {
+   "id": "catania",
+   "owner": "sicily"
+  },
+  {
+   "id": "como",
+   "owner": "milan"
+  },
+  {
+   "id": "corfu",
+   "owner": "venice"
+  },
+  {
+   "id": "corsica",
+   "owner": "milan"
+  },
+  {
+   "id": "cremona",
+   "owner": "milan"
+  },
+  {
+   "id": "creta",
+   "owner": "venice"
+  },
+  {
+   "id": "croazia",
+   "owner": "hungary"
+  },
+  {
+   "id": "cuneo",
+   "owner": "savoy"
+  },
+  {
+   "id": "dalmazia",
+   "owner": "venice"
+  },
+  {
+   "id": "delfinato",
+   "owner": "france"
+  },
+  {
+   "id": "epiro",
+   "owner": "ottomans"
+  },
+  {
+   "id": "erzegovina",
+   "owner": "ottomans"
+  },
+  {
+   "id": "ferrara",
+   "owner": "ferrara"
+  },
+  {
+   "id": "firenze",
+   "owner": "florence"
+  },
+  {
+   "id": "friuli",
+   "owner": "venice"
+  },
+  {
+   "id": "istria",
+   "owner": "venice"
+  },
+  {
+   "id": "lepanto",
+   "owner": "venice"
+  },
+  {
+   "id": "liguria",
+   "owner": "milan"
+  },
+  {
+   "id": "lucca",
+   "owner": "lucca"
+  },
+  {
+   "id": "malta",
+   "owner": "sicily"
+  },
+  {
+   "id": "malvasia",
+   "owner": "venice"
+  },
+  {
+   "id": "mantova",
+   "owner": "mantua"
+  },
+  {
+   "id": "marca",
+   "owner": "papacy"
+  },
+  {
+   "id": "messina",
+   "owner": "sicily"
+  },
+  {
+   "id": "milano",
+   "owner": "milan"
+  },
+  {
+   "id": "modena",
+   "owner": "ferrara"
+  },
+  {
+   "id": "modone",
+   "owner": "venice"
+  },
+  {
+   "id": "monferrato",
+   "owner": "montferrat"
+  },
+  {
+   "id": "morea",
+   "owner": "ottomans"
+  },
+  {
+   "id": "napoli",
+   "owner": "naples"
+  },
+  {
+   "id": "nauplia",
+   "owner": "venice"
+  },
+  {
+   "id": "nizza",
+   "owner": "savoy"
+  },
+  {
+   "id": "novara",
+   "owner": "milan"
+  },
+  {
+   "id": "ossola",
+   "owner": "milan"
+  },
+  {
+   "id": "otranto",
+   "owner": "naples"
+  },
+  {
+   "id": "padova",
+   "owner": "venice"
+  },
+  {
+   "id": "palermo",
+   "owner": "sicily"
+  },
+  {
+   "id": "parma",
+   "owner": "milan"
+  },
+  {
+   "id": "pavia",
+   "owner": "milan"
+  },
+  {
+   "id": "pisa",
+   "owner": "florence"
+  },
+  {
+   "id": "principato",
+   "owner": "naples"
+  },
+  {
+   "id": "provenza",
+   "owner": "provence"
+  },
+  {
+   "id": "ragusa",
+   "owner": "ragusa"
+  },
+  {
+   "id": "ravenna",
+   "owner": "venice"
+  },
+  {
+   "id": "roma",
+   "owner": "papacy"
+  },
+  {
+   "id": "romagna",
+   "owner": "papacy"
+  },
+  {
+   "id": "sassari",
+   "owner": "sicily"
+  },
+  {
+   "id": "savoia",
+   "owner": "savoy"
+  },
+  {
+   "id": "siena",
+   "owner": "siena"
+  },
+  {
+   "id": "svizzera",
+   "owner": "swiss"
+  },
+  {
+   "id": "tirolo",
+   "owner": "austria"
+  },
+  {
+   "id": "torino",
+   "owner": "savoy"
+  },
+  {
+   "id": "trento",
+   "owner": "austria"
+  },
+  {
+   "id": "umbria",
+   "owner": "papacy"
+  },
+  {
+   "id": "urbino",
+   "owner": "urbino"
+  },
+  {
+   "id": "valtellina",
+   "owner": "milan"
+  },
+  {
+   "id": "venezia",
+   "owner": "venice"
+  },
+  {
+   "id": "vercelli",
+   "owner": "savoy"
+  },
+  {
+   "id": "verona",
+   "owner": "venice"
+  },
+  {
+   "id": "vicenza",
+   "owner": "venice"
+  }
+ ],
+ "actors": [
+  {
+   "id": "milan",
+   "name": "Миланское герцогство",
+   "capital": "milano"
+  },
+  {
+   "id": "venice",
+   "name": "Венецианская республика",
+   "capital": "venezia"
+  },
+  {
+   "id": "florence",
+   "name": "Флорентийская республика",
+   "capital": "firenze"
+  },
+  {
+   "id": "naples",
+   "name": "Неаполитанское королевство",
+   "capital": "napoli"
+  },
+  {
+   "id": "papacy",
+   "name": "Папская область",
+   "capital": "roma"
+  },
+  {
+   "id": "ferrara",
+   "name": "Феррарское герцогство",
+   "capital": "ferrara"
+  },
+  {
+   "id": "mantua",
+   "name": "Мантуанское маркграфство",
+   "capital": "mantova"
+  },
+  {
+   "id": "urbino",
+   "name": "Урбинское герцогство",
+   "capital": "urbino"
+  },
+  {
+   "id": "bologna",
+   "name": "Болонская синьория",
+   "capital": "bologna"
+  },
+  {
+   "id": "savoy",
+   "name": "Савойское герцогство",
+   "capital": "savoia"
+  },
+  {
+   "id": "montferrat",
+   "name": "Монферратское маркграфство",
+   "capital": "monferrato"
+  },
+  {
+   "id": "sicily",
+   "name": "Сицилийское королевство",
+   "capital": "palermo"
+  },
+  {
+   "id": "siena",
+   "name": "Сиенская республика",
+   "capital": "siena"
+  },
+  {
+   "id": "lucca",
+   "name": "Луккская республика",
+   "capital": "lucca"
+  },
+  {
+   "id": "ragusa",
+   "name": "Рагузская республика",
+   "capital": "ragusa"
+  },
+  {
+   "id": "swiss",
+   "name": "Швейцарская конфедерация",
+   "capital": "svizzera"
+  },
+  {
+   "id": "france",
+   "name": "Французское королевство",
+   "capital": "delfinato"
+  },
+  {
+   "id": "provence",
+   "name": "Графство Прованс",
+   "capital": "provenza"
+  },
+  {
+   "id": "hungary",
+   "name": "Венгерское королевство",
+   "capital": "croazia"
+  },
+  {
+   "id": "ottomans",
+   "name": "Османская держава",
+   "capital": "albania_ottomana"
+  },
+  {
+   "id": "austria",
+   "name": "Габсбургские земли",
+   "capital": "tirolo"
+  }
+ ],
+ "units": []
+}
