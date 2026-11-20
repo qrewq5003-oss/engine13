@@ -62,6 +62,13 @@ fn the_view_shows_the_world_that_is_seen_and_of_the_viewer_alone_its_own() {
         let (to0, to1) = (w.actors[&s1].capital, w.actors[&s0].capital);
         w.order_move(u0, to0).unwrap();
         w.order_move(u1, to1).unwrap();
+        // A unit of a quality that makes its strength other than its number.
+        w.units.get_mut(&u0).unwrap().quality = 80.0;
+        // One of the living who holds no seat has died: the dead are not among the members.
+        let seated: BTreeSet<engine2::PersonId> = w.actors.values().flat_map(|x| [Some(x.ruler), x.heir, x.regent]).flatten().chain(w.provinces.values().filter_map(|pr| pr.governor)).collect();
+        let gone = *w.persons.iter().find(|(id, x)| x.died.is_none() && !seated.contains(id)).expect("someone without a seat").0;
+        let now = w.tick;
+        w.persons.get_mut(&gone).unwrap().died = Some(now);
     }
     g.set_player(Some(ActorRef::Ruler(s0)));
     let v = g.view();
@@ -86,6 +93,7 @@ fn the_view_shows_the_world_that_is_seen_and_of_the_viewer_alone_its_own() {
     assert_eq!(v.units.len(), w.units.len());
     let (mine, theirs) = (v.units.iter().find(|x| x.id == u0.0).unwrap(), v.units.iter().find(|x| x.id == u1.0).unwrap());
     assert!(mine.yours && mine.owner == id(s0) && mine.soldiers == w.soldiers(u0) && mine.strength == w.unit_strength(u0));
+    assert!(mine.strength != mine.soldiers as f64, "the strength by the battle's measure, not the number");
     assert_eq!(mine.destination, Some(pid(w.actors[&s1].capital)), "the order of a unit the viewer commands");
     assert!(w.units[&u1].destination.is_some() && !theirs.yours && theirs.destination.is_none(), "another's order is hidden");
     assert_eq!((theirs.position.clone(), theirs.soldiers), (pid(w.units[&u1].position), w.soldiers(u1)), "its place and its number are seen");
@@ -103,6 +111,7 @@ fn the_view_shows_the_world_that_is_seen_and_of_the_viewer_alone_its_own() {
     // The houses with their living members and seats; the treasury of the viewer's house only.
     assert_eq!(v.houses.len(), w.houses.len());
     let ruling = w.ruling_house(s0);
+    assert!(w.persons.values().any(|x| x.died.is_some()), "a world with its dead");
     for (h, x) in &w.houses {
         let shown = v.houses.iter().find(|y| y.id == w.names.houses[h.index()].0).expect("every house is shown");
         assert_eq!(shown.members.len(), w.members(*h).len(), "its living members");
@@ -285,6 +294,51 @@ fn the_offers_name_every_target_of_a_verb_and_price_each_target() {
     assert_eq!((up.cost_legitimacy, down.cost_legitimacy), (w.tax_step_cost(s0, true, &p), w.tax_step_cost(s0, false, &p)), "a step of the tax at its price, up and down");
     let order = &g.targets(who, VerbId::EnforceOrder)[0];
     assert_eq!((order.cost_kg, order.cost_legitimacy), (w.order_cost(s0, &p), -p.order_gain), "order is bought with the treasury and gives legitimacy back");
+    // The rule of a target is read at every target: another's unit is not its to disband, a
+    // province in revolt gives no levy, a vassal offers no alliance and fights only its lord.
+    let u1 = w.units_of(s1)[0];
+    assert!(w.target_room(who, VerbId::Disband, Target::Unit(u1), &p).is_err() && g.targets(who, VerbId::Disband).iter().all(|o| o.available && o.target != Target::Unit(u1)));
+    let risen = *w.actors[&s0].provinces.iter().find(|q| **q != w.actors[&s0].capital).unwrap();
+    let mut rebel = Game::new(&all_verbs(testworld::five_states_scenario()), params(), 8).unwrap();
+    let now = rebel.world().tick;
+    rebel.world_mut().provinces.get_mut(&risen).unwrap().revolt = Some(now);
+    let levies = rebel.targets(who, VerbId::Recruit);
+    let closed = levies.iter().find(|o| o.target == Target::Province(risen)).unwrap();
+    assert_eq!((closed.available, closed.why.as_deref(), closed.up_to), (false, Some("the province is in revolt"), Some(0)));
+    assert!(levies.iter().filter(|o| o.target != Target::Province(risen)).all(|o| o.available), "the others give their levy");
+    let mut vassal = Game::new(&all_verbs(testworld::five_states_scenario()), params(), 8).unwrap();
+    // (With the gifts of an embassy in its treasury: the caller's side reads the money first.)
+    vassal.world_mut().post(Account::Treasury(s0), Source::Test, 1_000_000_000_000).unwrap();
+    assert!(vassal.targets(who, VerbId::ProposeAlliance).iter().all(|o| o.why.as_deref() != Some("cannot pay") && o.why.as_deref() != Some("a vassal makes no alliance")), "free and able to pay: only the target's side can close the offer");
+    vassal.world_mut().make_vassal(s0, s1).unwrap();
+    let whys: Vec<(bool, Option<String>)> = vassal.targets(who, VerbId::ProposeAlliance).into_iter().map(|o| (o.available, o.why)).collect();
+    assert!(!whys.is_empty() && whys.iter().all(|(open, why)| !open && why.as_deref() == Some("a vassal makes no alliance")), "{whys:?}");
+    let wars = vassal.targets(who, VerbId::DeclareWar);
+    assert!(wars.iter().find(|o| o.target == Target::Actor(s1)).unwrap().available, "its lord it may fight");
+    assert_eq!(wars.iter().find(|o| o.target == Target::Actor(s2)).unwrap().why.as_deref(), Some("a vassal fights only its lord"));
+    // A claim met already is no claim: the submission of its own vassal cannot be claimed
+    // again, a province of the vassal can.
+    let mut lord = Game::new(&all_verbs(testworld::five_states_scenario()), params(), 8).unwrap();
+    lord.world_mut().make_vassal(s1, s0).unwrap();
+    let wars = lord.targets(who, VerbId::DeclareWar);
+    assert_eq!(wars.iter().find(|o| o.target == Target::Actor(s1)).unwrap().why.as_deref(), Some("the claim is met already: claim a province"));
+    assert!(wars.iter().find(|o| o.target == Target::Province(lord.world().actors[&s1].capital)).unwrap().available);
+    // No bank, no loan: the test world's polities have none, and with one the loan is offered.
+    let mut banked = Game::new(&all_verbs(testworld::five_states_scenario()), params(), 8).unwrap();
+    assert_eq!(banked.targets(who, VerbId::TakeLoan)[0].why.as_deref(), Some("no bank"));
+    banked.world_mut().actors.get_mut(&s0).unwrap().institutions.insert(engine2::Institution::Bank);
+    let loan = &banked.targets(who, VerbId::TakeLoan)[0];
+    assert!(loan.available && loan.receives_kg.is_some_and(|kg| kg > 0), "with a bank the loan is offered: {loan:?}");
+    // No marriage into a house of the enemy, whatever the relation.
+    let mut foes = Game::new(&all_verbs(testworld::five_states_scenario()), params(), 8).unwrap();
+    foes.world_mut().declare_war(s0, s1).unwrap();
+    foes.world_mut().push_relation(s0, s1, 1000.0);
+    assert!(foes.world().relation(s0, s1) >= p.treaty_accept_at_relation, "the relation above the threshold");
+    let theirs: Vec<engine2::HouseId> = foes.world().houses.iter().filter(|(_, x)| x.polity == s1).map(|(h, _)| *h).collect();
+    let matches = foes.targets(who, VerbId::ProposeMarriage);
+    let into_the_enemy: Vec<&engine2::TargetOffer> = matches.iter().filter(|o| matches!(o.target, Target::House(h) if theirs.contains(&h))).collect();
+    assert!(!into_the_enemy.is_empty() && into_the_enemy.iter().all(|o| !o.available), "{into_the_enemy:?}");
+    assert!(into_the_enemy.iter().any(|o| o.why.as_deref() == Some("at war")), "a house of the enemy with someone to marry is closed by the war: {into_the_enemy:?}");
     // A verb the scenario does not enable is not offered at any target.
     let narrow = Game::new(&testworld::five_states_scenario(), params(), 8).unwrap();
     assert!(narrow.verbs(who).iter().all(|o| o.verb != VerbId::DeclareWar) && narrow.targets(who, VerbId::DeclareWar).is_empty());
