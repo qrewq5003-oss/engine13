@@ -132,6 +132,45 @@ pub struct VerbOffer {
     pub threshold: Option<i64>,
 }
 
+/// An offer of a verb **at one target** (E5, plan §31.77): whether the world would take
+/// this call, why not, and what it would cost — by the going over of the targets the bots
+/// read too (`offers.rs`). The price is the one the application charges: the shell shows
+/// it and computes nothing.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TargetOffer {
+    pub target: Target,
+    pub available: bool,
+    /// Why it is not available, when it is not: the caller's side first, then the target's.
+    pub why: Option<String>,
+    /// What the treasury pays, kg. Of a marriage — the dowry the proposal names: nothing is
+    /// paid at the proposal, the house pays it at the wedding.
+    pub cost_kg: i64,
+    /// What the ruler pays in legitimacy, in points before saturation — exactly what the
+    /// application hands to the price (`politics::saturate`); negative when the verb gives
+    /// some back. Of a declaration — **the price of this target** (`World::war_price`: the
+    /// treaty with it and every alliance the war would set across its sides).
+    pub cost_legitimacy: f64,
+    /// For a proposal (peace, alliance, marriage): the relation the other side's polity
+    /// must stand at, and where it stands now. The offer says «may be proposed», not «will be
+    /// taken»: the answer is the other side's, by what only it knows.
+    pub threshold: Option<i64>,
+    pub relation: Option<f64>,
+    /// Men: of a levy — how many this province can give this tick, any number up to it
+    /// (`Target::Levy`); of a hire — how many the advance hires.
+    pub up_to: Option<u32>,
+    /// What a loan brings, kg: the world decides the sum.
+    pub receives_kg: Option<i64>,
+}
+
+/// What an order to a unit would be (E5, plan §31.77): the steps of the path the world
+/// finds now and the ticks of the march at the world's pace, if nothing stops it. The
+/// shell asks at a click and computes neither path nor adjacency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct OrderOffer {
+    pub steps: usize,
+    pub ticks: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

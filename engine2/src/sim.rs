@@ -16,7 +16,7 @@ use crate::params::Params;
 use crate::world::Institution;
 use crate::save::{self, SaveError};
 use crate::scenario::{Display, ScenarioData, SchemaError};
-use crate::verbs::{ActorRef, Order, Target, VerbCall, VerbId, VerbOffer};
+use crate::verbs::{ActorRef, Order, OrderOffer, Target, TargetOffer, VerbCall, VerbId, VerbOffer};
 use crate::view::{self, ChronicleSnapshot, WorldView};
 use crate::world::{TickReport, World, WorldError};
 
@@ -73,6 +73,15 @@ pub trait Simulation: Sized {
     fn play(&mut self, turn: &Turn) -> Result<TickReport, SimError>;
     /// The verbs on offer to `who`, computed by the one function agents use too.
     fn verbs(&self, who: ActorRef) -> Vec<VerbOffer>;
+    /// The offers of one verb of `who` over its targets (E5, plan §31.77): every target the
+    /// world could name, open or not, with the reason and the price of the call — by the
+    /// going over of the targets the agents read too (`offers.rs`). Nothing for a verb the
+    /// scenario does not enable.
+    fn targets(&self, who: ActorRef, verb: VerbId) -> Vec<TargetOffer>;
+    /// What an order to a unit would be: the rule of the order, then the path the world
+    /// finds now — its steps and the ticks of the march; refused with its reason when the
+    /// order cannot be given or there is no path.
+    fn order_offer(&self, order: &Order) -> Result<OrderOffer, SimError>;
     /// The opportunities `who` answers in the coming turn (E3 (в)), the same the bots get.
     fn opportunities(&self, who: ActorRef) -> Vec<Opportunity>;
     fn view(&self) -> WorldView;
@@ -414,18 +423,25 @@ impl Simulation for Game {
         self.offers(who)
     }
 
+    fn targets(&self, who: ActorRef, verb: VerbId) -> Vec<TargetOffer> {
+        if !self.enabled(verb) {
+            return Vec::new();
+        }
+        self.world.target_offers(who, verb, &self.params)
+    }
+
+    fn order_offer(&self, order: &Order) -> Result<OrderOffer, SimError> {
+        Ok(self.world.order_offer(order, &self.params)?)
+    }
+
     fn opportunities(&self, who: ActorRef) -> Vec<Opportunity> {
         self.world.opportunities_for(who)
     }
 
     fn view(&self) -> WorldView {
         // The viewer is the player's polity — for a player who plays a house, the polity the
-        // house lives in (plan §30.11: an assumption until E5 settles what a house sees).
-        let viewer = self.player.and_then(|who| match who {
-            ActorRef::Ruler(a) => Some(a),
-            ActorRef::House(h) => self.world.houses.get(&h).map(|house| house.polity),
-        });
-        view::world_view(&self.world, &self.display, viewer)
+        // house lives in (plan §30.11: an assumption until a game settles what a house sees).
+        view::world_view(&self.world, &self.display, &self.params, self.player)
     }
 
     fn chronicle(&self) -> ChronicleSnapshot {

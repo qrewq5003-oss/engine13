@@ -61,6 +61,10 @@ pub enum OrderError {
     UnknownProvince(ProvinceId),
     #[error("{0:?} does not command unit {1:?}")]
     NotYours(crate::verbs::ActorRef, UnitId),
+    /// Read when an order is offered (`World::order_offer`): the world takes an order with
+    /// no path and puts it aside when the tick is played (`Event::NoPath`).
+    #[error("unit {0:?} has no path to province {1:?}")]
+    NoPath(UnitId, ProvinceId),
     #[error("polity {0:?} has fallen")]
     Fallen(ActorId),
 }
@@ -94,6 +98,18 @@ impl World {
             return Err(OrderError::NotYours(o.actor, o.unit));
         }
         Ok(())
+    }
+
+    /// What an order would be before it is given (E5, plan §31.77): the rule of the order
+    /// (`order_room`, the one the application reads), then the path the world finds on the
+    /// state as it stands (`path`) — its steps, and the ticks of the march at the world's
+    /// pace (`march_steps_per_tick`). No path is refused here with its reason: given all the
+    /// same, the order is put aside when the tick is played (`Event::NoPath`).
+    pub fn order_offer(&self, o: &crate::verbs::Order, params: &Params) -> Result<crate::verbs::OrderOffer, OrderError> {
+        self.order_room(o)?;
+        let u = &self.units[&o.unit];
+        let steps = self.path(u.owner, u.position, o.to).ok_or(OrderError::NoPath(o.unit, o.to))?.len();
+        Ok(crate::verbs::OrderOffer { steps, ticks: steps.div_ceil(self.march_steps_per_tick(params).max(1)) as u32 })
     }
 
     /// Give an order through the contract's channel.

@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use crate::ids::{ActorId, HouseId, PersonId};
 use crate::params::Params;
-use crate::verbs::{ActorRef, Target, VerbId};
+use crate::verbs::{ActorRef, Target, TargetOffer, VerbId};
 use crate::world::{Institution, WarAim, World};
 
 /// What one decision reads once for all its targets: each house's eldest unmarried adult.
@@ -130,6 +130,77 @@ impl World {
             VerbId::HireMercenaries | VerbId::TakeLoan | VerbId::RaiseTax | VerbId::LowerTax | VerbId::EnforceOrder => vec![Target::None],
             VerbId::ProposeMarriage => Vec::new(),
         }
+    }
+
+    /// The offers of a verb of `who` over its targets (the shell's side of the going over;
+    /// `Simulation::targets`): every target the world could name, open or not, with the
+    /// reason and the price the application would charge.
+    pub fn target_offers(&self, who: ActorRef, verb: VerbId, params: &Params) -> Vec<TargetOffer> {
+        let seen = TargetSeen::default();
+        let caller = self.caller_room_seen(who, verb, params, &seen);
+        self.target_candidates(who, verb)
+            .into_iter()
+            .map(|target| {
+                let room = caller.and_then(|()| self.target_room_seen(who, verb, target, params, &seen));
+                let mut offer = self.target_price(who, verb, target, params);
+                offer.available = room.is_ok();
+                offer.why = room.err().map(str::to_string);
+                offer
+            })
+            .collect()
+    }
+
+    /// What the call would cost and move, read where the application reads it; the
+    /// availability is `target_offers`'s to fill.
+    fn target_price(&self, who: ActorRef, verb: VerbId, target: Target, params: &Params) -> TargetOffer {
+        let mut o = TargetOffer { target, available: false, why: None, cost_kg: 0, cost_legitimacy: 0.0, threshold: None, relation: None, up_to: None, receives_kg: None };
+        let threshold = Some(params.treaty_accept_at_relation.round() as i64);
+        if verb == VerbId::ProposeMarriage {
+            if let (Some((h, a)), Target::House(g)) = (self.marrying_house(who), target) {
+                o.cost_kg = self.dowry(h, params);
+                o.threshold = threshold;
+                o.relation = self.houses.get(&g).map(|x| x.polity).filter(|b| *b != a).map(|b| self.relation(a, b));
+            }
+            return o;
+        }
+        let ActorRef::Ruler(a) = who else { return o };
+        if !self.alive(a) {
+            return o;
+        }
+        // The polity the target stands for: its own, or the owner of the province named.
+        let b = match target {
+            Target::Actor(b) => Some(b),
+            Target::Province(q) if verb == VerbId::DeclareWar => self.provinces.get(&q).map(|pr| pr.owner),
+            _ => None,
+        }
+        .filter(|b| *b != a && self.actors.contains_key(b));
+        o.relation = b.map(|b| self.relation(a, b));
+        match (verb, target) {
+            (VerbId::DeclareWar, _) => o.cost_legitimacy = b.map_or(params.legitimacy_cost_declare_war, |b| self.war_price(a, b, params)),
+            (VerbId::MakePeace, _) => o.threshold = threshold,
+            (VerbId::ProposeAlliance, _) => {
+                o.cost_kg = self.embassy_cost(a, params);
+                o.threshold = threshold;
+            }
+            (VerbId::SendEmbassy, _) => o.cost_kg = self.embassy_cost(a, params),
+            (VerbId::Bribe, _) => o.cost_kg = self.gift_size(a, params),
+            (VerbId::Recruit, Target::Province(p) | Target::Levy(p, _)) => {
+                let own = self.provinces.get(&p).is_some_and(|x| x.owner == a) && !self.in_revolt(p);
+                o.up_to = Some(if own { self.recruit_per_tick(a, params).min(self.population(p)).max(0) as u32 } else { 0 });
+            }
+            (VerbId::HireMercenaries, _) => {
+                o.cost_kg = self.hire_advance(a, params);
+                o.up_to = Some(self.hire_count(a, params).max(0) as u32);
+            }
+            (VerbId::TakeLoan, _) => o.receives_kg = Some(self.yearly_income(a, params).min(self.loan_room(a, params)).max(0)),
+            (VerbId::RaiseTax | VerbId::LowerTax, _) => o.cost_legitimacy = self.tax_step_cost(a, verb == VerbId::RaiseTax, params),
+            (VerbId::EnforceOrder, _) => {
+                o.cost_kg = self.order_cost(a, params);
+                o.cost_legitimacy = -params.order_gain;
+            }
+            _ => {}
+        }
+        o
     }
 
     /// Could `a` open a war with `b` or, in the war `b` declared on it, state its claim?
