@@ -26,10 +26,11 @@ export interface ProvinceMapActor {
   capital: string | null;
 }
 
+/** A unit as the engine's view names it: `position` is the id of the province it stands in. */
 export interface ProvinceMapUnit {
   id: string;
   owner: string;
-  province: string;
+  position: string;
 }
 
 export interface ProvinceMapProps {
@@ -142,7 +143,7 @@ export const ProvinceMap: React.FC<ProvinceMapProps> = ({
     [geo, provinces, featureOf],
   );
   const unitsOffMap = useMemo(
-    () => (geo ? units.filter((u) => !featureOf.has(u.province)).map((u) => u.id) : []),
+    () => (geo ? units.filter((u) => !featureOf.has(u.position)).map((u) => u.id) : []),
     [geo, units, featureOf],
   );
 
@@ -204,8 +205,8 @@ export const ProvinceMap: React.FC<ProvinceMapProps> = ({
 
   const unitsIn = new Map<string, ProvinceMapUnit[]>();
   for (const u of units) {
-    if (!featureOf.has(u.province)) continue;
-    unitsIn.set(u.province, [...(unitsIn.get(u.province) ?? []), u]);
+    if (!featureOf.has(u.position)) continue;
+    unitsIn.set(u.position, [...(unitsIn.get(u.position) ?? []), u]);
   }
   const capitals = actors.filter((a) => a.capital !== null && featureOf.has(a.capital));
   const hoveredFeature = hovered ? featureOf.get(hovered) : undefined;

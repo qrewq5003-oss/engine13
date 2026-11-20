@@ -4,6 +4,8 @@ Writes dev/fixtures/<scenario>_start.json — owners and capitals of the start, 
 provinces.toml and scenario.toml — and <scenario>_after.json: the same with one province
 moved to another owner and three units, two of them in one province. The stand feeds these
 to `ProvinceMap` in place of the engine's view; nothing here is a fact of a played game.
+The names of the fields are those of the engine's `WorldView` (plan §31.77): a province's `id`
+and `owner`, a polity's `id`, `name` and `capital`, a unit's `id`, `owner` and `position`.
 
     python tools/map/ui_check/make_fixtures.py
 """
@@ -16,9 +18,9 @@ SCENARIO = "milan_1477"
 # The move of the second recording: a province of Venice to Milan.
 MOVED, NEW_OWNER = "bergamo", "milan"
 UNITS = [
-    {"id": "unit-1", "owner": "milan", "province": "milano"},
-    {"id": "unit-2", "owner": "milan", "province": "milano"},
-    {"id": "unit-3", "owner": "venice", "province": "verona"},
+    {"id": "unit-1", "owner": "milan", "position": "milano"},
+    {"id": "unit-2", "owner": "milan", "position": "milano"},
+    {"id": "unit-3", "owner": "venice", "position": "verona"},
 ]
 
 

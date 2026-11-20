@@ -56,6 +56,10 @@ function differing(a, b) {
 async function run(page) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
+  // Every request of the page, to see that the map asks the network for nothing but the
+  // stand's own files: no tiles, no fonts, no library from elsewhere.
+  const requested = [];
+  page.on('request', (r) => requested.push(r.url()));
   await page.goto(URL);
   await page.waitForSelector('path.pm-province[data-province]');
 
@@ -114,6 +118,8 @@ async function run(page) {
   check('and no map is drawn in its place', (await page.$$('path.pm-province')).length === 0);
 
   check('no script error on the page', errors.length === 0, errors.join(' | '));
+  const outside = requested.filter((u) => !u.startsWith('http://localhost:1420/') && !u.startsWith('data:'));
+  check('no request leaves the stand: no tiles, nothing from the network', outside.length === 0, `${requested.length} requests${outside.length ? ': ' + outside.slice(0, 3).join(' ') : ''}`);
 }
 
 async function main() {

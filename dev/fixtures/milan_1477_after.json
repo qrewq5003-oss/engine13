@@ -437,17 +437,17 @@
   {
    "id": "unit-1",
    "owner": "milan",
-   "province": "milano"
+   "position": "milano"
   },
   {
    "id": "unit-2",
    "owner": "milan",
-   "province": "milano"
+   "position": "milano"
   },
   {
    "id": "unit-3",
    "owner": "venice",
-   "province": "verona"
+   "position": "verona"
   }
  ]
 }
